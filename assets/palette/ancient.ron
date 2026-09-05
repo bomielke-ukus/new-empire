@@ -1,0 +1,122 @@
+// The shared 256-colour palette for the ancient architecture set.
+//
+// This file is the source of truth; `atlas palette bake` expands it into the
+// 256 entries the atlas tool validates against and the renderer uploads. Ramps
+// are authored as two endpoints plus a hue rotation rather than as 216 hand
+// -picked hex values, because endpoints are what an artist actually reasons
+// about and because a ramp interpolated in Oklab lands where a hand-picked one
+// would. See `docs/05-art-and-audio-spec.md` §2.4 and `docs/08-art-production.md`.
+//
+// Index layout, fixed by contract:
+//
+//     0          transparent
+//     1..=16     neutral ramp (outlines, shadows, greys, UI)
+//     17..=232   27 material ramps, 8 steps each
+//     233..=239  reserve, for material ramps we have not needed yet
+//     240..=247  PLAYER COLOUR — remapped per owner in the fragment shader
+//     248..=255  specials (selection, health, fog, error)
+//
+// Nothing may be drawn in 240..=247 that is not meant to take player colour,
+// and every unit and building must use some of it or it will be unownable at
+// a glance. `atlas validate` enforces both halves of that.
+PaletteSpec(
+    name: "ancient",
+
+    // Cool in the shadows, warm at the top: the whole palette sits inside this
+    // relationship, and matching it is what makes independently produced art
+    // cut together.
+    neutral: (name: "neutral", start: 1, steps: 16, dark: "#06060a", light: "#f2efe6", hue_shift: 14.0),
+
+    materials: [
+        // Figures
+        (name: "skin_light",      start:  17, steps: 8, dark: "#4a2a1c", light: "#f2cfa8", hue_shift:  6.0),
+        (name: "skin_mid",        start:  25, steps: 8, dark: "#331a10", light: "#d19a68", hue_shift:  6.0),
+        (name: "skin_dark",       start:  33, steps: 8, dark: "#241009", light: "#9c6440", hue_shift:  5.0),
+        (name: "hair_dark",       start:  41, steps: 8, dark: "#100a08", light: "#6b4a32", hue_shift:  8.0),
+        // Costume: the age progression hides -> cloth -> bronze -> iron
+        (name: "hide_tan",        start:  49, steps: 8, dark: "#3a2513", light: "#d8b184", hue_shift: -4.0),
+        (name: "hide_brown",      start:  57, steps: 8, dark: "#211308", light: "#8f6035", hue_shift: -4.0),
+        (name: "linen",           start:  65, steps: 8, dark: "#4a4133", light: "#ece2cc", hue_shift: -6.0),
+        (name: "cloth_red",       start:  73, steps: 8, dark: "#3d0f0f", light: "#d95c4a", hue_shift: 10.0),
+        (name: "cloth_blue",      start:  81, steps: 8, dark: "#101a3a", light: "#6f92cf", hue_shift:-10.0),
+        // Architecture: the age progression thatch -> mudbrick -> dressed stone
+        (name: "timber",          start:  89, steps: 8, dark: "#2b1a0d", light: "#b8895a", hue_shift: -5.0),
+        (name: "timber_dark",     start:  97, steps: 8, dark: "#1a0f07", light: "#7a5636", hue_shift: -5.0),
+        (name: "thatch",          start: 105, steps: 8, dark: "#4a3512", light: "#e8cd7e", hue_shift: -8.0),
+        (name: "mudbrick",        start: 113, steps: 8, dark: "#40281a", light: "#d6a878", hue_shift: -5.0),
+        (name: "mudbrick_shadow", start: 121, steps: 8, dark: "#2a1810", light: "#9c7452", hue_shift: -5.0),
+        (name: "limestone",       start: 129, steps: 8, dark: "#423d33", light: "#ece4d0", hue_shift: -8.0),
+        (name: "granite",         start: 137, steps: 8, dark: "#22242a", light: "#9fa3ab", hue_shift:-10.0),
+        // Metals
+        (name: "bronze",          start: 145, steps: 8, dark: "#3a2208", light: "#e0a94e", hue_shift:  8.0),
+        (name: "iron",            start: 153, steps: 8, dark: "#14161c", light: "#c2c8d2", hue_shift:-12.0),
+        (name: "gold",            start: 161, steps: 8, dark: "#4a3208", light: "#ffe07a", hue_shift:  6.0),
+        // Terrain
+        (name: "grass",           start: 169, steps: 8, dark: "#172a12", light: "#7ba84a", hue_shift: -6.0),
+        (name: "grass_dry",       start: 177, steps: 8, dark: "#322a10", light: "#c4b060", hue_shift: -4.0),
+        (name: "dirt",            start: 185, steps: 8, dark: "#2e1f12", light: "#a8845a", hue_shift: -4.0),
+        (name: "earth_dark",      start: 193, steps: 8, dark: "#1a1108", light: "#6b5236", hue_shift: -4.0),
+        (name: "sand",            start: 201, steps: 8, dark: "#4d3f22", light: "#f0dfae", hue_shift: -6.0),
+        (name: "water_shallow",   start: 209, steps: 8, dark: "#0e3040", light: "#6fc4cf", hue_shift: -8.0),
+        (name: "water_deep",      start: 217, steps: 8, dark: "#05131f", light: "#2a6382", hue_shift:-10.0),
+        (name: "foliage",         start: 225, steps: 8, dark: "#0d1c0e", light: "#4e8a3a", hue_shift: -6.0),
+    ],
+
+    reserve: (233, 239),
+
+    // Art is drawn once into this ramp and appears in all eight player colours.
+    player_slot: (240, 247),
+
+    specials: [
+        (index: 248, name: "selection",   colour: "#5cff7a"),
+        (index: 249, name: "health_full", colour: "#3cd34a"),
+        (index: 250, name: "health_low",  colour: "#d33c3c"),
+        (index: 251, name: "health_back", colour: "#14141a"),
+        (index: 252, name: "fog",         colour: "#2a2a33"),
+        (index: 253, name: "ui_accent",   colour: "#d8b169"),
+        (index: 254, name: "outline",     colour: "#0a0810"),
+        // Deliberately hideous. If this ever appears on screen, something
+        // sampled an index the palette does not define.
+        (index: 255, name: "error",       colour: "#ff00ff"),
+    ],
+
+    // Eight owners, eight steps each, matching the reserved ramp position for
+    // position. These are not hand-picked: hue is pinned near the colour's name
+    // so "red" reads as red, and lightness and chroma were then searched to
+    // maximise the smallest gap between any two owners under normal vision and
+    // under both simulated dichromacies. See `docs/08-art-production.md` §6.
+    //
+    // Hue alone cannot separate eight owners for a dichromat: red, green,
+    // yellow and orange all collapse toward one axis and blue, cyan and magenta
+    // toward the other. What separates them is lightness, which is why these
+    // ramps sit at deliberately different heights rather than at a uniform
+    // saturation.
+    players: [
+        (name: "blue",    dark: "#080075", light: "#7ca0ff", hue_shift:  -0.5),
+        (name: "red",     dark: "#320000", light: "#c73704", hue_shift:   8.7),
+        (name: "green",   dark: "#014a2a", light: "#0ad986", hue_shift:   4.0),
+        (name: "yellow",  dark: "#6e7206", light: "#f6fe3b", hue_shift:  -3.5),
+        (name: "cyan",    dark: "#004950", light: "#6accd7", hue_shift:   5.1),
+        (name: "magenta", dark: "#3b0042", light: "#c889ce", hue_shift:  -4.2),
+        (name: "grey",    dark: "#171717", light: "#b2b2b2", hue_shift:   8.8),
+        (name: "orange",  dark: "#623400", light: "#f58e07", hue_shift:  -3.1),
+    ],
+
+    // Minimum Oklab distance between two owners' ramps, taken over the body of
+    // the ramp and over all three vision models. Two tiers, because players are
+    // assigned colours in the order listed above and most matches are 2v2 or
+    // smaller: the first four have to be unmistakable, the back four only have
+    // to be tellable apart.
+    //
+    // The measured values for the ramps above are 0.160 and 0.074, the worst
+    // pairs being green/yellow under protanopia and green/grey under
+    // deuteranopia. The bars are set just under those, so this is a regression
+    // guard — an edit that closes the gap fails `cargo test`, and re-running the
+    // search described in `docs/08-art-production.md` §6 is how you reopen it.
+    //
+    // 0.074 is not comfortable, and no eight-colour set does much better while
+    // still letting each colour answer to its name. The real fix is a second
+    // ownership cue that is not colour at all; see Q9 in `docs/07`.
+    min_player_separation: 0.070,
+    min_first_four_separation: 0.15,
+)

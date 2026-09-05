@@ -2,3 +2,11 @@
 **/*.rs.bk
 .DS_Store
 /replays/
+
+# Generated art. `cargo run -p atlas -- placeholder` regenerates the placeholder
+# sprite sets, and `-- export` regenerates the palette swatch and the .gpl an
+# artist imports. Both are derived from assets/palette/ancient.ron, so a
+# committed copy can only ever go stale; CI regenerates and validates them.
+/assets/sprites/
+/assets/palette/*-swatch.png
+/assets/palette/*.gpl

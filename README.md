@@ -22,6 +22,7 @@ Read in order:
 | [05 — Art and audio spec](docs/05-art-and-audio-spec.md) | Isometric projection, sprite and animation standards, palette, terrain, UI art, audio inventory |
 | [06 — Roadmap](docs/06-roadmap.md) | M0–M9 milestones with demonstrable acceptance criteria |
 | [07 — Decisions and open questions](docs/07-decisions-and-open-questions.md) | Decision log with reasoning, and what still needs answering |
+| [08 — Art production](docs/08-art-production.md) | Where the art comes from: the inventory cost, the options researched, the legal position, the render-to-sprite pipeline |
 
 ## Building and running
 
@@ -36,6 +37,12 @@ cargo run --release -p simrunner -- determinism --ticks 10000
 cargo run --release -p simrunner -- bench --units 1500 --ticks 2000
 cargo run -p new-empire                      # open the (currently empty) game window
 scripts/check-sim-purity.sh                  # no floats, no clock, no stray deps in sim
+scripts/check-art.sh                         # palette, placeholder regen, atlas gate
+
+cargo run -p atlas -- palette                # player-colour separation report
+cargo run -p atlas -- export                 # swatch + .gpl for Aseprite/GIMP
+cargo run -p atlas -- placeholder            # generate the placeholder sprite sets
+cargo run -p atlas -- validate               # art conformance gate
 ```
 
 Workspace layout:
@@ -45,8 +52,10 @@ Workspace layout:
 | `crates/sim` | Deterministic simulation: fixed-point maths, RNG, entity store, command queue, replay |
 | `crates/app` | The game binary: window, GPU surface, fixed-timestep clock |
 | `tools/simrunner` | Headless runner for determinism checks, replay verification and benchmarks |
+| `tools/atlas` | Art gate: bakes the palette, validates sprite sets, generates placeholders, quantises renders |
 | `tools/gen` | Generators for committed tables (trig) |
 | `scripts` | CI checks |
+| `assets/palette` | The 256-colour indexed palette, with the reserved player-colour ramp |
 
 ## Design pillars
 
@@ -65,7 +74,8 @@ Workspace layout:
   28.8"*, which is what let the original run 1,500 units over a modem.
 - **2D isometric sprites**, 64×32 tiles, 8 facings authored as 5 and mirrored,
   palette-indexed with a reserved player-colour ramp — Genie engine technique,
-  our own art.
+  our own art. Modelled and rendered rather than drawn, which is how the
+  original's sprites were made too (`docs/08`).
 
 ## First playable target (M7)
 
@@ -76,7 +86,10 @@ complete 25-minute match, start to victory screen.
 ## Assets and legal position
 
 No Age of Empires assets, data files or code are used anywhere in this project.
-All art, audio and balance data are original. The techniques documented in
+All art, audio and balance data are original. Shipped art is rendered from
+geometry we build; generative tools are used upstream of that, for concept and
+texture work, and never prompted with the name of a game, studio or franchise
+(`docs/08` §5). The techniques documented in
 `docs/01` (isometric tiling, palette-indexed player colours, sprite mirroring,
 deterministic lockstep networking) are published engineering practice and are
 what we are building on.

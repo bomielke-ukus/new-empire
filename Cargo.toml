@@ -4,6 +4,7 @@ members = [
     "crates/sim",
     "crates/app",
     "tools/simrunner",
+    "tools/atlas",
 ]
 
 [workspace.package]
@@ -15,6 +16,7 @@ rust-version = "1.85"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 ron = "0.10"
+png = "0.17"
 
 [profile.dev]
 # The sim is exercised for tens of thousands of ticks in tests; unoptimised

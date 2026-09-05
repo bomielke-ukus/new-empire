@@ -8,6 +8,10 @@ This document is the contract that any artist (human, generative, or
 commissioned) must produce against, so that art from different sources still
 cuts together into one game.
 
+Where the art comes from in practice, what the inventory costs, and how the
+render-to-sprite pipeline works is `docs/08-art-production.md`. This document
+stays source-agnostic on purpose: it says what the art must *be*.
+
 ---
 
 ## 1. Projection and grid
@@ -78,7 +82,11 @@ sliding around" bugs, so they are authored data, not a guess.
   fragment shader to the owning player's ramp. Art is drawn once, in the
   reserved indices, and appears in all eight player colours.
 - Player colours: blue, red, green, yellow, cyan, magenta, grey, orange —
-  checked against deuteranopia and protanopia simulation before we commit.
+  checked against deuteranopia and protanopia simulation before we commit. That
+  check is `cargo test`, not a review step; the ramps are generated to maximise
+  the worst pair rather than picked by eye, and owners are assigned in that
+  order so small games only use the best-separated four. See D14 and
+  `docs/08` §6.
 - Index 0 is transparent.
 
 ### 2.5 Age variants
@@ -165,9 +173,11 @@ what makes the world feel large.
 
 Art is not on the critical path for gameplay. The order is:
 
-1. **Placeholder pass (immediately).** Flat coloured diamonds and boxes,
-   procedurally generated at runtime, with correct sizes, anchors and facings.
-   Everything is playable and testable before a single sprite exists.
+1. **Placeholder pass (immediately).** Flat coloured diamonds and boxes with
+   correct sizes, anchors and facings, so everything is playable and testable
+   before a single sprite exists. Generated as files by `atlas placeholder`
+   rather than at runtime, so they exercise the whole pipeline and pass the same
+   gate real art will — see D13. **Done.**
 2. **Greybox pass.** One real sprite set for one civ, one age — proving the
    pipeline end to end (source PNG → atlas → manifest → in-game, with player
    colour remapping and mirroring working).
@@ -176,4 +186,5 @@ Art is not on the critical path for gameplay. The order is:
 
 Every sprite goes through `tools/atlas`, which validates size, anchor, facing
 count and palette conformance and **fails the build** on violation. That
-validation is what keeps art from four sources looking like one game.
+validation is what keeps art from four sources looking like one game. It is
+wired into CI as `scripts/check-art.sh`.
