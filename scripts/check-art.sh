@@ -3,8 +3,11 @@
 # tools/atlas, which validates size, anchor, facing count and palette
 # conformance and fails the build on violation."
 #
-# Three steps, each of which can fail the build on its own:
+# Four steps, each of which can fail the build on its own:
 #
+#   0. The render rig still describes the projection docs/05 specifies. Every
+#      sprite in the game is rendered through it, so a drifted rig invalidates
+#      every frame already made.
 #   1. The palette bakes, every index is claimed, and the eight player colours
 #      stay tellable apart under simulated protanopia and deuteranopia.
 #   2. The placeholder catalogue regenerates. It is not committed — it is
@@ -16,6 +19,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+echo "== rig: camera, facings and lights still match the spec =="
+cargo run --quiet -p atlas -- rig
+
+echo
 echo "== palette: bakes, and player colours survive colour blindness =="
 cargo run --quiet -p atlas -- palette
 

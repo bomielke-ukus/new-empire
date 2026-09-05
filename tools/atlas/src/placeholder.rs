@@ -372,7 +372,8 @@ impl Frame<'_> {
         let (ax, ay) = (self.anchor.0 as i32, self.anchor.1 as i32);
         let half_w = (self.w / 2) as i32 - 1;
         let base = self.entry.accent;
-        fill_diamond(img, ax, ay - (self.h / 2) as i32, half_w, base);
+        // Centred on the anchor, which for terrain is the tile's placement point.
+        fill_diamond(img, ax, ay, half_w, base);
 
         let seed = seed_of(self.entry.name).wrapping_add(variant.wrapping_mul(0x9E37));
         for y in 0..self.h {
@@ -390,40 +391,18 @@ impl Frame<'_> {
     }
 }
 
-/// The animation list a placeholder set declares.
+/// The animation list a placeholder set declares. Timings come from the shared
+/// table so placeholders and rendered art play at the same speed.
 fn animations(class: Class) -> Vec<AnimationSpec> {
-    let spec =
-        |name: &str, frames: u32, frame_ms: u32, loops: bool, impact: Option<u32>| AnimationSpec {
-            name: name.to_string(),
-            frames,
-            frame_ms,
-            loops,
-            impact,
-        };
-    match class.kind() {
-        Kind::Mobile => REQUIRED_MOBILE
-            .iter()
-            .map(|(name, frames)| match *name {
-                "idle" => spec(name, *frames, 160, true, None),
-                "walk" => spec(name, *frames, 100, true, None),
-                // Hit lands on frame 4 of 6, one-based — index 3 (docs/05 §2.2).
-                "attack" => spec(name, *frames, 90, false, Some(3)),
-                "death" => spec(name, *frames, 110, false, None),
-                // Decay spans ~30 s across 4 frames.
-                _ => spec(name, *frames, 7500, false, None),
-            })
-            .collect(),
-        Kind::Building => REQUIRED_BUILDING
-            .iter()
-            .map(|(name, frames)| spec(name, *frames, 200, name == &"idle", None))
-            .collect(),
-        Kind::Terrain =>
-        // Terrain variants are picked by the map generator, never played
-        // as an animation, so the frame time is nominal.
-        {
-            vec![spec("variants", 4, 1000, false, None)]
-        }
-    }
+    let required: &[(&str, u32)] = match class.kind() {
+        Kind::Mobile => &REQUIRED_MOBILE,
+        Kind::Building => &REQUIRED_BUILDING,
+        Kind::Terrain => &[("variants", 4)],
+    };
+    required
+        .iter()
+        .map(|(name, frames)| crate::manifest::default_animation(name, *frames))
+        .collect()
 }
 
 /// Generates the whole placeholder catalogue into `out_dir`.
@@ -448,9 +427,14 @@ pub fn generate(out_dir: &Path, palette: &Palette) -> Result<Vec<std::path::Path
         let rows = anims.len() as u32 * facings.len() as u32;
         let mut sheet = Indexed::new(cols * fw, rows * fh);
 
-        // Ground contact sits two rows above the bottom edge, leaving room for
-        // the shadow without anything crossing the cell boundary.
-        let anchor = (fw / 2, fh - 3);
+        // Ground contact sits three rows above the bottom edge, leaving room
+        // for the shadow without anything crossing the cell boundary — the same
+        // convention assets/render/rig.json shifts the render camera to hit.
+        // Terrain is the exception: a tile is placed by its centre.
+        let anchor = match entry.class.kind() {
+            Kind::Terrain => (fw / 2, fh / 2),
+            _ => (fw / 2, fh - 3),
+        };
         let painter = Frame {
             entry,
             w: fw,
@@ -476,8 +460,13 @@ pub fn generate(out_dir: &Path, palette: &Palette) -> Result<Vec<std::path::Path
                     }
                     // The invariant the anchor check depends on: nothing is
                     // composited below the ground contact point, whatever a
-                    // shape routine drew there.
-                    for y in 0..=anchor.1 {
+                    // shape routine drew there. Terrain is exempt — its diamond
+                    // surrounds the anchor rather than standing on it.
+                    let floor = match entry.class.kind() {
+                        Kind::Terrain => fh - 1,
+                        _ => anchor.1,
+                    };
+                    for y in 0..=floor {
                         for x in 0..fw {
                             let index = cell.get(x, y);
                             if index != 0 {

@@ -188,6 +188,60 @@ pub const REQUIRED_MOBILE: [(&str, u32); 5] = [
 /// `construction` frames are the progress silhouette from `docs/02` §6.
 pub const REQUIRED_BUILDING: [(&str, u32); 3] = [("construction", 3), ("idle", 1), ("rubble", 1)];
 
+/// Default timing for a known animation name, from `docs/05` §2.2.
+///
+/// Frame counts come from the art; the timings do not, and hard-coding them in
+/// two places is how a walk cycle ends up playing at one speed in the
+/// placeholder set and another in the rendered one.
+pub fn default_animation(name: &str, frames: u32) -> AnimationSpec {
+    let (frame_ms, loops, impact) = match name {
+        "idle" => (160, true, None),
+        "walk" => (100, true, None),
+        // Hit lands on frame 4 of 6, one-based — index 3 (`docs/05` §2.2).
+        "attack" => (90, false, Some(3)),
+        "death" => (110, false, None),
+        // Decay spans ~30 s across 4 frames.
+        "decay" => (7500, false, None),
+        "construction" => (200, false, None),
+        "rubble" => (200, false, None),
+        // Terrain variants are chosen by the map generator, never played.
+        "variants" => (1000, false, None),
+        // Villager tasks and carry variants: a working loop.
+        _ => (140, true, None),
+    };
+    AnimationSpec {
+        name: name.to_string(),
+        frames,
+        frame_ms,
+        loops,
+        impact,
+    }
+}
+
+/// The order animations are laid out in a sheet: the required ones first, in
+/// spec order, then anything else alphabetically. Deterministic, because the
+/// row index is how the renderer finds a frame.
+pub fn sheet_order(class: Class, present: &[String]) -> Vec<String> {
+    let required: &[(&str, u32)] = match class.kind() {
+        Kind::Mobile => &REQUIRED_MOBILE,
+        Kind::Building => &REQUIRED_BUILDING,
+        Kind::Terrain => &[],
+    };
+    let mut out: Vec<String> = required
+        .iter()
+        .filter(|(n, _)| present.iter().any(|p| p == n))
+        .map(|(n, _)| n.to_string())
+        .collect();
+    let mut extra: Vec<String> = present
+        .iter()
+        .filter(|p| !out.contains(p))
+        .cloned()
+        .collect();
+    extra.sort();
+    out.extend(extra);
+    out
+}
+
 /// Villager task animations from `docs/05` §2.2. Not required of every set —
 /// only the villager has them — but the names are fixed so the simulation can
 /// look one up by task without a per-unit table.

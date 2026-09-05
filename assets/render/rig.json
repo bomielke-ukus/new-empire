@@ -1,0 +1,328 @@
+{
+  "_": "The render rig for New Empire. FROZEN: every sprite in the game is rendered through this, so changing a camera or light number here invalidates every frame already produced. See docs/08-art-production.md.\nJSON rather than RON, which the rest of the project uses, because this is the one file both Blender's Python and the Rust tooling have to read.",
+  "version": 1,
+  "projection": {
+    "tile_px": [
+      64,
+      32
+    ],
+    "elevation_step_px": 16,
+    "authoring_scale": 2,
+    "supersample": 2,
+    "note": "docs/05 section 1. A tile is twice as wide as tall, which forces the camera elevation to exactly 30 degrees: the on-screen height of a tile over its width is sin(elevation), and that has to be 1/2. The 26.565 degree figure quoted for 2:1 pixel art is a different measurement - the slope of a tile edge on screen - and is not the camera angle."
+  },
+  "camera": {
+    "type": "ORTHO",
+    "elevation_deg": 30.0,
+    "azimuth_deg": 135.0,
+    "rotation_euler_xyz_deg": [
+      60.0,
+      0.0,
+      135.0
+    ],
+    "location": [
+      12.247449,
+      12.247449,
+      10.0
+    ],
+    "clip_start": 0.1,
+    "clip_end": 100.0,
+    "basis": {
+      "forward": [
+        -0.612372,
+        -0.612372,
+        -0.5
+      ],
+      "up": [
+        -0.353553,
+        -0.353553,
+        0.866025
+      ],
+      "right": [
+        -0.707107,
+        0.707107,
+        0.0
+      ]
+    },
+    "note": "The camera never moves and never orbits. Facings come from turning the SUBJECT, so the lights stay fixed relative to the viewer and every frame in the game is lit identically. Orbiting the camera instead would swing the key light around the subject and is the single easiest way to ruin a sprite set."
+  },
+  "facings": [
+    {
+      "name": "S",
+      "subject_z_rotation_deg": -45.0,
+      "screen_direction": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "name": "SW",
+      "subject_z_rotation_deg": -90.0,
+      "screen_direction": [
+        -0.894427,
+        0.447214
+      ]
+    },
+    {
+      "name": "W",
+      "subject_z_rotation_deg": -135.0,
+      "screen_direction": [
+        -1.0,
+        0.0
+      ]
+    },
+    {
+      "name": "NW",
+      "subject_z_rotation_deg": -180.0,
+      "screen_direction": [
+        -0.894427,
+        -0.447214
+      ]
+    },
+    {
+      "name": "N",
+      "subject_z_rotation_deg": -225.0,
+      "screen_direction": [
+        -0.0,
+        -1.0
+      ]
+    }
+  ],
+  "facings_note": "The five authored facings from docs/05 section 2.1, mirrored to eight at draw time. Subject forward at rotation 0 is +Y. Screen directions are down-positive, matching docs/05 section 1. Because SE, E and NE are horizontal mirrors, a subject must carry no asymmetric detail that would flip - no shield on one arm only.",
+  "lights": [
+    {
+      "name": "key",
+      "type": "SUN",
+      "rotation_euler_xyz_deg": [
+        52.238756,
+        0.0,
+        18.434949
+      ],
+      "direction_toward_light": [
+        0.25,
+        -0.75,
+        0.612372
+      ],
+      "screen_position": {
+        "right": -0.707107,
+        "up": 0.707107
+      },
+      "energy": 4.0,
+      "colour": [
+        1.0,
+        0.96,
+        0.9
+      ],
+      "angle_deg": 2.0,
+      "note": "Sits at exactly 45 degrees up and to the LEFT in screen space, so it stays put relative to the viewer no matter which way the subject is turned. Warm, and the only light that defines form."
+    },
+    {
+      "name": "fill",
+      "type": "SUN",
+      "rotation_euler_xyz_deg": [
+        56.174155,
+        0.0,
+        -112.239524
+      ],
+      "direction_toward_light": [
+        -0.768935,
+        0.314415,
+        0.55667
+      ],
+      "screen_position": {
+        "right": 0.766044,
+        "up": 0.642788
+      },
+      "energy": 1.0,
+      "colour": [
+        0.8,
+        0.87,
+        1.0
+      ],
+      "angle_deg": 8.0,
+      "note": "Screen upper-right, a quarter of the key's strength and cool, so shadows read as sky-lit rather than black. The 4:1 key-to-fill ratio is what gives the palette's ramps somewhere to go."
+    },
+    {
+      "name": "rim",
+      "type": "SUN",
+      "rotation_euler_xyz_deg": [
+        69.289407,
+        0.0,
+        -45.0
+      ],
+      "direction_toward_light": [
+        -0.661413,
+        -0.661413,
+        0.353648
+      ],
+      "screen_position": {
+        "right": -0.0,
+        "up": 0.773957
+      },
+      "energy": 2.0,
+      "colour": [
+        0.92,
+        0.95,
+        1.0
+      ],
+      "angle_deg": 4.0,
+      "note": "Directly above in screen space and behind the subject, catching the top edge. This is what keeps a dark unit legible against dark terrain."
+    }
+  ],
+  "lights_note": "Three suns, defined by where they sit in SCREEN space rather than in world space, because that is the thing that has to stay constant across every sprite in the game.",
+  "scale": {
+    "tile_world_units": 1.0,
+    "elevation_step_world_units": 0.408248,
+    "px_per_world_z_unit_at_1x": 39.1918,
+    "human_height_world_units": 0.9,
+    "note": "One Blender unit is one tile. A standing human is 0.9 units, which is about 35 px at 1x in a 48 px frame - deliberately oversized against real-world proportion, as every isometric RTS does, because a unit has to be readable at a glance.",
+    "ground_from_bottom_px": 3,
+    "px_per_world_unit_at_authoring_scale": 90.5097
+  },
+  "classes": {
+    "Foot": {
+      "sprite_px": [
+        40,
+        48
+      ],
+      "render_px": [
+        160,
+        192
+      ],
+      "ortho_scale": 1.06066,
+      "anchor_px": [
+        40,
+        93
+      ],
+      "camera_up_shift": 0.497184
+    },
+    "Mounted": {
+      "sprite_px": [
+        56,
+        56
+      ],
+      "render_px": [
+        224,
+        224
+      ],
+      "ortho_scale": 1.237437,
+      "anchor_px": [
+        56,
+        109
+      ],
+      "camera_up_shift": 0.585573
+    },
+    "Heavy": {
+      "sprite_px": [
+        72,
+        72
+      ],
+      "render_px": [
+        288,
+        288
+      ],
+      "ortho_scale": 1.59099,
+      "anchor_px": [
+        72,
+        141
+      ],
+      "camera_up_shift": 0.762349
+    },
+    "SmallBuilding": {
+      "sprite_px": [
+        64,
+        64
+      ],
+      "render_px": [
+        256,
+        256
+      ],
+      "ortho_scale": 1.414214,
+      "anchor_px": [
+        64,
+        125
+      ],
+      "camera_up_shift": 0.673961
+    },
+    "MediumBuilding": {
+      "sprite_px": [
+        128,
+        96
+      ],
+      "render_px": [
+        512,
+        384
+      ],
+      "ortho_scale": 2.828427,
+      "anchor_px": [
+        128,
+        189
+      ],
+      "camera_up_shift": 1.027515
+    },
+    "LargeBuilding": {
+      "sprite_px": [
+        192,
+        144
+      ],
+      "render_px": [
+        768,
+        576
+      ],
+      "ortho_scale": 4.242641,
+      "anchor_px": [
+        192,
+        285
+      ],
+      "camera_up_shift": 1.557845
+    },
+    "Wonder": {
+      "sprite_px": [
+        384,
+        320
+      ],
+      "render_px": [
+        1536,
+        1280
+      ],
+      "ortho_scale": 8.485281,
+      "anchor_px": [
+        384,
+        637
+      ],
+      "camera_up_shift": 3.502388
+    },
+    "Terrain": {
+      "sprite_px": [
+        64,
+        32
+      ],
+      "render_px": [
+        256,
+        128
+      ],
+      "ortho_scale": 1.414214,
+      "anchor_px": [
+        64,
+        32
+      ],
+      "camera_up_shift": 0.0
+    }
+  },
+  "classes_note": "ortho_scale is the world width Blender fits across the LARGER render dimension. Derived, not chosen: max(render_px) * sqrt(2) / tile_px_at_render. anchor_px is the ground contact point within the authored frame, and camera_up_shift slides the camera that far along its own up axis so the subject's origin lands there. Without the shift the origin sits at the frame centre and half of every frame is empty ground.",
+  "render": {
+    "engine": "BLENDER_EEVEE_NEXT",
+    "engine_fallback": "BLENDER_EEVEE",
+    "samples": 64,
+    "film_transparent": true,
+    "filter_width": 1.2,
+    "view_transform": "Standard",
+    "look": "None",
+    "exposure": 0.0,
+    "gamma": 1.0,
+    "file_format": "PNG",
+    "colour_mode": "RGBA",
+    "colour_depth": "8",
+    "note": "view_transform MUST be Standard. Blender defaults to AgX or Filmic, which desaturate and roll off the highlights, so the colours you texture are not the colours you get and the quantiser maps them somewhere you did not intend. film_transparent keeps the ground out of the sprite - the game draws its own shadow."
+  }
+}

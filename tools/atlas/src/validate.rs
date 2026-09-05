@@ -287,6 +287,22 @@ fn check_frames_and_anchors(
                 };
 
                 let (ax, ay) = set.anchor_for(&anim.name, *facing, frame);
+                // A terrain tile is not an object standing on the ground, it IS
+                // the ground: it is placed by its centre, and its diamond
+                // surrounds that point rather than sitting above it.
+                if set.class.kind() == Kind::Terrain {
+                    if (ax, ay) != (fw / 2, fh / 2) {
+                        problems.push(format!(
+                            "{} {} frame {frame}: terrain anchors at ({ax}, {ay}); it is \
+                             placed by its centre, which is ({}, {})",
+                            anim.name,
+                            facing.name(),
+                            fw / 2,
+                            fh / 2
+                        ));
+                    }
+                    continue;
+                }
                 if ax >= fw || ay >= fh {
                     problems.push(format!(
                         "{} {} frame {frame}: anchor ({ax}, {ay}) is outside the \

@@ -43,6 +43,7 @@ cargo run -p atlas -- palette                # player-colour separation report
 cargo run -p atlas -- export                 # swatch + .gpl for Aseprite/GIMP
 cargo run -p atlas -- placeholder            # generate the placeholder sprite sets
 cargo run -p atlas -- validate               # art conformance gate
+cargo run -p atlas -- rig                    # render rig, checked against the specs
 ```
 
 Workspace layout:
@@ -52,10 +53,12 @@ Workspace layout:
 | `crates/sim` | Deterministic simulation: fixed-point maths, RNG, entity store, command queue, replay |
 | `crates/app` | The game binary: window, GPU surface, fixed-timestep clock |
 | `tools/simrunner` | Headless runner for determinism checks, replay verification and benchmarks |
-| `tools/atlas` | Art gate: bakes the palette, validates sprite sets, generates placeholders, quantises renders |
+| `tools/atlas` | Art gate: bakes the palette, validates sprite sets, generates placeholders, quantises and composes renders |
+| `tools/render` | Blender scripts for the frozen camera and light rig, and the render driver |
 | `tools/gen` | Generators for committed tables (trig) |
 | `scripts` | CI checks |
 | `assets/palette` | The 256-colour indexed palette, with the reserved player-colour ramp |
+| `assets/render` | The frozen render rig every sprite is rendered through |
 
 ## Design pillars
 

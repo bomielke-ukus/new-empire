@@ -266,15 +266,42 @@ already in place:
                                                  colour key)
 ```
 
-**Camera.** One orthographic camera at the 2:1 dimetric angle that
-`docs/05` §1's projection implies — 30° above the horizon, orbited to the five
-authored azimuths (S, SW, W, NW, N). The renderer mirrors those for SE, E and
-NE, so the model must not carry an asymmetric detail that would flip.
+The rig is frozen, and lives in `assets/render/rig.json`. `tools/render/README.md`
+is the working guide; what follows is why it is shaped the way it is.
 
-**Light.** One key light, high and to the left, plus a weak fill. Fixed for
-every subject in the game. This is the single most important thing to freeze
-early — it is what makes art from different sources cut together, and changing
-it later invalidates every rendered frame.
+**Camera.** One orthographic camera, 30° above the horizon at azimuth 45°. The
+30° is forced rather than chosen: the on-screen height of a tile over its width
+is `sin(elevation)`, and `docs/05` §1 fixes that ratio at 1:2. (The 26.565°
+figure usually quoted for 2:1 pixel art measures something else — the slope of a
+tile edge on screen — and using it as the camera angle gives a tile that is not
+2:1.)
+
+**The camera never moves.** Facings come from turning the subject, not from
+orbiting the camera. Orbiting swings the key light around with the camera, so
+every facing is lit differently, which is exactly the consistency failure in §2.
+It also slides up per size class so a subject standing on the origin lands on
+its ground-contact anchor instead of the frame centre, which would waste the
+bottom half of every frame.
+
+**Light.** Three suns, positioned by where they sit in *screen* space rather
+than world space, because screen position is what has to stay constant across
+every sprite: a warm key 45° up and to the left, a cool fill at a quarter
+strength up and to the right, and a rim from above and behind that keeps a dark
+unit legible against dark terrain. The 4:1 key-to-fill ratio is what gives the
+palette's ramps somewhere to go. This is the single most important thing to
+freeze early, and changing it later invalidates every frame already rendered.
+
+**Colour management.** `view_transform` must be `Standard`. Blender defaults to
+AgX or Filmic, which desaturate and roll off highlights, so the colours you
+texture are not the colours that reach the quantiser.
+
+**None of that is taken on trust.** `atlas rig` re-derives the camera basis from
+its Euler angles, checks a tile projects exactly 2:1, checks each facing
+rotation points the subject the declared way on screen, checks each light aims
+where it claims and sits above the horizon, and checks every size class against
+`docs/05` §2.3. CI runs it. The rig is a pile of angles that are individually
+plausible and collectively either exactly right or subtly wrong, and subtly
+wrong does not announce itself — it shows up four thousand frames later.
 
 **Render size.** Render at 2× the authoring size, i.e. 4× the 1× sprite, and
 box-filter down in linear light. Rendering straight to the authoring size gives
@@ -288,6 +315,14 @@ nowhere in the palette. `atlas quantize` maps pixels near that hue into indices
 other pixel matches to the nearest ordinary index, and quantisation is
 explicitly forbidden from landing in the player range, or parts of a sprite
 would recolour themselves per owner.
+
+**Composition.** `render_sheet.py` writes one RGBA PNG per frame and knows
+nothing else; `atlas compose` quantises them, lays them out one row per
+(animation, facing), writes the manifest with the anchor the rig aimed at, and
+validates the result. The sheet layout therefore exists in one place rather than
+in a Rust file and a Python file that can drift apart — and because compose is
+pure Rust, the whole path from render to validated sprite is covered by tests
+that do not need Blender installed.
 
 **Validation.** `atlas validate` is the gate `docs/05` §6 requires. It checks
 frame size against the class table, sheet dimensions against the manifest,
@@ -304,12 +339,19 @@ first, and it exits non-zero, so CI fails.
 `tools/atlas`, run by `scripts/check-art.sh` in CI:
 
 ```sh
+cargo run -p atlas -- rig          # the render rig, and whether it still fits the spec
 cargo run -p atlas -- palette      # bake, and report player-colour separation
 cargo run -p atlas -- export       # swatch PNG + .gpl for Aseprite/GIMP/Krita
 cargo run -p atlas -- placeholder  # generate the placeholder catalogue
 cargo run -p atlas -- validate     # the conformance gate
 cargo run -p atlas -- quantize --in render.png --out sprite.png
+cargo run -p atlas -- compose  --renders DIR --set NAME --class CLASS --out DIR
 ```
+
+The **render rig** is frozen: `assets/render/rig.json`, applied to Blender by
+`tools/render/rig.py` and driven by `tools/render/render_sheet.py`. See
+`tools/render/README.md`. Nothing in it is trusted — every camera, facing and
+light number is re-derived and checked against the specs on every CI run.
 
 The **placeholder pass** (`docs/05` §6 step 1) is done: 26 sprite sets covering
 the vertical-slice units, buildings and terrain, with correct sizes, anchors,
@@ -331,12 +373,14 @@ proves a fresh clone can produce what the game loads.
 
 ## 9. What comes next
 
-1. **Freeze the camera and light rig** as a Blender file under `tools/render/`,
-   with the five azimuths and the render size baked in. Nothing else can start
-   until this is fixed.
+1. ~~**Freeze the camera and light rig.**~~ **Done** — `assets/render/rig.json`,
+   with the Blender scripts in `tools/render/` and the verification in
+   `atlas rig`. The one thing left that no test can prove is that the rig looks
+   good, which needs a Blender install and a first model.
 2. **Greybox one unit end to end** — model, rig, render, quantise, validate,
-   in-game with player colour and mirroring working. `docs/05` §6 step 2. One
-   unit proves or disproves the whole route.
+   in-game with player colour and mirroring working. `docs/05` §6 step 2. Every
+   step of that path except the render itself is already covered by tests; one
+   real model proves or disproves the route.
 3. **Model the slice**: 12 units and 10 buildings, with the age costume and
    architecture variants as mesh swaps.
 4. **Commission the icons and UI panel set** (§4.3) in parallel — they are off
