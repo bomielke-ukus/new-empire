@@ -75,6 +75,10 @@ pub struct World {
     pub health: Vec<Fx>,
     /// Where it is walking to, if anywhere.
     pub move_target: Vec<Option<Vec2Fx>>,
+    /// Resource units remaining, for nodes and carcasses; 0 otherwise.
+    pub resource: Vec<i32>,
+    /// Which of 8 directions it faces; see [`crate::Angle::facing8`].
+    pub facing: Vec<u8>,
 }
 
 impl World {
@@ -100,6 +104,18 @@ impl World {
 
     /// Creates an entity and returns its handle.
     pub fn spawn(&mut self, kind: KindId, owner: PlayerId, pos: Vec2Fx, health: Fx) -> EntityId {
+        self.spawn_with_resource(kind, owner, pos, health, 0)
+    }
+
+    /// Creates an entity carrying `resource` units of whatever its kind yields.
+    pub fn spawn_with_resource(
+        &mut self,
+        kind: KindId,
+        owner: PlayerId,
+        pos: Vec2Fx,
+        health: Fx,
+        resource: i32,
+    ) -> EntityId {
         self.live += 1;
         if let Some(i) = self.free.pop() {
             let i = i as usize;
@@ -109,6 +125,8 @@ impl World {
             self.pos[i] = pos;
             self.health[i] = health;
             self.move_target[i] = None;
+            self.resource[i] = resource;
+            self.facing[i] = 1;
             EntityId {
                 index: i as u32,
                 generation: self.generation[i],
@@ -122,6 +140,8 @@ impl World {
             self.pos.push(pos);
             self.health.push(health);
             self.move_target.push(None);
+            self.resource.push(resource);
+            self.facing.push(1);
             EntityId {
                 index: i as u32,
                 generation: 0,
@@ -145,6 +165,8 @@ impl World {
         self.pos[i] = Vec2Fx::ZERO;
         self.health[i] = Fx::ZERO;
         self.move_target[i] = None;
+        self.resource[i] = 0;
+        self.facing[i] = 0;
         self.live -= 1;
         // Keep `free` sorted descending: insert at the position that
         // maintains order. Slot counts are small enough that the O(n) insert
@@ -206,6 +228,8 @@ impl HashState for World {
                 h.write(&self.pos[i]);
                 h.write(&self.health[i]);
                 h.write(&self.move_target[i]);
+                h.write_i32(self.resource[i]);
+                h.write_u8(self.facing[i]);
             }
         }
     }

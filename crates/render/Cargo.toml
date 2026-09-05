@@ -1,19 +1,16 @@
 [package]
-name = "new-empire"
-description = "New Empire: the game binary."
+name = "render"
+description = "The wgpu renderer: terrain, palette-indexed sprites, minimap."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
-[[bin]]
-name = "new-empire"
-path = "src/main.rs"
-
 [dependencies]
 sim = { path = "../sim" }
 view = { path = "../view" }
-render = { path = "../render" }
-winit = "0.30"
 wgpu = "23"
-pollster = "0.4"
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+naga = { version = "23", features = ["wgsl-in"] }

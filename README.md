@@ -4,8 +4,9 @@ A real-time strategy game about taking a civilization from hand-axes to iron in
 about half an hour — built to recapture what made *Age of Empires* (1997)
 engaging, without its 1997 frustrations.
 
-**Status: M0 (foundation) — the deterministic simulation core, headless
-runner and CI are in place. Nothing to play yet; see the roadmap.**
+**Status: M1 (a world you can look at) — seeded Inland maps, the isometric
+renderer with placeholder art, camera and minimap. Nothing to *play* yet; see
+the roadmap.**
 
 ---
 
@@ -34,17 +35,26 @@ cargo run --release -p simrunner -- determinism --ticks 10000
                                              # M0 acceptance: run a synthetic
                                              # match twice, compare every tick
 cargo run --release -p simrunner -- bench --units 1500 --ticks 2000
-cargo run -p new-empire                      # open the (currently empty) game window
+cargo run --release -p new-empire [SEED]     # open the game window on a generated map
+cargo run --release -p mapview -- --seed 1 --out frame.png --minimap mini.png
+                                             # render a frame to PNG with no GPU
 scripts/check-sim-purity.sh                  # no floats, no clock, no stray deps in sim
 ```
+
+In the window: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
+`+`/`-` to zoom; click the minimap to jump; `H` home; `Space` pause; `[` `]`
+speed; `E` toggles edge scrolling; `Esc` quits.
 
 Workspace layout:
 
 | Path | What |
 |---|---|
-| `crates/sim` | Deterministic simulation: fixed-point maths, RNG, entity store, command queue, replay |
-| `crates/app` | The game binary: window, GPU surface, fixed-timestep clock |
+| `crates/sim` | Deterministic simulation: fixed-point maths, RNG, entity store, command queue, replay, tile map, map generation |
+| `crates/view` | Presentation maths: projection, camera, palette, placeholder atlas, terrain mesh, scene, minimap, software rasteriser |
+| `crates/render` | The wgpu renderer: terrain, palette-indexed sprites, minimap |
+| `crates/app` | The game binary: window, GPU surface, input, fixed-timestep clock |
 | `tools/simrunner` | Headless runner for determinism checks, replay verification and benchmarks |
+| `tools/mapview` | Renders generated maps to PNG through the software rasteriser |
 | `tools/gen` | Generators for committed tables (trig) |
 | `scripts` | CI checks |
 

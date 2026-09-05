@@ -385,3 +385,33 @@ anticipate:
 - **The presentation clock** (`crates/app/src/clock.rs`) caps catch-up at 8
   ticks per frame and drops the backlog beyond that, so a stalled window
   resumes rather than fast-forwarding.
+
+## 15. Implementation notes from M1
+
+- **Map generation is inside `sim`**, not a separate `mapgen` crate as §1
+  planned. It needs only the sim's RNG and fixed-point noise, and keeping it
+  there means a replay carries a seed and a `MapSpec` rather than a map. The
+  generator retries derived seeds until a map passes its own checks (every
+  start has the same kit, every start can walk to every other, elevation
+  steps are at most one level) and falls back to a flat map after twelve.
+- **Elevation lives on tile corners** (`(w+1)×(h+1)`), so terrain deforms
+  smoothly as in the second game; a tile's gameplay elevation is the rounded
+  mean of its corners. Start zones are flattened.
+- **A `view` crate sits between `sim` and `render`.** It owns every piece of
+  presentation maths — projection, camera, palette, terrain mesh, sprite
+  sorting, the minimap — and a software rasteriser that consumes the same
+  buffers the GPU does. `tools/mapview` uses it to render PNGs; the render
+  crate's only unit test is naga validation of its WGSL. Any divergence
+  between the two paths is a bug in `render`, by definition.
+- **Terrain blending is per-vertex colour** for now: each corner averages the
+  tiles that share it. Mask-texture blending (§7) waits for real terrain art.
+- **Depth sorting is CPU-side** in `view::Scene` by `(x + y + footprint
+  offset, slot)`; the GPU draws the instance buffer in that order with no
+  depth buffer.
+- **A `facing` component** was added to `World` and is set from the movement
+  vector, so sprites turn as they walk. It is part of the state hash.
+- **Placeholder art is drawn procedurally at 1×**, not authored at 2× as §2.1
+  of the art spec asks; the atlas format is unchanged, so 2× art drops in
+  when it exists.
+- **Palette texture is `256 × 9`**: row 0 neutral, rows 1–8 players. The
+  fragment shader looks up `(index, row)`; shadow (index 3) always reads row 0.

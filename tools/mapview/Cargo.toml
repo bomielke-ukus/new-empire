@@ -1,0 +1,12 @@
+[package]
+name = "mapview"
+description = "Renders generated maps to PNG through the software rasteriser, for eyeballing without a GPU."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sim = { path = "../../crates/sim" }
+view = { path = "../../crates/view" }
+image = { workspace = true }

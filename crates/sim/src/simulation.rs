@@ -9,6 +9,9 @@ use crate::command::{Command, CommandKind, CommandQueue, PlayerId};
 use crate::entity::{EntityId, KindId, Slot, World};
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
+use crate::kinds;
+use crate::map::TileMap;
+use crate::mapgen::{self, MapSpec};
 use crate::replay::Replay;
 use crate::rng::Rng;
 use crate::vec2::Vec2Fx;
@@ -22,23 +25,19 @@ pub const TICK_MS: u32 = 1000 / TICKS_PER_SECOND;
 /// Match parameters that are fixed for the whole match.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct SimConfig {
-    /// Map edge length in tiles (maps are square).
-    pub map_size: i32,
+    /// The map to generate.
+    pub map: MapSpec,
     /// Hard cap on live entities; spawns beyond it are ignored.
     pub max_entities: u32,
-    /// Movement speed in tiles per tick.
-    pub unit_speed: Fx,
-    /// Whether idle units pick random nearby destinations. Exercises the RNG.
+    /// Whether idle mobile units pick random nearby destinations.
     pub wander: bool,
 }
 
 impl Default for SimConfig {
     fn default() -> Self {
         SimConfig {
-            map_size: 128,
-            max_entities: 2000,
-            // One tile per second.
-            unit_speed: Fx::from_ratio(1, TICKS_PER_SECOND as i32),
+            map: MapSpec::default(),
+            max_entities: 4000,
             wander: true,
         }
     }
@@ -46,9 +45,10 @@ impl Default for SimConfig {
 
 impl HashState for SimConfig {
     fn hash_state(&self, h: &mut StateHasher) {
-        h.write_i32(self.map_size);
+        h.write_u8(self.map.kind as u8);
+        h.write_u16(self.map.size);
+        h.write_u8(self.map.players);
         h.write_u32(self.max_entities);
-        h.write(&self.unit_speed);
         h.write_bool(self.wander);
     }
 }
@@ -60,6 +60,10 @@ pub struct Simulation {
     tick: u64,
     config: SimConfig,
     rng: Rng,
+    map: TileMap,
+    /// Hash of the immutable map, folded into every state hash.
+    map_hash: u64,
+    starts: Vec<(i32, i32)>,
     world: World,
     queue: CommandQueue,
     /// Every command ever issued, with its issue tick. This *is* the replay.
@@ -67,17 +71,37 @@ pub struct Simulation {
 }
 
 impl Simulation {
-    /// A fresh match at tick 0.
+    /// A fresh match at tick 0, with its map generated and populated.
     pub fn new(seed: u64, config: SimConfig) -> Simulation {
-        Simulation {
+        let generated = mapgen::generate(seed, &config.map);
+        let mut map_hasher = StateHasher::new();
+        generated.tiles.hash_state(&mut map_hasher);
+        let mut sim = Simulation {
             seed,
             tick: 0,
             rng: Rng::new(seed),
+            map: generated.tiles,
+            map_hash: map_hasher.finish(),
+            starts: generated.starts,
             world: World::new(),
             queue: CommandQueue::new(),
             log: Vec::new(),
             config,
+        };
+        for s in &generated.spawns {
+            sim.spawn(s.kind, s.owner, s.pos);
         }
+        sim
+    }
+
+    /// Terrain and elevation.
+    pub fn map(&self) -> &TileMap {
+        &self.map
+    }
+
+    /// Each player's Town Center tile.
+    pub fn starts(&self) -> &[(i32, i32)] {
+        &self.starts
     }
 
     /// The seed this match was created with.
@@ -125,6 +149,7 @@ impl Simulation {
         let mut h = StateHasher::new();
         h.write_u64(self.tick);
         h.write(&self.config);
+        h.write_u64(self.map_hash);
         h.write(&self.rng);
         h.write(&self.world);
         h.write_u64(self.queue.pending_len() as u64);
@@ -165,7 +190,9 @@ impl Simulation {
                 let target = self.clamp_to_map(target);
                 for id in ids {
                     if let Some(slot) = self.owned_slot(id, cmd.player) {
-                        self.world.move_target[slot.index()] = Some(target);
+                        if kinds::info(self.world.kind[slot.index()]).mobile {
+                            self.world.move_target[slot.index()] = Some(target);
+                        }
                     }
                 }
             }
@@ -183,11 +210,19 @@ impl Simulation {
         if self.world.len() as u32 >= self.config.max_entities {
             return None;
         }
+        let info = kinds::info(kind);
         let pos = self.clamp_to_map(pos);
-        Some(self.world.spawn(kind, owner, pos, Fx::from_int(100)))
+        let resource = info.resource.map_or(0, |(_, amount)| amount);
+        Some(self.world.spawn_with_resource(
+            kind,
+            owner,
+            pos,
+            Fx::from_int(info.max_health),
+            resource,
+        ))
     }
 
-    /// Idle units occasionally pick a destination within three tiles.
+    /// Idle mobile units occasionally pick a destination within three tiles.
     fn wander(&mut self) {
         if !self.config.wander {
             return;
@@ -195,7 +230,7 @@ impl Simulation {
         let slots: Vec<Slot> = self.world.slots().collect();
         for slot in slots {
             let i = slot.index();
-            if self.world.move_target[i].is_some() {
+            if self.world.move_target[i].is_some() || !kinds::info(self.world.kind[i]).mobile {
                 continue;
             }
             if !self.rng.chance(1, 200) {
@@ -209,13 +244,17 @@ impl Simulation {
     }
 
     fn movement(&mut self) {
-        let speed = self.config.unit_speed;
         for slot in self.world.slots().collect::<Vec<_>>() {
             let i = slot.index();
             let Some(target) = self.world.move_target[i] else {
                 continue;
             };
-            let next = self.world.pos[i].move_toward(target, speed);
+            let speed = kinds::info(self.world.kind[i]).speed_per_second / TICKS_PER_SECOND as i32;
+            let here = self.world.pos[i];
+            if here != target {
+                self.world.facing[i] = (target - here).angle().facing8();
+            }
+            let next = here.move_toward(target, speed);
             self.world.pos[i] = next;
             if next == target {
                 self.world.move_target[i] = None;
@@ -231,8 +270,9 @@ impl Simulation {
     }
 
     fn clamp_to_map(&self, p: Vec2Fx) -> Vec2Fx {
-        let max = Fx::from_int(self.config.map_size) - Fx::EPSILON;
-        Vec2Fx::new(p.x.clamp(Fx::ZERO, max), p.y.clamp(Fx::ZERO, max))
+        let max_x = Fx::from_int(self.map.width()) - Fx::EPSILON;
+        let max_y = Fx::from_int(self.map.height()) - Fx::EPSILON;
+        Vec2Fx::new(p.x.clamp(Fx::ZERO, max_x), p.y.clamp(Fx::ZERO, max_y))
     }
 }
 
@@ -240,10 +280,23 @@ impl Simulation {
 mod tests {
     use super::*;
 
+    use crate::mapgen::MapKind;
+
+    fn flat() -> SimConfig {
+        SimConfig {
+            map: MapSpec {
+                kind: MapKind::Flat,
+                size: 128,
+                players: 2,
+            },
+            ..SimConfig::default()
+        }
+    }
+
     fn quiet() -> SimConfig {
         SimConfig {
             wander: false,
-            ..SimConfig::default()
+            ..flat()
         }
     }
 
@@ -251,7 +304,7 @@ mod tests {
         Command {
             player,
             kind: CommandKind::Spawn {
-                kind: 1,
+                kind: kinds::VILLAGER,
                 pos: Vec2Fx::from_int(x, y),
             },
         }
@@ -284,8 +337,8 @@ mod tests {
                 target: Vec2Fx::from_int(3, 0),
             },
         });
-        // Delay of 2 ticks, then 3 tiles at 1 tile/second = 60 ticks.
-        for _ in 0..(2 + 60) {
+        // Delay of 2 ticks, then 3 tiles at a villager's 0.9 tiles/s (67 ticks).
+        for _ in 0..(2 + 67) {
             sim.step();
         }
         let s = sim.world().slot(id).unwrap();
@@ -344,7 +397,7 @@ mod tests {
     #[test]
     fn identical_runs_hash_identically_and_diverge_on_seed() {
         let run = |seed: u64| {
-            let mut sim = Simulation::new(seed, SimConfig::default());
+            let mut sim = Simulation::new(seed, flat());
             for i in 0..20 {
                 sim.issue(spawn_cmd(i % 2, i as i32 * 3, 10));
             }
@@ -360,8 +413,72 @@ mod tests {
     }
 
     #[test]
+    fn generated_map_is_populated_and_static_things_stay_put() {
+        let mut sim = Simulation::new(11, SimConfig::default());
+        let start_gazelles: Vec<_> = sim
+            .world()
+            .slots()
+            .filter(|s| sim.world().kind[s.index()] == kinds::GAZELLE)
+            .map(|s| sim.world().pos[s.index()])
+            .collect();
+        let n = sim.world().len();
+        assert!(n > 200, "inland map should have scenery: {n}");
+        assert_eq!(sim.starts().len(), 2);
+        let trees: Vec<_> = sim
+            .world()
+            .slots()
+            .filter(|s| sim.world().kind[s.index()] == kinds::TREE)
+            .collect();
+        assert!(!trees.is_empty());
+        let before: Vec<_> = trees.iter().map(|s| sim.world().pos[s.index()]).collect();
+        let wood = sim.world().resource[trees[0].index()];
+        assert_eq!(wood, 75);
+        // Nobody may order a tree around, not even its owner (gaia has no player).
+        let tree_id = sim.world().id_at(trees[0]);
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Move {
+                ids: vec![tree_id],
+                target: Vec2Fx::ZERO,
+            },
+        });
+        for _ in 0..200 {
+            sim.step();
+        }
+        let after: Vec<_> = trees.iter().map(|s| sim.world().pos[s.index()]).collect();
+        assert_eq!(before, after, "static entities moved");
+        // Gazelles, on the other hand, wander.
+        let gazelles: Vec<_> = sim
+            .world()
+            .slots()
+            .filter(|s| sim.world().kind[s.index()] == kinds::GAZELLE)
+            .map(|s| sim.world().pos[s.index()])
+            .collect();
+        assert!(gazelles.len() >= 6);
+        assert!(gazelles.iter().any(|p| p.x.frac() != Fx::ZERO
+            || p.y.frac() != Fx::ZERO
+            || !start_gazelles.contains(p)));
+    }
+
+    #[test]
+    fn map_hash_is_part_of_state() {
+        let a = Simulation::new(1, SimConfig::default());
+        let b = Simulation::new(
+            1,
+            SimConfig {
+                map: MapSpec {
+                    size: 96,
+                    ..MapSpec::default()
+                },
+                ..SimConfig::default()
+            },
+        );
+        assert_ne!(a.state_hash(), b.state_hash());
+    }
+
+    #[test]
     fn wander_actually_moves_things() {
-        let mut sim = Simulation::new(3, SimConfig::default());
+        let mut sim = Simulation::new(3, flat());
         for i in 0..10 {
             sim.issue(spawn_cmd(0, 50 + i, 50));
         }

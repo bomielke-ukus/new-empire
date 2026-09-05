@@ -84,6 +84,22 @@ guarantees (no hidden allocation, no implicit float promotion, `#![deny]`-able
 lints, `cargo test` in CI on three OSes) pay off most. `wgpu`/`winit` also give
 one renderer for Windows, macOS, Linux and — as a secondary target — the web.
 
+### D12 — Map generation lives in the simulation crate
+**Date:** 2026-09-05
+
+Planned as its own crate; moved into `sim::mapgen` because it depends only on
+the sim's RNG and fixed-point maths, and because it lets a replay carry a seed
+and a spec instead of a map. The `sim` dependency allowlist is unchanged.
+
+### D13 — A software rasteriser is the renderer's reference
+**Date:** 2026-09-05
+
+The GPU cannot be exercised in CI or in the environment this is being built
+in, so `view::raster` draws the same vertex buffers and sprite instances the
+GPU receives, and `tools/mapview` writes the result to PNG. Every frame the
+GPU shows should match a `mapview` render of the same camera; when it does
+not, the renderer is wrong.
+
 ---
 
 ## Open questions

@@ -49,6 +49,14 @@ jobs:
         run: cargo run --release -p simrunner -- determinism --seed 20260905 --ticks 5000 --players 8 --units 800
       - name: replay file round-trips
         run: cargo run --release -p simrunner -- verify replay-ci.ron
+      - name: software-rendered frame
+        run: cargo run --release -p mapview -- --seed 1 --out frame.png --minimap minimap.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frame-${{ matrix.os }}
+          path: |
+            frame.png
+            minimap.png
       - name: cross-platform hash
         shell: bash
         run: |

@@ -1,0 +1,11 @@
+[package]
+name = "view"
+description = "Presentation-side maths and data: projection, camera, palette, placeholder art, terrain mesh, scene building, minimap, and a software rasteriser that mirrors the GPU renderer."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sim = { path = "../sim" }
+bytemuck = { workspace = true }

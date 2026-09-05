@@ -54,6 +54,18 @@ smoothly at 60 fps, and the same seed always produces the same map.
 
 **Size:** Medium.
 
+**Status:** landed, with one caveat. Map generation lives in `sim::mapgen`
+(same seed, same map, verified by test and by the determinism run, which now
+executes over a populated Inland map). The renderer draws Gouraud terrain
+chunks, palette-remapped instanced sprites and a diamond minimap; the camera
+edge-scrolls, drags, zooms in steps and jumps from the minimap. Placeholder
+sprites for every kind go through the real atlas pipeline (indices, anchors,
+five facings mirrored to eight). `tools/mapview` renders frames to PNG via a
+software rasteriser that shares all the maths, and those frames look right.
+The caveat: the GPU path has only been validated by compiling and by naga
+shader validation — the "60 fps in a window" half of the acceptance test is
+still waiting on a machine with a display.
+
 ---
 
 ## M2 — Villagers, movement, economy

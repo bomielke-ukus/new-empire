@@ -2,8 +2,11 @@
 resolver = "2"
 members = [
     "crates/sim",
+    "crates/view",
+    "crates/render",
     "crates/app",
     "tools/simrunner",
+    "tools/mapview",
 ]
 
 [workspace.package]
@@ -15,6 +18,8 @@ rust-version = "1.85"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 ron = "0.10"
+bytemuck = { version = "1", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [profile.dev]
 # The sim is exercised for tens of thousands of ticks in tests; unoptimised
