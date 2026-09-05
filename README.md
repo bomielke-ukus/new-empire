@@ -4,7 +4,8 @@ A real-time strategy game about taking a civilization from hand-axes to iron in
 about half an hour — built to recapture what made *Age of Empires* (1997)
 engaging, without its 1997 frustrations.
 
-**Status: specification. No code yet.**
+**Status: M0 (foundation) — the deterministic simulation core, headless
+runner and CI are in place. Nothing to play yet; see the roadmap.**
 
 ---
 
@@ -21,6 +22,31 @@ Read in order:
 | [05 — Art and audio spec](docs/05-art-and-audio-spec.md) | Isometric projection, sprite and animation standards, palette, terrain, UI art, audio inventory |
 | [06 — Roadmap](docs/06-roadmap.md) | M0–M9 milestones with demonstrable acceptance criteria |
 | [07 — Decisions and open questions](docs/07-decisions-and-open-questions.md) | Decision log with reasoning, and what still needs answering |
+
+## Building and running
+
+Requires a stable Rust toolchain (`rustup` installs it; `rust-toolchain.toml`
+pins the channel).
+
+```sh
+cargo test --workspace                       # unit tests for every crate
+cargo run --release -p simrunner -- determinism --ticks 10000
+                                             # M0 acceptance: run a synthetic
+                                             # match twice, compare every tick
+cargo run --release -p simrunner -- bench --units 1500 --ticks 2000
+cargo run -p new-empire                      # open the (currently empty) game window
+scripts/check-sim-purity.sh                  # no floats, no clock, no stray deps in sim
+```
+
+Workspace layout:
+
+| Path | What |
+|---|---|
+| `crates/sim` | Deterministic simulation: fixed-point maths, RNG, entity store, command queue, replay |
+| `crates/app` | The game binary: window, GPU surface, fixed-timestep clock |
+| `tools/simrunner` | Headless runner for determinism checks, replay verification and benchmarks |
+| `tools/gen` | Generators for committed tables (trig) |
+| `scripts` | CI checks |
 
 ## Design pillars
 

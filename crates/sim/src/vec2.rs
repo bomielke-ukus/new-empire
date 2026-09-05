@@ -1,0 +1,312 @@
+//! Two-component fixed-point vector, for positions and displacements in tiles.
+//!
+//! Squared lengths are computed in 64-bit raw form (Q32.32) because a map is
+//! up to 240 tiles across and 240² does not fit in Q16.16. Use
+//! [`Vec2Fx::length_sq_raw`] for comparisons and [`Vec2Fx::length`] when you
+//! actually need the distance.
+
+use crate::angle::Angle;
+use crate::fx::{isqrt_u64, Fx};
+use core::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
+use serde::{Deserialize, Serialize};
+
+/// A 2D vector of [`Fx`].
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug, Serialize, Deserialize)]
+pub struct Vec2Fx {
+    /// x component.
+    pub x: Fx,
+    /// y component.
+    pub y: Fx,
+}
+
+impl Vec2Fx {
+    /// (0, 0)
+    pub const ZERO: Vec2Fx = Vec2Fx {
+        x: Fx::ZERO,
+        y: Fx::ZERO,
+    };
+
+    /// Constructs from components.
+    #[inline]
+    pub const fn new(x: Fx, y: Fx) -> Vec2Fx {
+        Vec2Fx { x, y }
+    }
+
+    /// Constructs from integer components.
+    #[inline]
+    pub const fn from_int(x: i32, y: i32) -> Vec2Fx {
+        Vec2Fx {
+            x: Fx::from_int(x),
+            y: Fx::from_int(y),
+        }
+    }
+
+    /// Unit vector at `angle`, scaled by `len`.
+    pub fn from_angle(angle: Angle, len: Fx) -> Vec2Fx {
+        Vec2Fx {
+            x: angle.cos() * len,
+            y: angle.sin() * len,
+        }
+    }
+
+    /// Dot product, saturating.
+    pub fn dot(self, o: Vec2Fx) -> Fx {
+        let sum = self.x.raw() as i64 * o.x.raw() as i64 + self.y.raw() as i64 * o.y.raw() as i64;
+        Fx::from_raw(((sum + (1 << 15)) >> 16).clamp(i32::MIN as i64, i32::MAX as i64) as i32)
+    }
+
+    /// Squared length as raw Q32.32. Exact; use for comparisons.
+    #[inline]
+    pub fn length_sq_raw(self) -> u64 {
+        let x = self.x.raw() as i64;
+        let y = self.y.raw() as i64;
+        (x * x + y * y) as u64
+    }
+
+    /// Length. Saturates at `Fx::MAX` (only reachable for absurd inputs).
+    pub fn length(self) -> Fx {
+        // sqrt(x_raw² + y_raw²) == sqrt(x² + y²) · 2^16, i.e. already Q16.16.
+        let r = isqrt_u64(self.length_sq_raw());
+        Fx::from_raw(r.min(i32::MAX as u64) as i32)
+    }
+
+    /// Squared distance as raw Q32.32.
+    #[inline]
+    pub fn distance_sq_raw(self, o: Vec2Fx) -> u64 {
+        (o - self).length_sq_raw()
+    }
+
+    /// Distance to `o`.
+    #[inline]
+    pub fn distance(self, o: Vec2Fx) -> Fx {
+        (o - self).length()
+    }
+
+    /// `|dx| + |dy|`.
+    pub fn manhattan(self, o: Vec2Fx) -> Fx {
+        (o.x - self.x).abs() + (o.y - self.y).abs()
+    }
+
+    /// `self * num / den` per component with a 64-bit intermediate.
+    pub fn scale_ratio(self, num: Fx, den: Fx) -> Vec2Fx {
+        Vec2Fx {
+            x: self.x.mul_div(num, den),
+            y: self.y.mul_div(num, den),
+        }
+    }
+
+    /// Unit-length copy, or zero if this is the zero vector.
+    pub fn normalized_or_zero(self) -> Vec2Fx {
+        let len = self.length();
+        if len.is_zero() {
+            Vec2Fx::ZERO
+        } else {
+            self.scale_ratio(Fx::ONE, len)
+        }
+    }
+
+    /// Steps toward `target` by at most `max_step`, landing exactly on it when
+    /// within reach. This is the primitive every movement system uses.
+    pub fn move_toward(self, target: Vec2Fx, max_step: Fx) -> Vec2Fx {
+        let d = target - self;
+        let len = d.length();
+        if len <= max_step {
+            target
+        } else {
+            self + d.scale_ratio(max_step, len)
+        }
+    }
+
+    /// Angle of this vector; zero vector yields `Angle::ZERO`.
+    ///
+    /// Computed by octant reduction and a rational approximation of atan on
+    /// `[0, 1]`, accurate to about 0.3°. Good enough for facings and steering;
+    /// not for geometry that has to close.
+    pub fn angle(self) -> Angle {
+        let x = self.x.raw() as i64;
+        let y = self.y.raw() as i64;
+        if x == 0 && y == 0 {
+            return Angle::ZERO;
+        }
+        let ax = x.abs();
+        let ay = y.abs();
+        // atan(t) for t in [0,1], in BAM (8192 == 45°):
+        //   atan(t) ≈ t·(8192 + 2810·(1 − t)) / 1   with t in Q16
+        let (num, den, swap) = if ay <= ax {
+            (ay, ax, false)
+        } else {
+            (ax, ay, true)
+        };
+        let t = (num << 16) / den; // Q16, 0..=65536
+        let one_minus_t = 65536 - t;
+        let a = (t * (8192 * 65536 + 2810 * one_minus_t)) >> 32;
+        let a = if swap { 16384 - a } else { a };
+        let a = match (x >= 0, y >= 0) {
+            (true, true) => a,
+            (false, true) => 32768 - a,
+            (false, false) => 32768 + a,
+            (true, false) => 65536 - a,
+        };
+        Angle(a as u16)
+    }
+}
+
+impl Add for Vec2Fx {
+    type Output = Vec2Fx;
+    #[inline]
+    fn add(self, o: Vec2Fx) -> Vec2Fx {
+        Vec2Fx {
+            x: self.x + o.x,
+            y: self.y + o.y,
+        }
+    }
+}
+impl Sub for Vec2Fx {
+    type Output = Vec2Fx;
+    #[inline]
+    fn sub(self, o: Vec2Fx) -> Vec2Fx {
+        Vec2Fx {
+            x: self.x - o.x,
+            y: self.y - o.y,
+        }
+    }
+}
+impl Neg for Vec2Fx {
+    type Output = Vec2Fx;
+    #[inline]
+    fn neg(self) -> Vec2Fx {
+        Vec2Fx {
+            x: -self.x,
+            y: -self.y,
+        }
+    }
+}
+impl Mul<Fx> for Vec2Fx {
+    type Output = Vec2Fx;
+    #[inline]
+    fn mul(self, s: Fx) -> Vec2Fx {
+        Vec2Fx {
+            x: self.x * s,
+            y: self.y * s,
+        }
+    }
+}
+impl Mul<i32> for Vec2Fx {
+    type Output = Vec2Fx;
+    #[inline]
+    fn mul(self, s: i32) -> Vec2Fx {
+        Vec2Fx {
+            x: self.x * s,
+            y: self.y * s,
+        }
+    }
+}
+impl Div<Fx> for Vec2Fx {
+    type Output = Vec2Fx;
+    #[inline]
+    fn div(self, s: Fx) -> Vec2Fx {
+        Vec2Fx {
+            x: self.x / s,
+            y: self.y / s,
+        }
+    }
+}
+impl AddAssign for Vec2Fx {
+    fn add_assign(&mut self, o: Vec2Fx) {
+        *self = *self + o;
+    }
+}
+impl SubAssign for Vec2Fx {
+    fn sub_assign(&mut self, o: Vec2Fx) {
+        *self = *self - o;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(x: i32, y: i32) -> Vec2Fx {
+        Vec2Fx::from_int(x, y)
+    }
+
+    #[test]
+    fn arithmetic() {
+        assert_eq!(v(1, 2) + v(3, 4), v(4, 6));
+        assert_eq!(v(1, 2) - v(3, 4), v(-2, -2));
+        assert_eq!(-v(1, 2), v(-1, -2));
+        assert_eq!(v(1, 2) * Fx::TWO, v(2, 4));
+        assert_eq!(v(1, 2) * 3, v(3, 6));
+        assert_eq!(v(4, 6) / Fx::TWO, v(2, 3));
+    }
+
+    #[test]
+    fn dot_and_lengths() {
+        assert_eq!(v(3, 4).dot(v(2, 1)), Fx::from_int(10));
+        assert_eq!(v(3, 4).length(), Fx::from_int(5));
+        assert_eq!(v(-3, 4).length(), Fx::from_int(5));
+        assert_eq!(v(0, 0).length(), Fx::ZERO);
+        assert_eq!(v(1, 2).distance(v(4, 6)), Fx::from_int(5));
+        assert_eq!(v(1, 2).manhattan(v(4, 6)), Fx::from_int(7));
+        // Far corners of a giant map must not overflow.
+        let d = v(0, 0).distance(v(240, 240));
+        assert_eq!(d.floor(), 339);
+        assert!(v(0, 0).distance_sq_raw(v(240, 240)) > v(0, 0).distance_sq_raw(v(200, 200)));
+    }
+
+    #[test]
+    fn normalize() {
+        let n = v(3, 4).normalized_or_zero();
+        assert!((n.length() - Fx::ONE).abs() <= Fx::from_raw(2), "{n:?}");
+        assert_eq!(n.x, Fx::from_ratio(3, 5));
+        assert_eq!(Vec2Fx::ZERO.normalized_or_zero(), Vec2Fx::ZERO);
+    }
+
+    #[test]
+    fn move_toward_lands_exactly() {
+        let start = v(0, 0);
+        let target = v(3, 4);
+        let step = Fx::ONE;
+        let mut p = start;
+        let mut steps = 0;
+        while p != target {
+            p = p.move_toward(target, step);
+            steps += 1;
+            assert!(steps <= 6, "did not converge: {p:?}");
+        }
+        assert_eq!(steps, 5);
+        // Overshoot is impossible; a big step lands on the target.
+        assert_eq!(start.move_toward(target, Fx::from_int(100)), target);
+        // Already there.
+        assert_eq!(target.move_toward(target, step), target);
+        // Each intermediate step has the right length.
+        let q = start.move_toward(target, step);
+        assert!((q.length() - Fx::ONE).abs() <= Fx::from_raw(2));
+    }
+
+    #[test]
+    fn from_angle_round_trips_through_facing() {
+        for deg in (0..360).step_by(15) {
+            let a = Angle::from_degrees(deg);
+            let p = Vec2Fx::from_angle(a, Fx::from_int(10));
+            let back = p.angle();
+            let diff = (back - a).0.min((a - back).0);
+            assert!(
+                diff <= 60,
+                "{deg}°: got {}° (diff {diff} BAM)",
+                back.to_degrees()
+            );
+            assert_eq!(back.facing8(), a.facing8(), "{deg}°");
+        }
+    }
+
+    #[test]
+    fn angle_axes_exact() {
+        assert_eq!(v(1, 0).angle(), Angle::ZERO);
+        assert_eq!(v(0, 1).angle(), Angle::QUARTER);
+        assert_eq!(v(-1, 0).angle(), Angle::HALF);
+        assert_eq!(v(0, -1).angle(), Angle::THREE_QUARTER);
+        assert_eq!(v(5, 5).angle(), Angle::from_degrees(45));
+        assert_eq!(Vec2Fx::ZERO.angle(), Angle::ZERO);
+    }
+}

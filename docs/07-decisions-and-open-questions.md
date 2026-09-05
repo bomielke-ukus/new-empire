@@ -59,6 +59,31 @@ opponent that cheats teaches you nothing.
 Low caps keep individual units meaningful, battles readable at our sprite scale,
 and the simulation cheap. Configurable 50–200.
 
+### D9 — Hand-written RNG and fixed-point; `serde` is the sim's only dependency
+**Date:** 2026-09-05
+
+`xoshiro256**` and Q16.16 arithmetic are small enough to own outright, and
+owning them means no dependency can change the simulation's output under a
+version bump. `scripts/check-sim-purity.sh` fails CI if anything else appears
+in `crates/sim`'s dependency tree, if a float type or literal appears in its
+source, or if it touches the clock or a `HashMap`.
+
+### D10 — Fixed-point division rounds to nearest, not toward zero
+**Date:** 2026-09-05
+
+Found during M0: truncating division made every movement step fractionally
+short, so a 60-tick walk at 1 tile/s ended at 2.9992 tiles. Rounding to nearest
+(halves away from zero) is unbiased and lands on the integer the design says.
+All `Fx` divisions and `mul_div` share one rounding routine.
+
+### D11 — Rust over C++
+**Date:** 2026-09-05 · **Decided by:** Claude, within Bo's "Rust or C++" choice
+
+The bit-exact simulation and the data-oriented entity store are where Rust's
+guarantees (no hidden allocation, no implicit float promotion, `#![deny]`-able
+lints, `cargo test` in CI on three OSes) pay off most. `wgpu`/`winit` also give
+one renderer for Windows, macOS, Linux and — as a secondary target — the web.
+
 ---
 
 ## Open questions

@@ -1,0 +1,12 @@
+[package]
+name = "sim"
+description = "Deterministic simulation core. No rendering, no I/O, no floats, no clock."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The dependency list of this crate is policed by scripts/check-sim-purity.sh.
+# Nothing may be added here that could make two machines disagree.
+[dependencies]
+serde = { workspace = true }

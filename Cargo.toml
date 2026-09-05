@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sim",
+    "crates/app",
+    "tools/simrunner",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+ron = "0.10"
+
+[profile.dev]
+# The sim is exercised for tens of thousands of ticks in tests; unoptimised
+# fixed-point maths is painfully slow. Optimise dependencies and keep our own
+# crates debuggable.
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+# Reproducibility matters more than the last few percent of speed.
+codegen-units = 1
+lto = "thin"
+debug = 1

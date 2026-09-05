@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # Fast, Linux-only gates: formatting, lints, and the sim purity rules.
+  lint:
+    name: Lint and purity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: sim purity (no floats, no clock, dependency allowlist)
+        run: scripts/check-sim-purity.sh
+
+  # The determinism contract: the same command log produces the same hashes,
+  # on every platform we ship to. This is M0's acceptance test.
+  test:
+    name: Test (${{ matrix.os }})
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: unit tests
+        run: cargo test --workspace
+      - name: determinism, 10,000 ticks
+        run: cargo run --release -p simrunner -- determinism --seed 1 --ticks 10000 --players 4 --units 400 --save replay-ci.ron
+      - name: determinism, second seed, 8 players
+        run: cargo run --release -p simrunner -- determinism --seed 20260905 --ticks 5000 --players 8 --units 800
+      - name: replay file round-trips
+        run: cargo run --release -p simrunner -- verify replay-ci.ron
+      - name: cross-platform hash
+        shell: bash
+        run: |
+          # The final hash must be identical on every OS. Each job prints it;
+          # the compare job below asserts they agree.
+          cargo run --release -p simrunner -- determinism --seed 777 --ticks 3000 --players 4 --units 300 \
+            | grep -oE 'final hash [0-9a-f]{16}' | awk '{print $3}' > hash-${{ matrix.os }}.txt
+          cat hash-${{ matrix.os }}.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hash-${{ matrix.os }}
+          path: hash-${{ matrix.os }}.txt
+
+  cross-platform:
+    name: Hashes agree across platforms
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hash-*
+          merge-multiple: true
+      - name: compare
+        run: |
+          cat hash-*.txt
+          if [ "$(cat hash-*.txt | sort -u | wc -l)" != "1" ]; then
+            echo "FAIL: platforms produced different state hashes"
+            exit 1
+          fi
+          echo "ok: all platforms agree"

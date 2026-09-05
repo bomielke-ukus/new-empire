@@ -1,0 +1,17 @@
+[package]
+name = "new-empire"
+description = "New Empire: the game binary."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "new-empire"
+path = "src/main.rs"
+
+[dependencies]
+sim = { path = "../sim" }
+winit = "0.30"
+wgpu = "23"
+pollster = "0.4"

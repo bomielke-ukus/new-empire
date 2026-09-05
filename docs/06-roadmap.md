@@ -28,6 +28,13 @@ every per-tick hash matches, on all three platforms.
 
 **Size:** Medium.
 
+**Status:** landed. `simrunner determinism --ticks 10000` passes locally
+(4 players, 400 units, ~4,500 commands, ~28 µs/tick); CI runs it on Linux,
+Windows and macOS and asserts the three final hashes are identical. The
+window opens and clears to a colour, and drives the sim at 20 Hz from a
+fixed-timestep clock (Space pauses, `+`/`-` change speed). Not yet verified
+on a real GPU from this environment — first thing to check on a desktop.
+
 ---
 
 ## M1 — A world you can look at

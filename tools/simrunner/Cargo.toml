@@ -1,0 +1,12 @@
+[package]
+name = "simrunner"
+description = "Headless simulation runner: determinism checks, replay verification, benchmarks."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sim = { path = "../../crates/sim" }
+ron = { workspace = true }
+serde = { workspace = true }

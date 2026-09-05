@@ -349,3 +349,39 @@ Kept deliberately small; every one is justified.
 
 Nothing else without a conversation. Fixed-point maths, the entity store, and
 pathfinding are ours — they are the parts where correctness is the product.
+
+*Amendment (M0):* the RNG is hand-written too (`xoshiro256**` is twenty
+lines), so `rand_xoshiro` is not used. That leaves `serde` as the simulation
+crate's only dependency, which `scripts/check-sim-purity.sh` enforces.
+
+---
+
+## 14. Implementation notes from M0
+
+Decisions made while building the foundation that the sections above did not
+anticipate:
+
+- **All `Fx` divisions round to nearest, halves away from zero** — including
+  `from_ratio`, `/`, and `mul_div`. Truncation gave a systematic short bias:
+  a unit walking 60 ticks at "1 tile/s" arrived at 2.9992, not 3. Rounding is
+  unbiased, so repeated scaling lands where the integers say it should.
+  Multiplication also rounds to nearest. Addition and subtraction saturate.
+- **Angles are 16-bit BAM** (65536 per turn), not fixed-point radians. Wrap
+  is free, there is no π to approximate, and `sin`/`cos` come from a
+  committed 257-entry quarter-wave table (`tools/gen/gen_trig_table.py`) with
+  linear interpolation, accurate to about 1/1000. `Vec2Fx::angle` is an
+  integer `atan2` approximation good to ~0.3°, sufficient for facings.
+- **Squared distances are 64-bit raw (Q32.32)**, never `Fx`, because 240² does
+  not fit in Q16.16. `Vec2Fx::length` goes through `isqrt_u64` directly.
+- **Despawn scrubs the slot.** Component data in dead slots is zeroed so the
+  `World`'s derived equality agrees with its state hash — two worlds with the
+  same live state compare equal regardless of history.
+- **Commands are logged on issue**, so `Simulation::replay()` is always
+  available and a replay is exactly "seed + config + `(issue_tick, command)`
+  list". `Replay::verify` runs it twice and names the first divergent tick.
+- **The state hash is FNV-1a** over tick, config, RNG state and draw count,
+  every live entity's components in slot order, and the pending command
+  count. Cheap enough to compute every tick; the simrunner does exactly that.
+- **The presentation clock** (`crates/app/src/clock.rs`) caps catch-up at 8
+  ticks per frame and drops the backlog beyond that, so a stalled window
+  resumes rather than fast-forwarding.
