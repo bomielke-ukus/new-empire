@@ -10,7 +10,9 @@
 //! non-zero on the first tick whose state hashes disagree. This is M0's
 //! acceptance test and runs in CI on every platform.
 
-use sim::{Command, CommandKind, Replay, Rng, SimConfig, Simulation, Vec2Fx};
+use sim::{
+    kinds, Command, CommandKind, MapKind, MapSpec, Replay, Rng, SimConfig, Simulation, Vec2Fx,
+};
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -57,10 +59,17 @@ fn parse(args: &[String]) -> Result<Args, String> {
 /// stream itself comes from a *separate* RNG so it is reproducible without
 /// depending on simulation state.
 fn synthesise(a: &Args) -> Replay {
-    let config = SimConfig::default();
+    let config = SimConfig {
+        map: MapSpec {
+            kind: MapKind::Inland,
+            size: 128,
+            players: a.players,
+        },
+        ..SimConfig::default()
+    };
     let mut sim = Simulation::new(a.seed, config);
     let mut driver = Rng::new(a.seed ^ 0xD1CE);
-    let map = sim.config().map_size;
+    let map = sim.map().width();
 
     for n in 0..a.units {
         let player = (n % a.players as u32) as u8;
@@ -84,7 +93,10 @@ fn synthesise(a: &Args) -> Replay {
             let owned: Vec<_> = sim
                 .world()
                 .slots()
-                .filter(|s| sim.world().owner[s.index()] == player)
+                .filter(|s| {
+                    sim.world().owner[s.index()] == player
+                        && kinds::info(sim.world().kind[s.index()]).mobile
+                })
                 .map(|s| sim.world().id_at(s))
                 .collect();
             if owned.is_empty() {
@@ -105,7 +117,7 @@ fn synthesise(a: &Args) -> Replay {
                     id: owned[driver.below(owned.len() as u32) as usize],
                 },
                 1 => CommandKind::Spawn {
-                    kind: 1,
+                    kind: kinds::VILLAGER,
                     pos: Vec2Fx::from_int(driver.range_i32(0, map), driver.range_i32(0, map)),
                 },
                 2..=4 => CommandKind::Stop {

@@ -4,8 +4,10 @@ A real-time strategy game about taking a civilization from hand-axes to iron in
 about half an hour — built to recapture what made *Age of Empires* (1997)
 engaging, without its 1997 frustrations.
 
-**Status: M0 (foundation) — the deterministic simulation core, headless
-runner and CI are in place. Nothing to play yet; see the roadmap.**
+**Status: M2 (villagers, movement, economy) — select villagers, gather all
+four resources, build houses and storehouses, train villagers with rally
+points, on a pathfinder that does not get stuck. Playable as an economy
+sandbox; no opponent yet. See the roadmap.**
 
 ---
 
@@ -35,7 +37,9 @@ cargo run --release -p simrunner -- determinism --ticks 10000
                                              # M0 acceptance: run a synthetic
                                              # match twice, compare every tick
 cargo run --release -p simrunner -- bench --units 1500 --ticks 2000
-cargo run -p new-empire                      # open the (currently empty) game window
+cargo run --release -p new-empire [SEED]     # open the game window on a generated map
+cargo run --release -p mapview -- --seed 1 --out frame.png --minimap mini.png
+                                             # render a frame to PNG with no GPU
 scripts/check-sim-purity.sh                  # no floats, no clock, no stray deps in sim
 scripts/check-art.sh                         # palette, placeholder regen, atlas gate
 
@@ -46,13 +50,30 @@ cargo run -p atlas -- validate               # art conformance gate
 cargo run -p atlas -- rig                    # render rig, checked against the specs
 ```
 
+In the window: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
+`+`/`-` to zoom; click the minimap to jump; `Space` pause; `[` `]` speed;
+`E` toggles edge scrolling.
+
+Play: left-click or drag to select, double-click for all of a kind on screen,
+`Shift` adds, `Ctrl`+`0-9` saves a control group and `0-9` recalls it, `.`
+cycles idle villagers. Right-click moves, or gathers when over a tree, bush
+or vein, or helps build when over your own site. With villagers selected,
+`H` places a house and `B` a storehouse (`Shift` keeps placing); with the
+Town Center selected, `V` trains a villager, `X` unqueues, and right-click
+sets its rally point. `T` stops, `Delete` dismisses, `Esc` cancels or quits.
+Commands take effect two ticks (100 ms) after you give them — that delay is
+the lockstep window, and it is why multiplayer will be a transport job.
+
 Workspace layout:
 
 | Path | What |
 |---|---|
-| `crates/sim` | Deterministic simulation: fixed-point maths, RNG, entity store, command queue, replay |
-| `crates/app` | The game binary: window, GPU surface, fixed-timestep clock |
+| `crates/sim` | Deterministic simulation: fixed-point maths, RNG, entity store, command queue, replay, tile map, map generation |
+| `crates/view` | Presentation maths: projection, camera, palette, placeholder atlas, terrain mesh, scene, minimap, software rasteriser |
+| `crates/render` | The wgpu renderer: terrain, palette-indexed sprites, minimap |
+| `crates/app` | The game binary: window, GPU surface, input, fixed-timestep clock |
 | `tools/simrunner` | Headless runner for determinism checks, replay verification and benchmarks |
+| `tools/mapview` | Renders generated maps to PNG through the software rasteriser |
 | `tools/atlas` | Art gate: bakes the palette, validates sprite sets, generates placeholders, quantises and composes renders |
 | `tools/render` | Blender scripts for the frozen camera and light rig, and the render driver |
 | `tools/gen` | Generators for committed tables (trig) |

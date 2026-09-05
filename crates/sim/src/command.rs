@@ -12,6 +12,7 @@
 //! first.
 
 use crate::entity::{EntityId, KindId};
+use crate::orders::Rally;
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -26,7 +27,8 @@ pub const COMMAND_DELAY: u64 = 2;
 /// What a command asks the simulation to do.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum CommandKind {
-    /// Create an entity of `kind` at `pos` owned by the issuing player.
+    /// Create an entity of `kind` at `pos` owned by the issuing player,
+    /// free of charge. For tests, scenarios and cheats.
     Spawn {
         /// Static data index.
         kind: KindId,
@@ -38,17 +40,62 @@ pub enum CommandKind {
         /// Which entity.
         id: EntityId,
     },
-    /// Walk the listed entities to `target`.
+    /// Walk the listed entities to `target`, spreading over nearby tiles.
     Move {
         /// Which entities; stale or foreign handles are skipped.
         ids: Vec<EntityId>,
         /// Destination in tiles.
         target: Vec2Fx,
     },
-    /// Cancel movement for the listed entities.
+    /// Cancel whatever the listed entities are doing.
     Stop {
         /// Which entities.
         ids: Vec<EntityId>,
+    },
+    /// Send villagers to gather from a node.
+    Gather {
+        /// Villagers.
+        ids: Vec<EntityId>,
+        /// A tree, bush or vein.
+        node: EntityId,
+    },
+    /// Place a building and send villagers to construct it. The cost is
+    /// paid when the site is placed.
+    Build {
+        /// What to build.
+        kind: KindId,
+        /// Tile the footprint is centred on.
+        x: i32,
+        /// Tile the footprint is centred on.
+        y: i32,
+        /// Villagers to send; may be empty.
+        ids: Vec<EntityId>,
+    },
+    /// Send villagers to help finish a site that already exists.
+    Assist {
+        /// Villagers.
+        ids: Vec<EntityId>,
+        /// The site.
+        site: EntityId,
+    },
+    /// Queue a unit at a building. The cost is paid on queueing.
+    Train {
+        /// The building.
+        building: EntityId,
+        /// The unit kind.
+        kind: KindId,
+    },
+    /// Remove the last queued item of a kind and refund it.
+    CancelTrain {
+        /// The building.
+        building: EntityId,
+    },
+    /// Set where a building's produced units go.
+    SetRally {
+        /// The building.
+        building: EntityId,
+        /// Destination.
+        rally: Rally,
     },
 }
 

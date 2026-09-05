@@ -55,6 +55,18 @@ smoothly at 60 fps, and the same seed always produces the same map.
 
 **Size:** Medium.
 
+**Status:** landed, with one caveat. Map generation lives in `sim::mapgen`
+(same seed, same map, verified by test and by the determinism run, which now
+executes over a populated Inland map). The renderer draws Gouraud terrain
+chunks, palette-remapped instanced sprites and a diamond minimap; the camera
+edge-scrolls, drags, zooms in steps and jumps from the minimap. Placeholder
+sprites for every kind go through the real atlas pipeline (indices, anchors,
+five facings mirrored to eight). `tools/mapview` renders frames to PNG via a
+software rasteriser that shares all the maths, and those frames look right.
+The caveat: the GPU path has only been validated by compiling and by naga
+shader validation — the "60 fps in a window" half of the acceptance test is
+still waiting on a machine with a display.
+
 ---
 
 ## M2 — Villagers, movement, economy
@@ -75,6 +87,21 @@ one getting permanently stuck. Pathfinding property tests pass on adversarial
 maps.
 
 **Size:** Large. *This is the milestone that decides whether the game feels good.*
+
+**Status:** landed, with the same caveat as M1 (the GPU window is verified by
+compilation and software renders, not by eyes on a screen). Simulation tests
+cover every acceptance item: 60 villagers cross an Inland map and all arrive
+within the spread radius with none stacked; villagers gather all four
+resources and deliver them; a house raises the cap and a storehouse becomes
+the nearest drop-off; a wall of trees is detoured around; a sealed pocket
+resolves to the nearest reachable tile; a placed building blocks its tiles
+at once and refunds on cancel; training respects the population cap and
+rally points send new villagers straight to work. Two things the roadmap
+listed are deferred: group flow fields (A\* with line-of-sight shortcuts and
+a per-tick node budget met the acceptance test without them; they return
+with M4's armies) and hunting (animals need combat to die first). Selection
+is click, drag, double-click, shift, and ten control groups; the `.` key
+cycles idle villagers.
 
 ---
 

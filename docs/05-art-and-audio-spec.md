@@ -85,7 +85,7 @@ sliding around" bugs, so they are authored data, not a guess.
   checked against deuteranopia and protanopia simulation before we commit. That
   check is `cargo test`, not a review step; the ramps are generated to maximise
   the worst pair rather than picked by eye, and owners are assigned in that
-  order so small games only use the best-separated four. See D14 and
+  order so small games only use the best-separated four. See D18 and
   `docs/08` §6.
 - Index 0 is transparent.
 
@@ -177,7 +177,7 @@ Art is not on the critical path for gameplay. The order is:
    correct sizes, anchors and facings, so everything is playable and testable
    before a single sprite exists. Generated as files by `atlas placeholder`
    rather than at runtime, so they exercise the whole pipeline and pass the same
-   gate real art will — see D13. **Done.**
+   gate real art will — see D17. **Done.**
 2. **Greybox pass.** One real sprite set for one civ, one age — proving the
    pipeline end to end (source PNG → atlas → manifest → in-game, with player
    colour remapping and mirroring working).

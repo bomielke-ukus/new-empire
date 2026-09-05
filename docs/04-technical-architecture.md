@@ -385,3 +385,77 @@ anticipate:
 - **The presentation clock** (`crates/app/src/clock.rs`) caps catch-up at 8
   ticks per frame and drops the backlog beyond that, so a stalled window
   resumes rather than fast-forwarding.
+
+## 15. Implementation notes from M1
+
+- **Map generation is inside `sim`**, not a separate `mapgen` crate as §1
+  planned. It needs only the sim's RNG and fixed-point noise, and keeping it
+  there means a replay carries a seed and a `MapSpec` rather than a map. The
+  generator retries derived seeds until a map passes its own checks (every
+  start has the same kit, every start can walk to every other, elevation
+  steps are at most one level) and falls back to a flat map after twelve.
+- **Elevation lives on tile corners** (`(w+1)×(h+1)`), so terrain deforms
+  smoothly as in the second game; a tile's gameplay elevation is the rounded
+  mean of its corners. Start zones are flattened.
+- **A `view` crate sits between `sim` and `render`.** It owns every piece of
+  presentation maths — projection, camera, palette, terrain mesh, sprite
+  sorting, the minimap — and a software rasteriser that consumes the same
+  buffers the GPU does. `tools/mapview` uses it to render PNGs; the render
+  crate's only unit test is naga validation of its WGSL. Any divergence
+  between the two paths is a bug in `render`, by definition.
+- **Terrain blending is per-vertex colour** for now: each corner averages the
+  tiles that share it. Mask-texture blending (§7) waits for real terrain art.
+- **Depth sorting is CPU-side** in `view::Scene` by `(x + y + footprint
+  offset, slot)`; the GPU draws the instance buffer in that order with no
+  depth buffer.
+- **A `facing` component** was added to `World` and is set from the movement
+  vector, so sprites turn as they walk. It is part of the state hash.
+- **Placeholder art is drawn procedurally at 1×**, not authored at 2× as §2.1
+  of the art spec asks; the atlas format is unchanged, so 2× art drops in
+  when it exists.
+- **Palette texture is `256 × 9`**: row 0 neutral, rows 1–8 players. The
+  fragment shader looks up `(index, row)`; shadow (index 3) always reads row 0.
+
+## 16. Implementation notes from M2
+
+- **Navigation is three layers, but not the three §5 planned.** Connected
+  components over passable tiles (relabelled lazily when a static blocker
+  changes) answer reachability in O(1) and redirect unreachable goals to the
+  nearest reachable tile *before* any search. A line-of-sight test on the
+  tile grid short-circuits the common short trip. A\* (8-connected, no
+  corner cutting, octile heuristic) handles the rest, followed by
+  string-pulling so paths take diagonals. Flow fields were not needed to
+  pass the 60-villager test and are deferred to M4, where group combat
+  movement wants them.
+- **Budgets:** 12,000 nodes per search, 48,000 per tick. Over budget, a
+  walker waits a tick; three failures in a row and it gives up. `TickStats`
+  reports searches, nodes, failures and deferrals for the profiler.
+- **Stall detection measures progress toward the next waypoint**, not the
+  goal. Measuring against the goal made every detour look like a stall — the
+  first version gave up halfway round a wall. After 40 ticks without
+  progress a walker replans (up to three times), then arrives if within
+  2.5 tiles, else fails.
+- **Separation is a linked-list tile grid**, resolved in slot order.
+  Walkers displace idle units three to one; units anchored at a job (working
+  a node or a site) are never displaced, so a column of walkers flows around
+  a woodline instead of scattering it. Approach tiles prefer ones no other
+  worker is anchored on, so a crowd spreads round a node.
+- **Orders are the state machines §4 promised**, in `orders.rs`:
+  `Idle`, `Move`, `Gather { node, resource, phase }`, `Build { site, working }`.
+  A gatherer whose node vanishes delivers what it carries, then looks for
+  the nearest node of the same resource within ten tiles that it can
+  actually stand beside; a walled-in node counts as gone.
+- **Buildings are entities with `construction: Option<ticks>`.** A site blocks
+  its footprint the moment it is placed, is paid for on placement, refunds
+  the unbuilt fraction if cancelled, and only counts toward population or
+  drop-off once complete. Up to five builders add a tick of work each.
+- **Production queues live on the building** (`Production { queue, rally }`).
+  A finished unit waits at the door while the player is housed. Rally points
+  may be a point, a node (new villagers gather) or a site (they build).
+- **Positions are tile centres now.** M1 spawned everything on tile corners;
+  buildings sit on the geometric centre of their footprint
+  (`nav::building_centre`) and `anchor_tile` inverts it.
+- **The HUD is sprites.** A 5×7 pixel font and solid fills live in the atlas
+  under reserved kind ids; screen-space sprites carry a flag the vertex
+  shader honours. No text library, no second pipeline, and the software
+  rasteriser draws it identically.

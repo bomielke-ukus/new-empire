@@ -84,7 +84,38 @@ guarantees (no hidden allocation, no implicit float promotion, `#![deny]`-able
 lints, `cargo test` in CI on three OSes) pay off most. `wgpu`/`winit` also give
 one renderer for Windows, macOS, Linux and — as a secondary target — the web.
 
-### D12 — Art is modelled and rendered, not drawn or prompted
+### D12 — Map generation lives in the simulation crate
+**Date:** 2026-09-05
+
+Planned as its own crate; moved into `sim::mapgen` because it depends only on
+the sim's RNG and fixed-point maths, and because it lets a replay carry a seed
+and a spec instead of a map. The `sim` dependency allowlist is unchanged.
+
+### D13 — A software rasteriser is the renderer's reference
+**Date:** 2026-09-05
+
+The GPU cannot be exercised in CI or in the environment this is being built
+in, so `view::raster` draws the same vertex buffers and sprite instances the
+GPU receives, and `tools/mapview` writes the result to PNG. Every frame the
+GPU shows should match a `mapview` render of the same camera; when it does
+not, the renderer is wrong.
+
+### D14 — Flow fields deferred to M4
+**Date:** 2026-09-05
+
+A\* with line-of-sight shortcuts, string-pulling and per-tick budgets moved
+60 villagers across a forested map with none stuck. Flow fields are a
+throughput optimisation for many units sharing a destination; armies are
+where that matters, so they arrive with combat rather than adding surface
+now.
+
+### D15 — Hunting waits for combat
+**Date:** 2026-09-05
+
+Animals need to be killed before they are food, and killing is M4. Berries,
+trees, stone and gold cover "gather all four resources" for the slice.
+
+### D16 — Art is modelled and rendered, not drawn or prompted
 **Date:** 2026-09-05 · **Decided by:** Bo
 
 Closes Q6. Alternatives considered: direct AI sprite generation via the
@@ -111,7 +142,7 @@ Generative AI keeps a real job upstream of the frames: concept and costume
 exploration, model textures, and the icons, which are single static images with
 no coherence problem.
 
-### D13 — Placeholders are generated as files, not at runtime
+### D17 — Placeholders are generated as files, not at runtime
 **Date:** 2026-09-05
 
 `docs/05` §6 said placeholder shapes would be generated at runtime. They are
@@ -125,7 +156,7 @@ load-bearing from M1 rather than from the first drawn sprite. The cost is a
 build step; the generated art is not committed, because it is derived from the
 palette and a committed copy could only go stale.
 
-### D14 — Player colours are searched, not chosen
+### D18 — Player colours are searched, not chosen
 **Date:** 2026-09-05
 
 `docs/05` §2.4 required the eight player colours to be checked against
@@ -168,7 +199,7 @@ in the style of the original's campaign intros.
 "New Empire" is the repository name and a placeholder. Worth deciding before
 there is a main menu (M6).
 
-### Q6 — Where does the art come from in practice? — **answered, see D12**
+### Q6 — Where does the art come from in practice? — **answered, see D16**
 Modelled and rendered, with generative AI upstream of the frames and
 commissioning for icons and UI. Full reasoning and the researched alternatives
 are in `docs/08-art-production.md`.
@@ -176,7 +207,7 @@ are in `docs/08-art-production.md`.
 ### Q7 — Music: licensed, commissioned, or generated?
 Five stems plus four fanfares, plus the sound inventory in `docs/05` §5.1.
 
-D12's reasoning does not transfer. Audio has no equivalent of the coherence
+D16's reasoning does not transfer. Audio has no equivalent of the coherence
 problem that decided the sprite question — a fanfare does not have to agree with
 the next fanfare about anything but key and instrumentation — and the volume is
 two orders of magnitude smaller. The copyright and Steam disclosure positions in
