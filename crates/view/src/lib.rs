@@ -8,6 +8,8 @@
 //! Floats are fine here. Nothing flows back into the simulation.
 
 pub mod camera;
+pub mod font;
+pub mod hud;
 pub mod iso;
 pub mod minimap;
 pub mod palette;
@@ -17,7 +19,8 @@ pub mod sprites;
 pub mod terrain;
 
 pub use camera::Camera;
-pub use scene::{Scene, SpriteInstance};
+pub use hud::{Action, Button, Hud, HudInput};
+pub use scene::{Ghost, Scene, SpriteInstance};
 pub use sprites::{Atlas, Frame};
 pub use terrain::{ChunkMesh, TerrainVertex, CHUNK_TILES};
 

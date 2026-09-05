@@ -9,8 +9,48 @@ use sim::entity::KindId;
 use sim::kinds;
 use std::collections::HashMap;
 
+use crate::font;
 use crate::iso;
 use crate::palette::*;
+
+/// Reserved kind ids for UI frames. Real kinds stay below these.
+pub const UI_SOLID: KindId = 59_000;
+/// Selection ring for a footprint of `n` tiles: `UI_RING + n` (0 = unit).
+pub const UI_RING: KindId = 58_000;
+/// Placement footprint, valid: `UI_FOOT_OK + footprint`.
+pub const UI_FOOT_OK: KindId = 58_100;
+/// Placement footprint, blocked: `UI_FOOT_BAD + footprint`.
+pub const UI_FOOT_BAD: KindId = 58_200;
+/// Construction site: `UI_SITE + footprint`.
+pub const UI_SITE: KindId = 58_300;
+/// Light glyphs: `UI_GLYPH + index into font::CHARS`.
+pub const UI_GLYPH: KindId = 60_000;
+/// Dark glyphs: `UI_GLYPH_DARK + index into font::CHARS`.
+pub const UI_GLYPH_DARK: KindId = 61_000;
+
+/// Palette indices that get a solid fill frame, for panels and bars.
+pub const SOLIDS: [u8; 20] = [
+    BLACK,
+    WHITE,
+    SHADOW,
+    BROWN_DARK,
+    BROWN,
+    TAN,
+    SAND,
+    GREEN_DARK,
+    GREEN,
+    GREEN_LIGHT,
+    GREY_DARK,
+    GREY,
+    GREY_LIGHT,
+    GOLD_DARK,
+    GOLD,
+    RED,
+    RED_DARK,
+    P_BASE,
+    P_LIGHT,
+    P_DARK,
+];
 
 /// One image in the atlas.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -86,7 +126,8 @@ impl Atlas {
     }
 
     /// Builds the placeholder atlas: coloured shapes for every kind the
-    /// simulation knows, at the sizes the art spec calls for.
+    /// simulation knows, at the sizes the art spec calls for, plus the UI
+    /// frames (solid fills, glyphs, selection rings, placement footprints).
     pub fn placeholder() -> Atlas {
         let mut canvases: Vec<(KindId, u8, Canvas)> = Vec::new();
         for k in kinds::all() {
@@ -98,8 +139,122 @@ impl Atlas {
                 canvases.push((k.id, 0, draw_kind(k.id, 1)));
             }
         }
+        for idx in SOLIDS {
+            let mut c = Canvas::new(4, 4, (0, 0));
+            c.rect(0, 0, 4, 4, idx);
+            canvases.push((UI_SOLID + idx as KindId, 0, c));
+        }
+        for fp in 0..=3u32 {
+            canvases.push((UI_RING + fp as KindId, 0, ring(fp)));
+            if fp > 0 {
+                canvases.push((UI_FOOT_OK + fp as KindId, 0, footprint(fp, GREEN_LIGHT)));
+                canvases.push((UI_FOOT_BAD + fp as KindId, 0, footprint(fp, RED)));
+                canvases.push((UI_SITE + fp as KindId, 0, site(fp)));
+            }
+        }
+        for (i, ch) in font::CHARS.chars().enumerate() {
+            canvases.push((UI_GLYPH + i as KindId, 0, glyph(ch, WHITE)));
+            canvases.push((UI_GLYPH_DARK + i as KindId, 0, glyph(ch, BLACK)));
+        }
         pack(canvases, 1024)
     }
+
+    /// A 4×4 fill of a palette index, for stretching into rectangles.
+    pub fn solid(&self, idx: u8) -> &Frame {
+        self.frame(UI_SOLID + idx as KindId, 0)
+            .or_else(|| self.frame(UI_SOLID + BLACK as KindId, 0))
+            .map(|(f, _)| f)
+            .expect("solid frames exist")
+    }
+
+    /// The glyph for a character, light or dark.
+    pub fn glyph(&self, c: char, dark: bool) -> Option<&Frame> {
+        let i = font::CHARS.find(c.to_ascii_uppercase())? as KindId;
+        let base = if dark { UI_GLYPH_DARK } else { UI_GLYPH };
+        self.frame(base + i, 0).map(|(f, _)| f)
+    }
+
+    /// Selection ring for a footprint (0 for units).
+    pub fn ring(&self, footprint: u8) -> Option<&Frame> {
+        self.frame(UI_RING + footprint.min(3) as KindId, 0)
+            .map(|(f, _)| f)
+    }
+
+    /// Construction site for a footprint.
+    pub fn site(&self, footprint: u8) -> Option<&Frame> {
+        self.frame(UI_SITE + footprint.clamp(1, 3) as KindId, 0)
+            .map(|(f, _)| f)
+    }
+
+    /// Placement footprint overlay.
+    pub fn footprint(&self, footprint: u8, ok: bool) -> Option<&Frame> {
+        let base = if ok { UI_FOOT_OK } else { UI_FOOT_BAD };
+        self.frame(base + footprint.clamp(1, 3) as KindId, 0)
+            .map(|(f, _)| f)
+    }
+}
+
+/// A selection ellipse in the player ramp, anchored at its centre.
+fn ring(footprint: u32) -> Canvas {
+    let (w, h) = if footprint == 0 {
+        (40, 20)
+    } else {
+        (64 * footprint + 8, 32 * footprint + 4)
+    };
+    let mut c = Canvas::new(w, h, ((w / 2) as i16, (h / 2) as i16));
+    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+    let (rx, ry) = (cx - 1.0, cy - 1.0);
+    c.ellipse(cx, cy, rx, ry, P_LIGHT);
+    c.ellipse(cx, cy, rx - 2.0, ry - 1.5, TRANSPARENT);
+    c
+}
+
+/// A translucent-looking footprint diamond in a single colour.
+fn footprint(fp: u32, idx: u8) -> Canvas {
+    let (w, h) = (64 * fp, 32 * fp);
+    let mut c = Canvas::new(w, h, ((w / 2) as i16, (h / 2) as i16));
+    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+    c.diamond(cx, cy, cx - 1.0, cy - 1.0, idx);
+    // Hatch so the ground shows through.
+    for y in 0..h as i32 {
+        for x in 0..w as i32 {
+            if (x + y) % 3 != 0 {
+                let i = (y as u32 * w + x as u32) as usize;
+                if c.px[i] == idx {
+                    c.px[i] = TRANSPARENT;
+                }
+            }
+        }
+    }
+    c.diamond(cx, cy, cx - 1.0, cy - 1.0, BLACK);
+    c.diamond(cx, cy, cx - 3.0, cy - 2.0, TRANSPARENT);
+    for y in 0..h as i32 {
+        for x in 0..w as i32 {
+            let i = (y as u32 * w + x as u32) as usize;
+            if c.px[i] == TRANSPARENT && (x + y) % 3 == 0 {
+                // Re-apply the hatch fill inside the outline.
+                let dx = (x as f32 + 0.5 - cx).abs() / (cx - 3.0);
+                let dy = (y as f32 + 0.5 - cy).abs() / (cy - 2.0);
+                if dx + dy <= 1.0 {
+                    c.px[i] = idx;
+                }
+            }
+        }
+    }
+    c
+}
+
+/// A 5×7 glyph in one colour.
+fn glyph(ch: char, idx: u8) -> Canvas {
+    let mut c = Canvas::new(font::GLYPH_W, font::GLYPH_H, (0, 0));
+    for (y, row) in font::rows(ch).iter().enumerate() {
+        for (x, p) in row.chars().enumerate() {
+            if p == '#' {
+                c.set(x as i32, y as i32, idx);
+            }
+        }
+    }
+    c
 }
 
 /// Shelf-packs canvases into an atlas of the given width.
@@ -365,6 +520,7 @@ fn draw_kind(kind: KindId, facing: u8) -> Canvas {
         }
         kinds::TOWN_CENTER => building(192, 144, 3, 58.0, true),
         kinds::HOUSE => building(128, 96, 2, 34.0, false),
+        kinds::STOREHOUSE => storehouse(),
         _ => {
             let mut c = Canvas::new(32, 32, (16, 28));
             c.diamond(16.0, 28.0, 14.0, 7.0, SHADOW);
@@ -373,6 +529,102 @@ fn draw_kind(kind: KindId, facing: u8) -> Canvas {
             c
         }
     }
+}
+
+/// The storehouse: a low, wide shed with a thatched roof and a player-colour
+/// banner, so it reads as "goods go here" rather than "people live here".
+fn storehouse() -> Canvas {
+    let (w, h) = (128, 80);
+    let cx = 64.0;
+    let base_cy = h as f32 - 32.0;
+    let mut c = Canvas::new(w, h, (cx as i16, base_cy as i16));
+    c.diamond(cx, base_cy, 63.0, 31.0, BLACK);
+    c.diamond(cx, base_cy, 62.0, 30.0, SAND);
+    let rise = 18.0;
+    let inset = 0.85;
+    let (bl, bb, br) = (
+        (cx - 63.0 * inset, base_cy),
+        (cx, base_cy + 31.0 * inset),
+        (cx + 63.0 * inset, base_cy),
+    );
+    let up = |p: (f32, f32), d: f32| (p.0, p.1 - d);
+    c.convex(&[bl, bb, up(bb, rise), up(bl, rise)], BLACK);
+    c.convex(&[bb, br, up(br, rise), up(bb, rise)], BLACK);
+    c.convex(
+        &[
+            up(bl, 1.0),
+            up(bb, 1.0),
+            up(bb, rise - 1.0),
+            up(bl, rise - 1.0),
+        ],
+        TAN,
+    );
+    c.convex(
+        &[
+            up(bb, 1.0),
+            up(br, 1.0),
+            up(br, rise - 1.0),
+            up(bb, rise - 1.0),
+        ],
+        BROWN,
+    );
+    // Thatch: a diamond roof in browns with a ridge.
+    let roof_cy = base_cy - rise;
+    c.diamond(cx, roof_cy, 63.0 * inset + 1.0, 31.0 * inset + 1.0, BLACK);
+    c.diamond(cx, roof_cy, 63.0 * inset, 31.0 * inset, BROWN);
+    c.diamond(cx - 12.0, roof_cy - 6.0, 30.0, 14.0, TAN);
+    c.rect(
+        cx as i32 - 1,
+        (roof_cy - 31.0 * inset) as i32,
+        2,
+        (31.0 * inset * 2.0) as i32,
+        BROWN_DARK,
+    );
+    // Sacks and a banner.
+    c.ellipse(cx - 30.0, base_cy + 6.0, 7.0, 4.0, BLACK);
+    c.ellipse(cx - 30.0, base_cy + 5.0, 6.0, 3.0, GOLD_DARK);
+    c.ellipse(cx - 18.0, base_cy + 12.0, 7.0, 4.0, BLACK);
+    c.ellipse(cx - 18.0, base_cy + 11.0, 6.0, 3.0, TAN);
+    c.rect(cx as i32 + 30, roof_cy as i32 - 22, 2, 30, BLACK);
+    c.convex(
+        &[
+            (cx + 32.0, roof_cy - 22.0),
+            (cx + 46.0, roof_cy - 18.0),
+            (cx + 32.0, roof_cy - 12.0),
+        ],
+        BLACK,
+    );
+    c.convex(
+        &[
+            (cx + 33.0, roof_cy - 21.0),
+            (cx + 43.0, roof_cy - 18.0),
+            (cx + 33.0, roof_cy - 14.0),
+        ],
+        P_BASE,
+    );
+    c
+}
+
+/// A construction site: the footprint pegged out, with corner posts.
+fn site(fp: u32) -> Canvas {
+    let (w, h) = (64 * fp, 32 * fp + 20);
+    let cx = w as f32 / 2.0;
+    let base_cy = h as f32 - 16.0 * fp as f32;
+    let mut c = Canvas::new(w, h, (cx as i16, base_cy as i16));
+    let (hw, hh) = (cx - 1.0, 16.0 * fp as f32 - 1.0);
+    c.diamond(cx, base_cy, hw, hh, BLACK);
+    c.diamond(cx, base_cy, hw - 1.0, hh - 1.0, BROWN_DARK);
+    c.diamond(cx, base_cy, hw - 4.0, hh - 3.0, TAN);
+    for (px, py) in [
+        (cx, base_cy - hh + 4.0),
+        (cx + hw - 6.0, base_cy),
+        (cx, base_cy + hh - 4.0),
+        (cx - hw + 6.0, base_cy),
+    ] {
+        c.rect(px as i32 - 2, py as i32 - 18, 4, 20, BLACK);
+        c.rect(px as i32 - 1, py as i32 - 17, 2, 18, BROWN);
+    }
+    c
 }
 
 /// A block building: a footprint diamond, two shaded walls, a player-colour
@@ -522,17 +774,62 @@ mod tests {
                 .flat_map(|y| (0..f.w as u32).map(move |x| (x, y)))
                 .filter(|&(x, y)| a.index_at(f.x as u32 + x, f.y as u32 + y) != 0)
                 .count();
-            assert!(
-                painted > (f.w as usize * f.h as usize) / 8,
-                "frame {i} ({}) is nearly empty",
-                f.kind
-            );
+            if f.kind < UI_RING {
+                assert!(
+                    painted > (f.w as usize * f.h as usize) / 8,
+                    "frame {i} ({}) is nearly empty",
+                    f.kind
+                );
+            } else {
+                let space = UI_GLYPH + 36;
+                let dark_space = UI_GLYPH_DARK + 36;
+                assert!(
+                    painted > 0 || f.kind == space || f.kind == dark_space,
+                    "UI frame {i} ({}) is empty",
+                    f.kind
+                );
+            }
             for g in &frames[i + 1..] {
                 let disjoint =
                     f.x + f.w <= g.x || g.x + g.w <= f.x || f.y + f.h <= g.y || g.y + g.h <= f.y;
                 assert!(disjoint, "frames overlap: {f:?} {g:?}");
             }
         }
+    }
+
+    #[test]
+    fn ui_frames_exist() {
+        let a = Atlas::placeholder();
+        assert_eq!(a.solid(BLACK).w, 4);
+        assert!(
+            a.glyph('A', false).is_some()
+                && a.glyph('7', true).is_some()
+                && a.glyph('#', false).is_none()
+        );
+        let (gw, gh) = (
+            a.glyph('A', false).unwrap().w,
+            a.glyph('A', false).unwrap().h,
+        );
+        assert_eq!((gw as u32, gh as u32), (font::GLYPH_W, font::GLYPH_H));
+        assert_eq!(a.ring(0).unwrap().w, 40);
+        assert_eq!(a.ring(3).unwrap().w, 200);
+        assert_eq!(a.footprint(2, true).unwrap().w, 128);
+        assert!(a.footprint(2, false).is_some());
+        assert_eq!(a.site(3).unwrap().w, 192);
+        assert_eq!(
+            a.frame(kinds::STOREHOUSE, 0).unwrap().0.w,
+            128,
+            "storehouse has its own sprite"
+        );
+        // A glyph is drawn in its colour only.
+        let g = a.glyph('I', false).unwrap();
+        let mut seen = std::collections::HashSet::new();
+        for y in 0..g.h as u32 {
+            for x in 0..g.w as u32 {
+                seen.insert(a.index_at(g.x as u32 + x, g.y as u32 + y));
+            }
+        }
+        assert_eq!(seen, [TRANSPARENT, WHITE].into_iter().collect());
     }
 
     #[test]

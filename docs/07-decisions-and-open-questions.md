@@ -100,6 +100,21 @@ GPU receives, and `tools/mapview` writes the result to PNG. Every frame the
 GPU shows should match a `mapview` render of the same camera; when it does
 not, the renderer is wrong.
 
+### D14 — Flow fields deferred to M4
+**Date:** 2026-09-05
+
+A\* with line-of-sight shortcuts, string-pulling and per-tick budgets moved
+60 villagers across a forested map with none stuck. Flow fields are a
+throughput optimisation for many units sharing a destination; armies are
+where that matters, so they arrive with combat rather than adding surface
+now.
+
+### D15 — Hunting waits for combat
+**Date:** 2026-09-05
+
+Animals need to be killed before they are food, and killing is M4. Berries,
+trees, stone and gold cover "gather all four resources" for the slice.
+
 ---
 
 ## Open questions

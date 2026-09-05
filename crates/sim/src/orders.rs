@@ -1,0 +1,311 @@
+//! What a unit is doing, as an explicit state machine, and the per-player
+//! state the economy needs.
+
+use crate::entity::{EntityId, KindId};
+use crate::fx::Fx;
+use crate::hash::{HashState, StateHasher};
+use crate::kinds::{Cost, Resource};
+use crate::vec2::Vec2Fx;
+use serde::{Deserialize, Serialize};
+
+/// A unit's current job.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub enum Order {
+    /// Nothing. Villagers idle here are what the idle counter counts.
+    #[default]
+    Idle,
+    /// Walk to a point and stop.
+    Move {
+        /// Destination.
+        target: Vec2Fx,
+    },
+    /// Gather from a node, carrying loads home until it is gone.
+    Gather {
+        /// The tree, bush or vein.
+        node: EntityId,
+        /// What it yields; remembered so a replacement can be found.
+        resource: Resource,
+        /// Where in the cycle.
+        phase: GatherPhase,
+    },
+    /// Construct a building.
+    Build {
+        /// The site.
+        site: EntityId,
+        /// Standing next to it and working.
+        working: bool,
+    },
+}
+
+/// Stages of the gather cycle.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum GatherPhase {
+    /// Walking to the node.
+    ToNode,
+    /// At the node, extracting.
+    Working,
+    /// Walking a load to a drop-off.
+    ToDropoff {
+        /// The building to deliver to.
+        dropoff: EntityId,
+    },
+}
+
+impl HashState for Order {
+    fn hash_state(&self, h: &mut StateHasher) {
+        match self {
+            Order::Idle => h.write_u8(0),
+            Order::Move { target } => {
+                h.write_u8(1);
+                h.write(target);
+            }
+            Order::Gather {
+                node,
+                resource,
+                phase,
+            } => {
+                h.write_u8(2);
+                h.write(node);
+                h.write_u8(resource.index() as u8);
+                match phase {
+                    GatherPhase::ToNode => h.write_u8(0),
+                    GatherPhase::Working => h.write_u8(1),
+                    GatherPhase::ToDropoff { dropoff } => {
+                        h.write_u8(2);
+                        h.write(dropoff);
+                    }
+                }
+            }
+            Order::Build { site, working } => {
+                h.write_u8(3);
+                h.write(site);
+                h.write_bool(*working);
+            }
+        }
+    }
+}
+
+/// Progress of a trip.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum NavState {
+    /// Waiting for a path.
+    Planning,
+    /// Following waypoints.
+    Walking,
+    /// Reached the goal (or as near as it gets).
+    Arrived,
+    /// Gave up: unreachable or hopelessly stuck.
+    Failed,
+}
+
+/// Where a unit is walking, and the waypoints it will take.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Nav {
+    /// Final destination.
+    pub goal: Vec2Fx,
+    /// Remaining waypoints, next first.
+    pub waypoints: Vec<Vec2Fx>,
+    /// Where the trip is.
+    pub state: NavState,
+    /// Closest the unit has been to the goal, for stuck detection.
+    pub best: Fx,
+    /// Ticks without getting closer.
+    pub stalled: u16,
+    /// Replans attempted for this goal.
+    pub replans: u8,
+    /// Stop when within this distance of the goal.
+    pub arrive: Fx,
+}
+
+impl Nav {
+    /// A new trip.
+    pub fn to(goal: Vec2Fx, arrive: Fx) -> Nav {
+        Nav {
+            goal,
+            waypoints: Vec::new(),
+            state: NavState::Planning,
+            best: Fx::MAX,
+            stalled: 0,
+            replans: 0,
+            arrive,
+        }
+    }
+}
+
+impl HashState for Nav {
+    fn hash_state(&self, h: &mut StateHasher) {
+        h.write(&self.goal);
+        h.write(&self.waypoints);
+        h.write_u8(self.state as u8);
+        h.write(&self.best);
+        h.write_u16(self.stalled);
+        h.write_u8(self.replans);
+        h.write(&self.arrive);
+    }
+}
+
+/// One item in a building's production queue.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct QueueItem {
+    /// What is being trained.
+    pub kind: KindId,
+    /// Ticks of work done.
+    pub progress: u32,
+}
+
+/// Where a building sends what it produces.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Rally {
+    /// Nowhere: units step out and wait.
+    None,
+    /// Walk to a point.
+    Point(Vec2Fx),
+    /// Go and work on an entity — gather a node or help a site.
+    Entity(EntityId),
+}
+
+impl HashState for Rally {
+    fn hash_state(&self, h: &mut StateHasher) {
+        match self {
+            Rally::None => h.write_u8(0),
+            Rally::Point(p) => {
+                h.write_u8(1);
+                h.write(p);
+            }
+            Rally::Entity(e) => {
+                h.write_u8(2);
+                h.write(e);
+            }
+        }
+    }
+}
+
+/// A building's production state.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub struct Production {
+    /// Queued items, head first.
+    pub queue: Vec<QueueItem>,
+    /// Where finished units go.
+    pub rally: Option<Rally>,
+}
+
+impl HashState for Production {
+    fn hash_state(&self, h: &mut StateHasher) {
+        h.write_u64(self.queue.len() as u64);
+        for q in &self.queue {
+            h.write_u16(q.kind);
+            h.write_u32(q.progress);
+        }
+        h.write(&self.rally.unwrap_or(Rally::None));
+    }
+}
+
+/// Per-player economy.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Player {
+    /// Stockpile, indexed by [`Resource::index`].
+    pub stockpile: Cost,
+    /// Population in use.
+    pub pop: u32,
+    /// Population available from completed buildings, capped by the match limit.
+    pub pop_cap: u32,
+    /// Running totals gathered, for the score screen.
+    pub gathered: Cost,
+}
+
+impl Player {
+    /// A player with the standard opening stockpile.
+    pub fn new() -> Player {
+        Player {
+            stockpile: [200, 200, 100, 100],
+            pop: 0,
+            pop_cap: 0,
+            gathered: [0; 4],
+        }
+    }
+
+    /// True if the stockpile covers `cost`.
+    pub fn can_afford(&self, cost: &Cost) -> bool {
+        (0..4).all(|i| self.stockpile[i] >= cost[i])
+    }
+
+    /// Deducts `cost`. Returns false, changing nothing, if unaffordable.
+    pub fn pay(&mut self, cost: &Cost) -> bool {
+        if !self.can_afford(cost) {
+            return false;
+        }
+        for (have, need) in self.stockpile.iter_mut().zip(cost) {
+            *have -= need;
+        }
+        true
+    }
+
+    /// Refunds `cost`.
+    pub fn refund(&mut self, cost: &Cost) {
+        for (have, back) in self.stockpile.iter_mut().zip(cost) {
+            *have += back;
+        }
+    }
+
+    /// Adds gathered resources.
+    pub fn deposit(&mut self, r: Resource, amount: i32) {
+        self.stockpile[r.index()] += amount;
+        self.gathered[r.index()] += amount;
+    }
+}
+
+impl Default for Player {
+    fn default() -> Self {
+        Player::new()
+    }
+}
+
+impl HashState for Player {
+    fn hash_state(&self, h: &mut StateHasher) {
+        for v in self.stockpile {
+            h.write_i32(v);
+        }
+        h.write_u32(self.pop);
+        h.write_u32(self.pop_cap);
+        for v in self.gathered {
+            h.write_i32(v);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paying_and_depositing() {
+        let mut p = Player::new();
+        assert!(p.can_afford(&[50, 0, 0, 0]));
+        assert!(!p.can_afford(&[0, 0, 0, 500]));
+        assert!(p.pay(&[50, 30, 0, 0]));
+        assert_eq!(p.stockpile, [150, 170, 100, 100]);
+        assert!(!p.pay(&[0, 0, 0, 500]));
+        assert_eq!(
+            p.stockpile,
+            [150, 170, 100, 100],
+            "failed payment changes nothing"
+        );
+        p.deposit(Resource::Gold, 10);
+        assert_eq!(p.stockpile[3], 110);
+        assert_eq!(p.gathered, [0, 0, 0, 10]);
+        p.refund(&[50, 0, 0, 0]);
+        assert_eq!(p.stockpile[0], 200);
+    }
+
+    #[test]
+    fn hashes_distinguish_orders() {
+        let mut a = StateHasher::new();
+        Order::Idle.hash_state(&mut a);
+        let mut b = StateHasher::new();
+        Order::Move {
+            target: Vec2Fx::ZERO,
+        }
+        .hash_state(&mut b);
+        assert_ne!(a.finish(), b.finish());
+    }
+}

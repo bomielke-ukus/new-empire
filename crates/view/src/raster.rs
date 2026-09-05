@@ -146,24 +146,32 @@ pub fn draw_sprites(
     palette_tex: &[[u8; 4]],
     sprites: &[SpriteInstance],
 ) {
-    let zoom = cam.zoom();
     let visible = cam.visible_rect();
     for s in sprites {
-        if s.x + s.w < visible.0 || s.x > visible.2 || s.y + s.h < visible.1 || s.y > visible.3 {
-            continue;
-        }
-        let (x0, y0) = cam.to_window(s.x, s.y);
+        let (x0, y0, zoom) = if s.screen {
+            (s.x, s.y, 1.0)
+        } else {
+            if s.x + s.w < visible.0 || s.x > visible.2 || s.y + s.h < visible.1 || s.y > visible.3
+            {
+                continue;
+            }
+            let (x, y) = cam.to_window(s.x, s.y);
+            (x, y, cam.zoom())
+        };
         let dw = (s.w * zoom).round() as i32;
         let dh = (s.h * zoom).round() as i32;
         let (x0, y0) = (x0.round() as i32, y0.round() as i32);
         let row = s.row as usize * 256;
+        // Source scale: a stretched fill (w != uw) maps proportionally.
+        let sxs = s.uw as f32 / (s.w * zoom).max(1.0);
+        let sys = s.vh as f32 / (s.h * zoom).max(1.0);
         for dy in 0..dh {
-            let sy = (dy as f32 / zoom) as u32;
+            let sy = (dy as f32 * sys) as u32;
             if sy >= s.vh as u32 {
                 continue;
             }
             for dx in 0..dw {
-                let mut sx = (dx as f32 / zoom) as u32;
+                let mut sx = (dx as f32 * sxs) as u32;
                 if sx >= s.uw as u32 {
                     continue;
                 }

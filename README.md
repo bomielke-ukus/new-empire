@@ -4,9 +4,10 @@ A real-time strategy game about taking a civilization from hand-axes to iron in
 about half an hour — built to recapture what made *Age of Empires* (1997)
 engaging, without its 1997 frustrations.
 
-**Status: M1 (a world you can look at) — seeded Inland maps, the isometric
-renderer with placeholder art, camera and minimap. Nothing to *play* yet; see
-the roadmap.**
+**Status: M2 (villagers, movement, economy) — select villagers, gather all
+four resources, build houses and storehouses, train villagers with rally
+points, on a pathfinder that does not get stuck. Playable as an economy
+sandbox; no opponent yet. See the roadmap.**
 
 ---
 
@@ -42,8 +43,18 @@ scripts/check-sim-purity.sh                  # no floats, no clock, no stray dep
 ```
 
 In the window: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
-`+`/`-` to zoom; click the minimap to jump; `H` home; `Space` pause; `[` `]`
-speed; `E` toggles edge scrolling; `Esc` quits.
+`+`/`-` to zoom; click the minimap to jump; `Space` pause; `[` `]` speed;
+`E` toggles edge scrolling.
+
+Play: left-click or drag to select, double-click for all of a kind on screen,
+`Shift` adds, `Ctrl`+`0-9` saves a control group and `0-9` recalls it, `.`
+cycles idle villagers. Right-click moves, or gathers when over a tree, bush
+or vein, or helps build when over your own site. With villagers selected,
+`H` places a house and `B` a storehouse (`Shift` keeps placing); with the
+Town Center selected, `V` trains a villager, `X` unqueues, and right-click
+sets its rally point. `T` stops, `Delete` dismisses, `Esc` cancels or quits.
+Commands take effect two ticks (100 ms) after you give them — that delay is
+the lockstep window, and it is why multiplayer will be a transport job.
 
 Workspace layout:
 

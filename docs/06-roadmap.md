@@ -87,6 +87,21 @@ maps.
 
 **Size:** Large. *This is the milestone that decides whether the game feels good.*
 
+**Status:** landed, with the same caveat as M1 (the GPU window is verified by
+compilation and software renders, not by eyes on a screen). Simulation tests
+cover every acceptance item: 60 villagers cross an Inland map and all arrive
+within the spread radius with none stacked; villagers gather all four
+resources and deliver them; a house raises the cap and a storehouse becomes
+the nearest drop-off; a wall of trees is detoured around; a sealed pocket
+resolves to the nearest reachable tile; a placed building blocks its tiles
+at once and refunds on cancel; training respects the population cap and
+rally points send new villagers straight to work. Two things the roadmap
+listed are deferred: group flow fields (A\* with line-of-sight shortcuts and
+a per-tick node budget met the acceptance test without them; they return
+with M4's armies) and hunting (animals need combat to die first). Selection
+is click, drag, double-click, shift, and ten control groups; the `.` key
+cycles idle villagers.
+
 ---
 
 ## M3 — Ages, production and technology

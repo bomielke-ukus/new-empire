@@ -9,7 +9,7 @@ struct Inst {
     @location(0) rect: vec4<f32>,
     // u, v, uw, vh in atlas px
     @location(1) uv: vec4<f32>,
-    // palette row, flip, unused, unused
+    // palette row, flip, screen-space flag, unused
     @location(2) misc: vec4<u32>,
 };
 
@@ -27,7 +27,12 @@ fn vs_main(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
     );
     let c = corners[vi];
     var out: VsOut;
-    out.clip = world_to_clip(inst.rect.xy + c * inst.rect.zw);
+    let corner = inst.rect.xy + c * inst.rect.zw;
+    if (inst.misc.z == 1u) {
+        out.clip = screen_to_clip(corner);
+    } else {
+        out.clip = world_to_clip(corner);
+    }
     var u = c.x;
     if (inst.misc.y == 1u) {
         u = 1.0 - u;

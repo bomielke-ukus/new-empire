@@ -17,6 +17,7 @@ use crate::entity::KindId;
 use crate::fx::Fx;
 use crate::kinds::{self, GAIA};
 use crate::map::{Terrain, TileMap, MAX_ELEVATION};
+use crate::nav;
 use crate::noise::Fbm;
 use crate::rng::Rng;
 use crate::vec2::Vec2Fx;
@@ -173,7 +174,7 @@ impl Gen<'_> {
         self.spawns.push(Spawn {
             kind,
             owner,
-            pos: Vec2Fx::from_int(x, y),
+            pos: nav::centre((x, y)),
         });
     }
 
@@ -182,7 +183,7 @@ impl Gen<'_> {
         self.spawns.push(Spawn {
             kind,
             owner,
-            pos: Vec2Fx::from_int(x, y),
+            pos: nav::centre((x, y)),
         });
     }
 
@@ -198,7 +199,7 @@ impl Gen<'_> {
         self.spawns.push(Spawn {
             kind,
             owner,
-            pos: Vec2Fx::from_int(x, y),
+            pos: nav::building_centre(x, y, fp),
         });
     }
 

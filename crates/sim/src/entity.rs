@@ -12,6 +12,8 @@
 use crate::command::PlayerId;
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
+use crate::kinds::Resource;
+use crate::orders::{Nav, Order, Production};
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
 
@@ -79,6 +81,18 @@ pub struct World {
     pub resource: Vec<i32>,
     /// Which of 8 directions it faces; see [`crate::Angle::facing8`].
     pub facing: Vec<u8>,
+    /// Current job.
+    pub order: Vec<Order>,
+    /// Current trip, for mobile units.
+    pub nav: Vec<Option<Nav>>,
+    /// What a villager is carrying.
+    pub carry: Vec<Option<(Resource, i32)>>,
+    /// Ticks of construction work done; `None` once complete (or never a site).
+    pub construction: Vec<Option<u32>>,
+    /// Production queue and rally point, for buildings that train.
+    pub production: Vec<Option<Production>>,
+    /// Fractional work accumulator (gathering).
+    pub work: Vec<Fx>,
 }
 
 impl World {
@@ -127,6 +141,12 @@ impl World {
             self.move_target[i] = None;
             self.resource[i] = resource;
             self.facing[i] = 1;
+            self.order[i] = Order::Idle;
+            self.nav[i] = None;
+            self.carry[i] = None;
+            self.construction[i] = None;
+            self.production[i] = None;
+            self.work[i] = Fx::ZERO;
             EntityId {
                 index: i as u32,
                 generation: self.generation[i],
@@ -142,6 +162,12 @@ impl World {
             self.move_target.push(None);
             self.resource.push(resource);
             self.facing.push(1);
+            self.order.push(Order::Idle);
+            self.nav.push(None);
+            self.carry.push(None);
+            self.construction.push(None);
+            self.production.push(None);
+            self.work.push(Fx::ZERO);
             EntityId {
                 index: i as u32,
                 generation: 0,
@@ -167,6 +193,12 @@ impl World {
         self.move_target[i] = None;
         self.resource[i] = 0;
         self.facing[i] = 0;
+        self.order[i] = Order::Idle;
+        self.nav[i] = None;
+        self.carry[i] = None;
+        self.construction[i] = None;
+        self.production[i] = None;
+        self.work[i] = Fx::ZERO;
         self.live -= 1;
         // Keep `free` sorted descending: insert at the position that
         // maintains order. Slot counts are small enough that the O(n) insert
@@ -230,6 +262,18 @@ impl HashState for World {
                 h.write(&self.move_target[i]);
                 h.write_i32(self.resource[i]);
                 h.write_u8(self.facing[i]);
+                h.write(&self.order[i]);
+                h.write(&self.nav[i]);
+                match self.carry[i] {
+                    None => h.write_u8(0),
+                    Some((r, n)) => {
+                        h.write_u8(1 + r.index() as u8);
+                        h.write_i32(n);
+                    }
+                }
+                h.write(&self.construction[i]);
+                h.write(&self.production[i]);
+                h.write(&self.work[i]);
             }
         }
     }
@@ -315,7 +359,6 @@ mod tests {
         a.hash_state(&mut h2);
         assert_ne!(h1.finish(), h2.finish());
 
-        // Two worlds built by different paths but with identical state hash equal.
         let mut b = World::new();
         let x = spawn(&mut b, 1);
         spawn(&mut b, 2);

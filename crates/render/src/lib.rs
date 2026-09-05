@@ -466,20 +466,23 @@ impl Renderer {
 
         // Sprites: cull to the view, then upload.
         let visible = camera.visible_rect();
+        let to_gpu = |s: &view::SpriteInstance| SpriteGpu {
+            rect: [s.x, s.y, s.w, s.h],
+            uv: [s.u as f32, s.v as f32, s.uw as f32, s.vh as f32],
+            misc: [s.row as u32, s.flip as u32, s.screen as u32, 0],
+        };
         let gpu: Vec<SpriteGpu> = scene
             .sprites
             .iter()
             .filter(|s| {
-                !(s.x + s.w < visible.0
-                    || s.x > visible.2
-                    || s.y + s.h < visible.1
-                    || s.y > visible.3)
+                s.screen
+                    || !(s.x + s.w < visible.0
+                        || s.x > visible.2
+                        || s.y + s.h < visible.1
+                        || s.y > visible.3)
             })
-            .map(|s| SpriteGpu {
-                rect: [s.x, s.y, s.w, s.h],
-                uv: [s.u as f32, s.v as f32, s.uw as f32, s.vh as f32],
-                misc: [s.row as u32, s.flip as u32, 0, 0],
-            })
+            .map(to_gpu)
+            .chain(scene.ui.iter().map(to_gpu))
             .collect();
         if gpu.len() > self.instance_capacity {
             self.instance_capacity = gpu.len().next_power_of_two();
