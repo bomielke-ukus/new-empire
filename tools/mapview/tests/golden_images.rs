@@ -196,7 +196,13 @@ fn compare(width: u32, got: &[u8], want: &[u8]) -> Difference {
         worst_channel: 0,
         first_at: None,
     };
-    for (i, (g, w)) in got.chunks_exact(4).zip(want.chunks_exact(4)).enumerate() {
+    for (i, (g, w)) in got
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(want.as_chunks::<4>().0)
+        .enumerate()
+    {
         let delta = g
             .iter()
             .zip(w)
@@ -222,7 +228,7 @@ fn save_artefacts(name: &str, rendered: &Path, got: &[u8], want: &[u8], w: u32, 
     let _ = std::fs::copy(rendered, dir.join(format!("{name}.actual.png")));
 
     let mut diff = Vec::with_capacity(got.len());
-    for (g, wp) in got.chunks_exact(4).zip(want.chunks_exact(4)) {
+    for (g, wp) in got.as_chunks::<4>().0.iter().zip(want.as_chunks::<4>().0) {
         let delta = g
             .iter()
             .zip(wp)
