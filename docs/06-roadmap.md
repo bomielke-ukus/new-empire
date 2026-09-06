@@ -46,6 +46,7 @@ on a real GPU from this environment — first thing to check on a desktop.
 - Isometric camera: edge scroll, keyboard, drag, discrete zoom, minimap jump
 - Instanced sprite pipeline with palette remapping and horizontal mirroring
 - Procedural placeholder sprites (coloured diamonds, correct sizes and anchors)
+  — **done ahead of M1**: `atlas placeholder` generates 26 conformant sets
 - `mapgen` producing a seeded Inland map with resources and balanced starts
 - `tools/mapview` to eyeball generated maps
 
@@ -227,4 +228,7 @@ the game gets its long tail.
 - **M5 before M6** deliberately: an opponent to lose to teaches us more about the
   design than a menu does.
 - Art can proceed in parallel from M1 onward, against
-  `docs/05-art-and-audio-spec.md`, because placeholders unblock all gameplay work.
+  `docs/05-art-and-audio-spec.md` and `docs/08-art-production.md`, because
+  placeholders unblock all gameplay work. The first art task is not a sprite: it
+  is freezing the render camera and light rig, which everything after it depends
+  on (`docs/08` §9).

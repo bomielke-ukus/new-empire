@@ -349,6 +349,7 @@ real hardware per milestone.
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 scripts/check-sim-purity.sh
+scripts/check-art.sh
 scripts/check-generated.sh
 scripts/check-traceability.sh
 scripts/check-cli-callers.sh

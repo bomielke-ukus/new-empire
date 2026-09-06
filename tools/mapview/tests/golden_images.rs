@@ -125,7 +125,7 @@ const SCENES: &[Scene] = &[
         //
         // This golden records the defect as it stands so that fixing it shows
         // up as a deliberate image change rather than passing unnoticed. It is
-        // listed in `docs/08-test-plan.md` under known gaps.
+        // listed in `docs/09-test-plan.md` under known gaps.
         name: "narrow-hud-overlap",
         args: &[
             "--seed",
