@@ -234,3 +234,53 @@ Options: a per-owner shape badge on the selection ring; a hatch or outline
 pattern keyed to the owner; a dedicated high-contrast palette selectable in
 options, as most modern RTS games ship. The first is cheapest and does not touch
 the art. **Needs an answer before the HUD work in M6.**
+
+### Q10 — There are two palettes, and they disagree
+**Filed:** 2026-09-05 · Deliberately deferred, not overlooked.
+
+M1 and the art pipeline were built in parallel and each grew a 256-colour
+palette. They agree on the two things that matter structurally and on nothing
+else:
+
+| | `crates/view/src/palette.rs` | `assets/palette/ancient.ron` |
+|---|---|---|
+| Index 0 transparent | yes | yes |
+| Player ramp | 240–247 | 240–247 |
+| Everything else | hand-written constants at sparse indices (10–13 browns, 20–22 greens, 30–32 greys…) | 27 material ramps of 8 steps, Oklab-interpolated, densely packed 17–232 |
+
+So a sprite that passes `atlas validate` and is then drawn by the renderer comes
+out with the wrong colours at every index except transparency and player colour.
+Nothing is visibly broken today only because no art has gone through the
+pipeline into the renderer yet — the placeholder atlas in `view` is drawn from
+`view`'s own constants.
+
+The accessibility half is measured rather than argued. `view`'s
+`PLAYER_COLOURS` carries the comment "Chosen to stay distinct under
+deuteranopia and protanopia simulation; verify again when art lands". Verified:
+
+| Palette | Worst of all eight | Worst of the first four |
+|---|---|---|
+| `crates/view` | **0.024** (green/orange, protanopia) | 0.054 (red/green, deuteranopia) |
+| `ancient.ron` | 0.075 (magenta/grey, deuteranopia) | 0.163 (green/yellow, protanopia) |
+
+0.024 Oklab is below the threshold at which two colours are tellable apart at
+all, so under protanopia `view`'s green and orange players are the same colour.
+The instinct in that comment was right; the colours were picked by eye.
+
+**Recommended fix:** `crates/view` stops holding its own table and takes its
+colours from `assets/palette/ancient.ron`, baked into a generated Rust file so
+there is no runtime I/O in the renderer. `view`'s named constants stay — they
+become named indices into the real ramps rather than colours in their own
+right. That keeps one palette, keeps the searched player colours, and keeps the
+per-age material progression `docs/05` §2.5 depends on. The cost is remapping
+M1's placeholder atlas and terrain colours onto the new indices, which is
+mechanical.
+
+Rejected: making `ancient.ron` adopt `view`'s colours. It would drop the player
+separation back to 0.024 and throw away the ramp structure the art spec is
+built on.
+
+**Deferred by Bo, to its own PR.** Nothing renders through the art pipeline
+yet, so this is not urgent — but it becomes urgent the moment the first real
+sprite reaches the renderer, which is the greybox unit in `docs/08` §9 step 2.
+Whoever does that work should expect to do this first.

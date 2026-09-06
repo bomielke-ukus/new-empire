@@ -381,6 +381,11 @@ proves a fresh clone can produce what the game loads.
    in-game with player colour and mirroring working. `docs/05` §6 step 2. Every
    step of that path except the render itself is already covered by tests; one
    real model proves or disproves the route.
+
+   **Do Q10 first.** `crates/view` holds a second 256-colour palette that
+   disagrees with this one at every index except transparency and the player
+   ramp, so the "in-game" half of this step produces wrong colours until they
+   are unified. It is deferred, not forgotten, and it is measured in `docs/07`.
 3. **Model the slice**: 12 units and 10 buildings, with the age costume and
    architecture variants as mesh swaps.
 4. **Commission the icons and UI panel set** (§4.3) in parallel — they are off
