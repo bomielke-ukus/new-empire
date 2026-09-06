@@ -40,7 +40,7 @@ pub use command::{
     Command, CommandError, CommandKind, CommandQueue, PlayerId, COMMAND_DELAY, MAX_COMMAND_IDS,
     MAX_PLAYERS,
 };
-pub use entity::{EntityId, KindId, Slot, World};
+pub use entity::{EntityId, KindId, Slot, World, WorldViolation};
 pub use fx::Fx;
 pub use hash::{HashState, StateHasher};
 pub use map::{Terrain, TileMap, MAX_ELEVATION};
@@ -48,6 +48,6 @@ pub use mapgen::{MapKind, MapSpec};
 pub use orders::{GatherPhase, Nav, NavState, Order, Player, Production, Rally};
 pub use replay::{Divergence, Replay, ReplayError, VerifyError};
 pub use rng::Rng;
-pub use simulation::{PlaceError, TickStats};
+pub use simulation::{PlaceError, TickStats, Violation};
 pub use simulation::{SimConfig, Simulation, TICKS_PER_SECOND, TICK_MS};
 pub use vec2::Vec2Fx;

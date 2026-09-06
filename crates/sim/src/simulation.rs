@@ -16,7 +16,7 @@
 //! Nothing here reads a clock or a float; see the crate docs.
 
 use crate::command::{Command, CommandKind, CommandQueue, PlayerId};
-use crate::entity::{EntityId, KindId, Slot, World};
+use crate::entity::{EntityId, KindId, Slot, World, WorldViolation};
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
 use crate::kinds::{self, Resource, CARRY_CAPACITY, GAIA, MAX_BUILDERS};
@@ -300,6 +300,13 @@ impl Simulation {
         self.production();
         self.recount_population();
         self.tick += 1;
+        #[cfg(feature = "debug-checks")]
+        // Failing loudly is the whole point of this build configuration; the
+        // shipping build does not compile this line.
+        #[allow(clippy::panic)]
+        if let Err(v) = self.check() {
+            panic!("invariant broken at tick {}: {v}", self.tick);
+        }
     }
 
     /// Canonical hash of everything that matters. Equal hashes on two
@@ -315,8 +322,109 @@ impl Simulation {
         }
         h.write(&self.nav);
         h.write(&self.world);
-        h.write_u64(self.queue.pending_len() as u64);
+        h.write(&self.queue);
         h.finish()
+    }
+
+    /// Verifies every invariant the simulation is supposed to maintain.
+    ///
+    /// The structural invariants of the entity store, plus the ones that
+    /// depend on the map and the players. Cheap enough to run every tick in
+    /// tests; not run in shipping builds.
+    ///
+    /// Deliberately conservative: it asserts only what is genuinely always
+    /// true. Two invariants that look obvious are *not* here, because both
+    /// fire on legal states, and a checker that cries wolf is one people
+    /// switch off:
+    ///
+    /// - `pop <= pop_cap` — destroying a house lowers the cap below the
+    ///   population already alive.
+    /// - "every owner is a real player" — [`kinds::GAIA`] owns the trees and
+    ///   animals, and a `Spawn` command (a test and scenario facility) can
+    ///   name a player the match does not have. `recount_population` skips
+    ///   such owners on purpose, and every command from one is a no-op
+    ///   because it owns nothing.
+    pub fn check(&self) -> Result<(), Violation> {
+        self.world.check().map_err(Violation::World)?;
+
+        if self.world.len() as u32 > self.config.max_entities {
+            return Err(Violation::OverEntityCap {
+                live: self.world.len() as u32,
+                cap: self.config.max_entities,
+            });
+        }
+
+        let max_x = Fx::from_int(self.map.width());
+        let max_y = Fx::from_int(self.map.height());
+        let inside = |p: Vec2Fx| p.x >= Fx::ZERO && p.x < max_x && p.y >= Fx::ZERO && p.y < max_y;
+
+        for slot in self.world.slots() {
+            let i = slot.index();
+            let s = i as u32;
+            if !inside(self.world.pos[i]) {
+                return Err(Violation::PositionOutOfMap {
+                    slot: s,
+                    pos: self.world.pos[i],
+                });
+            }
+            if let Some(t) = self.world.move_target[i] {
+                if !inside(t) {
+                    return Err(Violation::TargetOutOfMap { slot: s, target: t });
+                }
+            }
+            if self.world.health[i] < Fx::ZERO {
+                return Err(Violation::NegativeHealth {
+                    slot: s,
+                    health: self.world.health[i],
+                });
+            }
+            if self.world.resource[i] < 0 {
+                return Err(Violation::NegativeResource {
+                    slot: s,
+                    amount: self.world.resource[i],
+                });
+            }
+            if let Some((_, n)) = self.world.carry[i] {
+                if n < 0 {
+                    return Err(Violation::NegativeCarry { slot: s, amount: n });
+                }
+            }
+            if self.world.facing[i] >= 8 {
+                return Err(Violation::BadFacing {
+                    slot: s,
+                    facing: self.world.facing[i],
+                });
+            }
+        }
+
+        for (player, p) in self.players.iter().enumerate() {
+            for (resource, &amount) in p.stockpile.iter().enumerate() {
+                if amount < 0 {
+                    return Err(Violation::NegativeStockpile {
+                        player,
+                        resource,
+                        amount,
+                    });
+                }
+            }
+            for (resource, &amount) in p.gathered.iter().enumerate() {
+                if amount < 0 {
+                    return Err(Violation::NegativeGathered {
+                        player,
+                        resource,
+                        amount,
+                    });
+                }
+            }
+            if p.pop_cap > self.config.pop_cap_max {
+                return Err(Violation::PopCapAboveLimit {
+                    player,
+                    pop_cap: p.pop_cap,
+                    limit: self.config.pop_cap_max,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Everything needed to reproduce this match up to the current tick.
@@ -1418,6 +1526,146 @@ impl Simulation {
         Vec2Fx::new(p.x.clamp(Fx::ZERO, max_x), p.y.clamp(Fx::ZERO, max_y))
     }
 }
+
+/// A simulation invariant that does not hold. See [`Simulation::check`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Violation {
+    /// The entity store itself is inconsistent.
+    World(WorldViolation),
+    /// More live entities than `max_entities` allows.
+    OverEntityCap {
+        /// How many are live.
+        live: u32,
+        /// The configured cap.
+        cap: u32,
+    },
+    /// A live entity is outside the map.
+    PositionOutOfMap {
+        /// Which slot.
+        slot: u32,
+        /// Its position.
+        pos: Vec2Fx,
+    },
+    /// A move order points outside the map.
+    TargetOutOfMap {
+        /// Which slot.
+        slot: u32,
+        /// The target.
+        target: Vec2Fx,
+    },
+    /// A live entity has negative health.
+    NegativeHealth {
+        /// Which slot.
+        slot: u32,
+        /// Its health.
+        health: Fx,
+    },
+    /// A resource node holds a negative amount.
+    NegativeResource {
+        /// Which slot.
+        slot: u32,
+        /// The amount.
+        amount: i32,
+    },
+    /// A villager carries a negative amount.
+    NegativeCarry {
+        /// Which slot.
+        slot: u32,
+        /// The amount.
+        amount: i32,
+    },
+    /// A facing is outside `0..8`.
+    BadFacing {
+        /// Which slot.
+        slot: u32,
+        /// The value.
+        facing: u8,
+    },
+    /// A stockpile went negative, so something was spent that was not there.
+    NegativeStockpile {
+        /// Which player.
+        player: usize,
+        /// Which resource index.
+        resource: usize,
+        /// The amount.
+        amount: i32,
+    },
+    /// A running gathered total went backwards.
+    NegativeGathered {
+        /// Which player.
+        player: usize,
+        /// Which resource index.
+        resource: usize,
+        /// The amount.
+        amount: i32,
+    },
+    /// A player's population headroom exceeds the match limit.
+    PopCapAboveLimit {
+        /// Which player.
+        player: usize,
+        /// Their cap.
+        pop_cap: u32,
+        /// The match limit.
+        limit: u32,
+    },
+}
+
+impl core::fmt::Display for Violation {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Violation::World(v) => write!(f, "{v}"),
+            Violation::OverEntityCap { live, cap } => {
+                write!(f, "{live} live entities exceeds the cap of {cap}")
+            }
+            Violation::PositionOutOfMap { slot, pos } => {
+                write!(f, "slot {slot} is at {pos:?}, outside the map")
+            }
+            Violation::TargetOutOfMap { slot, target } => {
+                write!(f, "slot {slot} is ordered to {target:?}, outside the map")
+            }
+            Violation::NegativeHealth { slot, health } => {
+                write!(f, "slot {slot} has health {health}")
+            }
+            Violation::NegativeResource { slot, amount } => {
+                write!(f, "slot {slot} holds {amount} resource")
+            }
+            Violation::NegativeCarry { slot, amount } => {
+                write!(f, "slot {slot} carries {amount}")
+            }
+            Violation::BadFacing { slot, facing } => {
+                write!(f, "slot {slot} faces {facing}, which is not one of 8")
+            }
+            Violation::NegativeStockpile {
+                player,
+                resource,
+                amount,
+            } => write!(
+                f,
+                "player {player} has {amount} of resource {resource}: something \
+                 was spent that was never gathered"
+            ),
+            Violation::NegativeGathered {
+                player,
+                resource,
+                amount,
+            } => write!(
+                f,
+                "player {player} has gathered {amount} of resource {resource}"
+            ),
+            Violation::PopCapAboveLimit {
+                player,
+                pop_cap,
+                limit,
+            } => write!(
+                f,
+                "player {player} has population headroom {pop_cap}, above the \
+                 match limit of {limit}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for Violation {}
 
 #[cfg(test)]
 mod tests {

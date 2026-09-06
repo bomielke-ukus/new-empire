@@ -28,6 +28,17 @@ pub struct EntityId {
 }
 
 impl EntityId {
+    /// Builds a handle from its parts.
+    ///
+    /// For deserialisation, the network layer and tests. Not a way to forge
+    /// access: a handle whose generation does not match the slot's is
+    /// rejected by [`World::slot`], and the simulation checks ownership
+    /// before acting on one. Serde already constructs these from arbitrary
+    /// input, so this adds no capability that did not exist.
+    pub const fn from_parts(index: u32, generation: u32) -> EntityId {
+        EntityId { index, generation }
+    }
+
     /// The slot this ID refers (or referred) to.
     pub const fn index(self) -> usize {
         self.index as usize
@@ -94,6 +105,101 @@ pub struct World {
     /// Fractional work accumulator (gathering).
     pub work: Vec<Fx>,
 }
+
+/// A structural invariant of the entity store that does not hold.
+///
+/// Every variant here is a bug that would otherwise surface much later as an
+/// unexplained hash divergence. Naming the broken invariant, and the slot,
+/// turns "the hash diverged at tick 9,900" into "the free list gained a
+/// duplicate at tick 4,132".
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WorldViolation {
+    /// The parallel component vectors are different lengths.
+    RaggedColumns {
+        /// Which column.
+        column: &'static str,
+        /// Its length.
+        len: usize,
+        /// The length every column should have.
+        expected: usize,
+    },
+    /// The cached live count disagrees with the `alive` flags.
+    LiveCountWrong {
+        /// The cached count.
+        cached: u32,
+        /// The counted one.
+        counted: u32,
+    },
+    /// The free list is not sorted descending, so slot reuse would stop being
+    /// lowest-index-first and two machines would allocate differently.
+    FreeListUnsorted {
+        /// Position of the first out-of-order pair.
+        at: usize,
+    },
+    /// The free list names the same slot twice.
+    FreeListDuplicate {
+        /// The repeated slot.
+        slot: u32,
+    },
+    /// The free list names a slot that is live.
+    FreeSlotIsLive {
+        /// The slot.
+        slot: u32,
+    },
+    /// The free list names a slot that does not exist.
+    FreeSlotOutOfRange {
+        /// The slot.
+        slot: u32,
+    },
+    /// A dead slot still holds component data, which breaks the guarantee
+    /// that a world's identity is its live state and not its history.
+    DeadSlotNotScrubbed {
+        /// The slot.
+        slot: u32,
+        /// Which column still holds something.
+        column: &'static str,
+    },
+    /// A slot is neither live nor free, so it can never be used again.
+    SlotLeaked {
+        /// The slot.
+        slot: u32,
+    },
+}
+
+impl core::fmt::Display for WorldViolation {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            WorldViolation::RaggedColumns {
+                column,
+                len,
+                expected,
+            } => write!(f, "column `{column}` has {len} rows, expected {expected}"),
+            WorldViolation::LiveCountWrong { cached, counted } => {
+                write!(f, "live count is {cached} but {counted} slots are alive")
+            }
+            WorldViolation::FreeListUnsorted { at } => {
+                write!(f, "free list is not sorted descending at index {at}")
+            }
+            WorldViolation::FreeListDuplicate { slot } => {
+                write!(f, "free list names slot {slot} twice")
+            }
+            WorldViolation::FreeSlotIsLive { slot } => {
+                write!(f, "slot {slot} is both live and free")
+            }
+            WorldViolation::FreeSlotOutOfRange { slot } => {
+                write!(f, "free list names slot {slot}, which does not exist")
+            }
+            WorldViolation::DeadSlotNotScrubbed { slot, column } => {
+                write!(f, "dead slot {slot} still holds `{column}` data")
+            }
+            WorldViolation::SlotLeaked { slot } => {
+                write!(f, "slot {slot} is neither live nor free")
+            }
+        }
+    }
+}
+
+impl std::error::Error for WorldViolation {}
 
 impl World {
     /// An empty world.
@@ -232,6 +338,113 @@ impl World {
         }
     }
 
+    /// Verifies every structural invariant of the store.
+    ///
+    /// Not on the hot path. Tests, the corpus runner and the soak runner call
+    /// it after each tick, and `--features debug-checks` makes
+    /// [`crate::Simulation::step`] call it too. The point is to fail at the
+    /// tick that *created* an inconsistency rather than at the much later
+    /// tick that noticed.
+    pub fn check(&self) -> Result<(), WorldViolation> {
+        let n = self.alive.len();
+        let columns: [(&'static str, usize); 13] = [
+            ("generation", self.generation.len()),
+            ("kind", self.kind.len()),
+            ("owner", self.owner.len()),
+            ("pos", self.pos.len()),
+            ("health", self.health.len()),
+            ("move_target", self.move_target.len()),
+            ("resource", self.resource.len()),
+            ("facing", self.facing.len()),
+            ("order", self.order.len()),
+            ("nav", self.nav.len()),
+            ("carry", self.carry.len()),
+            ("construction", self.construction.len()),
+            ("production", self.production.len()),
+        ];
+        for (column, len) in columns {
+            if len != n {
+                return Err(WorldViolation::RaggedColumns {
+                    column,
+                    len,
+                    expected: n,
+                });
+            }
+        }
+        if self.work.len() != n {
+            return Err(WorldViolation::RaggedColumns {
+                column: "work",
+                len: self.work.len(),
+                expected: n,
+            });
+        }
+
+        let counted = self.alive.iter().filter(|&&a| a).count() as u32;
+        if counted != self.live {
+            return Err(WorldViolation::LiveCountWrong {
+                cached: self.live,
+                counted,
+            });
+        }
+
+        let mut is_free = vec![false; n];
+        for (at, pair) in self.free.windows(2).enumerate() {
+            if pair[0] <= pair[1] {
+                return Err(WorldViolation::FreeListUnsorted { at });
+            }
+        }
+        for &slot in &self.free {
+            let i = slot as usize;
+            if i >= n {
+                return Err(WorldViolation::FreeSlotOutOfRange { slot });
+            }
+            if is_free[i] {
+                return Err(WorldViolation::FreeListDuplicate { slot });
+            }
+            if self.alive[i] {
+                return Err(WorldViolation::FreeSlotIsLive { slot });
+            }
+            is_free[i] = true;
+        }
+
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..n {
+            if self.alive[i] {
+                continue;
+            }
+            if !is_free[i] {
+                return Err(WorldViolation::SlotLeaked { slot: i as u32 });
+            }
+            // Every column `despawn` scrubs is checked, so adding a component
+            // without scrubbing it shows up here rather than as a hash that
+            // depends on history.
+            let scrubbed: [(&'static str, bool); 13] = [
+                ("kind", self.kind[i] == 0),
+                ("owner", self.owner[i] == 0),
+                ("pos", self.pos[i] == Vec2Fx::ZERO),
+                ("health", self.health[i] == Fx::ZERO),
+                ("move_target", self.move_target[i].is_none()),
+                ("resource", self.resource[i] == 0),
+                ("facing", self.facing[i] == 0),
+                ("order", self.order[i] == Order::Idle),
+                ("nav", self.nav[i].is_none()),
+                ("carry", self.carry[i].is_none()),
+                ("construction", self.construction[i].is_none()),
+                ("production", self.production[i].is_none()),
+                ("work", self.work[i] == Fx::ZERO),
+            ];
+            for (column, ok) in scrubbed {
+                if !ok {
+                    return Err(WorldViolation::DeadSlotNotScrubbed {
+                        slot: i as u32,
+                        column,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Live slots in ascending index order — the only iteration order there is.
     pub fn slots(&self) -> impl Iterator<Item = Slot> + '_ {
         self.alive
@@ -282,6 +495,37 @@ impl HashState for World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The scrub contract, column by column.
+    ///
+    /// `despawn` has to clear every component, or a world's identity starts
+    /// depending on its history and two replays that reach the same live
+    /// state report a desync that is not one. M2's own suite never despawns
+    /// a resource-bearing entity — an exhausted node is already zero — so
+    /// without this the check has no coverage at all.
+    #[test]
+    fn despawn_scrubs_every_column() {
+        let mut w = World::new();
+        let id = w.spawn(7, 1, Vec2Fx::from_int(3, 4), Fx::from_int(50));
+        let i = w.slot(id).unwrap().index();
+        // Dirty every column the scrub is responsible for.
+        w.resource[i] = 250;
+        w.facing[i] = 5;
+        w.move_target[i] = Some(Vec2Fx::from_int(9, 9));
+        w.carry[i] = Some((crate::kinds::Resource::Wood, 7));
+        w.construction[i] = Some(40);
+        w.work[i] = Fx::from_int(3);
+        assert!(w.check().is_ok(), "a live entity may hold anything");
+
+        w.despawn(id);
+        w.check().expect("every column must be scrubbed on despawn");
+
+        // And a world that never saw that entity is indistinguishable.
+        let mut fresh = World::new();
+        let fid = fresh.spawn(7, 1, Vec2Fx::from_int(3, 4), Fx::from_int(50));
+        fresh.despawn(fid);
+        assert_eq!(w, fresh, "history leaked past the scrub");
+    }
 
     fn spawn(w: &mut World, x: i32) -> EntityId {
         w.spawn(1, 0, Vec2Fx::from_int(x, 0), Fx::from_int(100))

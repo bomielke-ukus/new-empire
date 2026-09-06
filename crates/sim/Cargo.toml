@@ -17,3 +17,9 @@ serde = { workspace = true }
 proptest = "1"
 # Round-tripping the on-disk replay format in tests.
 ron = { workspace = true }
+
+[features]
+# Verifies every invariant after every tick and panics naming the tick that
+# broke it. Used by the soak and fuzz runners and by CI; never in a shipping
+# build.
+debug-checks = []
