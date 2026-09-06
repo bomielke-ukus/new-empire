@@ -1,0 +1,54 @@
+// Per-tick performance ceilings for `simrunner bench`, checked by
+// `scripts/check-perf.sh`.
+//
+// WHAT THESE ARE
+//
+// Cliff detectors: an accidentally quadratic loop, a per-tick allocation that
+// was not there yesterday, a linear scan that became a scan over every
+// entity. They sit at roughly three times the p99 a developer machine
+// produces, because a shared CI runner is slower and noisier and a tighter
+// gate fails on neighbours rather than on regressions.
+//
+// Measured variance on a developer machine across three runs of three
+// repeats: p99 spread was 1.1x-1.2x. CI will be worse.
+//
+// HOW THESE RELATE TO docs/04 §12
+//
+// They no longer have the comfortable distance the M0 numbers did. §12
+// budgets 6 ms of a 50 ms tick for pathfinding at 200 population and 400
+// entities. `marching-8p` — eight players keeping 40 mobile units each in
+// the field, so ~320 units under way at once, with no combat and no AI —
+// already spends about 5 ms at p99, nearly all of it planning paths.
+//
+// That is not a regression; it is the shape of the work. But it does mean
+// the pathfinding budget is substantially spent before M4 and M5 add combat
+// and an opponent, and the sector-graph and flow-field layers described in
+// §5 are the thing that has to buy it back. Worth knowing now rather than at
+// M7.
+//
+// The ceilings below are still deliberately loose. The useful signal is the
+// trend, printed on every run. When a system lands that makes a scenario
+// meaningfully slower, lower the ceiling to three times the new number in
+// the same commit — a ceiling that is never revisited stops being a gate.
+//
+// Verify §12 properly on known hardware at milestone review. A shared runner
+// cannot answer that question and should not pretend to.
+(
+    scenarios: [
+        (
+            name: "economy-2p",
+            note: "a settled two-player economy: gathering, drop-off, building",
+            max_p99_us: 350.0,
+        ),
+        (
+            name: "marching-8p",
+            note: "eight players pathing ~320 units at once; the docs/04 §5 load",
+            max_p99_us: 17000.0,
+        ),
+        (
+            name: "crowded",
+            note: "economy and marching together on a large map",
+            max_p99_us: 8500.0,
+        ),
+    ],
+)
