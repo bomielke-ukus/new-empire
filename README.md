@@ -24,6 +24,7 @@ Read in order:
 | [05 — Art and audio spec](docs/05-art-and-audio-spec.md) | Isometric projection, sprite and animation standards, palette, terrain, UI art, audio inventory |
 | [06 — Roadmap](docs/06-roadmap.md) | M0–M9 milestones with demonstrable acceptance criteria |
 | [07 — Decisions and open questions](docs/07-decisions-and-open-questions.md) | Decision log with reasoning, and what still needs answering |
+| [08 — Test plan](docs/08-test-plan.md) | How we find out whether it is any good before a player does: what each layer catches, what is tested today, and what is still owed |
 
 ## Building and running
 

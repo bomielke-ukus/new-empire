@@ -1820,6 +1820,7 @@ mod tests {
         assert_eq!(sim.stats().path_failures, 0);
     }
 
+    // REQ: TA-PATH-03
     #[test]
     fn unreachable_goal_goes_to_nearest_reachable_tile() {
         let mut sim = Simulation::new(1, flat(30, 1));
@@ -1856,6 +1857,7 @@ mod tests {
         );
     }
 
+    // REQ: RM-M2-02
     #[test]
     fn sixty_villagers_cross_the_map_without_getting_stuck() {
         let mut sim = inland(4);
@@ -1910,6 +1912,7 @@ mod tests {
         }
     }
 
+    // REQ: RM-M2-01
     #[test]
     fn gathers_all_four_resources_and_delivers_them() {
         let mut sim = inland(2);
@@ -2010,6 +2013,7 @@ mod tests {
         );
     }
 
+    // REQ: GD-ECON-01
     #[test]
     fn exhausted_node_is_removed_and_villagers_move_to_the_next() {
         let mut sim = inland(3);

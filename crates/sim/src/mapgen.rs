@@ -531,6 +531,7 @@ mod tests {
             .count()
     }
 
+    // REQ: GD-MAP-01  REQ: RM-M1-01
     #[test]
     fn same_seed_same_map() {
         let spec = MapSpec::default();
