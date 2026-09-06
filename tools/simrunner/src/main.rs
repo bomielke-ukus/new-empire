@@ -182,12 +182,8 @@ fn verify_file(args: &[String]) -> ExitCode {
         Ok(r) => r,
         Err(e) => return fail(&format!("could not parse {path}: {e}")),
     };
-    if replay.version != Replay::VERSION {
-        return fail(&format!(
-            "replay version {} but this build reads version {}",
-            replay.version,
-            Replay::VERSION
-        ));
+    if let Err(e) = replay.validate() {
+        return fail(&format!("{path}: {e}"));
     }
     println!(
         "loaded {path}: seed={} ticks={} commands={}",
@@ -210,7 +206,7 @@ fn verify_replay(replay: &Replay) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
-        Err(d) => fail(&format!("DESYNC {d}")),
+        Err(e) => fail(&e.to_string()),
     }
 }
 
@@ -221,7 +217,10 @@ fn bench(args: &[String]) -> ExitCode {
     };
     let replay = synthesise(&a);
     let t0 = Instant::now();
-    let sim = replay.run(|_, _| {});
+    let sim = match replay.run(|_, _| {}) {
+        Ok(s) => s,
+        Err(e) => return fail(&e.to_string()),
+    };
     let dt = t0.elapsed();
     println!(
         "{} ticks, {} live entities at end: {:.2?} total, {:.1?}/tick, rng draws {}",
