@@ -468,6 +468,7 @@ mod tests {
         );
     }
 
+    // REQ: TA-DET-02
     /// The hash fed only `pending_len()`, so two simulations holding
     /// different pending orders agreed for two ticks and then diverged with
     /// no attributable cause.
@@ -549,6 +550,7 @@ mod tests {
         }
     }
 
+    // REQ: TA-CMD-02
     /// `drain_due(u64::MAX)` is how a caller says "everything". It panicked
     /// in debug and, in release, returned nothing while leaving the commands
     /// queued — the quietest possible way to lose a player's orders.

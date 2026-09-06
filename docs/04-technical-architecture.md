@@ -42,7 +42,7 @@ new-empire/
 └── docs/
 ```
 
-**The dependency rule that matters:** `sim` depends on `data` and nothing else.
+**[TA-DEP-01] The dependency rule that matters:** `sim` depends on `data` and nothing else.
 It cannot see `render`, `audio`, `ui`, or the clock. Enforced in CI by a check
 on `cargo tree`. If a renderer type ever ends up in the simulation, determinism
 is gone and we will not find out for weeks.
@@ -58,22 +58,22 @@ now than to retrofit.
 
 **Hard rules inside `crates/sim`:**
 
-1. **No `f32` / `f64`.** Positions, velocities, health, gather rates and combat
+1. **[TA-DET-08] No `f32` / `f64`.** Positions, velocities, health, gather rates and combat
    maths use fixed-point `Fx` = signed Q16.16 (`i32` with 16 fractional bits),
    with `i64` intermediates for multiply/divide. A `#![deny]` lint plus a CI
    grep enforces the ban.
-2. **One RNG, explicitly threaded.** `xoshiro256**` seeded from the match seed,
+2. **[TA-RNG-01] One RNG, explicitly threaded.** `xoshiro256**` seeded from the match seed,
    stored in the sim state, advanced only by the sim. No `rand::thread_rng()`,
    no `SystemTime`.
-3. **No hash-map iteration.** Iteration order over `HashMap` is not stable across
+3. **[TA-ENT-04] No hash-map iteration.** Iteration order over `HashMap` is not stable across
    runs. Entity storage is dense `Vec`s indexed by generational IDs; anywhere a
    map is genuinely needed, `BTreeMap` or a sorted `Vec`.
-4. **No wall-clock or frame-time input.** The sim advances only by whole ticks.
-5. **All external input arrives as `Command`s** through one queue. There is no
+4. **[TA-DET-09] No wall-clock or frame-time input.** The sim advances only by whole ticks.
+5. **[TA-CMD-03] All external input arrives as `Command`s** through one queue. There is no
    other way to affect the simulation — not from UI, not from AI, not from
    cheats.
 
-**Verification:** after every tick the sim can produce a **state hash** (FNV-1a
+**[TA-DET-01] [TA-DET-02] Verification:** after every tick the sim can produce a **state hash** (FNV-1a
 over entity positions, health, resources and the RNG counter). `tools/simrunner`
 replays a command log twice and asserts equal hashes at every tick. A corpus of
 recorded matches runs in CI on every commit. When multiplayer arrives, clients
@@ -189,13 +189,13 @@ first-class treatment.
 
 **Behaviour requirements, tested explicitly:**
 
-- A unit whose path is blocked repaths within 3 ticks; it never stops silently.
-- A unit ordered to an unreachable tile moves to the nearest reachable tile and
+- **[TA-PATH-02]** A unit whose path is blocked repaths within 3 ticks; it never stops silently.
+- **[TA-PATH-03]** A unit ordered to an unreachable tile moves to the nearest reachable tile and
   reports arrival — it does not stand still, and it does not run laps.
-- Faster units overtake slower ones on a shared route.
-- Units never occupy the same tile centre; overlap is resolved deterministically
+- **[TA-PATH-04]** Faster units overtake slower ones on a shared route.
+- **[TA-PATH-05]** Units never occupy the same tile centre; overlap is resolved deterministically
   by entity ID order.
-- Path requests are **budgeted**: a fixed number of full searches per tick, with
+- **[TA-PATH-06]** Path requests are **budgeted**: a fixed number of full searches per tick, with
   a priority queue (player-issued orders before AI-issued ones). Over-budget
   requests wait a tick rather than blowing the frame.
 
@@ -212,7 +212,7 @@ first-class treatment.
 - The renderer reads the visibility grid into a low-resolution texture and
   smooths it in the shader, so the fog edge is soft while the simulation stays
   tile-exact.
-- **The AI queries the same fogged view a player sees.** No exceptions, enforced
+- **[TA-AI-01] The AI queries the same fogged view a player sees.** No exceptions, enforced
   by the `ai` crate having no access to raw `World` state — only to a
   `FoggedView<'_>` wrapper.
 
@@ -237,13 +237,13 @@ first-class treatment.
 
 **Sprite specifics:**
 
-- **Depth sort** by `(tile_y, world_y, entity_id)` — the last term guarantees a
+- **[TA-RENDER-01] Depth sort** by `(tile_y, world_y, entity_id)` — the last term guarantees a
   stable, deterministic order for co-located sprites, so nothing flickers.
-- **Palette-indexed textures with a player-colour ramp**, exactly as the Genie
+- **[TA-RENDER-02] Palette-indexed textures with a player-colour ramp**, exactly as the Genie
   engine did: sprite pixels store a palette index; indices in a reserved range
   are remapped in the fragment shader to the owning player's colour. One set of
   art serves eight players.
-- **Horizontal mirroring** for facings: art is authored for 5 of 8 facings and
+- **[TA-RENDER-03] Horizontal mirroring** for facings: art is authored for 5 of 8 facings and
   the other 3 are the mirror, set by a flag on the instance. ~37% less art.
 - Everything visible is one draw call per atlas per frame; a 400-unit battle is
   a handful of draw calls.
@@ -255,12 +255,12 @@ first-class treatment.
 `kira` for mixing and buses.
 
 - Four buses (UI, acknowledgments, world, music) with independent volume.
-- **Voice limiting**: at most N concurrent instances of any one sound (N≈4), with
+- **[TA-AUDIO-01] Voice limiting**: at most N concurrent instances of any one sound (N≈4), with
   ±5% random pitch variation, so twelve villagers chopping is a texture.
 - 2D positional panning and distance attenuation relative to camera centre.
 - Music: one stem per age, cross-faded over 4 seconds on age-up; a combat stem
   that ducks in when ≥6 units are fighting within the camera's view.
-- Audio is driven from **sim events**, not from sim state polling. The sim emits
+- **[TA-AUDIO-02]** Audio is driven from **sim events**, not from sim state polling. The sim emits
   an event stream (`UnitDied`, `BuildingCompleted`, `ResourceDeposited`) that the
   presentation layer consumes; it never reads sim internals.
 
@@ -268,7 +268,7 @@ first-class treatment.
 
 ## 9. Data and content pipeline
 
-- All balance data in **RON** files under `assets/data/` — units, buildings,
+- **[TA-DATA-01]** All balance data in **RON** files under `assets/data/` — units, buildings,
   technologies, civilizations, map templates. Strongly typed on load, validated
   at startup (every referenced ID must exist; every unit must be trainable
   somewhere; every tech must be reachable).
@@ -277,18 +277,18 @@ first-class treatment.
 - `tools/atlas` packs PNG animation sequences into atlases plus a JSON manifest
   (frame rects, anchor points, facing count, frame durations). Source art stays
   in the repo; atlases are build artefacts.
-- Data files are content-hashed into the replay header so a replay recorded
+- **[TA-DATA-02]** Data files are content-hashed into the replay header so a replay recorded
   against different balance data is detected rather than silently desyncing.
 
 ---
 
 ## 10. Saves and replays
 
-- **Replay** = match setup + seed + the full command log. Kilobytes. Replays are
+- **[TA-DET-05] Replay** = match setup + seed + the full command log. Kilobytes. Replays are
   the primary debugging tool: a bug report is a replay file.
-- **Save** = a full serialised `World` snapshot plus the command log since the
+- **[TA-SAVE-01] Save** = a full serialised `World` snapshot plus the command log since the
   last snapshot, so a save is also a resumable replay.
-- Both are versioned; loading an incompatible version fails loudly with the
+- **[TA-DET-06]** Both are versioned; loading an incompatible version fails loudly with the
   version numbers rather than corrupting.
 
 ---
@@ -331,7 +331,80 @@ the sanity check: if our numbers drift far from that shape, something is wrong.
 
 ---
 
-## 13. Dependencies
+## 13. Invariants the arithmetic must hold
+
+The fixed-point types are not a utility library; they are the substrate the
+whole simulation is defined in, and a rounding difference in any of them is a
+desync rather than a wrong pixel. These are the properties they are required
+to have, stated so they can be tested rather than assumed. Property tests in
+`crates/sim/tests/` check each against a reference computed in `i128`.
+
+### Fixed point (`Fx`)
+
+| ID | Invariant |
+|---|---|
+| **TA-FX-01** | `floor + frac == self`, `frac` is in `[0, 1)`, `trunc` rounds toward zero, and none of them overflow at `Fx::MIN` or `Fx::MAX` |
+| **TA-FX-02** | Ordering agrees with the raw `i32` ordering, and addition is monotone |
+| **TA-FX-03** | Addition and subtraction **saturate**; they never wrap. A saturated value is a bug, but a deterministic one the hash will catch — a wrap is a silent teleport |
+| **TA-FX-04** | Multiplication is commutative and within one ulp of the exact product |
+| **TA-FX-05** | Division rounds to nearest, halves away from zero (`docs/07` D10) |
+| **TA-FX-06** | `mul_div` and `from_ratio` match the exact rational result; the intermediate product never overflows |
+| **TA-FX-07** | `sqrt` returns the floor of the true root, and zero for non-positive input |
+| **TA-FX-08** | `min`, `max` and `clamp` agree with each other and with the ordering |
+| **TA-FX-09** | Serialisation round-trips bit-exactly |
+
+### Vectors (`Vec2Fx`)
+
+| ID | Invariant |
+|---|---|
+| **TA-VEC-01** | `length` is the floor of the true length, and exact for axis-aligned vectors |
+| **TA-VEC-02** | `normalized_or_zero` has unit length within an ulp, or is exactly zero |
+| **TA-VEC-03** | `distance` is symmetric, and zero only between equal points |
+| **TA-VEC-04** | `angle` is accurate to half a degree everywhere, including the octant seams |
+| **TA-VEC-05** | `dot` and `length_sq_raw` are exact and never overflow, at any representable input |
+| **TA-PATH-01** | `move_toward` makes strict progress every call, never overshoots, lands **exactly** on the target when it is within reach, and arrives in a bounded number of steps. Every "unit stuck forever" bug reduces to this property failing |
+
+### Angles
+
+| ID | Invariant |
+|---|---|
+| **TA-ANG-01** | `sin² + cos² == 1` within the table's tolerance, and `cos(a) == sin(a + 90°)`, for every one of the 65,536 representable angles |
+| **TA-ANG-02** | Sine and cosine have the correct sign in every quadrant |
+| **TA-ANG-03** | Both are continuous across the wrap at 65535 → 0 |
+
+### Random numbers
+
+| ID | Invariant |
+|---|---|
+| **TA-RNG-02** | Every range-limited draw is inside its range, including the empty and maximal ranges |
+| **TA-RNG-03** | `chance(0, n)` never fires and `chance(n, n)` always does |
+| **TA-RNG-04** | Exactly one draw per call, and none for a call that short-circuits. Desync diagnosis compares draw counts, which only localises anything if the count is a function of the code path |
+| **TA-RNG-05** | Serialisation round-trips: a restored generator produces the same stream |
+| **TA-RNG-06** | Adjacent seeds produce uncorrelated streams |
+| **TA-RNG-07** | Range reduction is not biased toward either end |
+
+Beyond these, **the output stream itself is frozen** (TA-RNG-01). Changing the
+generator invalidates every replay and save file ever recorded, so a
+known-answer vector is committed as a tripwire.
+
+### Commands, entities and determinism
+
+| ID | Invariant |
+|---|---|
+| **TA-CMD-01** | `drain_due` returns everything at or before the tick, in canonical `(tick, player, seq)` order, including ticks that were skipped |
+| **TA-CMD-02** | Scheduling and draining are safe at the tick counter's ceiling |
+| **TA-DET-03** | The queue's state is independent of the order commands *arrived* in. Two peers whose packets interleaved differently hold byte-identical queues, so network jitter alone can never desync them |
+| **TA-DET-04** | Every invariant holds after every tick, across the config space |
+| **TA-DET-07** | The simulation still reproduces the recorded corpus. Determinism says two runs agree; this says the behaviour has not silently changed since the corpus was recorded |
+| **TA-ENT-01** | The live count, the free list and the component columns agree with each other after any sequence of operations |
+| **TA-ENT-02** | Slot reuse is lowest-index-first. The identity a new entity receives is part of the state, so two machines that allocate differently have already diverged |
+| **TA-ENT-03** | A handle to a despawned entity never resolves, even after its slot is reused |
+| **TA-ENT-05** | `despawn` scrubs every component column, so a world's identity is its live state and not the history that produced it. Slot generations and the slot count are deliberately *not* scrubbed: an outstanding `EntityId` resolves in one world and is stale in the other, so those worlds are genuinely different |
+| **TA-ENT-06** | Every invariant in `World::check` and `Simulation::check` holds after every tick, in every config |
+
+---
+
+## 14. Dependencies
 
 Kept deliberately small; every one is justified.
 
@@ -356,7 +429,7 @@ crate's only dependency, which `scripts/check-sim-purity.sh` enforces.
 
 ---
 
-## 14. Implementation notes from M0
+## 15. Implementation notes from M0
 
 Decisions made while building the foundation that the sections above did not
 anticipate:
@@ -386,7 +459,7 @@ anticipate:
   ticks per frame and drops the backlog beyond that, so a stalled window
   resumes rather than fast-forwarding.
 
-## 15. Implementation notes from M1
+## 16. Implementation notes from M1
 
 - **Map generation is inside `sim`**, not a separate `mapgen` crate as §1
   planned. It needs only the sim's RNG and fixed-point noise, and keeping it
@@ -416,7 +489,7 @@ anticipate:
 - **Palette texture is `256 × 9`**: row 0 neutral, rows 1–8 players. The
   fragment shader looks up `(index, row)`; shadow (index 3) always reads row 0.
 
-## 16. Implementation notes from M2
+## 17. Implementation notes from M2
 
 - **Navigation is three layers, but not the three §5 planned.** Connected
   components over passable tiles (relabelled lazily when a static blocker

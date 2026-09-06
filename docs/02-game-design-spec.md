@@ -58,7 +58,7 @@ what the spreadsheets say.
 | **Stone** | Stone veins | Fortification, towers, Wonder |
 | **Gold** | Gold veins, trade, tribute | Elite units and late technology |
 
-**Nothing regenerates.** Trees are removed when felled. Veins mine out. Hunted
+**[GD-ECON-01] Nothing regenerates.** Trees are removed when felled. Veins mine out. Hunted
 animals do not respawn. Farms are the only renewable food, and they cost wood
 each time they are re-seeded — a deliberate wood-to-food conversion that keeps
 late-game economies dependent on a shrinking forest.
@@ -79,21 +79,21 @@ late-game economies dependent on a shrinking forest.
 
 ### 3.3 Gathering
 
-- Base gather rate **0.45 resources/second**, carry capacity **10**, then walk to
+- **[GD-ECON-02]** Base gather rate **0.45 resources/second**, carry capacity **10**, then walk to
   the nearest valid drop-off and deposit.
-- **One drop-off building type — the Storehouse** — accepting all resources. The
+- **[GD-ECON-03] One drop-off building type — the Storehouse** — accepting all resources. The
   original's Granary/Storage Pit split was bookkeeping, not depth. The Town
   Center also accepts everything.
-- Distance to drop-off is the real economic skill: placement matters, walking
+- **[GD-ECON-04]** Distance to drop-off is the real economic skill: placement matters, walking
   time is the cost.
-- **Farms auto-reseed by default** (toggle per-farm and globally), and a
+- **[GD-ECON-05] Farms auto-reseed by default** (toggle per-farm and globally), and a
   notification fires when wood is too low to reseed.
 
 ### 3.4 Population
 
-- **House: +5 population, 30 wood.** Town Center provides 5.
-- **Default cap 75**, configurable 50–200 in skirmish setup.
-- Villager costs **50 food**. Military costs vary; every unit costs 1 pop except
+- **[GD-POP-01] House: +5 population, 30 wood.** Town Center provides 5.
+- **[GD-POP-02] Default cap 75**, configurable 50–200 in skirmish setup.
+- **[GD-POP-03]** Villager costs **50 food**. Military costs vary; every unit costs 1 pop except
   siege (2 pop) and elephants (2 pop).
 
 A low cap is intentional. It keeps individual units meaningful, keeps battles
@@ -110,11 +110,11 @@ readable at our sprite scale, and keeps the sim cheap.
 | **Bronze** | 800 food, 200 wood | 2 Tool Age buildings | 90 s |
 | **Iron** | 1200 food, 500 gold | 2 Bronze Age buildings | 120 s |
 
-The building requirement is doing real work: it stops a hoarding player from
+**[GD-AGE-01]** The building requirement is doing real work: it stops a hoarding player from
 skipping development, and it forces you to commit to a direction before you
 advance.
 
-**Age-up presentation** (pillar 1) — when an age completes:
+**[GD-AGE-02] Age-up presentation** (pillar 1) — when an age completes:
 
 - A short fanfare, distinct per age, ducking other audio.
 - A sweep of light across the settlement, building by building, as each
@@ -177,12 +177,12 @@ Slice units marked **[V1]**. Stats are opening values for tuning, not gospel.
 
 Kept close to the original because it is the series' signature:
 
-- Priest walks into range (7 tiles), begins a chant, and after a variable
+- **[GD-PRIEST-01]** Priest walks into range (7 tiles), begins a chant, and after a variable
   interval the target unit changes ownership permanently.
-- Conversion consumes **faith**, which recharges over ~40 seconds. A priest is
+- **[GD-PRIEST-02]** Conversion consumes **faith**, which recharges over ~40 seconds. A priest is
   a spent resource, not a spam unit.
-- Buildings cannot be converted. Siege can (and it is devastating, on purpose).
-- Priests heal friendly units at 3 HP/s when not converting.
+- **[GD-PRIEST-03]** Buildings cannot be converted. Siege can (and it is devastating, on purpose).
+- **[GD-PRIEST-04]** Priests heal friendly units at 3 HP/s when not converting.
 - The chant is audible to both players. Hearing it near your army should make
   you react.
 
@@ -212,7 +212,7 @@ Kept close to the original because it is the series' signature:
 | **Guard Tower** | Bronze | 150S | Upgraded tower |
 | **Wonder** | Iron | 1000W 1000S 1000G | Victory condition; enormous, visible, attackable |
 
-Buildings under construction show a build progress silhouette, take damage
+**[GD-BUILD-01]** Buildings under construction show a build progress silhouette, take damage
 normally, and can be finished by any villager.
 
 ---
@@ -244,20 +244,20 @@ vertical slice.
 damage = max(1, (attack × elevation_modifier) − armour_of_matching_type + bonus_vs_class)
 ```
 
-- **Damage types:** melee, pierce, siege. Units carry separate melee and pierce
+- **[GD-COMBAT-01] Damage types:** melee, pierce, siege. Units carry separate melee and pierce
   armour values.
-- **Bonus damage vs class** (spearman vs cavalry, slinger vs infantry) is the
+- **[GD-COMBAT-02] Bonus damage vs class** (spearman vs cavalry, slinger vs infantry) is the
   counter system. It is deliberately shallow — three or four real counters, all
   discoverable from the unit tooltip.
-- **Elevation:** ×1.25 attacking downhill, ×0.75 attacking uphill. Unchanged in
+- **[GD-COMBAT-03] Elevation:** ×1.25 attacking downhill, ×0.75 attacking uphill. Unchanged in
   spirit from the original.
-- **Siege friendly fire is on.** It makes siege a decision rather than a free
+- **[GD-COMBAT-04] Siege friendly fire is on.** It makes siege a decision rather than a free
   upgrade.
-- **Minimum damage 1**, so nothing is literally invulnerable.
+- **[GD-COMBAT-05] Minimum damage 1**, so nothing is literally invulnerable.
 
 ### 8.1 Unit behaviour (fixing the original's worst flaw)
 
-Every unit has a **stance**:
+**[GD-STANCE-01]** Every unit has a **stance**:
 
 | Stance | Behaviour |
 |---|---|
@@ -266,7 +266,7 @@ Every unit has a **stance**:
 | **Stand ground** | Attacks in range, never moves |
 | **Passive** (default for villagers) | Never attacks, flees toward the nearest Town Center when hit |
 
-Villagers being attacked **run and raise an alarm** rather than standing there
+**[GD-STANCE-02]** Villagers being attacked **run and raise an alarm** rather than standing there
 being killed. This one change removes most of the original's cruelty.
 
 ---
@@ -276,7 +276,7 @@ being killed. This one change removes most of the original's cruelty.
 - **Tile grid**, isometric 2:1 presentation, discrete elevation levels with
   cliffs. Elevation affects combat and vision, not movement cost (movement
   penalties on hills make pathing feel bad; we skip them).
-- **Three visibility states** per player:
+- **[GD-FOG-01] Three visibility states** per player:
   1. **Unexplored** — black. Nothing known.
   2. **Explored** — terrain and last-known buildings visible, dimmed. Units are
      *not* shown. Buildings you saw stay drawn even after they are destroyed,
@@ -285,7 +285,7 @@ being killed. This one change removes most of the original's cruelty.
 - **Map sizes:** Tiny 96², Small 128², Medium 168², Large 200², Giant 240².
 - **Random map types for the full game:** Inland, Coastal, Continental,
   Highland, Islands, Narrows, Oasis. **Slice ships Inland only.**
-- Map generation is seeded and deterministic: the same seed always produces the
+- **[GD-MAP-01]** Map generation is seeded and deterministic: the same seed always produces the
   same map, and starting positions are balanced (equal resources within a
   tolerance, verified by the generator before it returns).
 
@@ -295,9 +295,9 @@ being killed. This one change removes most of the original's cruelty.
 
 | Condition | Rule |
 |---|---|
-| **Conquest** (default) | Last player or team standing. A player is eliminated when they have no units and no buildings capable of producing them. |
-| **Wonder** | Build a Wonder and hold it for **10 minutes**. Global announcement and a permanent minimap marker the moment it completes. |
-| **Relics** | Control all relics on the map for **10 minutes**. |
+| **[GD-WIN-01] Conquest** (default) | Last player or team standing. A player is eliminated when they have no units and no buildings capable of producing them. |
+| **[GD-WIN-02] Wonder** | Build a Wonder and hold it for **10 minutes**. Global announcement and a permanent minimap marker the moment it completes. |
+| **[GD-WIN-03] Relics** | Control all relics on the map for **10 minutes**. |
 | **Score** | Highest score at the time limit, if one is set. |
 | **Resign** | Always available. |
 
@@ -332,7 +332,7 @@ civ, enough to prove asymmetry is working.
 
 ## 12. The computer opponent
 
-The AI plays through **exactly the same command interface a human uses**. It
+**[GD-AI-01]** The AI plays through **exactly the same command interface a human uses**. It
 cannot see through fog, and at Standard difficulty and below it does not receive
 resource bonuses. This is a hard architectural rule, not a preference — an AI
 that cheats produces an opponent you cannot learn from.
@@ -368,11 +368,11 @@ its own fog state.
 
 ## 14. Difficulty, speed and accessibility
 
-- **Game speed** ×0.5 / ×1.0 / ×1.5 / ×2.0, changeable mid-match in single-player.
-- **Pause** in single-player, with commands issuable while paused.
-- Colourblind-safe player palette, verified against deuteranopia and protanopia
+- **[GD-SPEED-01] Game speed** ×0.5 / ×1.0 / ×1.5 / ×2.0, changeable mid-match in single-player.
+- **[GD-SPEED-02] Pause** in single-player, with commands issuable while paused.
+- **[GD-A11Y-01]** Colourblind-safe player palette, verified against deuteranopia and protanopia
   simulations.
-- Full key rebinding, UI scale from 100% to 200%, subtitles for all narration.
+- **[GD-A11Y-02]** Full key rebinding, UI scale from 100% to 200%, subtitles for all narration.
 - No timed input requirements anywhere in the interface.
 
 ---

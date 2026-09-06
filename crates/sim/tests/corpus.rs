@@ -81,6 +81,7 @@ fn corpus_is_not_empty() {
     }
 }
 
+// REQ: TA-DET-06
 #[test]
 fn every_corpus_replay_is_well_formed() {
     for (name, path, _) in entries() {
@@ -92,6 +93,7 @@ fn every_corpus_replay_is_well_formed() {
     }
 }
 
+// REQ: TA-DET-07
 /// Stability: the behaviour recorded in the corpus is the behaviour this build
 /// produces.
 #[test]

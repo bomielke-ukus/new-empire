@@ -113,6 +113,7 @@ fn drive(
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(24))]
 
+    // REQ: TA-DET-01
     /// Determinism is not a property of one config.
     #[test]
     fn any_config_replays_identically(
@@ -128,6 +129,7 @@ proptest! {
         prop_assert_eq!(trace(seed), trace(seed));
     }
 
+    // REQ: TA-DET-04  REQ: TA-ENT-06
     /// Every invariant, after every tick, across the config space. This is
     /// what turns a corrupted world into a named failure at the tick that
     /// caused it rather than a hash divergence a thousand ticks later.
@@ -148,6 +150,7 @@ proptest! {
         prop_assert!(failure.is_none(), "{:?}", failure);
     }
 
+    // REQ: TA-DET-05
     /// Anything the simulation records must replay to the same state.
     #[test]
     fn recorded_matches_replay_to_the_same_state(
@@ -181,6 +184,7 @@ proptest! {
         prop_assert_eq!(back.trace_digest().unwrap(), replay.trace_digest().unwrap());
     }
 
+    // REQ: TA-CMD-03
     /// A player may only ever steer their own units (`docs/04` §2 rule 5).
     ///
     /// Stated over *orders*, not positions. A neutral gazelle standing where

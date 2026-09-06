@@ -26,9 +26,16 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: sim purity (no floats, no clock, dependency allowlist)
         run: scripts/check-sim-purity.sh
+      - name: generated files match their generators
+        run: scripts/check-generated.sh
+      - name: every landed requirement has a test
+        run: scripts/check-traceability.sh
+      - name: every documented CLI invocation parses
+        run: scripts/check-cli-callers.sh
 
   # The determinism contract: the same command log produces the same hashes,
   # on every platform we ship to. This is M0's acceptance test.
+  # REQ: RM-M0-01
   test:
     name: Test (${{ matrix.os }})
     needs: lint
@@ -37,6 +44,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      MAPVIEW_ARTEFACT_DIR: ${{ runner.temp }}/new-empire-golden-failures
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -66,9 +75,64 @@ jobs:
             | grep -oE 'final hash [0-9a-f]{16}' | awk '{print $3}' > hash-${{ matrix.os }}.txt
           cat hash-${{ matrix.os }}.txt
       - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: golden-image-failures-${{ matrix.os }}
+          path: ${{ runner.temp }}/new-empire-golden-failures/
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
         with:
           name: hash-${{ matrix.os }}
           path: hash-${{ matrix.os }}.txt
+
+  # A cliff detector, not a precision instrument — see perf/budgets.ron for
+  # why the ceilings are as loose as they are.
+  perf:
+    name: Performance
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: benchmarks against perf/budgets.ron
+        run: scripts/check-perf.sh
+      - name: post the numbers to the job summary
+        if: always()
+        run: |
+          {
+            echo '### Simulation performance'
+            echo
+            echo 'Per-tick timings, best of three. The trend matters more than'
+            echo 'the absolute numbers: shared runners are noisy.'
+            echo
+            echo '```'
+            cargo run --release --quiet -p simrunner -- bench || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Randomised configs with every invariant checked after every tick. Enough
+  # to catch a change that breaks a config nobody wrote a test for.
+  soak:
+    name: Soak (short)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 300 randomised matches with invariant checking
+        run: |
+          cargo run --release --quiet -p simrunner --features sim/debug-checks -- \
+            soak --matches 300 --ticks 2000 --timeout 60 --dump soak-failures
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: soak-failure-replays
+          # Each of these is a reproducible bug report: drop one into
+          # crates/sim/tests/corpus/ and the crash can never come back.
+          path: soak-failures/
 
   cross-platform:
     name: Hashes agree across platforms

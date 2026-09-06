@@ -54,6 +54,7 @@ fn saturate_ref(v: i128) -> i32 {
 }
 
 proptest! {
+    // REQ: TA-FX-01
     #[test]
     fn floor_plus_frac_reconstructs(v in any_fx()) {
         let rebuilt = Fx::from_int(v.floor()) + v.frac();
@@ -74,6 +75,7 @@ proptest! {
         prop_assert_eq!(v.trunc(), expected_trunc);
     }
 
+    // REQ: TA-FX-02
     /// Ordering must agree with the raw bit pattern, because the entity store
     /// and the command queue both sort on `Fx`-derived keys and a disagreement
     /// there is a divergence.
@@ -82,6 +84,7 @@ proptest! {
         prop_assert_eq!(a.cmp(&b), a.raw().cmp(&b.raw()));
     }
 
+    // REQ: TA-FX-03
     /// Saturation, not wrapping. A wrap here would be a silent teleport.
     #[test]
     fn add_and_sub_saturate(a in any_fx(), b in any_fx()) {
@@ -97,6 +100,7 @@ proptest! {
         prop_assert_eq!(Fx::MIN - v.abs(), Fx::MIN);
     }
 
+    // REQ: TA-FX-04
     #[test]
     fn mul_is_commutative(a in any_fx(), b in any_fx()) {
         prop_assert_eq!(a * b, b * a);
@@ -123,6 +127,7 @@ proptest! {
         }
     }
 
+    // REQ: TA-FX-05
     /// Division rounds to nearest, halves away from zero. This is D10, the
     /// decision that stopped units arriving at 2.9992 tiles.
     #[test]
@@ -137,6 +142,7 @@ proptest! {
         prop_assert_eq!(a.checked_div(Fx::ZERO), None);
     }
 
+    // REQ: TA-FX-06
     /// `mul_div` exists so the intermediate product does not overflow. It must
     /// therefore be at least as accurate as doing it in two steps, and exactly
     /// as accurate as the 128-bit reference.
@@ -152,6 +158,7 @@ proptest! {
         prop_assert_eq!(Fx::from_ratio(n, d).raw(), saturate_ref(ideal));
     }
 
+    // REQ: TA-FX-07
     #[test]
     fn sqrt_is_the_floor_of_the_true_root(v in any_fx()) {
         let r = v.sqrt();
@@ -167,6 +174,7 @@ proptest! {
         }
     }
 
+    // REQ: TA-FX-08
     #[test]
     fn min_max_clamp_are_consistent(a in any_fx(), b in any_fx(), c in any_fx()) {
         prop_assert_eq!(a.min(b), b.min(a));
@@ -180,6 +188,7 @@ proptest! {
         }
     }
 
+    // REQ: TA-FX-09
     #[test]
     fn serde_round_trip_is_bit_exact(v in any_fx()) {
         let text = ron::to_string(&v).unwrap();
@@ -253,6 +262,7 @@ fn walk_to(start: Vec2Fx, target: Vec2Fx, step: Fx) -> Result<u64, String> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
+    // REQ: TA-PATH-01
     /// The anti-stuck property, and the single most important one in the file:
     /// a unit told to walk somewhere reaches it, exactly, in a bounded number
     /// of steps. Every "unit stands still forever" bug in an RTS is this
@@ -325,6 +335,7 @@ proptest! {
         prop_assert_eq!(start.move_toward(target, reach), target);
     }
 
+    // REQ: TA-VEC-01
     #[test]
     fn length_is_the_floor_of_the_true_length(x in -30_000i32..30_000, y in -30_000i32..30_000) {
         let v = Vec2Fx::new(Fx::from_raw(x), Fx::from_raw(y));
@@ -334,6 +345,7 @@ proptest! {
         prop_assert!((got + 1) * (got + 1) > sq, "length too small");
     }
 
+    // REQ: TA-VEC-05
     #[test]
     fn dot_matches_the_reference_and_never_overflows(
         ax in any_fx(), ay in any_fx(), bx in any_fx(), by in any_fx(),
@@ -361,6 +373,7 @@ proptest! {
         prop_assert_eq!(Vec2Fx::new(Fx::ZERO, Fx::from_int(n)).length(), Fx::from_int(n).abs());
     }
 
+    // REQ: TA-VEC-02
     #[test]
     fn normalized_has_unit_length_or_is_zero(x in -1000i32..1000, y in -1000i32..1000) {
         let v = Vec2Fx::from_int(x, y);
@@ -375,6 +388,7 @@ proptest! {
         }
     }
 
+    // REQ: TA-VEC-03
     #[test]
     fn distance_is_symmetric_and_zero_only_at_zero(
         ax in -1000i32..1000, ay in -1000i32..1000,
@@ -389,6 +403,7 @@ proptest! {
         }
     }
 
+    // REQ: TA-VEC-04
     /// The facing computation only has to be good to a fraction of a degree,
     /// but it has to be good to that everywhere, including the octant seams.
     #[test]
@@ -418,6 +433,7 @@ proptest! {
     }
 }
 
+// REQ: TA-ANG-01
 /// Exhaustive over every representable angle. 65536 iterations is nothing, and
 /// exhaustive beats sampled when the domain is this small — there is no seam
 /// or table boundary left for a sampler to miss.
@@ -448,6 +464,7 @@ fn trig_identities_hold_for_every_angle() {
     );
 }
 
+// REQ: TA-ANG-02
 #[test]
 fn angle_quadrant_signs_are_correct() {
     let cases = [
@@ -476,6 +493,7 @@ fn angle_quadrant_signs_are_correct() {
     }
 }
 
+// REQ: TA-ANG-03
 /// Wrapping through zero must be continuous — a discontinuity at the seam
 /// would make a unit facing due east flicker.
 #[test]

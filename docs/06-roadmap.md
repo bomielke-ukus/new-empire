@@ -23,7 +23,7 @@ Effort estimates are relative sizes, not calendar dates.
 - State hashing + `tools/simrunner` replaying a log twice and asserting equality
 - CI: build, test, clippy, the `sim` no-float check, the `sim` dependency check
 
-**Done when:** `simrunner` replays a synthetic 10,000-tick command log twice and
+**Done when: [RM-M0-01]** `simrunner` replays a synthetic 10,000-tick command log twice and
 every per-tick hash matches, on all three platforms.
 
 **Size:** Medium.
@@ -49,7 +49,7 @@ on a real GPU from this environment — first thing to check on a desktop.
 - `mapgen` producing a seeded Inland map with resources and balanced starts
 - `tools/mapview` to eyeball generated maps
 
-**Done when:** we can generate a map from a seed, scroll and zoom around it
+**Done when: [RM-M1-01]** we can generate a map from a seed, scroll and zoom around it
 smoothly at 60 fps, and the same seed always produces the same map.
 
 **Size:** Medium.
@@ -80,9 +80,9 @@ still waiting on a machine with a display.
 - Houses and the population cap
 - Resource bar and the selection panel
 
-**Done when:** a player can select villagers, gather all four resources, build a
-house and a Storehouse, and 60 villagers can be ordered across the map without
-one getting permanently stuck. Pathfinding property tests pass on adversarial
+**Done when: [RM-M2-01]** a player can select villagers, gather all four resources, build a
+house and a Storehouse, and **[RM-M2-02]** 60 villagers can be ordered across the map without
+one getting permanently stuck. **[RM-M2-03]** Pathfinding property tests pass on adversarial
 maps.
 
 **Size:** Large. *This is the milestone that decides whether the game feels good.*
@@ -114,7 +114,7 @@ cycles idle villagers.
 - Age-up presentation: fanfare, light sweep, building and unit sprite swaps
 - Full command panel with the context-sensitive command grid
 
-**Done when:** a player can go Stone → Tool → Bronze in a live match, and the
+**Done when: [RM-M3-01]** a player can go Stone → Tool → Bronze in a live match, and the
 settlement visibly changes at each transition.
 
 **Size:** Medium.
@@ -130,7 +130,7 @@ settlement visibly changes at each transition.
 - Towers, walls, gates
 - Villagers fleeing and raising an alarm
 
-**Done when:** two forces of 40 units fight, the result is readable, counters
+**Done when: [RM-M4-01]** two forces of 40 units fight, the result is readable, counters
 work as designed, and no unit gets stuck during combat.
 
 **Size:** Large.
@@ -144,7 +144,7 @@ work as designed, and no unit gets stuck during combat.
 - Four difficulty levels
 - Victory and defeat conditions, elimination, resign
 
-**Done when:** `simrunner` runs 20 headless AI-vs-AI matches with no crashes, no
+**Done when: [RM-M5-01]** `simrunner` runs 20 headless AI-vs-AI matches with no crashes, no
 stuck units, and Hard beats Easy at least 18 times out of 20.
 
 **Size:** Large.
@@ -160,7 +160,7 @@ stuck units, and Hard beats Easy at least 18 times out of 20.
 - Settings: audio, video, hotkey rebinding, UI scale
 - Notification system with click-to-jump
 
-**Done when:** a player can launch the game, configure and play a full skirmish
+**Done when: [RM-M6-01]** a player can launch the game, configure and play a full skirmish
 to a victory screen, save mid-match, reload, and watch the replay — without ever
 touching a terminal.
 
@@ -180,7 +180,7 @@ touching a terminal.
 - Notification polish, tooltips, first-time hints
 - Performance pass against the budgets in `docs/04-technical-architecture.md`
 
-**Done when:** someone who loved the original plays a full match and does not
+**Done when: [RM-M7-01]** someone who loved the original plays a full match and does not
 want to stop. That is a real acceptance test and we should run it on actual
 people.
 

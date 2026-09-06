@@ -10,6 +10,7 @@
 use proptest::prelude::*;
 use sim::{Fx, Rng};
 
+// REQ: TA-RNG-01
 /// The generator is the one source of variation in the simulation, so its
 /// output stream is part of the replay format in everything but name. If a
 /// refactor changes these numbers, every replay ever recorded becomes
@@ -38,6 +39,7 @@ fn rng_stream_is_frozen() {
 }
 
 proptest! {
+    // REQ: TA-RNG-02
     #[test]
     fn below_is_always_in_range(seed in any::<u64>(), n in any::<u32>(), calls in 1usize..50) {
         let mut rng = Rng::new(seed);
@@ -71,6 +73,7 @@ proptest! {
         }
     }
 
+    // REQ: TA-RNG-03
     #[test]
     fn chance_respects_its_bounds(seed in any::<u64>(), den in 1u32..1000) {
         let mut rng = Rng::new(seed);
@@ -80,6 +83,7 @@ proptest! {
         }
     }
 
+    // REQ: TA-RNG-04
     /// One draw per call, always. Desync diagnosis works by comparing draw
     /// counts to localise where two machines parted company, which only tells
     /// you anything if the count is a function of the code path taken.
@@ -105,6 +109,7 @@ proptest! {
         prop_assert_eq!(rng.draws(), 6);
     }
 
+    // REQ: TA-RNG-05
     #[test]
     fn rng_serde_round_trip_preserves_the_stream(seed in any::<u64>(), warmup in 0usize..40) {
         let mut rng = Rng::new(seed);
@@ -119,6 +124,7 @@ proptest! {
         prop_assert_eq!(a, b);
     }
 
+    // REQ: TA-RNG-06
     /// Two seeds must not collapse onto the same stream. `Rng::new` runs the
     /// seed through splitmix64 precisely so that adjacent match seeds do not
     /// produce correlated matches.
@@ -132,6 +138,7 @@ proptest! {
     }
 }
 
+// REQ: TA-RNG-07
 /// A statistical smoke test, not a randomness certification: it exists to
 /// catch a range-reduction bug that biases everything toward one end, which is
 /// the failure mode that would actually reach players (every villager

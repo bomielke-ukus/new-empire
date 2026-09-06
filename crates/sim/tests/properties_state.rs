@@ -57,6 +57,7 @@ fn any_command() -> impl Strategy<Value = Command> {
 }
 
 proptest! {
+    // REQ: TA-DET-03
     /// The lockstep guarantee as a property rather than an example: for *any*
     /// set of commands and *any* pair of arrival orders, both peers hold a
     /// byte-identical queue and execute in the same order.
@@ -111,6 +112,7 @@ proptest! {
         prop_assert_eq!(a.drain_due(u64::MAX), b.drain_due(u64::MAX));
     }
 
+    // REQ: TA-CMD-01
     #[test]
     fn drain_takes_everything_due_and_nothing_later(
         commands in prop::collection::vec((0u64..20, any_command()), 0..30),
@@ -207,12 +209,14 @@ fn run_ops(ops: &[Op]) -> (World, Vec<EntityId>) {
 }
 
 proptest! {
+    // REQ: TA-ENT-01
     #[test]
     fn invariants_hold_after_any_sequence(ops in prop::collection::vec(any_op(), 0..80)) {
         let (w, _) = run_ops(&ops);
         prop_assert!(w.check().is_ok(), "{:?}", w.check().unwrap_err());
     }
 
+    // REQ: TA-ENT-02
     /// Slot reuse must be lowest-index-first, because the *identity* a new
     /// entity receives is part of the simulation state and two machines that
     /// allocate differently have already diverged.
@@ -228,6 +232,7 @@ proptest! {
         prop_assert_eq!(id.index(), expected);
     }
 
+    // REQ: TA-ENT-03
     /// A handle to a despawned entity must never resolve, even after its slot
     /// has been handed to someone else.
     #[test]
@@ -240,6 +245,7 @@ proptest! {
         }
     }
 
+    // REQ: TA-ENT-04
     #[test]
     fn iteration_is_slot_order(ops in prop::collection::vec(any_op(), 0..80)) {
         let (w, _) = run_ops(&ops);
@@ -250,6 +256,7 @@ proptest! {
         prop_assert_eq!(w.slots().count(), w.len());
     }
 
+    // REQ: TA-ENT-05
     /// The despawn-scrub guarantee (`docs/04` §15): what a dead entity *used
     /// to hold* can never influence equality or the hash.
     ///
