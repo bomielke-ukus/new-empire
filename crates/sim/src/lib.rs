@@ -46,7 +46,7 @@ pub use hash::{HashState, StateHasher};
 pub use map::{Terrain, TileMap, MAX_ELEVATION};
 pub use mapgen::{MapKind, MapSpec};
 pub use orders::{GatherPhase, Nav, NavState, Order, Player, Production, Rally};
-pub use replay::{Divergence, Replay, ReplayError, VerifyError};
+pub use replay::{Divergence, Replay, ReplayError, Trace, VerifyError};
 pub use rng::Rng;
 pub use simulation::{PlaceError, TickStats, Violation};
 pub use simulation::{SimConfig, Simulation, TICKS_PER_SECOND, TICK_MS};

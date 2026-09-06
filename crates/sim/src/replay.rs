@@ -2,6 +2,7 @@
 //! the primary bug-report format: if it reproduces from a replay, it is fixable.
 
 use crate::command::{Command, CommandError};
+use crate::hash::StateHasher;
 use crate::simulation::{SimConfig, Simulation};
 use serde::{Deserialize, Serialize};
 
@@ -99,6 +100,30 @@ impl core::fmt::Display for ReplayError {
 }
 
 impl std::error::Error for ReplayError {}
+
+/// The result of folding a whole run's per-tick hashes into one value.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Trace {
+    /// How many ticks were run.
+    pub ticks: u64,
+    /// FNV-1a over every `(tick, hash)` pair, in order.
+    pub digest: u64,
+    /// The state hash at the last tick.
+    pub final_hash: u64,
+    /// Live entities at the end. Not part of the digest; a sanity readout
+    /// that makes a "0 ticks ran" mistake obvious in a CI log.
+    pub entities: u64,
+}
+
+impl core::fmt::Display for Trace {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "ticks {} digest {:016x} final {:016x} entities {}",
+            self.ticks, self.digest, self.final_hash, self.entities
+        )
+    }
+}
 
 /// Why [`Replay::verify`] did not return a hash.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -202,6 +227,29 @@ impl Replay {
             on_tick(sim.tick(), sim.state_hash());
         }
         Ok(sim)
+    }
+
+    /// Runs the replay once and folds every per-tick hash into one digest.
+    ///
+    /// This is the value CI compares across builds, operating systems and
+    /// architectures. Comparing only the *final* hash would miss a divergence
+    /// that happens mid-match and then heals — and "it healed" is not a
+    /// property a deterministic simulation is allowed to have. Constant
+    /// memory, so it works on the longest replay.
+    pub fn trace_digest(&self) -> Result<Trace, ReplayError> {
+        let mut digest = StateHasher::new();
+        let mut final_hash = 0;
+        let sim = self.run(|t, h| {
+            digest.write_u64(t);
+            digest.write_u64(h);
+            final_hash = h;
+        })?;
+        Ok(Trace {
+            ticks: self.ticks,
+            digest: digest.finish(),
+            final_hash,
+            entities: sim.world().len() as u64,
+        })
     }
 
     /// Runs the replay twice and reports the first tick whose hashes differ,

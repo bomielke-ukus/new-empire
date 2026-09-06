@@ -473,6 +473,22 @@ impl Simulation {
         if info.footprint > 0 {
             let (ax, ay) = nav::anchor_tile(self.world.pos[i], info.footprint as i32);
             self.nav.unblock_footprint(ax, ay, info.footprint as i32);
+            // Relabel now, not at the end of the tick.
+            //
+            // `remove` is reachable from the middle of `orders()`, when a
+            // villager exhausts a node. Every villager processed after it in
+            // the same pass queries `NavGrid::connected` to approach its own
+            // node — and those queries would read component labels from
+            // before this tile opened up. In a debug build the assertion in
+            // `component` catches it; in release it silently answers from
+            // stale data, so a villager can decide a reachable node is
+            // unreachable. `step` already refreshes after `orders` for
+            // exactly this reason; the gap was queries *within* the pass.
+            //
+            // A relabel is a full BFS, but a node is removed once in its
+            // life, so this costs a sweep per exhausted node rather than one
+            // per tick.
+            self.nav.refresh();
         }
         if self.world.construction[i].is_some() {
             let cost = info.cost;
@@ -1948,6 +1964,50 @@ mod tests {
             );
             assert!(sim.world().carry[i].map_or(0, |(_, a)| a) <= CARRY_CAPACITY);
         }
+    }
+
+    #[test]
+    fn a_node_exhausted_while_others_gather_elsewhere() {
+        // Villagers split across *different* nodes. When one node runs out
+        // it is removed, which unblocks its tile and dirties the nav grid —
+        // and the villagers still walking to their own nodes then query
+        // connectivity inside the same `orders()` pass.
+        //
+        // `exhausted_node_is_removed_and_villagers_move_to_the_next` cannot
+        // reach this: its three villagers share one node, so when it goes
+        // they all lose it together and none is left mid-approach.
+        let mut sim = inland(3);
+        let (sx, sy) = sim.starts()[0];
+        let tc = nav::centre((sx, sy));
+        let vill = owned(&sim, 0, kinds::VILLAGER);
+        assert!(vill.len() >= 3, "need villagers to split up");
+
+        // One villager on the bush (150 food, exhausts soonest), the rest on
+        // wood and stone, so somebody is always mid-approach.
+        let bush = nearest_kind(&sim, kinds::BERRY_BUSH, tc);
+        let tree = nearest_kind(&sim, kinds::TREE, tc);
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Gather {
+                ids: vill[..1].to_vec(),
+                node: bush,
+            },
+        });
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Gather {
+                ids: vill[1..].to_vec(),
+                node: tree,
+            },
+        });
+        // Long enough for the wood node (75) to run out under several
+        // villagers while the food gatherer is still walking back and forth.
+        run(&mut sim, 20 * 400);
+        sim.check().expect("invariants must hold throughout");
+        assert!(
+            sim.player(0).unwrap().gathered.iter().sum::<i32>() > 0,
+            "the scenario must actually gather something"
+        );
     }
 
     #[test]
