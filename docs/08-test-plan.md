@@ -32,7 +32,7 @@ Cheapest and fastest first. Only the last has a human in it.
 
 | Layer | What | Cost |
 |---|---|---|
-| **1. Static gates** | `fmt`, `clippy -D warnings`, sim purity, generated-file freshness, requirement traceability, CLI-caller check | seconds |
+| **1. Static gates** | `fmt`, `clippy -D warnings`, sim purity, generated-file freshness, requirement traceability, CLI-caller and workflow validation | seconds |
 | **2. Unit and property tests** | `cargo test`, `proptest` over the maths, the queue and the entity store | seconds |
 | **3. Invariant checking** | `World::check` and `Simulation::check`, after every tick under `--features debug-checks` | free in shipping builds |
 | **4. Golden traces and images** | A committed replay corpus with a digest over every tick, and committed PNGs of fixed scenes | ~15 s |
@@ -59,7 +59,7 @@ raising a tree's wood yield from 75 to 76, which fails four entries by name.
 
 | Job | Contents |
 |---|---|
-| **Lint and purity** | fmt, clippy, sim purity, generated files, traceability, CLI callers |
+| **Lint and purity** | fmt, clippy, sim purity, generated files, traceability, CLI callers, workflow validation |
 | **Test (×3 OS)** | Every test including the corpus and the golden images; determinism runs; a software-rendered frame |
 | **Hashes agree** | The final state hash from all three platforms must be identical |
 | **Performance** | Benchmark scenarios against `perf/budgets.ron`, with the numbers posted to the run summary |
@@ -352,6 +352,7 @@ scripts/check-sim-purity.sh
 scripts/check-generated.sh
 scripts/check-traceability.sh
 scripts/check-cli-callers.sh
+scripts/check-workflows.sh
 
 # Everything else.
 cargo test --workspace

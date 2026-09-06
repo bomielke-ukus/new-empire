@@ -32,6 +32,8 @@ jobs:
         run: scripts/check-traceability.sh
       - name: every documented CLI invocation parses
         run: scripts/check-cli-callers.sh
+      - name: workflow files are valid
+        run: scripts/check-workflows.sh
 
   # The determinism contract: the same command log produces the same hashes,
   # on every platform we ship to. This is M0's acceptance test.
@@ -45,7 +47,12 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     env:
-      MAPVIEW_ARTEFACT_DIR: ${{ runner.temp }}/new-empire-golden-failures
+      # Absolute, via `github.workspace`. Two traps here: the `runner`
+      # context is not available in a job-level `env:` block (only inside
+      # steps), and cargo runs an integration test with its working directory
+      # at the *package* root, so a relative path would land in
+      # tools/mapview/ and the upload below would find nothing.
+      MAPVIEW_ARTEFACT_DIR: ${{ github.workspace }}/golden-failures
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -78,7 +85,7 @@ jobs:
         if: failure()
         with:
           name: golden-image-failures-${{ matrix.os }}
-          path: ${{ runner.temp }}/new-empire-golden-failures/
+          path: golden-failures/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
