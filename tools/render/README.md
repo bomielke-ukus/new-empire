@@ -28,15 +28,24 @@ ruin a sprite set. `render_sheet.py` parents the subject to a turntable empty
 and rotates the empty, so an animation that keys the subject's own rotation
 cannot fight the facing.
 
-**Three lights, placed by where they sit on screen** rather than in the world,
-because screen position is the thing that has to stay constant across every
-sprite in the game:
+**Three lights, placed relative to the camera** rather than in world space,
+because their position relative to the viewer is what has to stay constant
+across every sprite in the game:
 
 | Light | Screen position | Energy | Job |
 |---|---|---|---|
-| key | 45° up and to the left | 4.0, warm | Defines form. The only light that does. |
-| fill | up and to the right | 1.0, cool | Keeps shadows sky-lit rather than black. The 4:1 ratio is what gives the palette's ramps somewhere to go. |
-| rim | directly above, behind | 2.0, neutral | Catches the top edge, so a dark unit stays legible against dark terrain. |
+| key | over the viewer's left shoulder | 4.0, warm | Defines form. The only light that does. |
+| fill | over the viewer's right shoulder | 1.0, cool | Lights the screen-right face, which the key cannot reach. The 4:1 ratio is what gives the palette's ramps somewhere to go. |
+| rim | behind the subject and high | 1.5, neutral | Catches the top and back edges, so a dark unit stays legible against dark terrain. |
+
+**"Relative to the camera" is load-bearing**, and this rig got it wrong first
+time. Lights were placed by where they sit in the *image plane* — 45° up and to
+the left of the subject — which is almost edge-on to both vertical faces the
+camera can see. Every geometric check passed and the first render was a black
+silhouette with a lit hat: the screen-left face received 1.0 of light and the
+screen-right face 0.31, against 3.7 on the tops. Lights need a large component
+*toward the viewer*. `atlas rig` now sums the light reaching each visible face
+and fails if any of them goes dark, which is the only check that catches this.
 
 **The camera slides up per size class.** A subject modelled standing on the
 origin would otherwise render at the frame centre, wasting the bottom half of
@@ -57,8 +66,11 @@ lands somewhere you did not intend.
   proportion, as every isometric RTS does it, because a unit has to be readable
   at a glance.
 - **The subject stands on the world origin**, feet at `z = 0`, facing **+Y**.
-- **No asymmetric detail.** SE, E and NE are horizontal mirrors of SW, W and NW
-  (`docs/05` §2.1), so a shield on one arm only will swap arms halfway round.
+- **No asymmetric detail that carries meaning.** SE, E and NE are horizontal
+  mirrors of SW, W and NW (`docs/05` §2.1), so anything on one side swaps sides
+  halfway round the compass. A tool in one hand is fine — the greybox villager
+  holds one and nobody can tell. A shield that the player is meant to read as
+  being on the unit's left, or an insignia, is not.
 - **Player-coloured surfaces are textured pure magenta** (`#ff00ff`), which
   appears nowhere in the palette. `atlas quantize` maps pixels near that hue
   into the reserved ramp at indices 240–247 *by lightness*, so the shading the

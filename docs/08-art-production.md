@@ -283,13 +283,20 @@ It also slides up per size class so a subject standing on the origin lands on
 its ground-contact anchor instead of the frame centre, which would waste the
 bottom half of every frame.
 
-**Light.** Three suns, positioned by where they sit in *screen* space rather
-than world space, because screen position is what has to stay constant across
-every sprite: a warm key 45° up and to the left, a cool fill at a quarter
-strength up and to the right, and a rim from above and behind that keeps a dark
-unit legible against dark terrain. The 4:1 key-to-fill ratio is what gives the
-palette's ramps somewhere to go. This is the single most important thing to
-freeze early, and changing it later invalidates every frame already rendered.
+**Light.** Three suns, positioned *relative to the camera* — a warm key over
+the viewer's left shoulder, a cool fill at a quarter strength over the right,
+and a rim from behind and above that keeps a dark unit legible against dark
+terrain. The 4:1 key-to-fill ratio is what gives the palette's ramps somewhere
+to go. This is the single most important thing to freeze early, and changing it
+later invalidates every frame already rendered.
+
+Relative to the *camera*, not in the image plane. The rig's first version placed
+the lights 45° up-left of the subject as seen on screen, which is almost edge-on
+to both vertical faces the camera can see. It passed every geometric check and
+rendered the greybox villager as a black silhouette with a lit hat: the
+screen-left face got 1.0 of light and the screen-right face 0.31, against 3.7 on
+the tops. `atlas rig` now sums the light reaching each visible face and fails if
+one goes dark — see §10.
 
 **Colour management.** `view_transform` must be `Standard`. Blender defaults to
 AgX or Filmic, which desaturate and roll off highlights, so the colours you
@@ -377,19 +384,57 @@ proves a fresh clone can produce what the game loads.
    with the Blender scripts in `tools/render/` and the verification in
    `atlas rig`. The one thing left that no test can prove is that the rig looks
    good, which needs a Blender install and a first model.
-2. **Greybox one unit end to end** — model, rig, render, quantise, validate,
-   in-game with player colour and mirroring working. `docs/05` §6 step 2. Every
-   step of that path except the render itself is already covered by tests; one
-   real model proves or disproves the route.
+2. **Greybox one unit** — model, render, quantise, validate. **Done**, and what
+   it found is §10. `tools/render/greybox_villager.py` builds the subject,
+   `render_sheet.py` renders 150 frames through the rig, `atlas compose` turns
+   them into `assets/sprites/villager`, and it passes the gate. The player
+   colour key survives shading into 7 of the ramp's 8 steps.
 
-   **Do Q10 first.** `crates/view` holds a second 256-colour palette that
-   disagrees with this one at every index except transparency and the player
-   ramp, so the "in-game" half of this step produces wrong colours until they
-   are unified. It is deferred, not forgotten, and it is measured in `docs/07`.
+   **Still open: the same unit in-game.** That half needs Q10 — `crates/view`
+   holds a second 256-colour palette that disagrees with this one at every index
+   except transparency and the player ramp, so the renderer would draw the
+   villager in the wrong colours. Deferred to its own PR, and measured in
+   `docs/07`.
 3. **Model the slice**: 12 units and 10 buildings, with the age costume and
    architecture variants as mesh swaps.
 4. **Commission the icons and UI panel set** (§4.3) in parallel — they are off
    the critical path and do not depend on the render rig.
+
+---
+
+## 10. What the greybox unit found
+
+The point of building one real subject early is to find the things that no
+amount of checking a specification against itself can find. Three, in order of
+how badly they would have scaled:
+
+**The lighting lit the wrong surfaces.** Covered in §7. The rig was internally
+consistent and produced silhouettes. Caught only by rendering something; now
+caught by `atlas rig`, which sums light per visible face.
+
+**The anchor rule was wrong, not just strict.** `atlas validate` required that
+nothing be drawn below a sprite's ground contact point, on the reasoning that a
+sprite hanging below its anchor floats. But the anchor is the *centre* of a
+unit's ground footprint, and in a 2:1 projection the half of any footprint
+nearer the camera projects *below* that centre — so a correctly modelled
+standing villager violated the rule by two pixels, and a corpse lying across its
+own tile violated it properly. The rule is now symmetric: the lowest pixel must
+be within half a tile height of the anchor, either way. That is the statement
+that actually means "this sprite sits on its own tile", and it catches both a
+unit hovering and a corpse that has slid onto the tile in front.
+
+**A body pitching forward leaves its own tile.** The death animation rotated the
+villager about its feet, which lays it out entirely on one side of the origin —
+a half-tile from where it died, with the anchor no longer under it. The fix is
+in the model, not the tool: the body slides back by half its own length as it
+falls. Worth knowing before animating twenty more units.
+
+One thing it did *not* find, which the spec had warned about: the villager holds
+a tool in one hand, and mirroring SW/W/NW into SE/E/NE swaps it to the other.
+Nobody can tell. The rule in `tools/render/README.md` has been softened from "no
+asymmetric detail" to "no asymmetric detail that carries meaning" — a shield the
+player is meant to read the position of, or an insignia, still cannot be
+mirrored.
 
 ---
 

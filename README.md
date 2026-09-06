@@ -80,6 +80,7 @@ Workspace layout:
 | `scripts` | CI checks |
 | `assets/palette` | The 256-colour indexed palette, with the reserved player-colour ramp |
 | `assets/render` | The frozen render rig every sprite is rendered through |
+| `assets/sprites` | Rendered art (needs Blender, so committed rather than regenerated) |
 
 ## Design pillars
 

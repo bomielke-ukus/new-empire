@@ -31,7 +31,12 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const DEFAULT_PALETTE: &str = "assets/palette/ancient.ron";
+/// Real art, committed. Rendered through Blender, which CI does not have, so
+/// it cannot be regenerated on demand the way the palette and placeholders can.
 const DEFAULT_ASSETS: &str = "assets/sprites";
+/// Placeholder art, generated. Kept in its own tree so `atlas placeholder`
+/// can never overwrite a rendered sprite set.
+const DEFAULT_PLACEHOLDERS: &str = "assets/placeholder-sprites";
 const DEFAULT_RIG: &str = "assets/render/rig.json";
 
 struct Args {
@@ -160,6 +165,15 @@ fn rig_report(args: &[String]) -> ExitCode {
             l.screen_position.right,
             l.screen_position.up
         );
+    }
+
+    println!("\nlight reaching each visible face (energy x Lambert):");
+    for (label, normal) in [
+        ("screen-left  (+X)", [1.0, 0.0, 0.0]),
+        ("screen-right (+Y)", [0.0, 1.0, 0.0]),
+        ("top          (+Z)", [0.0, 0.0, 1.0]),
+    ] {
+        println!("  {label}  {:.3}", rig.illumination(normal));
     }
 
     println!("\nsize classes:");
@@ -300,14 +314,23 @@ fn validate_all(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => return fail(&e),
     };
-    if !a.assets.exists() {
+    // Both trees: real art and the generated placeholders go through the same
+    // gate, which is the point of generating placeholders as files at all.
+    let mut roots = vec![a.assets.clone()];
+    if a.assets == Path::new(DEFAULT_ASSETS) {
+        roots.push(PathBuf::from(DEFAULT_PLACEHOLDERS));
+    }
+    let mut manifests = Vec::new();
+    for root in roots.iter().filter(|r| r.exists()) {
+        match find_manifests(root) {
+            Ok(m) => manifests.extend(m),
+            Err(e) => return fail(&e),
+        }
+    }
+    if manifests.is_empty() {
         println!("{}: nothing to validate yet", a.assets.display());
         return ExitCode::SUCCESS;
     }
-    let manifests = match find_manifests(&a.assets) {
-        Ok(m) => m,
-        Err(e) => return fail(&e),
-    };
 
     let mut failed = 0;
     for path in &manifests {
@@ -336,7 +359,7 @@ fn validate_all(args: &[String]) -> ExitCode {
 }
 
 fn placeholders(args: &[String]) -> ExitCode {
-    let a = match parse(args, DEFAULT_ASSETS) {
+    let a = match parse(args, DEFAULT_PLACEHOLDERS) {
         Ok(a) => a,
         Err(e) => return usage(&e),
     };
@@ -344,7 +367,10 @@ fn placeholders(args: &[String]) -> ExitCode {
         Ok(p) => p,
         Err(e) => return fail(&e),
     };
-    let written = match placeholder::generate(&a.out, &palette) {
+    // A set that has real art does not need a placeholder, and generating one
+    // anyway invites someone to load the wrong file.
+    let real = PathBuf::from(DEFAULT_ASSETS);
+    let written = match placeholder::generate_except(&a.out, &palette, &real) {
         Ok(w) => w,
         Err(e) => return fail(&e),
     };
@@ -374,6 +400,13 @@ fn placeholders(args: &[String]) -> ExitCode {
         written.len(),
         a.out.display()
     );
+    let skipped = placeholder::catalogue_len() - written.len();
+    if skipped > 0 {
+        println!(
+            "skipped {skipped} set(s) that already have real art in {}",
+            real.display()
+        );
+    }
     if failed == 0 {
         ExitCode::SUCCESS
     } else {

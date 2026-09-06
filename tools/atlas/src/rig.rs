@@ -105,6 +105,15 @@ pub struct ScreenPosition {
 }
 
 #[derive(Deserialize)]
+pub struct LightingTargets {
+    pub min_screen_left: f64,
+    pub min_screen_right: f64,
+    pub min_top: f64,
+    pub min_left_right_ratio: f64,
+    pub max_left_right_ratio: f64,
+}
+
+#[derive(Deserialize)]
 pub struct Light {
     pub name: String,
     pub rotation_euler_xyz_deg: [f64; 3],
@@ -136,6 +145,7 @@ pub struct Rig {
     pub camera: Camera,
     pub facings: Vec<FacingRig>,
     pub lights: Vec<Light>,
+    pub lighting_targets: LightingTargets,
     pub classes: std::collections::BTreeMap<String, ClassRig>,
     pub render: Render,
 }
@@ -161,6 +171,17 @@ impl Rig {
             * self.projection.authoring_scale
             * self.projection.supersample) as f64;
         render_px[0].max(render_px[1]) as f64 * std::f64::consts::SQRT_2 / tile_at_render
+    }
+
+    /// Light reaching one face, as the sum over lights of `energy · max(0, N·L)`.
+    ///
+    /// Lambert, which is all a check needs: if a face is dark under this it is
+    /// dark in the render too.
+    pub fn illumination(&self, normal: Vec3) -> f64 {
+        self.lights
+            .iter()
+            .map(|l| l.energy * dot(l.direction_toward_light, normal).max(0.0))
+            .sum()
     }
 
     /// Every way the rig can disagree with the spec, as a list of complaints.
@@ -302,6 +323,46 @@ impl Rig {
                     l.name
                 ));
             }
+        }
+
+        // Does the lighting actually light the subject? Every check above is
+        // geometric — the lights are where they claim and above the horizon —
+        // and the first version of this rig passed all of them while rendering
+        // the villager as a black silhouette with a lit hat. The lights sat in
+        // the image plane, almost edge-on to both vertical faces the camera can
+        // see, so they lit the tops of things and nothing else. Only a sum over
+        // the faces that are actually visible catches that.
+        let t = &self.lighting_targets;
+        let left = self.illumination([1.0, 0.0, 0.0]);
+        let right = self.illumination([0.0, 1.0, 0.0]);
+        let top = self.illumination([0.0, 0.0, 1.0]);
+        for (label, got, want) in [
+            ("the screen-left face", left, t.min_screen_left),
+            ("the screen-right face", right, t.min_screen_right),
+            ("the top", top, t.min_top),
+        ] {
+            if got < want {
+                out.push(format!(
+                    "{label} receives {got:.3} of light, under the {want:.3} it needs. \
+                     A light placed in the image plane grazes the faces the camera \
+                     sees; give it a component toward the viewer."
+                ));
+            }
+        }
+        let ratio = left / right.max(1e-9);
+        if ratio < t.min_left_right_ratio {
+            out.push(format!(
+                "the two visible side faces differ by only {ratio:.2}x, under the \
+                 {:.2}x that makes form read; the subject will look flat",
+                t.min_left_right_ratio
+            ));
+        }
+        if ratio > t.max_left_right_ratio {
+            out.push(format!(
+                "the two visible side faces differ by {ratio:.2}x, over the {:.2}x \
+                 beyond which the darker one reads as black",
+                t.max_left_right_ratio
+            ));
         }
 
         // The one thing docs/08 §7 fixes about the lighting: the key comes from
@@ -573,6 +634,35 @@ mod tests {
         let mut rig = rig();
         rig.projection.elevation_step_px = 12;
         assert!(rig.problems().iter().any(|p| p.contains("elevation step")));
+    }
+
+    #[test]
+    fn lights_that_leave_the_visible_faces_dark_are_caught() {
+        let mut rig = rig();
+        // The rig's first shape: every light pushed into the image plane, which
+        // is geometrically valid and renders a silhouette.
+        for l in &mut rig.lights {
+            let b = Basis::from_euler(rig.camera.rotation_euler_xyz_deg);
+            let along = dot(l.direction_toward_light, b.forward);
+            for i in 0..3 {
+                l.direction_toward_light[i] -= along * b.forward[i];
+            }
+            l.direction_toward_light = norm(l.direction_toward_light);
+        }
+        let problems = rig.problems();
+        assert!(
+            problems.iter().any(|p| p.contains("receives")),
+            "lights in the image plane must fail the illumination check, got: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn the_shipped_rig_lights_every_visible_face() {
+        let rig = rig();
+        let t = &rig.lighting_targets;
+        assert!(rig.illumination([1.0, 0.0, 0.0]) >= t.min_screen_left);
+        assert!(rig.illumination([0.0, 1.0, 0.0]) >= t.min_screen_right);
+        assert!(rig.illumination([0.0, 0.0, 1.0]) >= t.min_top);
     }
 
     #[test]

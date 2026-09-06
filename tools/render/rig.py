@@ -36,10 +36,21 @@ def _euler(degrees):
 
 
 def clear_rig():
-    """Removes any previous camera or rig light, leaving the subject alone."""
+    """Removes every camera and light, leaving the subject alone.
+
+    Every light, not just the ones this script made: the rig's three suns are
+    the whole lighting model, and a stray lamp left in a subject file - Blender's
+    startup Light is the usual culprit - changes the shading on every frame
+    rendered from it without announcing itself. Removing one is worth saying out
+    loud, because it means the file was lit for something else.
+    """
     for obj in list(bpy.data.objects):
-        if obj.type == "CAMERA" or (obj.type == "LIGHT" and obj.name.startswith("ne_")):
-            bpy.data.objects.remove(obj, do_unlink=True)
+        if obj.type not in ("CAMERA", "LIGHT"):
+            continue
+        if obj.type == "LIGHT" and not obj.name.startswith("ne_"):
+            print("rig: removing stray light %r; the rig's three suns are the "
+                  "whole lighting model" % obj.name)
+        bpy.data.objects.remove(obj, do_unlink=True)
 
 
 def build_camera(rig, scene):
@@ -171,6 +182,11 @@ def check(rig, scene):
     a different claim, and the one that catches a Euler-order or handedness
     surprise after a Blender upgrade.
     """
+    # matrix_world is only recomputed when the dependency graph evaluates, so
+    # reading it straight after setting rotation_euler returns the identity and
+    # every check below "fails" against an unrotated camera.
+    bpy.context.view_layer.update()
+
     cam = scene.camera
     m = cam.matrix_world.to_3x3()
     right, up, forward = m.col[0], m.col[1], -m.col[2]

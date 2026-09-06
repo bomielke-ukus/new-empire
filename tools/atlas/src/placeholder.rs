@@ -409,10 +409,24 @@ fn animations(class: Class) -> Vec<AnimationSpec> {
 ///
 /// Returns the manifest paths written, so the caller can validate them and
 /// prove the generator produces conformant art rather than merely plausible art.
-pub fn generate(out_dir: &Path, palette: &Palette) -> Result<Vec<std::path::PathBuf>, String> {
+/// Skips any set that already has real art under `real_art`: a rendered sprite
+/// set is not something a placeholder should quietly sit beside. Pass an empty
+/// path to generate the whole catalogue.
+pub fn generate_except(
+    out_dir: &Path,
+    palette: &Palette,
+    real_art: &Path,
+) -> Result<Vec<std::path::PathBuf>, String> {
     let mut written = Vec::new();
 
     for entry in CATALOGUE {
+        if real_art
+            .join(entry.name)
+            .join(format!("{}.ron", entry.name))
+            .exists()
+        {
+            continue;
+        }
         let (fw, fh) = {
             let (w, h) = entry.class.size();
             (w * 2, h * 2)
@@ -528,6 +542,11 @@ fn render_manifest(
     s
 }
 
+/// How many sets the placeholder catalogue holds, for the CLI summary.
+pub fn catalogue_len() -> usize {
+    CATALOGUE.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -543,7 +562,8 @@ mod tests {
         let dir = std::env::temp_dir().join("atlas-placeholder-conformance");
         std::fs::remove_dir_all(&dir).ok();
 
-        let manifests = generate(&dir, &palette).expect("generation must succeed");
+        let manifests =
+            generate_except(&dir, &palette, Path::new("")).expect("generation must succeed");
         assert_eq!(manifests.len(), CATALOGUE.len());
 
         let mut failures = Vec::new();
@@ -574,8 +594,8 @@ mod tests {
         let base = std::env::temp_dir().join("atlas-placeholder-repeatable");
         std::fs::remove_dir_all(&base).ok();
         let (a, b) = (base.join("a"), base.join("b"));
-        generate(&a, &palette).unwrap();
-        generate(&b, &palette).unwrap();
+        generate_except(&a, &palette, Path::new("")).unwrap();
+        generate_except(&b, &palette, Path::new("")).unwrap();
 
         for entry in CATALOGUE {
             let name = entry.name;

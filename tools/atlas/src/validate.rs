@@ -326,15 +326,35 @@ fn check_frames_and_anchors(
                         bx + bw
                     ));
                 }
-                // Decay is a corpse settling into the ground, so it is allowed
-                // to sink below its own anchor. Nothing else is.
-                if anim.name != "decay" && ay + 1 < by + bh {
+                // How far the sprite's lowest pixel may sit from the anchor.
+                //
+                // The anchor is the CENTRE of the unit's ground footprint, not
+                // its lowest point, so some content below it is not a bug — it
+                // is the projection. The half of a footprint nearer the camera
+                // projects below the tile's contact point, by up to half a tile
+                // height for anything standing on its own tile, and a body
+                // lying down spreads to exactly that bound. Content further
+                // below than that has slid onto the tile in front; content
+                // further above means the unit hovers over its own tile. Both
+                // are real errors, and the same number bounds them.
+                let slack = Class::Terrain.size().1 / 2 * set.scale;
+                let lowest = by + bh - 1;
+                let anchor_y = ay as i64;
+                let delta = lowest as i64 - anchor_y;
+                if delta > slack as i64 {
                     problems.push(format!(
-                        "{} {} frame {frame}: anchor y {ay} is above the sprite's \
-                         lowest pixel ({}), so it would float",
+                        "{} {} frame {frame}: reaches {delta} px below its anchor, past \
+                         the {slack} px half-tile that keeps it on its own ground",
+                        anim.name,
+                        facing.name()
+                    ));
+                } else if -delta > slack as i64 {
+                    problems.push(format!(
+                        "{} {} frame {frame}: its lowest pixel is {} px above the anchor, \
+                         so it would hover over its own tile",
                         anim.name,
                         facing.name(),
-                        by + bh - 1
+                        -delta
                     ));
                 }
             }

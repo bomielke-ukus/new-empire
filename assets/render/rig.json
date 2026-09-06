@@ -94,18 +94,23 @@
       "name": "key",
       "type": "SUN",
       "rotation_euler_xyz_deg": [
-        52.238756,
+        39.766115,
         0.0,
-        18.434949
+        84.702446
       ],
       "direction_toward_light": [
-        0.25,
-        -0.75,
-        0.612372
+        0.636923,
+        -0.059058,
+        0.768662
       ],
+      "camera_relative": {
+        "toward_viewer": 0.72,
+        "rightward": -0.48,
+        "upward": 0.45
+      },
       "screen_position": {
-        "right": -0.707107,
-        "up": 0.707107
+        "right": -0.492133,
+        "up": 0.461375
       },
       "energy": 4.0,
       "colour": [
@@ -114,24 +119,29 @@
         0.9
       ],
       "angle_deg": 2.0,
-      "note": "Sits at exactly 45 degrees up and to the LEFT in screen space, so it stays put relative to the viewer no matter which way the subject is turned. Warm, and the only light that defines form."
+      "note": "Over the viewer's left shoulder. The large toward-viewer component is the whole point: a light placed in the image plane grazes the two vertical faces the camera can see and renders the subject as a silhouette with a lit hat."
     },
     {
       "name": "fill",
       "type": "SUN",
       "rotation_euler_xyz_deg": [
-        56.174155,
+        51.238449,
         0.0,
-        -112.239524
+        -169.535523
       ],
       "direction_toward_light": [
-        -0.768935,
-        0.314415,
-        0.55667
+        -0.141624,
+        0.766789,
+        0.626081
       ],
+      "camera_relative": {
+        "toward_viewer": 0.65,
+        "rightward": 0.6,
+        "upward": 0.3
+      },
       "screen_position": {
-        "right": 0.766044,
-        "up": 0.642788
+        "right": 0.642345,
+        "up": 0.321173
       },
       "energy": 1.0,
       "colour": [
@@ -140,36 +150,41 @@
         1.0
       ],
       "angle_deg": 8.0,
-      "note": "Screen upper-right, a quarter of the key's strength and cool, so shadows read as sky-lit rather than black. The 4:1 key-to-fill ratio is what gives the palette's ramps somewhere to go."
+      "note": "Over the viewer's right shoulder, a quarter of the key's strength and cool. It exists to light the screen-right face, which the key cannot reach."
     },
     {
       "name": "rim",
       "type": "SUN",
       "rotation_euler_xyz_deg": [
-        69.289407,
+        66.575009,
         0.0,
-        -45.0
+        -54.992844
       ],
       "direction_toward_light": [
-        -0.661413,
-        -0.661413,
-        0.353648
+        -0.751573,
+        -0.526397,
+        0.397548
       ],
-      "screen_position": {
-        "right": -0.0,
-        "up": 0.773957
+      "camera_relative": {
+        "toward_viewer": -0.55,
+        "rightward": 0.15,
+        "upward": 0.75
       },
-      "energy": 2.0,
+      "screen_position": {
+        "right": 0.159223,
+        "up": 0.796117
+      },
+      "energy": 1.5,
       "colour": [
         0.92,
         0.95,
         1.0
       ],
       "angle_deg": 4.0,
-      "note": "Directly above in screen space and behind the subject, catching the top edge. This is what keeps a dark unit legible against dark terrain."
+      "note": "Behind the subject and high, catching the top and back edges so a dark unit stays legible against dark terrain."
     }
   ],
-  "lights_note": "Three suns, defined by where they sit in SCREEN space rather than in world space, because that is the thing that has to stay constant across every sprite in the game.",
+  "lights_note": "Three suns, placed by direction RELATIVE TO THE CAMERA - a component toward the viewer, one across, one up - rather than by where they sit in the image plane. That distinction is the one this rig got wrong first time: a light at 45 degrees up-left of the subject IN THE IMAGE PLANE is almost edge-on to both vertical faces the camera sees, so it lights the tops of things and leaves their sides black. The minimum illumination each visible face must receive is asserted in `atlas rig`.",
   "scale": {
     "tile_world_units": 1.0,
     "elevation_step_world_units": 0.408248,
@@ -324,5 +339,13 @@
     "colour_mode": "RGBA",
     "colour_depth": "8",
     "note": "view_transform MUST be Standard. Blender defaults to AgX or Filmic, which desaturate and roll off the highlights, so the colours you texture are not the colours you get and the quantiser maps them somewhere you did not intend. film_transparent keeps the ground out of the sprite - the game draws its own shadow."
+  },
+  "lighting_targets": {
+    "note": "Illumination reaching each visible face, as sum over lights of energy * max(0, N.L). The camera sees the +X face (screen-left), the +Y face (screen-right) and the top. All three have to be lit, and the two side faces have to differ enough to read as form without either going black.",
+    "min_screen_left": 1.8,
+    "min_screen_right": 0.5,
+    "min_top": 1.0,
+    "min_left_right_ratio": 1.5,
+    "max_left_right_ratio": 5.0
   }
 }
