@@ -35,7 +35,8 @@ cargo test --workspace                       # unit tests for every crate
 cargo run --release -p simrunner -- determinism --ticks 10000
                                              # M0 acceptance: run a synthetic
                                              # match twice, compare every tick
-cargo run --release -p simrunner -- bench --units 1500 --ticks 2000
+cargo run --release -p simrunner -- bench            # per-tick timings
+cargo run --release -p simrunner -- golden           # replay the corpus, compare digests
 cargo run --release -p new-empire [SEED]     # open the game window on a generated map
 cargo run --release -p mapview -- --seed 1 --out frame.png --minimap mini.png
                                              # render a frame to PNG with no GPU

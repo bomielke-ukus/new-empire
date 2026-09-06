@@ -44,9 +44,9 @@ jobs:
       - name: unit tests
         run: cargo test --workspace
       - name: determinism, 10,000 ticks
-        run: cargo run --release -p simrunner -- determinism --seed 1 --ticks 10000 --players 4 --units 400 --save replay-ci.ron
+        run: cargo run --release -p simrunner -- determinism --seed 1 --ticks 10000 --players 4 --save replay-ci.ron
       - name: determinism, second seed, 8 players
-        run: cargo run --release -p simrunner -- determinism --seed 20260905 --ticks 5000 --players 8 --units 800
+        run: cargo run --release -p simrunner -- determinism --seed 20260905 --ticks 5000 --players 8 --size 168
       - name: replay file round-trips
         run: cargo run --release -p simrunner -- verify replay-ci.ron
       - name: software-rendered frame
@@ -62,7 +62,7 @@ jobs:
         run: |
           # The final hash must be identical on every OS. Each job prints it;
           # the compare job below asserts they agree.
-          cargo run --release -p simrunner -- determinism --seed 777 --ticks 3000 --players 4 --units 300 \
+          cargo run --release -p simrunner -- determinism --seed 777 --ticks 3000 --players 4 \
             | grep -oE 'final hash [0-9a-f]{16}' | awk '{print $3}' > hash-${{ matrix.os }}.txt
           cat hash-${{ matrix.os }}.txt
       - uses: actions/upload-artifact@v4
