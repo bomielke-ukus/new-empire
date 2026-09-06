@@ -115,6 +115,63 @@ now.
 Animals need to be killed before they are food, and killing is M4. Berries,
 trees, stone and gold cover "gather all four resources" for the slice.
 
+### D16 — Art is modelled and rendered, not drawn or prompted
+**Date:** 2026-09-05 · **Decided by:** Bo
+
+Closes Q6. Alternatives considered: direct AI sprite generation via the
+purpose-built APIs, permissively licensed asset packs, and commissioning the
+whole inventory. Reasoning in full in `docs/08-art-production.md`.
+
+The short version is that the slice needs ~4,400 individual images and the full
+game ~8,100, and the hard part is not producing any one of them — it is that
+every one has to agree with every other about light, palette, anchor,
+proportion, costume and the identity of the subject across five angles and
+thirty frames. Modelling and rendering makes all six consistent by
+construction: you author ~24 rigged models and the frames fall out of a render
+script. Per-age costume variants, which `docs/05` §2.5 calls the largest art
+cost in the project, become a mesh swap.
+
+Two supporting reasons that are easy to overlook. Age of Empires' own sprites
+were modelled in 3D Studio Max and converted to 2D, so this route reproduces the
+method that produced the look we are after — which is how you get the feel
+without copying anything, since there is nothing to copy from. And purely
+prompt-generated output is not copyrightable in the US, so sprites made that way
+could be lifted out of our data files by anyone.
+
+Generative AI keeps a real job upstream of the frames: concept and costume
+exploration, model textures, and the icons, which are single static images with
+no coherence problem.
+
+### D17 — Placeholders are generated as files, not at runtime
+**Date:** 2026-09-05
+
+`docs/05` §6 said placeholder shapes would be generated at runtime. They are
+generated as indexed PNGs with manifests instead, by `atlas placeholder`.
+
+Runtime shapes prove the renderer can draw a diamond. Files prove the pipeline —
+manifest, sheet layout, indexed palette, player-colour remapping, anchors, five
+authored facings — which is step 2 of the same production plan, and they go
+through `atlas validate` exactly as real art will. The gate is therefore
+load-bearing from M1 rather than from the first drawn sprite. The cost is a
+build step; the generated art is not committed, because it is derived from the
+palette and a committed copy could only go stale.
+
+### D18 — Player colours are searched, not chosen
+**Date:** 2026-09-05
+
+`docs/05` §2.4 required the eight player colours to be checked against
+deuteranopia and protanopia simulation. Doing that to hand-picked colours failed
+badly — pairs collapsed to a tenth of the separation they had in normal vision.
+
+Hue alone cannot separate eight owners for a dichromat. So the ramps are
+generated: hue pinned near each colour's name so it still answers to it, then
+lightness and chroma optimised to maximise the worst pair across normal vision
+and both simulated dichromacies. The measured worst separations (0.086 normal,
+0.076 protanopia, 0.072 deuteranopia) are asserted in `cargo test`, so an edit
+that closes a gap fails the build. Owners are also assigned in palette order and
+the first four held to roughly twice the bar, because most matches never reach
+the fifth colour.
+
 ---
 
 ## Open questions
@@ -142,16 +199,88 @@ in the style of the original's campaign intros.
 "New Empire" is the repository name and a placeholder. Worth deciding before
 there is a main menu (M6).
 
-### Q6 — Where does the art come from in practice?
-Generated, commissioned, or drawn by hand? The spec is source-agnostic and the
-atlas tool validates conformance, but the answer changes cost and schedule for
-M7 substantially. **Needs an answer before M3.**
+### Q6 — Where does the art come from in practice? — **answered, see D16**
+Modelled and rendered, with generative AI upstream of the frames and
+commissioning for icons and UI. Full reasoning and the researched alternatives
+are in `docs/08-art-production.md`.
 
 ### Q7 — Music: licensed, commissioned, or generated?
-Five stems plus four fanfares. Smaller than the sprite problem but on the same
-critical path for M7.
+Five stems plus four fanfares, plus the sound inventory in `docs/05` §5.1.
+
+D16's reasoning does not transfer. Audio has no equivalent of the coherence
+problem that decided the sprite question — a fanfare does not have to agree with
+the next fanfare about anything but key and instrumentation — and the volume is
+two orders of magnitude smaller. The copyright and Steam disclosure positions in
+`docs/08` §5 *do* transfer unchanged, and they cut against generation for
+anything shipped.
+
+**Recommendation:** commission the nine music cues, and treat the sound-effect
+inventory separately — it is large, repetitive and mostly foley, which is what
+licensed libraries are good at. **Still needs a decision before M6.**
 
 ### Q8 — Do we want a hard 4-age structure, or a 5th age?
 The original's four ages map cleanly onto ancient history and end at a natural
 place. A fifth (Classical/Imperial) would extend matches past 40 minutes.
 **Recommendation:** stay at four. Long matches were not the appeal.
+
+### Q9 — What is the second ownership cue, besides colour?
+Player colour is currently the only way to tell whose unit is whose, and
+`docs/08` §6 shows that eight colours cannot be separated comfortably for a
+dichromatic player — the worst pair sits at 0.072 Oklab, against 0.15 for the
+first four owners. Ordering owners so small games use only the well-separated
+colours helps but does not solve an eight-player game.
+
+Options: a per-owner shape badge on the selection ring; a hatch or outline
+pattern keyed to the owner; a dedicated high-contrast palette selectable in
+options, as most modern RTS games ship. The first is cheapest and does not touch
+the art. **Needs an answer before the HUD work in M6.**
+
+### Q10 — There are two palettes, and they disagree
+**Filed:** 2026-09-05 · Deliberately deferred, not overlooked.
+
+M1 and the art pipeline were built in parallel and each grew a 256-colour
+palette. They agree on the two things that matter structurally and on nothing
+else:
+
+| | `crates/view/src/palette.rs` | `assets/palette/ancient.ron` |
+|---|---|---|
+| Index 0 transparent | yes | yes |
+| Player ramp | 240–247 | 240–247 |
+| Everything else | hand-written constants at sparse indices (10–13 browns, 20–22 greens, 30–32 greys…) | 27 material ramps of 8 steps, Oklab-interpolated, densely packed 17–232 |
+
+So a sprite that passes `atlas validate` and is then drawn by the renderer comes
+out with the wrong colours at every index except transparency and player colour.
+Nothing is visibly broken today only because no art has gone through the
+pipeline into the renderer yet — the placeholder atlas in `view` is drawn from
+`view`'s own constants.
+
+The accessibility half is measured rather than argued. `view`'s
+`PLAYER_COLOURS` carries the comment "Chosen to stay distinct under
+deuteranopia and protanopia simulation; verify again when art lands". Verified:
+
+| Palette | Worst of all eight | Worst of the first four |
+|---|---|---|
+| `crates/view` | **0.024** (green/orange, protanopia) | 0.054 (red/green, deuteranopia) |
+| `ancient.ron` | 0.075 (magenta/grey, deuteranopia) | 0.163 (green/yellow, protanopia) |
+
+0.024 Oklab is below the threshold at which two colours are tellable apart at
+all, so under protanopia `view`'s green and orange players are the same colour.
+The instinct in that comment was right; the colours were picked by eye.
+
+**Recommended fix:** `crates/view` stops holding its own table and takes its
+colours from `assets/palette/ancient.ron`, baked into a generated Rust file so
+there is no runtime I/O in the renderer. `view`'s named constants stay — they
+become named indices into the real ramps rather than colours in their own
+right. That keeps one palette, keeps the searched player colours, and keeps the
+per-age material progression `docs/05` §2.5 depends on. The cost is remapping
+M1's placeholder atlas and terrain colours onto the new indices, which is
+mechanical.
+
+Rejected: making `ancient.ron` adopt `view`'s colours. It would drop the player
+separation back to 0.024 and throw away the ramp structure the art spec is
+built on.
+
+**Deferred by Bo, to its own PR.** Nothing renders through the art pipeline
+yet, so this is not urgent — but it becomes urgent the moment the first real
+sprite reaches the renderer, which is the greybox unit in `docs/08` §9 step 2.
+Whoever does that work should expect to do this first.

@@ -6,6 +6,7 @@ members = [
     "crates/render",
     "crates/app",
     "tools/simrunner",
+    "tools/atlas",
     "tools/mapview",
 ]
 
@@ -20,6 +21,11 @@ serde = { version = "1", features = ["derive"] }
 ron = "0.10"
 bytemuck = { version = "1", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+# `png` directly, not through `image`: the art pipeline needs the PLTE and tRNS
+# chunks of an indexed sprite, and `image` decodes indexed PNGs to RGBA, which
+# would throw away the palette indices player colour is remapped from.
+png = "0.17"
+serde_json = "1"
 
 [profile.dev]
 # The sim is exercised for tens of thousands of ticks in tests; unoptimised
