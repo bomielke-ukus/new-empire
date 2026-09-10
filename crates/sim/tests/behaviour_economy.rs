@@ -10,48 +10,10 @@
 //! `the_gather_rate_is_not_the_single_base_rate_the_spec_describes` and
 //! `the_population_cap_is_not_range_checked`.
 
+mod common;
+use common::{index_of, inland, nearest_kind, owned, pos_of, run};
 use sim::kinds::{self, Resource, CARRY_CAPACITY};
-use sim::{Command, CommandKind, EntityId, GatherPhase, Order, SimConfig, Simulation, Vec2Fx};
-
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
-fn inland(seed: u64) -> Simulation {
-    Simulation::new(seed, SimConfig::default())
-}
-
-fn run(sim: &mut Simulation, ticks: u32) {
-    for _ in 0..ticks {
-        sim.step();
-    }
-}
-
-fn owned(sim: &Simulation, player: u8, kind: u16) -> Vec<EntityId> {
-    sim.world()
-        .slots()
-        .filter(|s| sim.world().owner[s.index()] == player && sim.world().kind[s.index()] == kind)
-        .map(|s| sim.world().id_at(s))
-        .collect()
-}
-
-fn index_of(sim: &Simulation, id: EntityId) -> usize {
-    sim.world().slot(id).expect("entity is alive").index()
-}
-
-fn pos_of(sim: &Simulation, id: EntityId) -> Vec2Fx {
-    sim.world().pos[index_of(sim, id)]
-}
-
-/// The nearest live entity of `kind` to `from`, by squared distance.
-fn nearest_kind(sim: &Simulation, kind: u16, from: Vec2Fx) -> EntityId {
-    sim.world()
-        .slots()
-        .filter(|s| sim.world().kind[s.index()] == kind)
-        .min_by_key(|s| from.distance_sq_raw(sim.world().pos[s.index()]))
-        .map(|s| sim.world().id_at(s))
-        .expect("no entity of that kind on the map")
-}
+use sim::{Command, CommandKind, GatherPhase, Order, SimConfig, Simulation};
 
 // ---------------------------------------------------------------------------
 // Gathering — docs/02 §3.3
