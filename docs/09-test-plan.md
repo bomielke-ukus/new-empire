@@ -270,29 +270,60 @@ done".
 
 ## 7. The M1/M2 test backlog
 
-`TRACEABILITY_LANDED` still names only M0, which is understated: M1 and M2 have
-shipped. Running the check with their prefixes added produces **twelve named
-gaps**. They are listed here rather than left implicit, and flipping the switch
-is a one-line change once they are covered.
+`TRACEABILITY_LANDED` now names M1 and M2 as well as M0, so `TA-PATH`,
+`GD-ECON`, `GD-POP` and `RM-M2` are enforced. Coverage went from 51 declared
+requirements to 61, and `MISSING (landed)` is zero.
 
-| ID | The requirement, untested |
+**Two** of the original twelve remain, and neither is waiting on a test being
+written. They are listed by ID in `DEFERRED` in
+`scripts/check-traceability.sh`, each with its blocker, and the script fails if
+one is still listed once a test starts claiming it — a closed deferral that
+stays on the list hides the next one.
+
+| ID | Blocker |
 |---|---|
-| `TA-PATH-02` | A blocked unit repaths within 3 ticks and never stops silently |
-| `TA-PATH-04` | Faster units overtake slower ones on a shared route |
-| `TA-PATH-05` | Units never occupy the same tile centre; overlap resolves by entity ID |
-| `TA-PATH-06` | Path requests are budgeted, with player orders serviced before AI ones |
-| `RM-M2-03` | Pathfinding property tests pass on adversarial maps — mazes, single-tile gaps, full enclosure |
-| `GD-ECON-02` | Base gather rate 0.45/s and carry capacity 10 |
-| `GD-ECON-03` | The Storehouse accepts every resource |
-| `GD-ECON-04` | Gatherers walk to the *nearest* valid drop-off |
-| `GD-ECON-05` | Farms auto-reseed — not yet implementable, farms are M3 |
-| `GD-POP-01` | House gives +5 population for 30 wood |
-| `GD-POP-02` | Default cap 75, configurable 50–200 |
-| `GD-POP-03` | Villager costs 50 food |
+| `GD-ECON-05` | Farms auto-reseed. Farms are M3; there is nothing to test. |
+| `TA-PATH-02` | See below. Needs a design decision, not a test. |
 
-The pathfinding four are the ones that matter. `docs/06` calls M2 "the
-milestone that decides whether the game feels good", and four of the five
-behaviours `docs/04` §5 lists as "tested explicitly" are not.
+### TA-PATH-02: the number in the spec cannot be shipped as it stands
+
+`docs/04` asks for a repath "within 3 ticks". `STALL_TICKS` is 40. Every value
+below 40 strands villagers in M2's own
+`sixty_villagers_cross_the_map_without_getting_stuck`:
+
+| `STALL_TICKS` | 40 | 20 | 15 | 10 | 8 | 6 | 5 | 4 | 3 |
+|---|---|---|---|---|---|---|---|---|---|
+| villagers failing to arrive (of 60) | 0 | 1 | 5 | 5 | 6 | 5 | 5 | 5 | 9 |
+
+The cause is that `Nav::replans` is a per-order allowance of **3**, never
+reset. How often a unit exhausts it is journey-time ÷ `STALL_TICKS`, so the
+allowance is implicitly calibrated to 40: at 40 a three-minute crossing
+affords about 90 stall windows and using 3 is rare; at 3 it affords 1,200 and
+using 3 is routine. They are one tuning constant pretending to be two.
+
+The economics argue for tightening it. Measured across the corpus at 3:
+`long-run` gathers 3,950 against 3,555 with the same fourteen buildings, and
+`economy-8p` gathers 875 against 715, for 0.24% more path searches on
+`marching-8p` and no movement in p99 outside run-to-run noise.
+
+Resetting `replans` on progress is **not** the fix, and was tried: it drives
+`path_failures` to zero and costs about a third of `long-run`'s gathering,
+because the allowance running out is the *give-up* mechanism — `nav_failed`
+returns the unit to `Order::Idle`, where the idle counter surfaces it and it
+can be re-tasked. A unit that never gives up churns against a contested node
+forever. Making both halves of [TA-PATH-02] true needs a replan allowance
+scaled to the journey rather than a flat 3.
+
+### What TA-PATH-06 got, and did not
+
+The budget half is tested: a 300-villager crowd ordered across a 200-tile map
+on one tick drives `path_deferred` above zero, and every unit is then served
+rather than dropped — which is the requirement's actual content. The
+**priority** half ("player-issued orders before AI-issued ones") is not
+implemented: `plan_paths` iterates slots in index order with no priority
+queue, and there is no `ai` crate to issue a competing order. It is owed to
+M5, and is recorded here rather than in `DEFERRED` because the requirement as
+a whole is now partly covered.
 
 ---
 
