@@ -9,6 +9,9 @@ mod clock;
 mod input;
 mod selection;
 
+#[cfg(test)]
+mod tests;
+
 use clock::FixedClock;
 use input::Input;
 use selection::Selection;
@@ -387,6 +390,12 @@ impl App {
     }
 
     fn left_press(&mut self, px: f32, py: f32) {
+        // The minimap is drawn above the HUD. Its whole diamond must also
+        // win hit-testing, including while placing a building.
+        let (mm, map) = (self.minimap_rect(), self.map_size());
+        if self.input.left_pressed(&mut self.camera, mm, map, px, py) {
+            return;
+        }
         // HUD buttons first.
         if self.over_hud(px, py) {
             if let Some(b) = self
@@ -412,10 +421,6 @@ impl App {
                     }
                 }
             }
-            return;
-        }
-        let (mm, map) = (self.minimap_rect(), self.map_size());
-        if self.input.left_pressed(&mut self.camera, mm, map, px, py) {
             return;
         }
         self.selection.drag_from = Some((px, py));
@@ -473,11 +478,12 @@ impl App {
             self.build_mode = None;
             return;
         }
-        if self.over_hud(px, py) {
+        let minimap_uv = self.minimap_rect().to_uv(px, py);
+        if minimap_uv.is_none() && self.over_hud(px, py) {
             return;
         }
         // Minimap right-click: move there.
-        let target_world = match self.minimap_rect().to_uv(px, py) {
+        let target_world = match minimap_uv {
             Some((u, v)) => {
                 let (w, h) = self.map_size();
                 (u * w as f32, v * h as f32)
@@ -493,7 +499,7 @@ impl App {
         let trainer = self.selection.own_trainer(&self.sim, ME);
 
         // Contextual: something under the cursor?
-        let picked = if self.minimap_rect().to_uv(px, py).is_some() {
+        let picked = if minimap_uv.is_some() {
             None
         } else {
             selection::pick(&self.scene, &self.atlas, &self.camera, &self.sim, px, py)
@@ -558,10 +564,8 @@ impl App {
                     });
                 }
             }
-            Action::CancelTrain => {
-                if let Some(b) = self.selection.own_trainer(&self.sim, ME) {
-                    self.issue(CommandKind::CancelTrain { building: b });
-                }
+            Action::CancelTrain(building) => {
+                self.issue(CommandKind::CancelTrain { building });
             }
             Action::Stop => {
                 let ids = self.selection.own_mobile(&self.sim, ME);
