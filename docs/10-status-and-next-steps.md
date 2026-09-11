@@ -91,7 +91,45 @@ The points that affect what comes next:
 
 ---
 
-## 3. What comes next: M4 — Combat
+## 3. Review follow-up before M4
+
+The 2026-09-11 code review identified a short stabilisation pass before the
+combat work below. Keep the work in these independently reviewable chunks;
+the first chunk is the stopping point for this session.
+
+| Chunk | Scope | Status / completion check |
+|---|---|---|
+| 1 — Restore CI | Fix the stable Clippy failure in PNG palette validation | Fix verified by full CI on PR #6; awaiting merge |
+| 2 — Input routing | Handle minimap clicks before the general HUD hit test; allow Storehouse and Market research cancellation | Pending; check camera jumps, minimap orders, cancellation and refunds through the app input path |
+| 3 — Commands and production | Resolve WASD/command hotkey conflicts and update controls documentation; retain a paid training item when the entity cap prevents spawning | Pending; focused regression checks for input conflicts and capacity recovery |
+| 4 — Real-window check | Run the Mac app through selection, gathering, building, training, cancellation and age advancement | Pending; record the display/GPU and observed results, then resume M4 |
+
+### Work record: chunk 1
+
+- Reviewed the default branch at `ead7002`, including this status document.
+- Confirmed CI run `34645363689` failed at the palette iterator in
+  `crates/view/src/sheets.rs`, with downstream jobs skipped.
+- Changed the iterator to `as_chunks::<3>().0.iter()` and compared the
+  dereferenced RGB array with the palette entry. This preserves complete
+  three-byte groups, their order, the 256-entry limit, and the transparent
+  index-zero exception. The renderer already uses this array-chunk pattern.
+- Local whitespace and requirement-traceability checks passed. Rust is not
+  installed in the review environment, so GitHub Actions supplies the Rust
+  and platform verification; the game window has not been exercised here.
+- The first CI attempt caught an array-reference comparison mismatch in
+  the iterator edit; it was corrected in `332c444` before the full rerun.
+- Full CI passed for code commit `332c444` in
+  [run 34646217196](https://github.com/bomielke-ukus/new-empire/actions/runs/34646217196):
+  lint and purity (including art, generated-file, traceability, CLI and
+  workflow gates), tests on Linux/macOS/Windows, replay and determinism
+  checks, software-rendered frames, performance budgets, the 300-match
+  soak, and agreement of simulation hashes across platforms.
+- This status entry was added after that successful run; the executable
+  code is unchanged. Work is isolated in
+  [PR #6](https://github.com/bomielke-ukus/new-empire/pull/6), awaiting merge.
+  Chunks 2–4 remain pending; no live-window verification is claimed.
+
+## 4. What comes next: M4 — Combat
 
 The roadmap's list, in the order we intend to build it. Each step is
 shippable on its own and has a headless test before it has a sprite.
@@ -126,7 +164,7 @@ nightly job.
 
 ---
 
-## 4. Owed items and known debt
+## 5. Owed items and known debt
 
 Stated so they are not rediscovered.
 
@@ -147,7 +185,7 @@ Stated so they are not rediscovered.
 
 ---
 
-## 5. Decisions needed
+## 6. Decisions needed
 
 Open questions in `docs/07` that will block or shape the next milestones,
 in the order they bite:
@@ -162,7 +200,7 @@ in the order they bite:
 
 ---
 
-## 6. How to check the state yourself
+## 7. How to check the state yourself
 
 ```sh
 cargo test --workspace                       # everything, headless
