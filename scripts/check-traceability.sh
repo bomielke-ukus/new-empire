@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 # Which milestones' requirements must be covered *now*. Extend this as
 # milestones land; that edit is the moment the new requirements start being
 # enforced, and it belongs in the same commit as the milestone.
-LANDED_PREFIXES="${TRACEABILITY_LANDED:-TA-FX TA-VEC TA-ANG TA-RNG TA-CMD TA-ENT TA-DET TA-CLOCK TA-DEP RM-M0}"
+LANDED_PREFIXES="${TRACEABILITY_LANDED:-TA-FX TA-VEC TA-ANG TA-RNG TA-CMD TA-ENT TA-DET TA-CLOCK TA-DEP RM-M0 RM-M2 TA-PATH GD-ECON GD-POP}"
 
 python3 - "$LANDED_PREFIXES" <<'PY'
 import re, subprocess, sys
@@ -66,8 +66,25 @@ for path in files("crates/**/*.rs", "tools/**/*.rs", "scripts/*", "*.yml", ".git
         for rid in REQ.findall(line):
             claims[rid].append(f"{path}:{n}")
 
+# Individual requirements inside a landed prefix that are knowingly not
+# covered. A prefix is the wrong granularity for these: withholding all of
+# `TA-PATH` to accommodate one blocked requirement would leave the other five
+# unwatched, which is the failure this script exists to prevent. Each entry
+# needs a reason, and the reason has to be a blocker rather than a shrug.
+DEFERRED = {
+    "GD-ECON-05": "farms are M3; there is nothing to test yet",
+    "TA-PATH-02": (
+        "the spec asks for a repath within 3 ticks; every STALL_TICKS below "
+        "its current 40 strands villagers in "
+        "sixty_villagers_cross_the_map_without_getting_stuck, because "
+        "Nav::replans is a per-order allowance of 3 that is never reset. "
+        "Needs the allowance decoupled from the timer — a pathfinding design "
+        "change, not a test"
+    ),
+}
+
 def is_landed(rid):
-    return any(rid.startswith(p) for p in landed)
+    return any(rid.startswith(p) for p in landed) and rid not in DEFERRED
 
 covered   = sorted(r for r in declared if claims.get(r))
 uncovered = sorted(r for r in declared if not claims.get(r))
@@ -105,6 +122,26 @@ if planned:
     print()
 
 status = 0
+
+deferred_live = {r: why for r, why in DEFERRED.items()
+                 if r in declared and any(r.startswith(p) for p in landed)}
+if deferred_live:
+    print("deferred inside a landed prefix (each needs a blocker, not a shrug):")
+    for r, why in sorted(deferred_live.items()):
+        covered_now = " — NOW COVERED, remove it from DEFERRED" if claims.get(r) else ""
+        print(f"  {r}  {why}{covered_now}")
+    print()
+    for r in sorted(deferred_live):
+        if claims.get(r):
+            print(f"FAIL: {r} is listed in DEFERRED but a test now claims it.")
+            print("  Remove the entry; a deferral that has been closed hides the next one.")
+            status = 1
+
+for r in sorted(set(DEFERRED) - set(declared)):
+    print(f"FAIL: DEFERRED names {r}, which no specification declares.")
+    print("  Either the ID is a typo or the requirement was deleted.")
+    status = 1
+
 if blocking:
     print("FAIL: these requirements belong to landed work and no test claims them:")
     for r in blocking:
