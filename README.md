@@ -27,6 +27,7 @@ Read in order:
 | [07 — Decisions and open questions](docs/07-decisions-and-open-questions.md) | Decision log with reasoning, and what still needs answering |
 | [08 — Art production](docs/08-art-production.md) | Where the art comes from: the inventory cost, the options researched, the legal position, the render-to-sprite pipeline |
 | [09 — Test plan](docs/09-test-plan.md) | How we find out whether it is any good before a player does: what each layer catches, what is tested today, and what is still owed |
+| [10 — Status and next steps](docs/10-status-and-next-steps.md) | Where the project is, what each milestone established, what M4 builds first, the debt owed, and the decisions waiting |
 
 ## Building and running
 
