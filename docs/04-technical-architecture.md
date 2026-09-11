@@ -532,3 +532,25 @@ anticipate:
   under reserved kind ids; screen-space sprites carry a flag the vertex
   shader honours. No text library, no second pipeline, and the software
   rasteriser draws it identically.
+
+## 17. Implementation notes from Q10
+
+- **The palette has one source of truth**, `assets/palette/ancient.ron`. The
+  art tool bakes it (`atlas export --rust`) into
+  `crates/view/src/palette_table.rs`, which is committed so the renderer has
+  no runtime I/O, and diffed against its generator in CI. Named colours in
+  `view::palette` resolve at compile time through a `const fn` ramp lookup.
+- **Index 239 is `shadow`**, the one index whose alpha is not 255. The
+  palette texture carries the alpha; the sprite shader only redirects it to
+  row 0 so a shadow is never player-coloured.
+- **Sprite sets load at startup** from `assets/sprites` (found by walking up
+  from the working directory). Each set's PNG palette chunk must match the
+  baked palette entry for entry, or the set is refused with the `atlas
+  repalette` fix named in the error. A refused set costs that sprite, not
+  the game: the kind keeps its placeholder.
+- **The atlas is 2048 wide and grows to fit**; the app requests default
+  (8192) limits rather than downlevel ones. Frames carry their authored
+  `scale`; the scene draws `w / scale` so 2× art occupies 1× space and is
+  sampled at full resolution when zoomed in.
+- **Animation is chosen from simulation state** (walking, working, idle)
+  and timed from game ticks plus a per-slot phase. It never feeds back.

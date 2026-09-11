@@ -354,7 +354,7 @@ mod tests {
     #[test]
     fn holes_in_the_index_layout_are_rejected() {
         let mut s = spec();
-        s.reserve = (233, 238); // leaves 239 unclaimed
+        s.reserve = (233, 237); // leaves 238 unclaimed
         assert!(s.bake().unwrap_err().contains("not claimed"));
     }
 }

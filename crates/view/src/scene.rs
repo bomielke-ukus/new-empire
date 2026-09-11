@@ -1,12 +1,12 @@
 //! Turns simulation state into a sorted list of sprite instances.
 
 use sim::kinds;
-use sim::{Simulation, Vec2Fx};
+use sim::{GatherPhase, NavState, Order, Simulation, Vec2Fx, TICK_MS};
 
 use crate::fx_to_f32;
 use crate::iso;
 use crate::palette;
-use crate::sprites::Atlas;
+use crate::sprites::{Anim, Atlas};
 
 /// One sprite to draw, in world-screen space at 1×.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -90,10 +90,36 @@ impl Scene {
             // A site shows pegs until half built, then the building itself.
             let half_built =
                 world.construction[i].is_some_and(|done| done * 2 < info.build_ticks().max(1));
+            // What the unit is doing decides which animation plays; the clock
+            // is game time plus a per-slot phase so a crowd does not march in
+            // lockstep. Presentation only: nothing here feeds the simulation.
+            let anim = if info.mobile {
+                let walking = world.move_target[i].is_some()
+                    || matches!(&world.nav[i], Some(n) if n.state == NavState::Walking);
+                let working = matches!(
+                    world.order[i],
+                    Order::Gather {
+                        phase: GatherPhase::Working,
+                        ..
+                    } | Order::Build { working: true, .. }
+                );
+                if walking {
+                    Anim::Walk
+                } else if working {
+                    Anim::Work
+                } else {
+                    Anim::Idle
+                }
+            } else {
+                Anim::Idle
+            };
+            let time_ms = sim.tick() as u32 * TICK_MS
+                + (alpha * TICK_MS as f32) as u32
+                + (i as u32 * 61) % 1000;
             let looked_up = if half_built {
                 atlas.site(info.footprint).map(|f| (f, false))
             } else {
-                atlas.frame(kind, world.facing[i])
+                atlas.frame_at(kind, world.facing[i], anim, time_ms)
             };
             let Some((frame, flip)) = looked_up else {
                 continue;
@@ -109,11 +135,8 @@ impl Scene {
             };
             let h = iso::ground_height(map, px, py);
             let (gx, gy) = iso::project(px, py, h);
-            let anchor_x = if flip {
-                frame.w as f32 - frame.anchor_x as f32
-            } else {
-                frame.anchor_x as f32
-            };
+            let (ax, ay) = frame.draw_anchor();
+            let anchor_x = if flip { frame.draw_w() - ax } else { ax };
             let footprint = kinds::info(kind).footprint.max(1) as f32;
             let depth = px + py + (footprint - 1.0) * 0.5;
             let row = palette::row_for_owner(world.owner[i]);
@@ -124,9 +147,9 @@ impl Scene {
             }
             sprites.push(SpriteInstance {
                 x: (gx - anchor_x).round(),
-                y: (gy - frame.anchor_y as f32).round(),
-                w: frame.w as f32,
-                h: frame.h as f32,
+                y: (gy - ay).round(),
+                w: frame.draw_w(),
+                h: frame.draw_h(),
                 u: frame.x,
                 v: frame.y,
                 uw: frame.w,
@@ -170,11 +193,12 @@ fn overlay(
     depth: f32,
     slot: u32,
 ) -> SpriteInstance {
+    let (ax, ay) = frame.draw_anchor();
     SpriteInstance {
-        x: (gx - frame.anchor_x as f32).round(),
-        y: (gy - frame.anchor_y as f32).round(),
-        w: frame.w as f32,
-        h: frame.h as f32,
+        x: (gx - ax).round(),
+        y: (gy - ay).round(),
+        w: frame.draw_w(),
+        h: frame.draw_h(),
         u: frame.x,
         v: frame.y,
         uw: frame.w,

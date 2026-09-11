@@ -47,23 +47,20 @@ impl ChunkMesh {
     }
 }
 
-/// Base colour of a terrain type.
+/// Base colour of a terrain type: a step of the matching palette ramp, so
+/// the ground and the sprites standing on it come from one palette.
 pub fn terrain_colour(t: Terrain) -> [f32; 3] {
-    let c: [u8; 3] = match t {
-        Terrain::Grass => [92, 146, 62],
-        Terrain::Dirt => [146, 112, 68],
-        Terrain::Desert => [208, 182, 112],
-        Terrain::Sand => [220, 204, 156],
-        Terrain::ShallowWater => [76, 136, 186],
-        Terrain::DeepWater => [34, 74, 146],
-        Terrain::ForestFloor => [64, 100, 48],
-        Terrain::Snow => [232, 236, 240],
-    };
-    [
-        c[0] as f32 / 255.0,
-        c[1] as f32 / 255.0,
-        c[2] as f32 / 255.0,
-    ]
+    use crate::palette::{index, rgb_f32};
+    rgb_f32(match t {
+        Terrain::Grass => index("grass", 5),
+        Terrain::Dirt => index("dirt", 5),
+        Terrain::Desert => index("sand", 4),
+        Terrain::Sand => index("sand", 6),
+        Terrain::ShallowWater => index("water_shallow", 5),
+        Terrain::DeepWater => index("water_deep", 4),
+        Terrain::ForestFloor => index("foliage", 3),
+        Terrain::Snow => index("neutral", 15),
+    })
 }
 
 /// Deterministic per-tile brightness variation in `[0.94, 1.06]`.

@@ -50,9 +50,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (idx == 0u) {
         discard;
     }
-    // Shadow (index 3) is the same translucent black on every row.
+    // Shadow (index 239, the palette's "shadow" special) is the same
+    // translucent black on every row; its alpha lives in the palette texture.
     var row = i32(in.row);
-    if (idx == 3u) {
+    if (idx == 239u) {
         row = 0;
     }
     return textureLoad(palette, vec2<i32>(i32(idx), row), 0);

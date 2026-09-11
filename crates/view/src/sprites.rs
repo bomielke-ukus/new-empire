@@ -52,6 +52,47 @@ pub const SOLIDS: [u8; 20] = [
     P_DARK,
 ];
 
+/// Animations a kind may have. Placeholders have only `Idle`; rendered sets
+/// map their named animations onto these.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Anim {
+    /// Standing.
+    Idle = 0,
+    /// Walking.
+    Walk = 1,
+    /// Working or attacking (the art's `attack`).
+    Work = 2,
+    /// Dying.
+    Death = 3,
+    /// Lying dead.
+    Decay = 4,
+}
+
+impl Anim {
+    /// The art pipeline's name for this animation.
+    pub fn from_name(name: &str) -> Option<Anim> {
+        match name {
+            "idle" => Some(Anim::Idle),
+            "walk" => Some(Anim::Walk),
+            "attack" => Some(Anim::Work),
+            "death" => Some(Anim::Death),
+            "decay" => Some(Anim::Decay),
+            _ => None,
+        }
+    }
+}
+
+/// Timing of one kind's animation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AnimInfo {
+    /// Frame count.
+    pub frames: u32,
+    /// Milliseconds per frame.
+    pub frame_ms: u32,
+    /// Whether it repeats.
+    pub loops: bool,
+}
+
 /// One image in the atlas.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Frame {
@@ -59,6 +100,12 @@ pub struct Frame {
     pub kind: KindId,
     /// Authored facing (`facing8` index); 0 for static things.
     pub facing: u8,
+    /// Which animation.
+    pub anim: Anim,
+    /// Frame index within the animation.
+    pub index: u8,
+    /// Authored pixels per 1× pixel. A frame drawn at 1× is `w / scale` wide.
+    pub scale: u8,
     /// Atlas rectangle.
     pub x: u16,
     /// Atlas rectangle.
@@ -71,6 +118,24 @@ pub struct Frame {
     pub anchor_x: i16,
     /// Pixel of the frame that sits on the entity's ground point.
     pub anchor_y: i16,
+}
+
+impl Frame {
+    /// Draw width at 1× zoom.
+    pub fn draw_w(&self) -> f32 {
+        self.w as f32 / self.scale.max(1) as f32
+    }
+
+    /// Draw height at 1× zoom.
+    pub fn draw_h(&self) -> f32 {
+        self.h as f32 / self.scale.max(1) as f32
+    }
+
+    /// Anchor in 1× pixels.
+    pub fn draw_anchor(&self) -> (f32, f32) {
+        let sc = self.scale.max(1) as f32;
+        (self.anchor_x as f32 / sc, self.anchor_y as f32 / sc)
+    }
 }
 
 /// Facings that are authored; the other three are mirrors.
@@ -95,20 +160,57 @@ pub struct Atlas {
     /// Palette indices, row-major.
     pub indices: Vec<u8>,
     frames: Vec<Frame>,
-    lookup: HashMap<(KindId, u8), usize>,
+    lookup: HashMap<(KindId, u8, Anim, u8), usize>,
+    anims: HashMap<(KindId, Anim), AnimInfo>,
+    /// Names of the rendered sets that replaced placeholders.
+    pub loaded_sets: Vec<String>,
 }
 
 impl Atlas {
-    /// Finds the frame for a kind at a facing, and whether to mirror it.
+    /// Finds the idle frame for a kind at a facing, and whether to mirror it.
     /// Static kinds ignore the facing.
     pub fn frame(&self, kind: KindId, facing8: u8) -> Option<(&Frame, bool)> {
-        if let Some(&i) = self.lookup.get(&(kind, 0)) {
-            return Some((&self.frames[i], false));
+        self.frame_at(kind, facing8, Anim::Idle, 0)
+    }
+
+    /// The frame of `anim` to show at `time_ms` into it, falling back to idle
+    /// and then to whatever single frame the kind has.
+    pub fn frame_at(
+        &self,
+        kind: KindId,
+        facing8: u8,
+        anim: Anim,
+        time_ms: u32,
+    ) -> Option<(&Frame, bool)> {
+        let index = |a: Anim| -> u8 {
+            match self.anims.get(&(kind, a)) {
+                Some(info) if info.frames > 0 && info.frame_ms > 0 => {
+                    let f = time_ms / info.frame_ms;
+                    if info.loops {
+                        (f % info.frames) as u8
+                    } else {
+                        f.min(info.frames - 1) as u8
+                    }
+                }
+                _ => 0,
+            }
+        };
+        for a in [anim, Anim::Idle] {
+            let idx = index(a);
+            if let Some(&i) = self.lookup.get(&(kind, 0, a, idx)) {
+                return Some((&self.frames[i], false));
+            }
+            let (f, flip) = source_facing(facing8);
+            if let Some(&i) = self.lookup.get(&(kind, f, a, idx)) {
+                return Some((&self.frames[i], flip));
+            }
         }
-        let (f, flip) = source_facing(facing8);
-        self.lookup
-            .get(&(kind, f))
-            .map(|&i| (&self.frames[i], flip))
+        None
+    }
+
+    /// Timing of an animation, if the kind has it.
+    pub fn anim_info(&self, kind: KindId, anim: Anim) -> Option<AnimInfo> {
+        self.anims.get(&(kind, anim)).copied()
     }
 
     /// Every frame.
@@ -129,34 +231,102 @@ impl Atlas {
     /// simulation knows, at the sizes the art spec calls for, plus the UI
     /// frames (solid fills, glyphs, selection rings, placement footprints).
     pub fn placeholder() -> Atlas {
-        let mut canvases: Vec<(KindId, u8, Canvas)> = Vec::new();
+        Atlas::with_sheets(&[])
+    }
+
+    /// The placeholder atlas, with every kind that has a rendered sprite set
+    /// in `sheets` drawn from that set instead. Sets whose name matches no
+    /// kind are ignored.
+    pub fn with_sheets(sheets: &[crate::sheets::Sheet]) -> Atlas {
+        let mut canvases: Vec<Entry> = Vec::new();
+        let mut anims: HashMap<(KindId, Anim), AnimInfo> = HashMap::new();
+        let mut loaded_sets = Vec::new();
+        let mut covered: Vec<KindId> = Vec::new();
+        for sheet in sheets {
+            let Some(kind) = kind_for_set(&sheet.name) else {
+                continue;
+            };
+            covered.push(kind);
+            loaded_sets.push(sheet.name.clone());
+            for (ai, animation) in sheet.animations.iter().enumerate() {
+                let Some(anim) = Anim::from_name(&animation.name) else {
+                    continue;
+                };
+                anims.insert(
+                    (kind, anim),
+                    AnimInfo {
+                        frames: animation.frames,
+                        frame_ms: animation.frame_ms,
+                        loops: animation.loops,
+                    },
+                );
+                for (fi, &facing) in sheet.facings().iter().enumerate() {
+                    for frame in 0..animation.frames {
+                        let (x, y, w, h) = sheet.frame_rect(ai, fi, frame);
+                        let (ax, ay) = sheet.anchor_for(ai, fi, frame);
+                        let mut c = Canvas::new(w, h, (ax as i16, ay as i16));
+                        for yy in 0..h {
+                            for xx in 0..w {
+                                c.set(xx as i32, yy as i32, sheet.index_at(x + xx, y + yy));
+                            }
+                        }
+                        canvases.push(Entry {
+                            kind,
+                            facing,
+                            anim,
+                            index: frame as u8,
+                            scale: sheet.scale as u8,
+                            canvas: c,
+                        });
+                    }
+                }
+            }
+        }
+        let still = |kind: KindId, facing: u8, canvas: Canvas| Entry {
+            kind,
+            facing,
+            anim: Anim::Idle,
+            index: 0,
+            scale: 1,
+            canvas,
+        };
         for k in kinds::all() {
+            if covered.contains(&k.id) {
+                continue;
+            }
             if k.mobile {
                 for f in AUTHORED {
-                    canvases.push((k.id, f, draw_kind(k.id, f)));
+                    canvases.push(still(k.id, f, draw_kind(k.id, f)));
                 }
             } else {
-                canvases.push((k.id, 0, draw_kind(k.id, 1)));
+                canvases.push(still(k.id, 0, draw_kind(k.id, 1)));
             }
         }
         for idx in SOLIDS {
             let mut c = Canvas::new(4, 4, (0, 0));
             c.rect(0, 0, 4, 4, idx);
-            canvases.push((UI_SOLID + idx as KindId, 0, c));
+            canvases.push(still(UI_SOLID + idx as KindId, 0, c));
         }
         for fp in 0..=3u32 {
-            canvases.push((UI_RING + fp as KindId, 0, ring(fp)));
+            canvases.push(still(UI_RING + fp as KindId, 0, ring(fp)));
             if fp > 0 {
-                canvases.push((UI_FOOT_OK + fp as KindId, 0, footprint(fp, GREEN_LIGHT)));
-                canvases.push((UI_FOOT_BAD + fp as KindId, 0, footprint(fp, RED)));
-                canvases.push((UI_SITE + fp as KindId, 0, site(fp)));
+                canvases.push(still(
+                    UI_FOOT_OK + fp as KindId,
+                    0,
+                    footprint(fp, GREEN_LIGHT),
+                ));
+                canvases.push(still(UI_FOOT_BAD + fp as KindId, 0, footprint(fp, RED)));
+                canvases.push(still(UI_SITE + fp as KindId, 0, site(fp)));
             }
         }
         for (i, ch) in font::CHARS.chars().enumerate() {
-            canvases.push((UI_GLYPH + i as KindId, 0, glyph(ch, WHITE)));
-            canvases.push((UI_GLYPH_DARK + i as KindId, 0, glyph(ch, BLACK)));
+            canvases.push(still(UI_GLYPH + i as KindId, 0, glyph(ch, WHITE)));
+            canvases.push(still(UI_GLYPH_DARK + i as KindId, 0, glyph(ch, BLACK)));
         }
-        pack(canvases, 1024)
+        let mut atlas = pack(canvases, ATLAS_WIDTH);
+        atlas.anims = anims;
+        atlas.loaded_sets = loaded_sets;
+        atlas
     }
 
     /// A 4×4 fill of a palette index, for stretching into rectangles.
@@ -257,21 +427,40 @@ fn glyph(ch: char, idx: u8) -> Canvas {
     c
 }
 
-/// Shelf-packs canvases into an atlas of the given width.
-fn pack(canvases: Vec<(KindId, u8, Canvas)>, width: u32) -> Atlas {
+/// Atlas texture width. Height grows to fit, up to the GPU's limit.
+pub const ATLAS_WIDTH: u32 = 2048;
+
+/// A frame waiting to be packed.
+struct Entry {
+    kind: KindId,
+    facing: u8,
+    anim: Anim,
+    index: u8,
+    scale: u8,
+    canvas: Canvas,
+}
+
+/// Shelf-packs canvases into an atlas of the given width. Taller frames go
+/// first so shelves waste less.
+fn pack(mut canvases: Vec<Entry>, width: u32) -> Atlas {
+    canvases.sort_by_key(|e| std::cmp::Reverse(e.canvas.h));
     let mut frames = Vec::new();
     let mut lookup = HashMap::new();
     let mut placed: Vec<(u32, u32, Canvas)> = Vec::new();
     let (mut x, mut y, mut shelf_h) = (0u32, 0u32, 0u32);
-    for (kind, facing, c) in canvases {
+    for e in canvases {
+        let c = e.canvas;
         if x + c.w > width {
             x = 0;
             y += shelf_h + 1;
             shelf_h = 0;
         }
         frames.push(Frame {
-            kind,
-            facing,
+            kind: e.kind,
+            facing: e.facing,
+            anim: e.anim,
+            index: e.index,
+            scale: e.scale,
             x: x as u16,
             y: y as u16,
             w: c.w as u16,
@@ -279,7 +468,7 @@ fn pack(canvases: Vec<(KindId, u8, Canvas)>, width: u32) -> Atlas {
             anchor_x: c.anchor.0,
             anchor_y: c.anchor.1,
         });
-        lookup.insert((kind, facing), frames.len() - 1);
+        lookup.insert((e.kind, e.facing, e.anim, e.index), frames.len() - 1);
         shelf_h = shelf_h.max(c.h);
         placed.push((x, y, c));
         x += placed.last().unwrap().2.w + 1;
@@ -299,7 +488,26 @@ fn pack(canvases: Vec<(KindId, u8, Canvas)>, width: u32) -> Atlas {
         indices,
         frames,
         lookup,
+        anims: HashMap::new(),
+        loaded_sets: Vec::new(),
     }
+}
+
+/// Which kind a rendered sprite set draws, by the set's name.
+pub fn kind_for_set(name: &str) -> Option<KindId> {
+    Some(match name {
+        "villager" => kinds::VILLAGER,
+        "scout" => kinds::SCOUT,
+        "town_center" => kinds::TOWN_CENTER,
+        "house" => kinds::HOUSE,
+        "storehouse" => kinds::STOREHOUSE,
+        "tree" => kinds::TREE,
+        "berry_bush" => kinds::BERRY_BUSH,
+        "gold_mine" => kinds::GOLD_MINE,
+        "stone_mine" => kinds::STONE_MINE,
+        "gazelle" => kinds::GAZELLE,
+        _ => return None,
+    })
 }
 
 /// An indexed-colour drawing surface.
@@ -736,8 +944,8 @@ mod tests {
     #[test]
     fn placeholder_atlas_has_every_kind_at_spec_sizes() {
         let a = Atlas::placeholder();
-        assert_eq!(a.width, 1024);
-        assert!(a.height <= 1024, "atlas too tall: {}", a.height);
+        assert_eq!(a.width, ATLAS_WIDTH);
+        assert!(a.height <= 1024, "placeholder atlas too tall: {}", a.height);
         for k in kinds::all() {
             for f in 0..8u8 {
                 let (frame, flip) = a
@@ -774,7 +982,7 @@ mod tests {
                 .flat_map(|y| (0..f.w as u32).map(move |x| (x, y)))
                 .filter(|&(x, y)| a.index_at(f.x as u32 + x, f.y as u32 + y) != 0)
                 .count();
-            if f.kind < UI_RING {
+            if f.kind < UI_RING && f.scale == 1 {
                 assert!(
                     painted > (f.w as usize * f.h as usize) / 8,
                     "frame {i} ({}) is nearly empty",
@@ -830,6 +1038,44 @@ mod tests {
             }
         }
         assert_eq!(seen, [TRANSPARENT, WHITE].into_iter().collect());
+    }
+
+    #[test]
+    fn rendered_sets_replace_placeholders_and_animate() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
+        let (sheets, errors) = crate::sheets::load_all(&dir);
+        assert!(errors.is_empty(), "{errors:?}");
+        let a = Atlas::with_sheets(&sheets);
+        assert_eq!(a.loaded_sets, vec!["villager".to_string()]);
+        assert!(
+            a.width == ATLAS_WIDTH && a.height <= 8192,
+            "{}x{}",
+            a.width,
+            a.height
+        );
+        let (idle, flip) = a.frame(kinds::VILLAGER, 1).unwrap();
+        assert!(!flip);
+        assert_eq!((idle.w, idle.h, idle.scale), (80, 96, 2));
+        assert_eq!((idle.draw_w(), idle.draw_h()), (40.0, 48.0));
+        let walk = a.anim_info(kinds::VILLAGER, Anim::Walk).unwrap();
+        assert_eq!((walk.frames, walk.frame_ms, walk.loops), (8, 100, true));
+        let (f0, _) = a.frame_at(kinds::VILLAGER, 2, Anim::Walk, 0).unwrap();
+        let (f2, _) = a.frame_at(kinds::VILLAGER, 2, Anim::Walk, 250).unwrap();
+        let (f9, _) = a.frame_at(kinds::VILLAGER, 2, Anim::Walk, 950).unwrap();
+        assert_eq!((f0.anim, f0.index), (Anim::Walk, 0));
+        assert_eq!((f2.anim, f2.index), (Anim::Walk, 2));
+        assert_eq!(f9.index, 1, "walk loops");
+        let (d, _) = a.frame_at(kinds::VILLAGER, 1, Anim::Death, 10_000).unwrap();
+        assert_eq!(d.index, 7, "death holds its last frame");
+        let (e, flip) = a.frame_at(kinds::VILLAGER, 7, Anim::Idle, 0).unwrap();
+        assert!(flip && e.facing == 3, "east mirrors west");
+        // Kinds without a set still get placeholders, and UI frames still exist.
+        let (tc, _) = a.frame(kinds::TOWN_CENTER, 0).unwrap();
+        assert_eq!(tc.scale, 1);
+        assert!(a.glyph('A', false).is_some());
+        // A kind with only placeholders falls back to its single frame for any anim.
+        let (g, _) = a.frame_at(kinds::GAZELLE, 1, Anim::Walk, 500).unwrap();
+        assert_eq!((g.anim, g.index), (Anim::Idle, 0));
     }
 
     #[test]

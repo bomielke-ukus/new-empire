@@ -57,7 +57,9 @@ impl Gpu {
             &wgpu::DeviceDescriptor {
                 label: Some("new-empire"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_defaults(),
+                // The atlas is 2048 wide and grows past 2048 tall once
+                // rendered sets load; `default()` allows 8192.
+                required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::Performance,
             },
             None,
@@ -161,10 +163,21 @@ impl App {
         let (sx, sy) = sim.starts()[ME as usize];
         camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
         let prev_pos = sim.world().pos.clone();
+        // Rendered sprite sets replace placeholders wherever they exist.
+        let (sheets, errors) = view::sheets::default_dir()
+            .map(|d| view::sheets::load_all(&d))
+            .unwrap_or_default();
+        for e in &errors {
+            eprintln!("warning: {e}");
+        }
+        let atlas = Atlas::with_sheets(&sheets);
+        if !atlas.loaded_sets.is_empty() {
+            eprintln!("rendered sprite sets: {}", atlas.loaded_sets.join(", "));
+        }
         App {
             window: None,
             gpu: None,
-            atlas: Atlas::placeholder(),
+            atlas,
             sim,
             prev_pos,
             clock: FixedClock::new(TICK_MS),

@@ -134,8 +134,9 @@ pub fn pick(
         if dx < 0.0 || dy < 0.0 || dx >= s.w * zoom || dy >= s.h * zoom {
             continue;
         }
-        let mut sx = (dx / zoom) as u32;
-        let sy = (dy / zoom) as u32;
+        // Map window px into the atlas rect, which may be authored at 2×.
+        let mut sx = (dx / (s.w * zoom) * s.uw as f32) as u32;
+        let sy = (dy / (s.h * zoom) * s.vh as f32) as u32;
         if s.flip {
             sx = s.uw as u32 - 1 - sx.min(s.uw as u32 - 1);
         }

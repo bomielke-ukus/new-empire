@@ -56,6 +56,10 @@ In the window: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
 `+`/`-` to zoom; click the minimap to jump; `Space` pause; `[` `]` speed;
 `E` toggles edge scrolling.
 
+Rendered sprite sets under `assets/sprites` replace the procedural placeholders
+for their kinds at startup (today: the greybox villager). `cargo run -p atlas
+-- repalette` refreshes their palette chunks after a palette colour changes.
+
 Play: left-click or drag to select, double-click for all of a kind on screen,
 `Shift` adds, `Ctrl`+`0-9` saves a control group and `0-9` recalls it, `.`
 cycles idle villagers. Right-click moves, or gathers when over a tree, bush

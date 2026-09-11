@@ -390,11 +390,10 @@ proves a fresh clone can produce what the game loads.
    them into `assets/sprites/villager`, and it passes the gate. The player
    colour key survives shading into 7 of the ramp's 8 steps.
 
-   **Still open: the same unit in-game.** That half needs Q10 — `crates/view`
-   holds a second 256-colour palette that disagrees with this one at every index
-   except transparency and the player ramp, so the renderer would draw the
-   villager in the wrong colours. Deferred to its own PR, and measured in
-   `docs/07`.
+   **The same unit in-game: done** (D19). The renderer now bakes this palette,
+   loads every set under `assets/sprites`, and draws the villager with its
+   walk, work and idle animations in place of the placeholder. `mapview`
+   renders it headlessly, and the golden images include it.
 3. **Model the slice**: 12 units and 10 buildings, with the age costume and
    architecture variants as mesh swaps.
 4. **Commission the icons and UI panel set** (§4.3) in parallel — they are off

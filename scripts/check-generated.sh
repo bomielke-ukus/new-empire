@@ -50,4 +50,11 @@ check "trig table" \
   "crates/sim/src/trig_table.rs" \
   "python3 tools/gen/gen_trig_table.py"
 
+# The renderer's palette is baked from the art pipeline's source of truth.
+# If this drifts, sprites validated against one palette are drawn with another
+# (docs/07 Q10).
+check "palette table" \
+  "crates/view/src/palette_table.rs" \
+  "cargo run --quiet -p atlas -- export --out \"$scratch\" --rust crates/view/src/palette_table.rs"
+
 exit $status

@@ -29,6 +29,7 @@ struct Args {
     select: usize,
     hud: bool,
     ghost: Option<String>,
+    assets: Option<std::path::PathBuf>,
 }
 
 fn parse() -> Result<Args, String> {
@@ -49,6 +50,7 @@ fn parse() -> Result<Args, String> {
         select: 0,
         hud: false,
         ghost: None,
+        assets: None,
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -85,6 +87,7 @@ fn parse() -> Result<Args, String> {
             "--select" => a.select = val.parse().map_err(|e| format!("{key}: {e}"))?,
             "--hud" => a.hud = val == "1" || val == "true",
             "--ghost" => a.ghost = Some(val.clone()),
+            "--assets" => a.assets = Some(std::path::PathBuf::from(val)),
             _ => return Err(format!("unknown flag {key}")),
         }
         i += 2;
@@ -126,7 +129,18 @@ fn run() -> Result<(), String> {
         sim.starts()
     );
 
-    let atlas = Atlas::placeholder();
+    // Rendered sprite sets replace placeholders wherever they exist.
+    let sheet_dir = a.assets.clone().or_else(view::sheets::default_dir);
+    let (sheets, errors) = sheet_dir
+        .map(|d| view::sheets::load_all(&d))
+        .unwrap_or_default();
+    for e in &errors {
+        eprintln!("warning: {e}");
+    }
+    let atlas = Atlas::with_sheets(&sheets);
+    if !atlas.loaded_sets.is_empty() {
+        println!("rendered sprite sets: {}", atlas.loaded_sets.join(", "));
+    }
     if let Some(path) = &a.atlas {
         let pal = view::palette::texture();
         let rgba: Vec<u8> = atlas

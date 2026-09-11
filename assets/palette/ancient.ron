@@ -12,7 +12,8 @@
 //     0          transparent
 //     1..=16     neutral ramp (outlines, shadows, greys, UI)
 //     17..=232   27 material ramps, 8 steps each
-//     233..=239  reserve, for material ramps we have not needed yet
+//     233..=238  reserve, for material ramps we have not needed yet
+//     239        shadow, drawn translucent by the renderer
 //     240..=247  PLAYER COLOUR — remapped per owner in the fragment shader
 //     248..=255  specials (selection, health, fog, error)
 //
@@ -62,12 +63,16 @@ PaletteSpec(
         (name: "foliage",         start: 225, steps: 8, dark: "#0d1c0e", light: "#4e8a3a", hue_shift: -6.0),
     ],
 
-    reserve: (233, 239),
+    reserve: (233, 238),
 
     // Art is drawn once into this ramp and appears in all eight player colours.
     player_slot: (240, 247),
 
     specials: [
+        // Drawn translucent by the renderer (a 40% black multiply), opaque
+        // black everywhere else. The one index whose alpha is not 255, and
+        // the reason a unit's ground shadow does not read as a hole.
+        (index: 239, name: "shadow",      colour: "#000000"),
         (index: 248, name: "selection",   colour: "#5cff7a"),
         (index: 249, name: "health_full", colour: "#3cd34a"),
         (index: 250, name: "health_low",  colour: "#d33c3c"),

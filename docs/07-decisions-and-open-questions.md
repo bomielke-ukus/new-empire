@@ -172,6 +172,33 @@ that closes a gap fails the build. Owners are also assigned in palette order and
 the first four held to roughly twice the bar, because most matches never reach
 the fifth colour.
 
+### D19 — One palette: the renderer bakes `assets/palette/ancient.ron`
+**Date:** 2026-09-11 · Resolves Q10
+
+`atlas export --rust` writes the baked palette into
+`crates/view/src/palette_table.rs`, committed and policed by
+`scripts/check-generated.sh`. `view::palette`'s named constants are now
+indices into the real ramps ("timber, step 4") rather than colours of their
+own, and terrain colours come from the terrain ramps. The renderer's
+hand-picked player colours, which failed dichromacy simulation, are gone;
+the searched ramps from D18 are what draws.
+
+Two additions to the palette contract came with it. Index 239 is a new
+`shadow` special, drawn translucent (a 40% black multiply) by both renderers
+and opaque black by any other tool; the reserve shrinks to 233–238. And
+`atlas repalette` rewrites a committed sheet's PNG palette chunk against the
+current palette without touching its indices, for the case where a colour
+moves but the layout does not — which is exactly what adding `shadow` did to
+the committed villager sheet.
+
+The same change loads rendered sprite sets from `assets/sprites` into the
+game: `view::sheets` reads a manifest and its indexed PNG, checks the sheet
+was exported against this build's palette, and the atlas packs its frames
+in place of the procedural placeholder for that kind, with the set's
+animations (idle, walk, work, death, decay) driven by what the unit is
+doing. Art authored at 2× draws at 1× size and is crisp at 2× zoom, as
+`docs/05` §2.1 intended.
+
 ---
 
 ## Open questions
@@ -235,8 +262,8 @@ pattern keyed to the owner; a dedicated high-contrast palette selectable in
 options, as most modern RTS games ship. The first is cheapest and does not touch
 the art. **Needs an answer before the HUD work in M6.**
 
-### Q10 — There are two palettes, and they disagree
-**Filed:** 2026-09-05 · Deliberately deferred, not overlooked.
+### Q10 — There are two palettes, and they disagree — **answered, see D19**
+**Filed:** 2026-09-05 · Resolved 2026-09-11 by baking the art palette into the renderer.
 
 M1 and the art pipeline were built in parallel and each grew a 256-colour
 palette. They agree on the two things that matter structurally and on nothing

@@ -9,3 +9,8 @@ rust-version.workspace = true
 [dependencies]
 sim = { path = "../sim" }
 bytemuck = { workspace = true }
+# Sprite sets: RON manifests beside indexed PNGs, straight from the art
+# pipeline. `png` rather than `image` so the palette indices survive.
+png = { workspace = true }
+ron = { workspace = true }
+serde = { workspace = true }
