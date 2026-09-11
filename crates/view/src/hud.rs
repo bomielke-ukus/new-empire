@@ -276,13 +276,13 @@ fn short_name(kind: KindId) -> &'static str {
 fn build_hotkey(kind: KindId) -> char {
     match kind {
         kinds::HOUSE => 'H',
-        kinds::STOREHOUSE => 'S',
+        kinds::STOREHOUSE => 'O',
         kinds::BARRACKS => 'B',
         kinds::FARM => 'F',
         kinds::MARKET => 'M',
-        kinds::ARCHERY_RANGE => 'A',
+        kinds::ARCHERY_RANGE => 'N',
         kinds::STABLE => 'L',
-        kinds::WATCH_TOWER => 'W',
+        kinds::WATCH_TOWER => 'J',
         kinds::TEMPLE => 'P',
         kinds::ACADEMY => 'Y',
         kinds::SIEGE_WORKSHOP => 'G',
@@ -292,7 +292,7 @@ fn build_hotkey(kind: KindId) -> char {
 }
 
 /// Technology hotkeys, by position at the building.
-const TECH_KEYS: [char; 6] = ['Q', 'W', 'E', 'I', 'O', 'K'];
+const TECH_KEYS: [char; 5] = ['Q', 'E', 'I', 'K', 'Z'];
 
 /// A button before it has a place on the grid.
 struct Def {
@@ -943,6 +943,40 @@ impl Hud {
 mod tests {
     use super::*;
     use sim::SimConfig;
+
+    #[test]
+    fn command_shortcuts_are_unique_and_do_not_use_camera_keys() {
+        // These can coexist in mixed selections. Placement's Cancel uses
+        // X in a separate panel, replacing all other buttons.
+        let mut keys = std::collections::BTreeSet::from(['T', 'V', 'X', 'R', 'U']);
+        for k in kinds::all()
+            .iter()
+            .filter(|k| k.buildable && k.id != kinds::TOWN_CENTER)
+        {
+            let key = build_hotkey(k.id);
+            assert!(
+                !"WASD".contains(key),
+                "{} conflicts with camera movement",
+                k.name
+            );
+            assert!(keys.insert(key), "duplicate build shortcut: {key}");
+        }
+        for key in TECH_KEYS {
+            assert!(
+                !"WASD".contains(key),
+                "research conflicts with camera movement"
+            );
+            assert!(keys.insert(key), "duplicate research shortcut: {key}");
+        }
+        for k in kinds::all() {
+            assert!(
+                tech::at_building(k.id)
+                    .filter(|t| t.advances_age().is_none())
+                    .count()
+                    <= TECH_KEYS.len()
+            );
+        }
+    }
 
     fn first_owned(sim: &Simulation, kind: KindId) -> u32 {
         sim.world()
