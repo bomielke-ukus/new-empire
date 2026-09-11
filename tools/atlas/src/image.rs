@@ -133,7 +133,9 @@ pub fn read_png(path: &Path) -> Result<LoadedSheet, String> {
         .palette
         .as_ref()
         .ok_or_else(|| format!("{}: indexed PNG with no PLTE chunk", path.display()))?
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|c| Srgb {
             r: c[0],
             g: c[1],

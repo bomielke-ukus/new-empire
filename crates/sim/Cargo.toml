@@ -10,3 +10,16 @@ rust-version.workspace = true
 # Nothing may be added here that could make two machines disagree.
 [dependencies]
 serde = { workspace = true }
+
+[dev-dependencies]
+# Property testing. Dev-only, so it sits outside the dependency allowlist
+# that scripts/check-sim-purity.sh enforces on the shipping tree.
+proptest = "1"
+# Round-tripping the on-disk replay format in tests.
+ron = { workspace = true }
+
+[features]
+# Verifies every invariant after every tick and panics naming the tick that
+# broke it. Used by the soak and fuzz runners and by CI; never in a shipping
+# build.
+debug-checks = []

@@ -2,7 +2,10 @@
 # Guards the two properties the deterministic simulation depends on:
 #
 #   1. crates/sim contains no floating-point types or arithmetic.
-#   2. crates/sim depends on nothing that could make two machines disagree.
+#      REQ: TA-DET-08
+#   2. crates/sim depends on nothing that could make two machines disagree,
+#      and never reads the clock or iterates a HashMap.
+#      REQ: TA-DEP-01  REQ: TA-DET-09
 #
 # Run from the repository root. Exit status is non-zero on any violation.
 set -euo pipefail

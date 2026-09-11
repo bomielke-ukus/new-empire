@@ -28,9 +28,18 @@ jobs:
         run: scripts/check-sim-purity.sh
       - name: art conformance (palette, placeholders, atlas gate)
         run: scripts/check-art.sh
+      - name: generated files match their generators
+        run: scripts/check-generated.sh
+      - name: every landed requirement has a test
+        run: scripts/check-traceability.sh
+      - name: every documented CLI invocation parses
+        run: scripts/check-cli-callers.sh
+      - name: workflow files are valid
+        run: scripts/check-workflows.sh
 
   # The determinism contract: the same command log produces the same hashes,
   # on every platform we ship to. This is M0's acceptance test.
+  # REQ: RM-M0-01
   test:
     name: Test (${{ matrix.os }})
     needs: lint
@@ -39,6 +48,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # Absolute, via `github.workspace`. Two traps here: the `runner`
+      # context is not available in a job-level `env:` block (only inside
+      # steps), and cargo runs an integration test with its working directory
+      # at the *package* root, so a relative path would land in
+      # tools/mapview/ and the upload below would find nothing.
+      MAPVIEW_ARTEFACT_DIR: ${{ github.workspace }}/golden-failures
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -46,9 +62,9 @@ jobs:
       - name: unit tests
         run: cargo test --workspace
       - name: determinism, 10,000 ticks
-        run: cargo run --release -p simrunner -- determinism --seed 1 --ticks 10000 --players 4 --units 400 --save replay-ci.ron
+        run: cargo run --release -p simrunner -- determinism --seed 1 --ticks 10000 --players 4 --save replay-ci.ron
       - name: determinism, second seed, 8 players
-        run: cargo run --release -p simrunner -- determinism --seed 20260905 --ticks 5000 --players 8 --units 800
+        run: cargo run --release -p simrunner -- determinism --seed 20260905 --ticks 5000 --players 8 --size 168
       - name: replay file round-trips
         run: cargo run --release -p simrunner -- verify replay-ci.ron
       - name: software-rendered frame
@@ -64,13 +80,68 @@ jobs:
         run: |
           # The final hash must be identical on every OS. Each job prints it;
           # the compare job below asserts they agree.
-          cargo run --release -p simrunner -- determinism --seed 777 --ticks 3000 --players 4 --units 300 \
+          cargo run --release -p simrunner -- determinism --seed 777 --ticks 3000 --players 4 \
             | grep -oE 'final hash [0-9a-f]{16}' | awk '{print $3}' > hash-${{ matrix.os }}.txt
           cat hash-${{ matrix.os }}.txt
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: golden-image-failures-${{ matrix.os }}
+          path: golden-failures/
+          if-no-files-found: ignore
+
       - uses: actions/upload-artifact@v4
         with:
           name: hash-${{ matrix.os }}
           path: hash-${{ matrix.os }}.txt
+
+  # A cliff detector, not a precision instrument — see perf/budgets.ron for
+  # why the ceilings are as loose as they are.
+  perf:
+    name: Performance
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: benchmarks against perf/budgets.ron
+        run: scripts/check-perf.sh
+      - name: post the numbers to the job summary
+        if: always()
+        run: |
+          {
+            echo '### Simulation performance'
+            echo
+            echo 'Per-tick timings, best of three. The trend matters more than'
+            echo 'the absolute numbers: shared runners are noisy.'
+            echo
+            echo '```'
+            cargo run --release --quiet -p simrunner -- bench || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Randomised configs with every invariant checked after every tick. Enough
+  # to catch a change that breaks a config nobody wrote a test for.
+  soak:
+    name: Soak (short)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 300 randomised matches with invariant checking
+        run: |
+          cargo run --release --quiet -p simrunner --features sim/debug-checks -- \
+            soak --matches 300 --ticks 2000 --timeout 60 --dump soak-failures
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: soak-failure-replays
+          # Each of these is a reproducible bug report: drop one into
+          # crates/sim/tests/corpus/ and the crash can never come back.
+          path: soak-failures/
 
   cross-platform:
     name: Hashes agree across platforms

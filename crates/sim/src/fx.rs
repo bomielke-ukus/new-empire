@@ -106,7 +106,12 @@ impl Fx {
         if self.0 >= 0 {
             self.floor()
         } else {
-            -Fx(-self.0).floor()
+            // Rounding a negative value toward zero *is* the ceiling. The
+            // obvious `-Fx(-self.0).floor()` negates the raw value first,
+            // which overflows at `Fx::MIN`: a panic in debug, and in release
+            // a return of +32768 — the wrong sign, and outside the range of
+            // the type it claims to describe.
+            self.ceil()
         }
     }
 
@@ -395,6 +400,18 @@ mod tests {
 
     fn fx(n: i32, d: i32) -> Fx {
         Fx::from_ratio(n, d)
+    }
+
+    /// `Fx::MIN.trunc()` used to compute `-(-i32::MIN)`: a panic in debug and
+    /// +32768 in release, from the same input on the same machine.
+    #[test]
+    fn trunc_at_the_extremes_does_not_overflow() {
+        assert_eq!(Fx::MIN.trunc(), -32768);
+        assert_eq!(Fx::MAX.trunc(), 32767);
+        assert_eq!((Fx::MIN + Fx::EPSILON).trunc(), -32767);
+        assert_eq!(Fx::from_raw(-1).trunc(), 0);
+        assert_eq!(Fx::from_raw(1).trunc(), 0);
+        assert_eq!(Fx::from_ratio(-3, 2).trunc(), -1);
     }
 
     #[test]

@@ -1,0 +1,405 @@
+# Test Plan
+
+How we find out whether *New Empire* is any good before a player does.
+
+`docs/04-technical-architecture.md` §11 is the one-paragraph version this grew
+out of. Everything described here as landed exists and runs; everything marked
+**M*n*** is designed but waiting on the system it tests.
+
+---
+
+## 1. What can go wrong, and what catches it
+
+Three failure modes, three different kinds of machinery. Conflating them is how
+a project ends up with a thousand unit tests and a game that crashes.
+
+| Failure mode | What actually catches it |
+|---|---|
+| **Crashes and hangs** | Soak runs under `catch_unwind` with a watchdog, per-tick invariant checks, validation of everything read off disk |
+| **Wrong behaviour, and desync** | Golden per-tick trace digests, property tests against an `i128` reference, a build/OS/architecture matrix |
+| **Missing features** | Requirement IDs traced from the specs into tests and enforced in CI, golden images, data validation |
+
+The lever that makes almost all of it automatable is determinism. Because the
+simulation is a pure function of `(seed, command log)`, a bug is a file, a file
+is a regression test, and the whole game runs headless at a thousand times real
+speed. Very little of this plan would be affordable otherwise.
+
+---
+
+## 2. Six layers
+
+Cheapest and fastest first. Only the last has a human in it.
+
+| Layer | What | Cost |
+|---|---|---|
+| **1. Static gates** | `fmt`, `clippy -D warnings`, sim purity, generated-file freshness, requirement traceability, CLI-caller and workflow validation | seconds |
+| **2. Unit and property tests** | `cargo test`, `proptest` over the maths, the queue and the entity store | seconds |
+| **3. Invariant checking** | `World::check` and `Simulation::check`, after every tick under `--features debug-checks` | free in shipping builds |
+| **4. Golden traces and images** | A committed replay corpus with a digest over every tick, and committed PNGs of fixed scenes | ~15 s |
+| **5. Soak and benchmarks** | Randomised matches across the config space; per-tick timings against ceilings | minutes |
+| **6. Human playtest** | The feel, the audio texture, the M7 acceptance criterion | scheduled, out of CI's way |
+
+### The distinction layer 4 exists for
+
+**Determinism** is "the same replay produces the same result twice".
+**Stability** is "the simulation still produces the result it produced when the
+corpus was recorded". They are not the same property, and only the first was
+tested before this plan.
+
+A refactor can be perfectly deterministic and quietly change what a unit does.
+It passes every determinism test and invalidates every replay and save file in
+existence without saying so. The `.golden` files are the tripwire: when one
+changes, either it was intended — `simrunner golden --update` records it and
+the diff goes through review — or the diff just caught a bug. Verified by
+raising a tree's wood yield from 75 to 76, which fails four entries by name.
+
+---
+
+## 3. What runs, and when
+
+| Job | Contents |
+|---|---|
+| **Lint and purity** | fmt, clippy, sim purity, generated files, traceability, CLI callers, workflow validation |
+| **Test (×3 OS)** | Every test including the corpus and the golden images; determinism runs; a software-rendered frame |
+| **Hashes agree** | The final state hash from all three platforms must be identical |
+| **Performance** | Benchmark scenarios against `perf/budgets.ron`, with the numbers posted to the run summary |
+| **Soak** | 300 randomised matches with invariant checking; failure replays uploaded |
+
+### Why the platform matrix matters
+
+`docs/04` §2 promises bit-identical state on every machine, and nothing but
+running it proves that. The corpus digests are recorded on x86_64 Linux and
+checked on Windows and on aarch64 macOS — a different architecture, not just a
+different OS. They match, which is the strongest evidence so far that the
+fixed-point simulation is genuinely portable.
+
+Debug and release builds also differ in a way that matters: debug panics on
+integer overflow, release wraps. Several of the defects found while writing
+this plan were exactly that — the same input, two answers, depending on how the
+binary was built.
+
+---
+
+## 4. What is tested today
+
+### 4.1 Arithmetic — the substrate
+
+`docs/04` §13 states the invariants; `TA-FX-*`, `TA-VEC-*` and `TA-ANG-*` name
+them. Every operation is checked against a reference computed in `i128`.
+
+The ones that matter most: addition and subtraction **saturate** rather than
+wrapping (a wrap is a silent teleport); division rounds to nearest with halves
+away from zero, which is `docs/07` D10 and the reason units arrive at 3 tiles
+rather than 2.9992; and `mul_div` matches the exact rational, since its whole
+purpose is an intermediate that cannot overflow.
+
+Trig is checked **exhaustively** over all 65,536 angles rather than sampled.
+The domain is small enough that exhaustive is cheap, and it leaves no table
+boundary for a sampler to miss.
+
+> **TA-PATH-01** — `move_toward` makes strict progress on every call, never
+> overshoots, lands *exactly* on the target when it is within reach, and
+> arrives in a bounded number of steps.
+
+Every "unit stands still forever" bug reduces to that property failing.
+
+### 4.2 Random numbers
+
+The output stream is **frozen** by a committed known-answer vector
+(`TA-RNG-01`). Changing the generator invalidates every replay and save ever
+recorded; the vector makes that happen deliberately. Alongside: every
+range-limited draw is in range including the empty and maximal cases;
+serialisation round-trips the stream; and **exactly one draw per call**
+(`TA-RNG-04`), because desync diagnosis compares draw counts to localise where
+two machines parted company, which only helps if the count is a function of the
+code path taken.
+
+### 4.3 Commands and the entity store
+
+> **TA-DET-03** — the queue's state is independent of the order commands
+> *arrived* in.
+
+Two peers whose packets interleaved differently must hold byte-identical
+queues, or network jitter alone desyncs them and the bug report is
+unreproducible. Tested as a property over random command sets and random
+*interleavings* of the per-player streams — not arbitrary shuffles, because a
+player's own commands keep their relative order at the transport level and
+reordering them is a genuine state change.
+
+The state hash covers the queue's full contents, not just its length. Two
+simulations holding different pending orders used to agree for two ticks and
+then diverge with no attributable cause.
+
+The entity store is checked over random operation sequences: slot reuse is
+lowest-index-first (`TA-ENT-02` — the identity a new entity receives is part of
+the state, so machines that allocate differently have already diverged); stale
+handles never resolve; iteration is slot order; and `despawn` scrubs every one
+of the thirteen component columns (`TA-ENT-05`).
+
+That last one had no coverage at all before: M2's suite never despawns a
+resource-bearing entity, because an exhausted node is already zero. Removing a
+column's scrub failed nothing until a test was written that dirties every
+column first.
+
+### 4.4 The corpus
+
+Ten recorded matches with a digest over every tick's hash, driving M2's real
+systems — gathering and drop-off, construction, training, rally points, group
+pathing and separation. A corpus that only moved units around would not notice
+a change to the economy, which is most of what the simulation now does.
+
+They span the *edges* as well as the middle, because the default config is the
+one everything is developed against and therefore the one a bug is least likely
+to hide in: the smallest and largest map sizes, one and eight players, an
+entity cap low enough that spawns are refused constantly, wander off, a bare
+`Flat` map with no start kit at all, an idle match that issues nothing, and a
+20,000-tick run so drift that needs time to accumulate has time.
+
+`simrunner record` reports what each scenario *achieved* — live entities,
+buildings standing, resources gathered — not just that it ran. That readout
+caught three scenarios doing nothing, including one where marching dragged
+villagers off mid-gather so 2,000 ticks gathered exactly zero.
+
+**Every crash found anywhere becomes a corpus entry.** That is the corpus's
+main job over time, and what turns the soak from a one-off run into a ratchet.
+
+### 4.5 Rendering
+
+Five scenes rendered through `tools/mapview` and compared against committed
+PNGs with a tolerance. The test drives the binary rather than the rendering
+library, because the command line is what CI invokes and what a developer
+types.
+
+`mapview` renders through the software rasteriser in `crates/view`, which is an
+advantage over a GPU or even a software Vulkan driver: there is no driver to
+vary between runners, so a pixel difference means the renderer changed rather
+than that the machine did. A separate test asserts two renders of the same
+scene are byte-identical, because a golden test on a non-deterministic renderer
+is a coin toss.
+
+### 4.6 Robustness
+
+A replay is a file: it arrives from a bug report, a save directory, or
+eventually a download. `Replay::validate` bounds `ticks`, requires
+non-decreasing issue ticks, and range-checks every command; `run` and `verify`
+call it, so nothing executes unvalidated.
+
+`tests/robustness.rs` pins that every command variant from a player the match
+does not have is an inert no-op, since a replay can name any player index
+inside `MAX_PLAYERS` while a match may have one.
+
+---
+
+## 5. What is tested when it lands
+
+### Pathfinding — **M2 shipped, tests owed**
+
+See §7. The system exists; four of its stated behaviours have no test.
+
+### Map generation — M1 shipped
+
+Same seed produces a bit-identical map (`GD-MAP-01`, `RM-M1-01`), covered.
+Still owed: a nightly sweep over 1,000 seeds, because a generator that fails
+one seed in five hundred will meet that seed in front of a player.
+
+### Economy — M2 shipped, M3 to come
+
+The strong one, not yet written: **resource conservation** as a per-tick
+invariant — map remaining + carried + stockpiled + spent is constant. Every
+duplication and every leak violates it and it costs nothing to check.
+
+### Combat — M4
+
+A damage matrix generated from `docs/02` §8 and committed, covering armour
+types, class bonuses, elevation, minimum damage 1 and siege friendly fire
+(`GD-COMBAT-01`–`05`). A deterministic 40v40 that terminates. Counters win as
+designed over N trials — balance drift is a real regression and headless is the
+cheapest place to catch it.
+
+### The AI — M5
+
+Twenty headless AI-vs-AI matches: no panics, no unit idle over 60 s with work
+available, Hard beats Easy at least 18 times in 20. `FoggedView` enforced
+**mechanically** by a `trybuild` compile-fail test proving the `ai` crate
+cannot name `World` (`TA-AI-01`). `docs/07` D7 calls this architectural, and
+review is not an architecture.
+
+### Interface — M2–M6
+
+Every binding in `docs/03` §2–3 exists and is unique. Selection ordering stable
+across repeated band-boxes (`UX-SEL-01`) — a pure function, testable with no
+rendering. Click-to-response latency under 100 ms by input injection
+(`UX-PERF-02`). The eight player colours passing a deuteranopia and protanopia
+simulation (`GD-A11Y-01`).
+
+### Data files — M3 onward
+
+The startup validator from `docs/04` §9 run as a test: every referenced ID
+exists, every unit is trainable somewhere, every tech is reachable, every
+tooltip carries cost, build time, counters, countered-by and hotkey. **This is
+the main automated defence against missing content**, and it is worth building
+the day the first RON file lands rather than the day the first one is wrong.
+
+---
+
+## 6. Requirement traceability
+
+The half of testing that catches *missing features*. A requirement written in a
+spec and never implemented produces no failing test, because there is no test —
+which is how a milestone gets declared done with a system silently absent.
+
+Every acceptance-bearing statement in `docs/02`, `03`, `04` and `06` carries a
+stable ID, written next to the requirement so it is diffed with it. Tests claim
+one with a `REQ: <id>` marker. `scripts/check-traceability.sh` pairs them up.
+
+Today: **127 declared, 51 covered, 0 gaps in landed work.**
+
+The check fails on three things, each verified by breaking it deliberately: a
+landed requirement with no test; a test claiming an ID no document declares;
+and a *document* citing an ID no specification declares, since this file alone
+cites dozens and they rot silently as requirements are renamed.
+
+Requirements belonging to milestones that have not landed are reported as
+**planned**, not failed. A check that is red from day one until M7 gets
+disabled in week two. Extending `TRACEABILITY_LANDED` is the moment a
+milestone's requirements start being enforced, and that edit belongs in the
+milestone's own commit — it is the mechanical definition of "this milestone is
+done".
+
+---
+
+## 7. The M1/M2 test backlog
+
+`TRACEABILITY_LANDED` still names only M0, which is understated: M1 and M2 have
+shipped. Running the check with their prefixes added produces **twelve named
+gaps**. They are listed here rather than left implicit, and flipping the switch
+is a one-line change once they are covered.
+
+| ID | The requirement, untested |
+|---|---|
+| `TA-PATH-02` | A blocked unit repaths within 3 ticks and never stops silently |
+| `TA-PATH-04` | Faster units overtake slower ones on a shared route |
+| `TA-PATH-05` | Units never occupy the same tile centre; overlap resolves by entity ID |
+| `TA-PATH-06` | Path requests are budgeted, with player orders serviced before AI ones |
+| `RM-M2-03` | Pathfinding property tests pass on adversarial maps — mazes, single-tile gaps, full enclosure |
+| `GD-ECON-02` | Base gather rate 0.45/s and carry capacity 10 |
+| `GD-ECON-03` | The Storehouse accepts every resource |
+| `GD-ECON-04` | Gatherers walk to the *nearest* valid drop-off |
+| `GD-ECON-05` | Farms auto-reseed — not yet implementable, farms are M3 |
+| `GD-POP-01` | House gives +5 population for 30 wood |
+| `GD-POP-02` | Default cap 75, configurable 50–200 |
+| `GD-POP-03` | Villager costs 50 food |
+
+The pathfinding four are the ones that matter. `docs/06` calls M2 "the
+milestone that decides whether the game feels good", and four of the five
+behaviours `docs/04` §5 lists as "tested explicitly" are not.
+
+---
+
+## 8. Performance
+
+`simrunner bench --json` reports p50/p99/max per tick; `scripts/check-perf.sh`
+fails against ceilings in `perf/budgets.ron`, set at three times the observed
+p99. Measured spread on a developer machine was 1.1×–1.2×; CI is worse, which
+is what the headroom is for.
+
+**The number worth knowing.** `marching-8p` — eight players keeping about 320
+mobile units under way, with **no combat and no AI** — already spends roughly
+5 ms at p99, nearly all of it planning paths. `docs/04` §12 budgets 6 ms for
+pathfinding at 200 population and 400 entities.
+
+That is not a regression; it is the shape of the work. But the pathfinding
+budget is substantially spent before M4 and M5 add combat and an opponent, and
+the sector-graph and flow-field layers in `docs/04` §5 are what has to buy it
+back. Finding that out at M7 would be much more expensive.
+
+The ceilings are cliff detectors, not precision instruments. Verify §12
+properly on known hardware at milestone review; a shared runner cannot answer
+that question and should not pretend to.
+
+---
+
+## 9. What stays manual
+
+Automation cannot answer "does this feel like the game you remember", and a
+test plan that implies otherwise is lying about the hardest part.
+
+**Per-milestone smoke pass.** A scripted 30-minute run-through with explicit
+pass/fail steps drawn from that milestone's acceptance criteria in `docs/06`.
+
+**Feel review.** Against `docs/03` §6 at each milestone, by a person:
+acknowledgment latency, camera smoothness, audio texture under twelve
+simultaneous workers, the age-up presentation. `docs/02` pillar 4 says the feel
+*is* the product; nothing in CI has an opinion about it.
+
+**M7 playtest** (`RM-M7-01`). At least six people who played the original, a
+structured observation sheet, and the criterion operationalised: unprompted
+session length, and whether they start a second match.
+
+**Real hardware.** The golden images run on a software rasteriser, which proves
+the renderer and proves nothing about a GPU driver. One pass per platform on
+real hardware per milestone.
+
+---
+
+## 10. Running it locally
+
+```sh
+# Everything the lint job runs.
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+scripts/check-sim-purity.sh
+scripts/check-art.sh
+scripts/check-generated.sh
+scripts/check-traceability.sh
+scripts/check-cli-callers.sh
+scripts/check-workflows.sh
+
+# Everything else.
+cargo test --workspace
+cargo run --release -p simrunner -- golden
+scripts/check-perf.sh
+
+# Deeper, when changing the simulation.
+PROPTEST_CASES=20000 cargo test --release -p sim
+cargo run --release -p simrunner --features sim/debug-checks -- soak --matches 1000
+cargo test -p sim --features debug-checks
+
+# Deliberate updates, which must be reviewed as diffs.
+cargo run -p simrunner -- record          # re-record the corpus inputs
+cargo run -p simrunner -- golden --update # re-record the expected digests
+UPDATE_GOLDEN=1 cargo test -p mapview --test golden_images
+```
+
+`record` and `golden --update` are deliberately separate commands. Rewriting
+the corpus *inputs* is a much larger claim than rewriting the expected
+*outputs*, and the two should never happen in the same commit by accident.
+
+---
+
+## 11. Known gaps
+
+Stated rather than left to be discovered.
+
+- **The twelve M1/M2 requirements in §7**, four of them pathfinding behaviours
+  on the milestone the roadmap calls the risk.
+- **No resource-conservation invariant.** The strongest economy check
+  available and it is not written.
+- **The HUD overlaps below ~960px.** `GOLD` runs into `POP` and both run into
+  the right-aligned status. `docs/03` §1 says the layout reflows; overlapping
+  is not reflowing. Pinned by the `narrow-hud-overlap` golden, which records
+  the defect so a fix shows up as a deliberate image change.
+- **No fuzzing.** `cargo-fuzz` targets for the replay reader and the command
+  interface were written against M0 and need rebuilding for M2's ten command
+  variants.
+- **No nightly job.** The long soak, deep property runs, Miri over the
+  hand-rolled entity store, and the mapgen seed sweep all belong there.
+- **No real-hardware GPU pass.** A software rasteriser is not a driver
+  compatibility test.
+- **The perf gate is coarse**, on purpose — see §8. It will not catch a 20%
+  regression.
+- **`clippy::indexing_slicing` is not denied** in `crates/sim`. The entity
+  store is struct-of-arrays indexed by `Slot`, and `Slot` is only obtainable
+  from a live lookup, so the indexing is safe by construction; denying the lint
+  would mean replacing that design with bounds-checked accessors everywhere for
+  no gain. `World::check` and the soak are the empirical check.

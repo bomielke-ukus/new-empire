@@ -75,7 +75,9 @@ fn read_rgba(path: &Path) -> Result<Rgba, String> {
     let pixels = match colour {
         png::ColorType::Rgba => buf,
         png::ColorType::Rgb => buf
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|c| [c[0], c[1], c[2], 255])
             .collect(),
         other => {

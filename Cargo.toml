@@ -14,7 +14,13 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-rust-version = "1.85"
+# The floor the dependency tree actually imposes, not an aspiration: `image`
+# (via tools/mapview) declares 1.88 and `wayland-protocols` (via winit)
+# declares 1.86. The claim was 1.85 and nothing checked it until the MSRV job
+# in CI. `crates/sim` on its own still needs only 1.85 — its whole normal
+# dependency tree is serde — so that is the number that matters if the
+# simulation is ever split out for a platform with an older toolchain.
+rust-version = "1.88"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

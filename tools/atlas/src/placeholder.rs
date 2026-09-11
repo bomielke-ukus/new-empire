@@ -203,7 +203,7 @@ impl Frame<'_> {
             "death" => (0.0, 0.0, 1.0 - t * 0.75),
             "decay" => (0.0, 0.0, 0.25),
             // Villager task animations and anything else: a small working bob.
-            _ => (if frame % 2 == 0 { 0.0 } else { -1.0 }, 1.0, 1.0),
+            _ => (if frame.is_multiple_of(2) { 0.0 } else { -1.0 }, 1.0, 1.0),
         };
         let body_h = ((body_h as f32 * squash) as i32).max(3);
         let lean_x = (lean * dx) as i32;

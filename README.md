@@ -25,6 +25,7 @@ Read in order:
 | [06 — Roadmap](docs/06-roadmap.md) | M0–M9 milestones with demonstrable acceptance criteria |
 | [07 — Decisions and open questions](docs/07-decisions-and-open-questions.md) | Decision log with reasoning, and what still needs answering |
 | [08 — Art production](docs/08-art-production.md) | Where the art comes from: the inventory cost, the options researched, the legal position, the render-to-sprite pipeline |
+| [09 — Test plan](docs/09-test-plan.md) | How we find out whether it is any good before a player does: what each layer catches, what is tested today, and what is still owed |
 
 ## Building and running
 
@@ -36,7 +37,8 @@ cargo test --workspace                       # unit tests for every crate
 cargo run --release -p simrunner -- determinism --ticks 10000
                                              # M0 acceptance: run a synthetic
                                              # match twice, compare every tick
-cargo run --release -p simrunner -- bench --units 1500 --ticks 2000
+cargo run --release -p simrunner -- bench            # per-tick timings
+cargo run --release -p simrunner -- golden           # replay the corpus, compare digests
 cargo run --release -p new-empire [SEED]     # open the game window on a generated map
 cargo run --release -p mapview -- --seed 1 --out frame.png --minimap mini.png
                                              # render a frame to PNG with no GPU

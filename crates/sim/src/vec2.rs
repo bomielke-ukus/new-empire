@@ -50,17 +50,31 @@ impl Vec2Fx {
     }
 
     /// Dot product, saturating.
+    ///
+    /// The intermediate is `i128`. Each product reaches 2^62, so their sum
+    /// reaches 2^63 and overflows a signed 64-bit accumulator: in debug that
+    /// panicked, and in release it wrapped and returned a value with the
+    /// wrong *sign* (`dot(MIN, MIN)` gave -32768 where it should saturate to
+    /// +MAX). The same input giving two answers depending on the build
+    /// profile is a desync waiting for a player to find it.
     pub fn dot(self, o: Vec2Fx) -> Fx {
-        let sum = self.x.raw() as i64 * o.x.raw() as i64 + self.y.raw() as i64 * o.y.raw() as i64;
-        Fx::from_raw(((sum + (1 << 15)) >> 16).clamp(i32::MIN as i64, i32::MAX as i64) as i32)
+        let sum = (self.x.raw() as i128) * (o.x.raw() as i128)
+            + (self.y.raw() as i128) * (o.y.raw() as i128);
+        Fx::from_raw(((sum + (1 << 15)) >> 16).clamp(i32::MIN as i128, i32::MAX as i128) as i32)
     }
 
     /// Squared length as raw Q32.32. Exact; use for comparisons.
+    ///
+    /// Accumulated unsigned. Two extreme components square to 2^62 each and
+    /// 2^63 together, which does not fit the `i64` this used to add in — it
+    /// panicked in debug and relied on a wrap in release. It fits the `u64`
+    /// this returns with a bit to spare, so accumulating there is exact and
+    /// costs nothing.
     #[inline]
     pub fn length_sq_raw(self) -> u64 {
-        let x = self.x.raw() as i64;
-        let y = self.y.raw() as i64;
-        (x * x + y * y) as u64
+        let x = (self.x.raw() as i64).unsigned_abs();
+        let y = (self.y.raw() as i64).unsigned_abs();
+        x * x + y * y
     }
 
     /// Length. Saturates at `Fx::MAX` (only reachable for absurd inputs).
@@ -252,6 +266,44 @@ mod tests {
         let d = v(0, 0).distance(v(240, 240));
         assert_eq!(d.floor(), 339);
         assert!(v(0, 0).distance_sq_raw(v(240, 240)) > v(0, 0).distance_sq_raw(v(200, 200)));
+    }
+
+    /// Both accumulators overflowed at the extremes of the type: a panic in
+    /// debug, and in release a wrong answer with an inverted sign. Positions
+    /// never reach these values today, but `distance_sq_raw` is a comparison
+    /// primitive that `nav`, the separation pass and the drop-off search all
+    /// lean on, and the next caller should not have to know.
+    #[test]
+    fn extreme_components_do_not_overflow() {
+        let corners = [
+            Vec2Fx::new(Fx::MIN, Fx::MIN),
+            Vec2Fx::new(Fx::MAX, Fx::MAX),
+            Vec2Fx::new(Fx::MIN, Fx::MAX),
+            Vec2Fx::new(Fx::MAX, Fx::MIN),
+        ];
+        for a in corners {
+            // Exact, checked against the value computed in a wider type.
+            let expect = (a.x.raw() as i128).pow(2) + (a.y.raw() as i128).pow(2);
+            assert_eq!(a.length_sq_raw() as i128, expect, "{a:?}");
+            assert_eq!(a.length(), Fx::MAX, "length must saturate, not wrap");
+            for b in corners {
+                let expect = (a.x.raw() as i128) * (b.x.raw() as i128)
+                    + (a.y.raw() as i128) * (b.y.raw() as i128);
+                let want = ((expect + (1 << 15)) >> 16).clamp(i32::MIN as i128, i32::MAX as i128);
+                assert_eq!(a.dot(b).raw() as i128, want, "dot({a:?}, {b:?})");
+                // These must merely not blow up.
+                let _ = a.distance_sq_raw(b);
+                let _ = a.distance(b);
+                let _ = a.move_toward(b, Fx::ONE);
+            }
+        }
+        // The exact value, not a wrapped one: 2^62 + 2^62.
+        assert_eq!(Vec2Fx::new(Fx::MIN, Fx::MIN).length_sq_raw(), 1u64 << 63);
+        // Saturates positive; in release it used to come back as -32768.
+        assert_eq!(
+            Vec2Fx::new(Fx::MIN, Fx::MIN).dot(Vec2Fx::new(Fx::MIN, Fx::MIN)),
+            Fx::MAX
+        );
     }
 
     #[test]

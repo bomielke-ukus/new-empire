@@ -38,10 +38,10 @@ ultrawide.
 - **Resource bar top, command panel bottom, minimap bottom-right.** This is the
   layout the game we are evoking used, and it is muscle memory for the audience.
   We are not innovating here.
-- The resource bar shows, per resource: current stockpile **and the number of
+- **[UX-HUD-01]** The resource bar shows, per resource: current stockpile **and the number of
   villagers currently assigned to it**. The original showed this; most modern
   RTS games do not; it is genuinely useful.
-- **Idle villager counter** in the resource bar, always visible, clickable,
+- **[UX-HUD-02] Idle villager counter** in the resource bar, always visible, clickable,
   turning amber above 3 and red above 6.
 - The world view is never occluded by a modal during play. Menus pause (single
   player) or overlay translucently (multiplayer).
@@ -67,7 +67,7 @@ ultrawide.
 | H | Centre on Town Center |
 | Esc | Clear selection / cancel current command |
 
-**Selection ordering is stable.** Repeated band-boxes of the same units yield
+**[UX-SEL-01] Selection ordering is stable.** Repeated band-boxes of the same units yield
 the same order, so the selection panel does not shuffle.
 
 Selected units get a coloured ellipse in their player colour, plus a health bar
@@ -77,7 +77,7 @@ above (always on for damaged units, toggleable to always-on for all).
 
 ## 3. Commands
 
-**Right-click is contextual**, and the cursor tells you what it will do before
+**[UX-CMD-01] Right-click is contextual**, and the cursor tells you what it will do before
 you click:
 
 | Target under cursor | Action | Cursor |
@@ -93,22 +93,22 @@ you click:
 The full command vocabulary — all of it absent from the 1997 original, all of it
 non-negotiable now:
 
-- **Attack-move** (`A` then click): advance, engaging anything on the way.
-- **Patrol** (`P`): move back and forth, engaging.
-- **Waypoints** (Shift + click): queue any sequence of commands, including
+- **[UX-CMD-02] Attack-move** (`A` then click): advance, engaging anything on the way.
+- **[UX-CMD-03] Patrol** (`P`): move back and forth, engaging.
+- **[UX-CMD-04] Waypoints** (Shift + click): queue any sequence of commands, including
   mixed types — move here, build this, then gather that.
-- **Rally points**, including **onto a resource** (new villagers walk out and
+- **[UX-CMD-05] Rally points**, including **onto a resource** (new villagers walk out and
   start gathering it) or onto a unit (they follow it).
-- **Production queue** — click to queue one, Shift+click to queue five, with a
+- **[UX-CMD-06] Production queue** — click to queue one, Shift+click to queue five, with a
   visible queue strip and refund on cancel.
-- **Stances** — aggressive / defensive / stand ground / passive, per unit,
+- **[UX-CMD-07] Stances** — aggressive / defensive / stand ground / passive, per unit,
   settable on a selection.
-- **Formations** — line, box, staggered, flank. Units keep formation while
+- **[UX-CMD-08] Formations** — line, box, staggered, flank. Units keep formation while
   moving and the group moves at the speed of its slowest member (toggleable).
-- **Garrison / ungarrison** for towers, Town Centers and transports.
-- **Delete** (Del, with confirmation for buildings).
+- **[UX-CMD-09] Garrison / ungarrison** for towers, Town Centers and transports.
+- **[UX-CMD-10] Delete** (Del, with confirmation for buildings).
 
-**A queued command is always shown**: waypoint flags on the ground, a dotted line
+**[UX-CMD-11] A queued command is always shown**: waypoint flags on the ground, a dotted line
 between them, and a ghost of the queued building.
 
 ---
@@ -117,10 +117,10 @@ between them, and a ghost of the queued building.
 
 - Edge scroll (with a configurable dead zone and off switch), `WASD` / arrows,
   and middle-mouse drag.
-- **Discrete zoom levels only** — 1×, 1.5×, 2× — so pixel art stays crisp. No
+- **[UX-CAM-01] Discrete zoom levels only** — 1×, 1.5×, 2× — so pixel art stays crisp. No
   free-scroll zoom; it makes sprite art look bad.
 - Minimap click to jump, drag to scrub.
-- Camera speed is user-configurable and frame-rate independent.
+- **[UX-CAM-02]** Camera speed is user-configurable and frame-rate independent.
 - Alt + click on a notification jumps the camera to the event.
 
 ---
@@ -129,13 +129,13 @@ between them, and a ghost of the queued building.
 
 The placement interaction from the original, cleaned up:
 
-- Holding a building ghost snaps to the tile grid, tinted **green when valid,
+- **[UX-PLACE-01]** Holding a building ghost snaps to the tile grid, tinted **green when valid,
   red when blocked**, with the blocking tiles individually highlighted.
 - Foundation footprint is shown as a grid overlay, plus the building's
   **influence radius** where relevant (tower range, drop-off distance ring,
   house pop contribution).
-- **Shift keeps the ghost active** for repeat placement (walls, houses, farms).
-- **Wall dragging**: click-drag places a continuous run of wall segments, with a
+- **[UX-PLACE-02] Shift keeps the ghost active** for repeat placement (walls, houses, farms).
+- **[UX-PLACE-03] Wall dragging**: click-drag places a continuous run of wall segments, with a
   live cost readout and automatic gate suggestion at road crossings.
 - A **drop-off distance heat overlay** (toggle key `V`) shows walking cost from
   resources to your nearest Storehouse. This is a teaching tool that makes an
@@ -161,8 +161,8 @@ Audio is not decoration here; it is the primary feedback channel. Four buses:
 
 Rules:
 
-- Every player action gets a sound within **50 ms**. No exceptions.
-- Concurrent identical sounds are voice-limited and slightly pitch-varied so a
+- **[UX-AUDIO-01]** Every player action gets a sound within **50 ms**. No exceptions.
+- **[UX-AUDIO-02]** Concurrent identical sounds are voice-limited and slightly pitch-varied so a
   woodline of twelve villagers is a texture, not a machine gun.
 - Positional world audio uses the camera centre as the listener.
 - Ambient beds per terrain type (forest birds, coastal surf, desert wind) at
@@ -197,7 +197,7 @@ click-to-jump:
 | Cannot afford / population capped | Distinct voice line, plus the resource in the bar flashing |
 | Enemy Wonder started | Global announcement, permanent minimap marker |
 
-Attack notifications are rate-limited (one per area per 20 seconds) so a long
+**[UX-NOTIFY-01]** Attack notifications are rate-limited (one per area per 20 seconds) so a long
 siege does not become an alarm loop.
 
 ---
@@ -210,7 +210,7 @@ The original taught through a campaign, and it worked. We do the same:
   Scenario 3 teaches combat. Scenario 4 teaches counters.** One idea each.
 - Contextual first-time hints ("Villagers are idle — press `.` to find them"),
   each shown at most twice, all disableable.
-- A **tooltip standard**: every unit and building tooltip shows cost, build time,
+- **[UX-TIP-01]** A **tooltip standard**: every unit and building tooltip shows cost, build time,
   what it counters, what counters it, and the hotkey. Tooltips are the manual.
 - No wall of text anywhere. If a concept needs a paragraph, the design is wrong.
 
@@ -236,9 +236,9 @@ The original taught through a campaign, and it worked. We do the same:
 
 These are experience requirements, not engineering nice-to-haves:
 
-- **60 fps sustained** with 400 units on screen; never below 30 fps at the
+- **[UX-PERF-01] 60 fps sustained** with 400 units on screen; never below 30 fps at the
   200-population cap.
-- **Command latency under 100 ms** from click to visible unit response.
-- **Cold start to main menu under 3 seconds**; skirmish load under 5 seconds.
-- **Camera scroll is frame-perfect smooth** — a stuttering camera reads as a
+- **[UX-PERF-02] Command latency under 100 ms** from click to visible unit response.
+- **[UX-PERF-03] Cold start to main menu under 3 seconds**; skirmish load under 5 seconds.
+- **[UX-PERF-04] Camera scroll is frame-perfect smooth** — a stuttering camera reads as a
   broken game faster than almost any other defect.

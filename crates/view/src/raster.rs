@@ -74,7 +74,11 @@ impl Image {
 pub fn draw_terrain(img: &mut Image, cam: &Camera, chunks: &[ChunkMesh]) {
     let visible = cam.visible_rect();
     for chunk in chunks.iter().filter(|c| c.overlaps(visible)) {
-        for tri in chunk.indices.chunks_exact(3) {
+        // `as_chunks::<3>().0` rather than `chunks_exact(3)`: same triangles,
+        // same dropped remainder, but the chunk size is in the type, so the
+        // indexing below cannot go out of bounds. Requires Rust 1.88, which is
+        // the workspace MSRV.
+        for tri in chunk.indices.as_chunks::<3>().0 {
             let v = [
                 chunk.vertices[tri[0] as usize],
                 chunk.vertices[tri[1] as usize],
