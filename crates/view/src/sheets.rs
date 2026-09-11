@@ -237,7 +237,7 @@ fn read_indexed_png(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
     }
     let (width, height) = (info.width, info.height);
     if let Some(plte) = info.palette.as_deref() {
-        for (i, rgb) in plte.chunks_exact(3).enumerate().take(256) {
+        for (i, rgb) in plte.as_chunks::<3>().0.iter().enumerate().take(256) {
             if i == 0 {
                 continue; // index 0 is transparent; its colour is irrelevant
             }
