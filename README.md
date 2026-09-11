@@ -100,7 +100,9 @@ Workspace layout:
 
 ## Shape of the build
 
-- **Rust**, native desktop (Windows / macOS / Linux), `wgpu` + `winit` + `kira`.
+- **Rust**, native **macOS** desktop, `wgpu` + `winit` + `kira`.
+  macOS is the product target; Windows/Linux CI provides additional
+  portability and determinism checks, without a shipping commitment.
   The same stack compiles to WebAssembly for quick playtest builds.
 - **Deterministic lockstep simulation** at 20 Hz, fixed-point maths, seeded RNG,
   commands scheduled two ticks ahead — the architecture from *"1500 Archers on a

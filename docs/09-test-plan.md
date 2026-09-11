@@ -67,6 +67,10 @@ raising a tree's wood yield from 75 to 76, which fails four entries by name.
 
 ### Why the platform matrix matters
 
+**macOS is the product target.** Its test job and a live Mac hardware pass
+are the target-platform evidence. Windows/Linux jobs remain extra
+portability and determinism checks, not shipping commitments.
+
 `docs/04` §2 promises bit-identical state on every machine, and nothing but
 running it proves that. The corpus digests are recorded on x86_64 Linux and
 checked on Windows and on aarch64 macOS — a different architecture, not just a
@@ -239,6 +243,27 @@ review is not an architecture.
 
 ### Interface — M2–M6
 
+The chunk-2 review fixes add five app-level regression tests in
+`crates/app/src/tests.rs`, run by `cargo test -p new-empire`. These invoke
+the same click/hotkey handlers as the window, build the actual HUD, and
+advance the simulation command queue before checking outcomes:
+
+- Minimap clicks at three viewport sizes, including during building
+  placement; drag scrubbing preserves selection and does not place buildings.
+- Minimap right-click movement and Town Center rally orders.
+- HUD space outside the minimap diamond does not issue world commands.
+- Storehouse and Market research cancellation via both mouse and hotkey,
+  with exact refunds, no applied technology, and the empty queue reflected
+  in the HUD.
+- Mixed selection cancels the displayed building's queue while preserving
+  another selected building's training; Town Center cancellation still works.
+
+Four of these tests failed against the pre-fix input handlers, establishing
+that they catch the reviewed bugs. They run headlessly with a paused frame
+clock and explicit simulation ticks. They cover input routing and cancellation;
+they do not establish native event delivery, GPU correctness, every binding,
+or the complete production-queue UX. Those checks remain below and in §9.
+
 Every binding in `docs/03` §2–3 exists and is unique. Selection ordering stable
 across repeated band-boxes (`UX-SEL-01`) — a pure function, testable with no
 rendering. Click-to-response latency under 100 ms by input injection
@@ -380,8 +405,9 @@ structured observation sheet, and the criterion operationalised: unprompted
 session length, and whether they start a second match.
 
 **Real hardware.** The golden images run on a software rasteriser, which proves
-the renderer and proves nothing about a GPU driver. One pass per platform on
-real hardware per milestone.
+the renderer and proves nothing about a GPU driver. One pass on real Mac
+hardware per milestone, recording the macOS version, hardware and display/GPU
+setup.
 
 ---
 

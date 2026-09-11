@@ -6,6 +6,10 @@ the milestone definitions and their acceptance tests; this document says
 which of them are done, what was learned, and what the next steps are. Update
 it whenever a milestone lands or the plan changes.
 
+**Target platform: macOS.** Development, live testing and release acceptance
+focus on the Mac. Existing Windows/Linux CI jobs remain additional
+portability and determinism checks, without a shipping commitment.
+
 ---
 
 ## 1. Where we are
@@ -95,12 +99,12 @@ The points that affect what comes next:
 
 The 2026-09-11 code review identified a short stabilisation pass before the
 combat work below. Keep the work in these independently reviewable chunks;
-the first chunk is the stopping point for this session.
+chunk 2 is the stopping point for the current session.
 
 | Chunk | Scope | Status / completion check |
 |---|---|---|
-| 1 — Restore CI | Fix the stable Clippy failure in PNG palette validation | Fix verified by full CI on PR #6; awaiting merge |
-| 2 — Input routing | Handle minimap clicks before the general HUD hit test; allow Storehouse and Market research cancellation | Pending; check camera jumps, minimap orders, cancellation and refunds through the app input path |
+| 1 — Restore CI | Fix the stable Clippy failure in PNG palette validation | Merged as `dac80ad` after final CI passed on PR #6 |
+| 2 — Input routing | Handle minimap clicks before the general HUD hit test; allow Storehouse and Market research cancellation | Implemented; full local macOS tests pass, GitHub CI pending |
 | 3 — Commands and production | Resolve WASD/command hotkey conflicts and update controls documentation; retain a paid training item when the entity cap prevents spawning | Pending; focused regression checks for input conflicts and capacity recovery |
 | 4 — Real-window check | Run the Mac app through selection, gathering, building, training, cancellation and age advancement | Pending; record the display/GPU and observed results, then resume M4 |
 
@@ -113,9 +117,9 @@ the first chunk is the stopping point for this session.
   dereferenced RGB array with the palette entry. This preserves complete
   three-byte groups, their order, the 256-entry limit, and the transparent
   index-zero exception. The renderer already uses this array-chunk pattern.
-- Local whitespace and requirement-traceability checks passed. Rust is not
-  installed in the review environment, so GitHub Actions supplies the Rust
-  and platform verification; the game window has not been exercised here.
+- Local whitespace and requirement-traceability checks passed. Rust was not
+  installed during chunk 1, so GitHub Actions supplied the Rust and platform
+  verification; the game window was not exercised.
 - The first CI attempt caught an array-reference comparison mismatch in
   the iterator edit; it was corrected in `332c444` before the full rerun.
 - Full CI passed for code commit `332c444` in
@@ -124,10 +128,34 @@ the first chunk is the stopping point for this session.
   workflow gates), tests on Linux/macOS/Windows, replay and determinism
   checks, software-rendered frames, performance budgets, the 300-match
   soak, and agreement of simulation hashes across platforms.
-- This status entry was added after that successful run; the executable
-  code is unchanged. Work is isolated in
-  [PR #6](https://github.com/bomielke-ukus/new-empire/pull/6), awaiting merge.
-  Chunks 2–4 remain pending; no live-window verification is claimed.
+- The subsequent documentation commit also passed full CI in
+  [run 34646894917](https://github.com/bomielke-ukus/new-empire/actions/runs/34646894917).
+  [PR #6](https://github.com/bomielke-ukus/new-empire/pull/6) was merged as
+  `dac80ad` before starting chunk 2.
+
+### Work record: chunk 2
+
+- Read `docs/09-test-plan.md` and used app-level input injection to cover
+  the gap between HUD/selection and simulation commands.
+- Minimap left-clicks now take priority over HUD and placement handling;
+  right-click movement and rally orders bypass the HUD only inside the
+  minimap diamond. Right-click still cancels active building placement.
+- The UNQUEUE action carries the ID of the building whose queue is shown.
+  Storehouse/Market research can now be cancelled, including with a Town
+  Center in the selection, without accidentally cancelling that TC's queue.
+- Added five headless app regressions covering navigation at three viewport
+  sizes, scrubbing, selection/placement preservation, movement/rallies,
+  outside-diamond HUD clicks, both research cancellation input methods,
+  exact refunds and mixed selection. Four tests failed against the old
+  handlers; all 12 app tests pass after the fixes.
+- Installed a task-local Rust toolchain without modifying the shell profile
+  or system toolchain, enabling local macOS tests. The full workspace suite
+  passed (290 tests, zero failures), as did Clippy with warnings denied,
+  formatting and requirement traceability. GitHub CI is pending.
+- Clarified macOS as the target in the README, architecture, testing plan
+  and this status file. Windows/Linux CI remains additional verification.
+- No simulation rules or golden fixtures changed. The real-window Mac
+  check remains chunk 4; chunks 3 and 4 are not completed by these tests.
 
 ## 4. What comes next: M4 — Combat
 

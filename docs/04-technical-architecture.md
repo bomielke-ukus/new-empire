@@ -1,6 +1,10 @@
 # Technical Architecture
 
-Target: **native desktop (Windows, macOS, Linux), written in Rust.**
+Target: **native macOS desktop, written in Rust.**
+
+Platform clarification (2026-09-11): development, live testing and release
+acceptance target macOS. The existing Windows/Linux CI jobs remain additional
+portability and determinism checks; they do not define supported products.
 
 Rust over C++ because the two hardest problems in this project — a bit-exact
 deterministic simulation and a data-oriented entity store touched by many

@@ -5,7 +5,7 @@
 use sim::entity::{KindId, Slot};
 use sim::kinds::{self, Cost, KindInfo, Resource};
 use sim::tech::{self, TechId, TechInfo};
-use sim::{GatherPhase, Item, Order, Simulation};
+use sim::{EntityId, GatherPhase, Item, Order, Simulation};
 
 use crate::camera::Camera;
 use crate::font;
@@ -45,8 +45,8 @@ pub enum Action {
     Stop,
     /// Leave placement mode.
     Cancel,
-    /// Remove the last queued item.
-    CancelTrain,
+    /// Remove the last queued item at the building whose queue is displayed.
+    CancelTrain(EntityId),
     /// Queue a technology (an age advance included) at the selected building.
     Research(TechId),
     /// Flip the player's farm auto-reseed.
@@ -477,7 +477,7 @@ fn commands(sim: &Simulation, me: u8, selected: &[Slot], build_mode: Option<Kind
         }
         if queue_len > 0 {
             defs.push(Def::on(
-                Action::CancelTrain,
+                Action::CancelTrain(id),
                 "UNQUEUE",
                 'X',
                 "REMOVE THE LAST QUEUED ITEM AND REFUND IT",
@@ -1031,7 +1031,9 @@ mod tests {
         assert!(age.reason.contains("BUILDINGS"), "{}", age.reason);
         assert_eq!(find(&t, Action::ToggleReseed).unwrap().label, "RESEED ON");
         assert!(
-            find(&t, Action::CancelTrain).is_none(),
+            !t.buttons
+                .iter()
+                .any(|b| matches!(b.action, Action::CancelTrain(_))),
             "nothing queued yet"
         );
 
