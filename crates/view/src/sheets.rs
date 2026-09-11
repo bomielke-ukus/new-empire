@@ -241,7 +241,7 @@ fn read_indexed_png(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
             if i == 0 {
                 continue; // index 0 is transparent; its colour is irrelevant
             }
-            if rgb != ENTRIES[i] {
+            if *rgb != ENTRIES[i] {
                 return Err(format!(
                     "{}: palette entry {i} is #{:02x}{:02x}{:02x} but this build's palette says #{:02x}{:02x}{:02x}; run `atlas repalette`",
                     path.display(),
