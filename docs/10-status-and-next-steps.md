@@ -99,13 +99,13 @@ The points that affect what comes next:
 
 The 2026-09-11 code review identified a short stabilisation pass before the
 combat work below. Keep the work in these independently reviewable chunks;
-chunk 3 is the stopping point for the current session.
+chunks 1–3 are merged. The session is paused before chunk 4.
 
 | Chunk | Scope | Status / completion check |
 |---|---|---|
 | 1 — Restore CI | Fix the stable Clippy failure in PNG palette validation | Merged as `dac80ad` after final CI passed on PR #6 |
 | 2 — Input routing | Handle minimap clicks before the general HUD hit test; allow Storehouse and Market research cancellation | Merged by the owner in PR #7 as `384ae28` |
-| 3 — Commands and production | Resolve WASD/command hotkey conflicts and update controls documentation; retain a paid training item when the entity cap prevents spawning | Verified locally on macOS and by full CI in PR #8; awaiting merge |
+| 3 — Commands and production | Resolve WASD/command hotkey conflicts and update controls documentation; retain a paid training item when the entity cap prevents spawning | Merged in PR #8 as `9e0b3e6` after final CI passed; 295 local macOS tests passed |
 | 4 — Real-window check | Run the Mac app through selection, gathering, building, training, cancellation and age advancement | Pending; record the display/GPU and observed results, then resume M4 |
 
 ### Work record: chunk 1
@@ -198,10 +198,28 @@ chunk 3 is the stopping point for the current session.
   [run 34650485707](https://github.com/bomielke-ukus/new-empire/actions/runs/34650485707):
   macOS tests, all preliminary gates, additional Linux/Windows tests,
   performance, the 300-match soak and cross-platform hash agreement.
-  This result was recorded afterward in a documentation-only commit.
-  [PR #8](https://github.com/bomielke-ukus/new-empire/pull/8) is unmerged
-  and is this session's stopping point. The next chunk remains a real-window
-  Mac smoke pass.
+  The final documentation commit `43a3473` also passed full CI in
+  [PR run 34651001791](https://github.com/bomielke-ukus/new-empire/actions/runs/34651001791)
+  and [push run 34650998730](https://github.com/bomielke-ukus/new-empire/actions/runs/34650998730).
+- At the owner's request, marked
+  [PR #8](https://github.com/bomielke-ukus/new-empire/pull/8) ready and
+  squash-merged it as `9e0b3e6`, with the verified final head protected
+  against intervening changes.
+
+### Resume here next session
+
+Chunks 1–3 are complete and merged. Chunk 4 has not started; the live
+macOS window and GPU path remain unverified. This is the stopping point
+for the evening.
+
+1. Start from the latest default branch and reread `docs/09-test-plan.md`.
+2. Launch the Mac app and exercise selection, gathering, building, training,
+   cancellation and age advancement. Include minimap navigation/orders and
+   WASD camera movement with the new command shortcuts.
+3. Record the Mac, display/GPU, observed results and any issues in this file.
+   Address failures in a small follow-up change before marking chunk 4 done.
+4. Once the live check passes, resume M4 with flow fields and the sector
+   graph, using the pathfinding acceptance tests and performance budget below.
 
 ## 4. What comes next: M4 — Combat
 
