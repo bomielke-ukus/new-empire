@@ -208,6 +208,15 @@ one seed in five hundred will meet that seed in front of a player.
 
 ### Economy and ages — M2 and M3 shipped
 
+Chunk 3 adds `crates/sim/tests/production_capacity.rs`: a completed, paid
+unit stays queued at the entity cap, its tail cannot overtake it, freeing
+one slot produces exactly one unit with its rally order and no second charge,
+and cancellation while capped refunds the full cost. The recovery scenario
+also verifies its replay, and these tests run with debug invariant checks.
+The existing `entity-cap-pressed` replay's expected digest changes with this
+fix; its input commands remain unchanged. Older expected hashes for a replay
+that loses production at the entity cap will no longer match.
+
 M3's tests live in `crates/sim/tests/behaviour_ages.rs`: the building gate
 (`GD-AGE-01`, three ways), technology queued at its building in its age after
 its prerequisites and applied through modifiers, cancel refunds, farms
@@ -269,6 +278,14 @@ across repeated band-boxes (`UX-SEL-01`) — a pure function, testable with no
 rendering. Click-to-response latency under 100 ms by input injection
 (`UX-PERF-02`). The eight player colours passing a deuteranopia and protanopia
 simulation (`GD-A11Y-01`).
+
+Chunk 3 adds native-key-handler regressions for WASD/arrow panning across
+villager, research-building and mixed selections, release stopping movement,
+replacement build/research shortcuts, key-repeat suppression and Escape.
+A HUD table test checks that build/research shortcuts are unique even when
+combined and never occupy WASD. The reference HUD PNGs are refreshed only
+where the displayed shortcut letters change; this does not replace a live
+Mac keyboard/GPU pass.
 
 ### Data files — M3 onward
 

@@ -609,7 +609,32 @@ impl App {
         true
     }
 
-    fn key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode) {
+    /// Shared by the native event handler and headless input tests.
+    /// Returns true only when the caller should close the window.
+    fn keyboard_input(&mut self, code: KeyCode, state: ElementState, repeat: bool) -> bool {
+        match state {
+            ElementState::Pressed => {
+                self.input.held.insert(code);
+                if !repeat {
+                    return self.key(code);
+                }
+            }
+            ElementState::Released => {
+                self.input.held.remove(&code);
+            }
+        }
+        false
+    }
+
+    fn key(&mut self, code: KeyCode) -> bool {
+        // Camera movement is handled through held keys, regardless of the
+        // selection. Never let WASD also dispatch a command.
+        if matches!(
+            code,
+            KeyCode::KeyW | KeyCode::KeyA | KeyCode::KeyS | KeyCode::KeyD
+        ) {
+            return false;
+        }
         let ctrl = self.modifiers.control_key();
         let digit = match code {
             KeyCode::Digit0 => Some(0),
@@ -631,7 +656,7 @@ impl App {
                 let g = self.selection.groups[d].clone();
                 self.selection.set(g);
             }
-            return;
+            return false;
         }
         match code {
             KeyCode::Escape => {
@@ -640,7 +665,7 @@ impl App {
                 } else if !self.selection.ids.is_empty() {
                     self.selection.set(vec![]);
                 } else {
-                    event_loop.exit();
+                    return true;
                 }
             }
             KeyCode::Space => {
@@ -690,6 +715,7 @@ impl App {
                 }
             }
         }
+        false
     }
 }
 
@@ -792,17 +818,11 @@ impl ApplicationHandler for App {
                         ..
                     },
                 ..
-            } => match state {
-                ElementState::Pressed => {
-                    self.input.held.insert(code);
-                    if !repeat {
-                        self.key(event_loop, code);
-                    }
+            } => {
+                if self.keyboard_input(code, state, repeat) {
+                    event_loop.exit();
                 }
-                ElementState::Released => {
-                    self.input.held.remove(&code);
-                }
-            },
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 let (px, py) = (position.x as f32, position.y as f32);
                 let (mm, map) = (self.minimap_rect(), self.map_size());

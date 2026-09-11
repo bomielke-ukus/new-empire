@@ -1809,12 +1809,14 @@ impl Simulation {
                 continue;
             };
             let rally = self.world.production[i].as_ref().and_then(|p| p.rally);
+            let Some(unit) = self.spawn(kind, owner, nav::centre(exit)) else {
+                // The entity store is full. Keep the paid, completed item
+                // at the head until a slot opens or the player cancels it.
+                continue;
+            };
             if let Some(p) = self.world.production[i].as_mut() {
                 p.queue.remove(0);
             }
-            let Some(unit) = self.spawn(kind, owner, nav::centre(exit)) else {
-                continue;
-            };
             self.players[owner as usize].pop += info.pop_cost;
             self.apply_rally(unit, rally);
         }

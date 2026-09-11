@@ -5,6 +5,83 @@
 use super::*;
 use sim::{Item, MapKind, MapSpec, Order};
 
+#[test]
+fn camera_keys_pan_without_building_or_spending_and_release_stops_panning() {
+    let mut app = app();
+    let (store, _, market) = research_settlement(&mut app);
+    let unit = spawn(&mut app, kinds::VILLAGER, 8, 8);
+    for selection in [vec![unit], vec![store], vec![market], vec![unit, store]] {
+        app.selection.set(selection);
+        let selection = app.selection.ids.clone();
+        draw(&mut app);
+        for code in [
+            KeyCode::KeyW,
+            KeyCode::KeyA,
+            KeyCode::KeyS,
+            KeyCode::KeyD,
+            KeyCode::ArrowUp,
+            KeyCode::ArrowLeft,
+            KeyCode::ArrowDown,
+            KeyCode::ArrowRight,
+        ] {
+            let commands = app.sim.replay().commands.len();
+            let stockpile = app.sim.player(ME).unwrap().stockpile;
+            app.camera.look_at_tile(24.0, 24.0);
+            let before = app.camera.focus;
+            assert!(!app.keyboard_input(code, ElementState::Pressed, false));
+            app.input.update_camera(&mut app.camera, 0.1);
+            assert_ne!(app.camera.focus, before);
+            assert_eq!(app.build_mode, None);
+            assert_eq!(app.sim.replay().commands.len(), commands);
+            assert_eq!(app.selection.ids, selection);
+            assert!(!app.keyboard_input(code, ElementState::Released, false));
+            let stopped = app.camera.focus;
+            app.input.update_camera(&mut app.camera, 0.1);
+            assert_eq!(app.camera.focus, stopped);
+            step(&mut app, 3);
+            assert_eq!(app.sim.player(ME).unwrap().stockpile, stockpile);
+        }
+    }
+}
+
+#[test]
+fn replacement_shortcuts_work_without_panning_or_key_repeat_orders() {
+    let mut app = app();
+    let (store, _, _) = research_settlement(&mut app);
+    let unit = spawn(&mut app, kinds::VILLAGER, 8, 8);
+    app.selection.set(vec![unit]);
+    for (code, kind) in [
+        (KeyCode::KeyO, kinds::STOREHOUSE),
+        (KeyCode::KeyN, kinds::ARCHERY_RANGE),
+        (KeyCode::KeyJ, kinds::WATCH_TOWER),
+    ] {
+        draw(&mut app);
+        let before = app.camera.focus;
+        app.keyboard_input(code, ElementState::Pressed, false);
+        app.input.update_camera(&mut app.camera, 0.1);
+        assert_eq!(app.camera.focus, before);
+        assert_eq!(app.build_mode, Some(kind));
+        app.keyboard_input(code, ElementState::Released, false);
+        assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+        assert_eq!(app.build_mode, None);
+    }
+    app.selection.set(vec![store]);
+    draw(&mut app);
+    let before = app.camera.focus;
+    let commands = app.sim.replay().commands.len();
+    app.keyboard_input(KeyCode::KeyE, ElementState::Pressed, false);
+    app.keyboard_input(KeyCode::KeyE, ElementState::Pressed, true);
+    app.input.update_camera(&mut app.camera, 0.1);
+    app.keyboard_input(KeyCode::KeyE, ElementState::Released, false);
+    assert_eq!(app.camera.focus, before);
+    assert_eq!(app.sim.replay().commands.len(), commands + 1);
+    step(&mut app, 3);
+    assert!(app.sim.tech_queued(ME, tech::STONE_MINING));
+    assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    assert!(app.selection.ids.is_empty());
+    assert!(app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+}
+
 fn app() -> App {
     let mut app = App::new();
     app.sim = Simulation::new(

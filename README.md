@@ -56,7 +56,7 @@ cargo run -p atlas -- rig                    # render rig, checked against the s
 
 In the window: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
 `+`/`-` to zoom; click the minimap to jump; `Space` pause; `[` `]` speed;
-`E` toggles edge scrolling.
+`Shift`+`E` toggles edge scrolling. WASD is reserved for camera movement.
 
 Rendered sprite sets under `assets/sprites` replace the procedural placeholders
 for their kinds at startup (today: the greybox villager). `cargo run -p atlas
@@ -66,9 +66,14 @@ Play: left-click or drag to select, double-click for all of a kind on screen,
 `Shift` adds, `Ctrl`+`0-9` saves a control group and `0-9` recalls it, `.`
 cycles idle villagers. Right-click moves, or gathers when over a tree, bush
 or vein, or helps build when over your own site. With villagers selected,
-`H` places a house and `B` a storehouse (`Shift` keeps placing); with the
+`H` places a house, `O` a storehouse, `B` a barracks, `N` an archery range
+and `J` a watch tower (`Shift` keeps placing; age/resource gates apply); with the
 Town Center selected, `V` trains a villager, `X` unqueues, and right-click
 sets its rally point. `T` stops, `Delete` dismisses, `Esc` cancels or quits.
+Research buttons use `Q`, `E`, `I`, `K`, then `Z` in displayed order;
+the command grid shows the current key for each available technology.
+Completed training waits in its paid queue slot if the entity cap blocks
+spawning, and can still be cancelled for a refund.
 Commands take effect two ticks (100 ms) after you give them — that delay is
 the lockstep window, and it is why multiplayer will be a transport job.
 

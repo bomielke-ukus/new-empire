@@ -77,6 +77,22 @@ above (always on for damaged units, toggleable to always-on for all).
 
 ## 3. Commands
 
+### Current economy-sandbox shortcuts
+
+WASD and arrows are reserved for camera movement. Build shortcuts with
+villagers selected are H (House), O (Storehouse), B (Barracks), F (Farm),
+M (Market), N (Archery Range), L (Stable), J (Watch Tower), P (Temple),
+Y (Academy), G (Siege Workshop), and C (Government Centre), subject to age
+and resource gates. Technologies use Q, E, I, K, Z in displayed order;
+the HUD is authoritative as researched technologies leave the list.
+V trains a villager, U advances age, R toggles auto-reseed, X unqueues,
+and T stops units. Shift+E toggles edge scrolling. X cancels placement
+when its separate panel is active. Unmodified E remains available for research.
+
+Completed training remains paid and queued while the global entity cap
+blocks spawning. Opening a slot produces the unit without charging again;
+cancelling the queued item refunds it normally.
+
 **[UX-CMD-01] Right-click is contextual**, and the cursor tells you what it will do before
 you click:
 

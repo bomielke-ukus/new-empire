@@ -99,13 +99,13 @@ The points that affect what comes next:
 
 The 2026-09-11 code review identified a short stabilisation pass before the
 combat work below. Keep the work in these independently reviewable chunks;
-chunk 2 is the stopping point for the current session.
+chunk 3 is the stopping point for the current session.
 
 | Chunk | Scope | Status / completion check |
 |---|---|---|
 | 1 — Restore CI | Fix the stable Clippy failure in PNG palette validation | Merged as `dac80ad` after final CI passed on PR #6 |
-| 2 — Input routing | Handle minimap clicks before the general HUD hit test; allow Storehouse and Market research cancellation | Verified locally on macOS and by full CI in PR #7; awaiting merge |
-| 3 — Commands and production | Resolve WASD/command hotkey conflicts and update controls documentation; retain a paid training item when the entity cap prevents spawning | Pending; focused regression checks for input conflicts and capacity recovery |
+| 2 — Input routing | Handle minimap clicks before the general HUD hit test; allow Storehouse and Market research cancellation | Merged by the owner in PR #7 as `384ae28` |
+| 3 — Commands and production | Resolve WASD/command hotkey conflicts and update controls documentation; retain a paid training item when the entity cap prevents spawning | Verified locally on macOS and by full CI in PR #8; awaiting merge |
 | 4 — Real-window check | Run the Mac app through selection, gathering, building, training, cancellation and age advancement | Pending; record the display/GPU and observed results, then resume M4 |
 
 ### Work record: chunk 1
@@ -158,11 +158,50 @@ chunk 2 is the stopping point for the current session.
   Linux/Windows jobs, performance, the 300-match soak and cross-platform
   hash agreement. This result entry was added after that run, with no
   executable changes. [PR #7](https://github.com/bomielke-ukus/new-empire/pull/7)
-  is the reviewable stopping point and remains unmerged.
+  was subsequently merged by the owner as `384ae28` before chunk 3.
 - Clarified macOS as the target in the README, architecture, testing plan
   and this status file. Windows/Linux CI remains additional verification.
 - No simulation rules or golden fixtures changed. The real-window Mac
-  check remains chunk 4; chunks 3 and 4 are not completed by these tests.
+  check remains chunk 4; chunk 2's tests do not complete it.
+
+### Work record: chunk 3
+
+- Confirmed the PR #7 merge and branched from `384ae28`. Followed the
+  testing plan's distinction between behaviour regressions, deterministic
+  replay stability, reference images and live hardware testing.
+- Reserved WASD for camera movement in the physical-key handler. Build
+  shortcuts now use O (Storehouse), N (Archery Range), J (Watch Tower);
+  research uses Q, E, I, K, Z in displayed order. Updated the README and
+  UX controls, including the existing Shift+E edge-scroll toggle.
+- Extracted keyboard dispatch from window exit handling so the same
+  press/release/repeat path can run in headless app tests. Added two tests
+  for camera-only keys, release, replacement commands, repeats and Escape,
+  plus a HUD test for shortcut uniqueness across mixed selections.
+- Completed training now leaves the queue only after a unit spawns.
+  Two new simulation regressions cover waiting at the entity cap, preserving
+  queue order, spawning once with the rally after capacity opens, no second
+  charge, and full cancellation refunds. Both also pass with debug invariant
+  checks enabled; the recovery test verifies its replay.
+- Both app regressions and both capacity regressions failed on the old
+  behaviour before the fixes. Focused checks now pass.
+- The full corpus identified exactly one intended digest change:
+  `entity-cap-pressed`, whose paid units now remain queued. Updated only
+  its expected digest/final hash; all replay input files remain unchanged.
+  Existing expected hashes for affected older replays are not compatible
+  with the corrected behaviour; the replay file format is unchanged.
+- Refreshed reference renders: only `gather-hud.png` changed. Inspected the
+  before/after images; Storehouse, Archery Range and Tower shortcut labels
+  change, with the scene and layout preserved.
+- Full local macOS verification passed: 295 tests, zero failures; Clippy
+  with warnings denied, formatting and requirement traceability also pass.
+- Full CI passed for code commit `ad37ec5` in
+  [run 34650485707](https://github.com/bomielke-ukus/new-empire/actions/runs/34650485707):
+  macOS tests, all preliminary gates, additional Linux/Windows tests,
+  performance, the 300-match soak and cross-platform hash agreement.
+  This result was recorded afterward in a documentation-only commit.
+  [PR #8](https://github.com/bomielke-ukus/new-empire/pull/8) is unmerged
+  and is this session's stopping point. The next chunk remains a real-window
+  Mac smoke pass.
 
 ## 4. What comes next: M4 — Combat
 
