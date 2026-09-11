@@ -104,7 +104,7 @@ chunk 2 is the stopping point for the current session.
 | Chunk | Scope | Status / completion check |
 |---|---|---|
 | 1 — Restore CI | Fix the stable Clippy failure in PNG palette validation | Merged as `dac80ad` after final CI passed on PR #6 |
-| 2 — Input routing | Handle minimap clicks before the general HUD hit test; allow Storehouse and Market research cancellation | Implemented; full local macOS tests pass, GitHub CI pending |
+| 2 — Input routing | Handle minimap clicks before the general HUD hit test; allow Storehouse and Market research cancellation | Verified locally on macOS and by full CI in PR #7; awaiting merge |
 | 3 — Commands and production | Resolve WASD/command hotkey conflicts and update controls documentation; retain a paid training item when the entity cap prevents spawning | Pending; focused regression checks for input conflicts and capacity recovery |
 | 4 — Real-window check | Run the Mac app through selection, gathering, building, training, cancellation and age advancement | Pending; record the display/GPU and observed results, then resume M4 |
 
@@ -151,7 +151,14 @@ chunk 2 is the stopping point for the current session.
 - Installed a task-local Rust toolchain without modifying the shell profile
   or system toolchain, enabling local macOS tests. The full workspace suite
   passed (290 tests, zero failures), as did Clippy with warnings denied,
-  formatting and requirement traceability. GitHub CI is pending.
+  formatting and requirement traceability.
+- Full GitHub CI passed for code commit `662e086` in
+  [run 34648843607](https://github.com/bomielke-ukus/new-empire/actions/runs/34648843607):
+  lint/purity and all preliminary gates, macOS tests, the additional
+  Linux/Windows jobs, performance, the 300-match soak and cross-platform
+  hash agreement. This result entry was added after that run, with no
+  executable changes. [PR #7](https://github.com/bomielke-ukus/new-empire/pull/7)
+  is the reviewable stopping point and remains unmerged.
 - Clarified macOS as the target in the README, architecture, testing plan
   and this status file. Windows/Linux CI remains additional verification.
 - No simulation rules or golden fixtures changed. The real-window Mac
