@@ -105,7 +105,7 @@ chunk 3 is the stopping point for the current session.
 |---|---|---|
 | 1 — Restore CI | Fix the stable Clippy failure in PNG palette validation | Merged as `dac80ad` after final CI passed on PR #6 |
 | 2 — Input routing | Handle minimap clicks before the general HUD hit test; allow Storehouse and Market research cancellation | Merged by the owner in PR #7 as `384ae28` |
-| 3 — Commands and production | Resolve WASD/command hotkey conflicts and update controls documentation; retain a paid training item when the entity cap prevents spawning | Implemented; full local macOS suite passes, GitHub CI pending |
+| 3 — Commands and production | Resolve WASD/command hotkey conflicts and update controls documentation; retain a paid training item when the entity cap prevents spawning | Verified locally on macOS and by full CI in PR #8; awaiting merge |
 | 4 — Real-window check | Run the Mac app through selection, gathering, building, training, cancellation and age advancement | Pending; record the display/GPU and observed results, then resume M4 |
 
 ### Work record: chunk 1
@@ -194,7 +194,14 @@ chunk 3 is the stopping point for the current session.
   change, with the scene and layout preserved.
 - Full local macOS verification passed: 295 tests, zero failures; Clippy
   with warnings denied, formatting and requirement traceability also pass.
-  GitHub CI is pending. The next chunk remains a real-window Mac smoke pass.
+- Full CI passed for code commit `ad37ec5` in
+  [run 34650485707](https://github.com/bomielke-ukus/new-empire/actions/runs/34650485707):
+  macOS tests, all preliminary gates, additional Linux/Windows tests,
+  performance, the 300-match soak and cross-platform hash agreement.
+  This result was recorded afterward in a documentation-only commit.
+  [PR #8](https://github.com/bomielke-ukus/new-empire/pull/8) is unmerged
+  and is this session's stopping point. The next chunk remains a real-window
+  Mac smoke pass.
 
 ## 4. What comes next: M4 — Combat
 
