@@ -8,7 +8,7 @@
 use proptest::prelude::*;
 use sim::{
     kinds, Command, CommandKind, EntityId, MapKind, MapSpec, PlayerId, Replay, Rng, SimConfig,
-    Simulation, Vec2Fx, MAX_PLAYERS,
+    Simulation, Vec2Fx, COMMAND_DELAY, MAX_PLAYERS,
 };
 
 /// Configs across the ranges the game ships, plus the clamped extremes.
@@ -226,33 +226,61 @@ proptest! {
                 target: Vec2Fx::from_int(1, 1),
             },
         });
-        for _ in 0..ticks {
+        // Player 0's units are checked on the tick the order *lands*, not at
+        // the end of the run. The target is the map corner, which is often
+        // passable but in a different nav component — so the order is set,
+        // fails to plan, and is cleared again two ticks later, leaving a
+        // final snapshot identical to the one taken before the order was
+        // ever issued. Reading that as "ignored the order" is what this test
+        // used to do, and it failed on the trunk at seed
+        // 7678756834985788189: order became Move on tick 3 and was back to
+        // Idle by tick 4, with the run ending on tick 5.
+        //
+        // An unreachable target is worth keeping rather than engineering
+        // away: the property under test is that *other* players are
+        // untouched, and it should hold whether player 0's own order
+        // succeeds or fails.
+        for _ in 0..=COMMAND_DELAY {
+            sim.step();
+        }
+        let mut moved_own = false;
+        for (id, owner, was) in &before {
+            if *owner != 0 {
+                continue;
+            }
+            if let Some(slot) = sim.world().slot(*id) {
+                moved_own |= format!("{:?}", sim.world().order[slot.index()]) != *was;
+            }
+        }
+        prop_assert!(
+            moved_own,
+            "player 0's own units ignored the order on the tick it landed"
+        );
+
+        for _ in (COMMAND_DELAY + 1)..ticks {
             sim.step();
         }
 
-        let mut moved_own = false;
-        for (id, owner, was) in before {
-            let Some(slot) = sim.world().slot(id) else {
+        // The property itself: nobody else moved, and nothing changed hands.
+        for (id, owner, was) in &before {
+            if *owner == 0 {
+                continue;
+            }
+            let Some(slot) = sim.world().slot(*id) else {
                 continue;
             };
-            let now = format!("{:?}", sim.world().order[slot.index()]);
-            if owner == 0 {
-                moved_own |= now != was;
-            } else {
-                prop_assert_eq!(
-                    &now,
-                    &was,
-                    "player {} took an order from player 0",
-                    owner
-                );
-                prop_assert_eq!(
-                    sim.world().owner[slot.index()],
-                    owner,
-                    "ownership changed under {:?}",
-                    id
-                );
-            }
+            prop_assert_eq!(
+                &format!("{:?}", sim.world().order[slot.index()]),
+                was,
+                "player {} took an order from player 0",
+                owner
+            );
+            prop_assert_eq!(
+                sim.world().owner[slot.index()],
+                *owner,
+                "ownership changed under {:?}",
+                id
+            );
         }
-        prop_assert!(moved_own, "player 0's own units ignored the order");
     }
 }
