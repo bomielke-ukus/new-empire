@@ -3,15 +3,16 @@
 //! Every tick runs the same systems in the same order:
 //!
 //! 1. apply commands due this tick
-//! 2. order state machines (decide where units need to be)
-//! 3. path planning, budgeted
-//! 4. animal wandering
-//! 5. movement along waypoints, with stuck detection
-//! 6. unit separation (movers push idle units aside)
-//! 7. nudge anything standing in a blocked tile out of it
-//! 8. construction progress
-//! 9. production queues
-//! 10. population recount
+//! 2. reseed exhausted farms whose owner can pay
+//! 3. order state machines (decide where units need to be)
+//! 4. path planning, budgeted
+//! 5. animal wandering
+//! 6. movement along waypoints, with stuck detection
+//! 7. unit separation (movers push idle units aside)
+//! 8. nudge anything standing in a blocked tile out of it
+//! 9. construction progress
+//! 10. production queues (units and technologies)
+//! 11. population recount
 //!
 //! Nothing here reads a clock or a float; see the crate docs.
 
@@ -19,13 +20,16 @@ use crate::command::{Command, CommandKind, CommandQueue, PlayerId};
 use crate::entity::{EntityId, KindId, Slot, World, WorldViolation};
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
-use crate::kinds::{self, Resource, CARRY_CAPACITY, GAIA, MAX_BUILDERS};
+use crate::kinds::{self, Cost, Resource, GAIA, MAX_BUILDERS};
 use crate::map::TileMap;
 use crate::mapgen::{self, MapSpec};
 use crate::nav::{self, NavGrid, Tile};
-use crate::orders::{GatherPhase, Nav, NavState, Order, Player, Production, QueueItem, Rally};
+use crate::orders::{
+    GatherPhase, Item, Modifiers, Nav, NavState, Order, Player, Production, QueueItem, Rally,
+};
 use crate::replay::Replay;
 use crate::rng::Rng;
+use crate::tech::{self, Age, Effect, TechId, AGE_BUILDINGS_REQUIRED};
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
 
@@ -62,7 +66,20 @@ pub struct SimConfig {
     pub wander: bool,
     /// Population limit per player.
     pub pop_cap_max: u32,
+    /// What every player starts with, indexed by [`Resource::index`].
+    #[serde(default = "default_stockpile")]
+    pub starting_stockpile: Cost,
 }
+
+/// The standard opening stockpile: food, wood, stone, gold.
+pub const DEFAULT_STOCKPILE: Cost = [200, 200, 100, 100];
+
+fn default_stockpile() -> Cost {
+    DEFAULT_STOCKPILE
+}
+
+/// The population caps a skirmish may be set up with (`docs/02` §3.4).
+pub const POP_CAP_RANGE: core::ops::RangeInclusive<u32> = 50..=200;
 
 impl Default for SimConfig {
     fn default() -> Self {
@@ -71,9 +88,68 @@ impl Default for SimConfig {
             max_entities: 4000,
             wander: true,
             pop_cap_max: 75,
+            starting_stockpile: DEFAULT_STOCKPILE,
         }
     }
 }
+
+impl SimConfig {
+    /// Checks the values a match setup screen may offer.
+    ///
+    /// The simulation itself honours any config it is given — tests and
+    /// scenarios lean on caps far outside these bounds — so this is the
+    /// front door's check, not the engine's. Nothing in the replay path
+    /// calls it, because a replay recorded under a strange config must
+    /// still verify.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if !POP_CAP_RANGE.contains(&self.pop_cap_max) {
+            return Err(ConfigError::PopCapOutOfRange {
+                got: self.pop_cap_max,
+            });
+        }
+        for (resource, &amount) in self.starting_stockpile.iter().enumerate() {
+            if amount < 0 {
+                return Err(ConfigError::NegativeStockpile { resource, amount });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Why a match setup was refused. See [`SimConfig::validate`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ConfigError {
+    /// `pop_cap_max` is outside [`POP_CAP_RANGE`].
+    PopCapOutOfRange {
+        /// The value offered.
+        got: u32,
+    },
+    /// A starting stockpile entry is below zero.
+    NegativeStockpile {
+        /// Which resource, by [`Resource::index`].
+        resource: usize,
+        /// The value offered.
+        amount: i32,
+    },
+}
+
+impl core::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ConfigError::PopCapOutOfRange { got } => write!(
+                f,
+                "population cap {got} is outside {}..={}",
+                POP_CAP_RANGE.start(),
+                POP_CAP_RANGE.end()
+            ),
+            ConfigError::NegativeStockpile { resource, amount } => {
+                write!(f, "starting stockpile entry {resource} is {amount}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {}
 
 impl HashState for SimConfig {
     fn hash_state(&self, h: &mut StateHasher) {
@@ -83,6 +159,9 @@ impl HashState for SimConfig {
         h.write_u32(self.max_entities);
         h.write_bool(self.wander);
         h.write_u32(self.pop_cap_max);
+        for v in self.starting_stockpile {
+            h.write_i32(v);
+        }
     }
 }
 
@@ -130,10 +209,87 @@ impl core::fmt::Debug for Scratch {
 pub enum PlaceError {
     /// Not a kind players build.
     NotBuildable,
+    /// The player has not reached the age it belongs to.
+    AgeLocked {
+        /// The age it unlocks in.
+        needs: Age,
+    },
     /// Footprint off the map, on water, or over something.
     Blocked,
     /// Not enough resources.
     Unaffordable,
+}
+
+impl core::fmt::Display for PlaceError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            PlaceError::NotBuildable => write!(f, "not something you can build"),
+            PlaceError::AgeLocked { needs } => write!(f, "needs the {}", needs.name()),
+            PlaceError::Blocked => write!(f, "cannot build there"),
+            PlaceError::Unaffordable => write!(f, "not enough resources"),
+        }
+    }
+}
+
+/// Why a technology cannot be queued. See [`Simulation::can_research`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ResearchError {
+    /// No such technology.
+    UnknownTech,
+    /// The building does not exist or belongs to someone else.
+    NotYourBuilding,
+    /// The technology is researched somewhere else.
+    WrongBuilding,
+    /// The building is still a site.
+    UnderConstruction,
+    /// The player has not reached the age it belongs to.
+    AgeLocked {
+        /// The age it unlocks in.
+        needs: Age,
+    },
+    /// Another technology must come first.
+    MissingPrerequisite {
+        /// Which one.
+        tech: TechId,
+    },
+    /// Already complete.
+    AlreadyResearched,
+    /// Already in a queue somewhere.
+    AlreadyQueued,
+    /// The building's queue is full.
+    QueueFull,
+    /// An age advance needs more buildings of the current age.
+    NeedBuildings {
+        /// Complete, counting buildings the player has.
+        have: usize,
+        /// How many the advance needs.
+        need: usize,
+    },
+    /// Not enough resources.
+    Unaffordable,
+}
+
+impl core::fmt::Display for ResearchError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ResearchError::UnknownTech => write!(f, "no such technology"),
+            ResearchError::NotYourBuilding => write!(f, "not your building"),
+            ResearchError::WrongBuilding => write!(f, "researched elsewhere"),
+            ResearchError::UnderConstruction => write!(f, "still under construction"),
+            ResearchError::AgeLocked { needs } => write!(f, "needs the {}", needs.name()),
+            ResearchError::MissingPrerequisite { tech } => {
+                let name = tech::info(*tech).map_or("another technology", |t| t.name);
+                write!(f, "needs {name}")
+            }
+            ResearchError::AlreadyResearched => write!(f, "already researched"),
+            ResearchError::AlreadyQueued => write!(f, "already queued"),
+            ResearchError::QueueFull => write!(f, "queue is full"),
+            ResearchError::NeedBuildings { have, need } => {
+                write!(f, "needs {need} buildings of this age, have {have}")
+            }
+            ResearchError::Unaffordable => write!(f, "not enough resources"),
+        }
+    }
 }
 
 /// A running match.
@@ -164,7 +320,7 @@ impl Simulation {
         let mut map_hasher = StateHasher::new();
         generated.tiles.hash_state(&mut map_hasher);
         let players = (0..config.map.players.clamp(1, 8))
-            .map(|_| Player::new())
+            .map(|_| Player::with_stockpile(config.starting_stockpile))
             .collect();
         let nav = NavGrid::from_map(&generated.tiles);
         let mut sim = Simulation {
@@ -267,13 +423,119 @@ impl Simulation {
         if !info.buildable {
             return Err(PlaceError::NotBuildable);
         }
+        let Some(pl) = self.players.get(p as usize) else {
+            return Err(PlaceError::Unaffordable);
+        };
+        if pl.age < info.age {
+            return Err(PlaceError::AgeLocked { needs: info.age });
+        }
         if !self.nav.footprint_clear(x, y, info.footprint as i32) {
             return Err(PlaceError::Blocked);
         }
-        match self.players.get(p as usize) {
-            Some(pl) if pl.can_afford(&info.cost) => Ok(()),
-            _ => Err(PlaceError::Unaffordable),
+        if !pl.can_afford(&info.cost) {
+            return Err(PlaceError::Unaffordable);
         }
+        Ok(())
+    }
+
+    /// Whether `p` could queue `tech` at `building` right now.
+    ///
+    /// The same check `Research` runs before paying, so a command panel can
+    /// show why a button is grey with the words the simulation would use.
+    pub fn can_research(
+        &self,
+        p: PlayerId,
+        building: EntityId,
+        id: TechId,
+    ) -> Result<(), ResearchError> {
+        let t = tech::info(id).ok_or(ResearchError::UnknownTech)?;
+        let bs = self
+            .owned_slot(building, p)
+            .ok_or(ResearchError::NotYourBuilding)?;
+        let i = bs.index();
+        if self.world.kind[i] != t.building {
+            return Err(ResearchError::WrongBuilding);
+        }
+        if self.world.construction[i].is_some() {
+            return Err(ResearchError::UnderConstruction);
+        }
+        let player = self
+            .players
+            .get(p as usize)
+            .ok_or(ResearchError::NotYourBuilding)?;
+        if player.has_researched(id) {
+            return Err(ResearchError::AlreadyResearched);
+        }
+        // An age advance is researched from exactly the age before it; any
+        // other technology from its age onward.
+        if t.advances_age().is_some() && player.age > t.age {
+            return Err(ResearchError::AlreadyResearched);
+        }
+        if player.age < t.age {
+            return Err(ResearchError::AgeLocked { needs: t.age });
+        }
+        for &r in t.requires {
+            if !player.has_researched(r) {
+                return Err(ResearchError::MissingPrerequisite { tech: r });
+            }
+        }
+        if self.tech_queued(p, id) {
+            return Err(ResearchError::AlreadyQueued);
+        }
+        if self.world.production[i]
+            .as_ref()
+            .is_some_and(|q| q.queue.len() >= QUEUE_LIMIT)
+        {
+            return Err(ResearchError::QueueFull);
+        }
+        if t.advances_age().is_some() {
+            let have = self.age_buildings(p, player.age);
+            if have < AGE_BUILDINGS_REQUIRED {
+                return Err(ResearchError::NeedBuildings {
+                    have,
+                    need: AGE_BUILDINGS_REQUIRED,
+                });
+            }
+        }
+        if !player.can_afford(&t.cost) {
+            return Err(ResearchError::Unaffordable);
+        }
+        Ok(())
+    }
+
+    /// Complete buildings of `p` from `age` that count toward advancing
+    /// (`docs/02` §4: neither Houses, the Town Center nor Farms).
+    pub fn age_buildings(&self, p: PlayerId, age: Age) -> usize {
+        self.world
+            .slots()
+            .map(|s| s.index())
+            .filter(|&i| {
+                let k = self.world.kind[i];
+                self.world.owner[i] == p
+                    && self.world.construction[i].is_none()
+                    && kinds::counts_for_age(k)
+                    && kinds::info(k).age == age
+            })
+            .count()
+    }
+
+    /// True if `p` has `id` queued at any building.
+    pub fn tech_queued(&self, p: PlayerId, id: TechId) -> bool {
+        self.world.slots().any(|s| {
+            let i = s.index();
+            self.world.owner[i] == p
+                && self.world.production[i]
+                    .as_ref()
+                    .is_some_and(|q| q.queue.iter().any(|q| q.item == Item::Tech(id)))
+        })
+    }
+
+    /// A player's technology modifiers; the defaults for an owner the match
+    /// does not have (Gaia, or a scenario's spare player).
+    pub fn modifiers(&self, p: PlayerId) -> Modifiers {
+        self.players
+            .get(p as usize)
+            .map_or_else(Modifiers::default, |pl| pl.modifiers)
     }
 
     // ----- input -----------------------------------------------------------
@@ -288,6 +550,7 @@ impl Simulation {
     pub fn step(&mut self) {
         self.scratch.stats = TickStats::default();
         self.apply_commands();
+        self.farms();
         self.nav.refresh();
         self.orders();
         self.nav.refresh();
@@ -496,8 +759,8 @@ impl Simulation {
                 // Unfinished sites refund what has not been built yet.
                 let done = self.world.construction[i]
                     .unwrap_or(0)
-                    .min(info.build_ticks());
-                let total = info.build_ticks().max(1);
+                    .min(info.build_work());
+                let total = info.build_work().max(1);
                 let back = cost.map(|c| c - c * done as i32 / total as i32);
                 p.refund(&back);
             }
@@ -559,7 +822,7 @@ impl Simulation {
                     return;
                 };
                 let kind = self.world.kind[ns.index()];
-                if !kinds::gatherable(kind) || self.world.resource[ns.index()] <= 0 {
+                if !self.gatherable_by(ns.index(), p) {
                     return;
                 }
                 let resource = kinds::info(kind)
@@ -593,6 +856,8 @@ impl Simulation {
                 let i = site.index();
                 self.world.construction[i] = Some(0);
                 self.world.health[i] = Fx::ONE;
+                // A farm is seeded when it is finished, not when it is pegged out.
+                self.world.resource[i] = 0;
                 self.assign_builders(&ids, p, site);
             }
             CommandKind::Assist { ids, site } => {
@@ -625,7 +890,7 @@ impl Simulation {
                 self.world.production[i]
                     .get_or_insert_with(Production::default)
                     .queue
-                    .push(QueueItem { kind, progress: 0 });
+                    .push(QueueItem::unit(kind));
             }
             CommandKind::CancelTrain { building } => {
                 let Some(bs) = self.owned_slot(building, p) else {
@@ -634,8 +899,35 @@ impl Simulation {
                 let i = bs.index();
                 if let Some(q) = self.world.production[i].as_mut() {
                     if let Some(item) = q.queue.pop() {
-                        self.players[p as usize].refund(&kinds::info(item.kind).cost);
+                        let cost = match item.item {
+                            Item::Unit(k) => kinds::info(k).cost,
+                            Item::Tech(t) => tech::info(t).map_or([0; 4], |t| t.cost),
+                        };
+                        self.players[p as usize].refund(&cost);
                     }
+                }
+            }
+            CommandKind::Research { building, tech } => {
+                if self.can_research(p, building, tech).is_err() {
+                    return;
+                }
+                let Some(bs) = self.owned_slot(building, p) else {
+                    return;
+                };
+                let Some(t) = tech::info(tech) else {
+                    return;
+                };
+                if !self.players[p as usize].pay(&t.cost) {
+                    return;
+                }
+                self.world.production[bs.index()]
+                    .get_or_insert_with(Production::default)
+                    .queue
+                    .push(QueueItem::tech(tech));
+            }
+            CommandKind::SetAutoReseed { enabled } => {
+                if let Some(pl) = self.players.get_mut(p as usize) {
+                    pl.auto_reseed = enabled;
                 }
             }
             CommandKind::SetRally { building, rally } => {
@@ -711,9 +1003,10 @@ impl Simulation {
     fn tick_gather(&mut self, slot: Slot, node: EntityId, resource: Resource, phase: GatherPhase) {
         let i = slot.index();
         let me = self.world.owner[i];
-        let node_slot = self.world.slot(node).filter(|s| {
-            kinds::gatherable(self.world.kind[s.index()]) && self.world.resource[s.index()] > 0
-        });
+        let node_slot = self
+            .world
+            .slot(node)
+            .filter(|s| self.gatherable_by(s.index(), me));
 
         match phase {
             GatherPhase::ToNode => {
@@ -762,25 +1055,29 @@ impl Simulation {
                 if matches!(self.world.carry[i], Some((r, _)) if r != resource) {
                     self.world.carry[i] = None;
                 }
-                let rate = resource.gather_rate() / TICKS_PER_SECOND as i32;
+                let modifiers = self.modifiers(me);
+                let rate = modifiers.gather_rate(resource) / TICKS_PER_SECOND as i32;
                 self.world.work[i] += rate;
                 if self.world.work[i] < Fx::ONE {
                     return;
                 }
+                let capacity = modifiers.carry_capacity();
                 let carried = self.world.carry[i].map_or(0, |(_, a)| a);
                 let take = self.world.work[i]
                     .floor()
                     .min(self.world.resource[n])
-                    .min(CARRY_CAPACITY - carried)
+                    .min(capacity - carried)
                     .max(0);
                 self.world.work[i] -= Fx::from_int(take);
                 self.world.resource[n] -= take;
                 let carried = carried + take;
                 self.world.carry[i] = Some((resource, carried));
-                if self.world.resource[n] <= 0 {
+                // An exhausted node is gone; an exhausted farm stays, empty,
+                // for `farms` to reseed when its owner can pay.
+                if self.world.resource[n] <= 0 && self.world.kind[n] != kinds::FARM {
                     self.remove(node);
                 }
-                if carried >= CARRY_CAPACITY {
+                if carried >= capacity {
                     self.go_dropoff(slot, node, resource, me);
                 }
             }
@@ -996,6 +1293,42 @@ impl Simulation {
         }
     }
 
+    /// True if `p`'s villagers may gather from entity `n` right now: a
+    /// static node with something left, not a site, and — for a farm —
+    /// theirs. Gaia's nodes are everyone's; a farm is its owner's.
+    fn gatherable_by(&self, n: usize, p: PlayerId) -> bool {
+        let k = self.world.kind[n];
+        kinds::gatherable(k)
+            && self.world.resource[n] > 0
+            && self.world.construction[n].is_none()
+            && (k != kinds::FARM || self.world.owner[n] == p)
+    }
+
+    /// Reseeds every exhausted farm whose owner has auto-reseed on and the
+    /// wood to pay for it. Runs before orders, so a villager working a farm
+    /// that ran dry last tick finds it full again before it looks elsewhere.
+    fn farms(&mut self) {
+        let base = kinds::info(kinds::FARM)
+            .resource
+            .map_or(0, |(_, amount)| amount);
+        for slot in self.world.slots().collect::<Vec<_>>() {
+            let i = slot.index();
+            if self.world.kind[i] != kinds::FARM
+                || self.world.resource[i] > 0
+                || self.world.construction[i].is_some()
+            {
+                continue;
+            }
+            let Some(p) = self.players.get_mut(self.world.owner[i] as usize) else {
+                continue;
+            };
+            if !p.auto_reseed || !p.pay(&kinds::FARM_RESEED_COST) {
+                continue;
+            }
+            self.world.resource[i] = p.modifiers.farm_yield(base);
+        }
+    }
+
     fn is_dropoff_for(&self, slot: usize, p: PlayerId) -> bool {
         self.world.owner[slot] == p
             && kinds::info(self.world.kind[slot]).dropoff
@@ -1017,15 +1350,15 @@ impl Simulation {
     /// the reachability test runs only until one passes.
     fn nearest_node(&self, i: usize, resource: Resource) -> Option<EntityId> {
         let pos = self.world.pos[i];
+        let me = self.world.owner[i];
         let limit = REPLACEMENT_RADIUS.raw() as u64 * REPLACEMENT_RADIUS.raw() as u64;
         let mut candidates: Vec<(u64, Slot)> = self
             .world
             .slots()
             .filter(|s| {
                 let k = self.world.kind[s.index()];
-                kinds::gatherable(k)
+                self.gatherable_by(s.index(), me)
                     && kinds::info(k).resource.is_some_and(|(r, _)| r == resource)
-                    && self.world.resource[s.index()] > 0
             })
             .map(|s| (pos.distance_sq_raw(self.world.pos[s.index()]), s))
             .filter(|&(d, _)| d <= limit)
@@ -1145,7 +1478,19 @@ impl Simulation {
             if !info.mobile {
                 continue;
             }
-            let speed = info.speed_per_second / TICKS_PER_SECOND as i32;
+            let per_second = match self.world.kind[i] {
+                kinds::VILLAGER => {
+                    let pct = self.modifiers(self.world.owner[i]).villager_speed_pct;
+                    if pct == 0 {
+                        info.speed_per_second
+                    } else {
+                        info.speed_per_second
+                            .mul_div(Fx::from_int(100 + pct), Fx::from_int(100))
+                    }
+                }
+                _ => info.speed_per_second,
+            };
+            let speed = per_second / TICKS_PER_SECOND as i32;
             let here = self.world.pos[i];
 
             // Animals: straight-line wander targets.
@@ -1380,14 +1725,23 @@ impl Simulation {
                 continue;
             }
             let info = kinds::info(self.world.kind[i]);
-            let total = info.build_ticks().max(1);
-            let done = (self.world.construction[i].unwrap_or(0) + n).min(total);
+            let owner = self.world.owner[i];
+            let modifiers = self.modifiers(owner);
+            // Progress is in hundredths of a builder-tick, so a percentage
+            // build-speed bonus applies without rounding to nothing.
+            let total = info.build_work().max(1);
+            let pace = (100 + modifiers.build_speed_pct).max(1) as u32;
+            let done = (self.world.construction[i].unwrap_or(0) + n * pace).min(total);
             self.world.construction[i] = Some(done);
             self.world.health[i] =
                 Fx::from_int((info.max_health as i64 * done as i64 / total as i64).max(1) as i32);
             if done >= total {
                 self.world.construction[i] = None;
                 self.world.health[i] = Fx::from_int(info.max_health);
+                if let Some((_, base)) = info.resource {
+                    // A finished farm is seeded for free; only reseeds cost.
+                    self.world.resource[i] = modifiers.farm_yield(base);
+                }
                 let id = self.world.id_at(*site);
                 for s in self.world.slots().collect::<Vec<_>>() {
                     if matches!(self.world.order[s.index()], Order::Build { site: b, .. } if b == id)
@@ -1421,8 +1775,11 @@ impl Simulation {
             else {
                 continue;
             };
-            let info = kinds::info(head.kind);
-            let total = info.build_ticks().max(1);
+            let total = match head.item {
+                Item::Unit(k) => kinds::info(k).build_ticks(),
+                Item::Tech(t) => tech::info(t).map_or(0, |t| t.ticks()),
+            }
+            .max(1);
             let progress = (head.progress + 1).min(total);
             if let Some(p) = self.world.production[i].as_mut() {
                 p.queue[0].progress = progress;
@@ -1430,6 +1787,17 @@ impl Simulation {
             if progress < total {
                 continue;
             }
+            let kind = match head.item {
+                Item::Unit(k) => k,
+                Item::Tech(t) => {
+                    if let Some(p) = self.world.production[i].as_mut() {
+                        p.queue.remove(0);
+                    }
+                    self.apply_tech(owner, t);
+                    continue;
+                }
+            };
+            let info = kinds::info(kind);
             let player = &self.players[owner as usize];
             if player.pop + info.pop_cost > player.pop_cap {
                 continue; // Housed out: wait at the door.
@@ -1444,11 +1812,33 @@ impl Simulation {
             if let Some(p) = self.world.production[i].as_mut() {
                 p.queue.remove(0);
             }
-            let Some(unit) = self.spawn(head.kind, owner, nav::centre(exit)) else {
+            let Some(unit) = self.spawn(kind, owner, nav::centre(exit)) else {
                 continue;
             };
             self.players[owner as usize].pop += info.pop_cost;
             self.apply_rally(unit, rally);
+        }
+    }
+
+    /// A technology completes: record it and fold its effects into the
+    /// player's modifiers. An age advance is just another effect.
+    fn apply_tech(&mut self, owner: PlayerId, id: TechId) {
+        let Some(t) = tech::info(id) else {
+            return;
+        };
+        let Some(p) = self.players.get_mut(owner as usize) else {
+            return;
+        };
+        p.mark_researched(id);
+        for effect in t.effects {
+            match *effect {
+                Effect::GatherRate(r, pct) => p.modifiers.gather_rate_pct[r.index()] += pct,
+                Effect::CarryCapacity(n) => p.modifiers.carry_bonus += n,
+                Effect::FarmYield(n) => p.modifiers.farm_yield_bonus += n,
+                Effect::VillagerSpeed(pct) => p.modifiers.villager_speed_pct += pct,
+                Effect::BuildSpeed(pct) => p.modifiers.build_speed_pct += pct,
+                Effect::AdvanceAge(age) => p.age = age,
+            }
         }
     }
 
@@ -1469,7 +1859,7 @@ impl Simulation {
                     return;
                 };
                 let ek = self.world.kind[es.index()];
-                if kinds::gatherable(ek) && self.world.resource[es.index()] > 0 {
+                if self.gatherable_by(es.index(), self.world.owner[i]) {
                     let resource = kinds::info(ek)
                         .resource
                         .map(|(r, _)| r)
@@ -1965,7 +2355,7 @@ mod tests {
                 "{:?}",
                 sim.world().order[i]
             );
-            assert!(sim.world().carry[i].map_or(0, |(_, a)| a) <= CARRY_CAPACITY);
+            assert!(sim.world().carry[i].map_or(0, |(_, a)| a) <= kinds::CARRY_CAPACITY);
         }
     }
 

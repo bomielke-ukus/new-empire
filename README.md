@@ -4,10 +4,11 @@ A real-time strategy game about taking a civilization from hand-axes to iron in
 about half an hour — built to recapture what made *Age of Empires* (1997)
 engaging, without its 1997 frustrations.
 
-**Status: M2 (villagers, movement, economy) — select villagers, gather all
-four resources, build houses and storehouses, train villagers with rally
-points, on a pathfinder that does not get stuck. Playable as an economy
-sandbox; no opponent yet. See the roadmap.**
+**Status: M3 (ages, production and technology) — advance Stone → Tool →
+Bronze → Iron from the Town Center behind a resource-and-buildings gate,
+research at the Storehouse and Market, farm with auto-reseed, and place the
+ten new buildings from a command grid that shows what each age unlocks.
+Playable as an economy sandbox; no combat or opponent yet. See the roadmap.**
 
 ---
 

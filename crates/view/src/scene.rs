@@ -3,6 +3,21 @@
 use sim::kinds;
 use sim::{GatherPhase, NavState, Order, Simulation, Vec2Fx, TICK_MS};
 
+/// How long the age-up sweep takes to cross a settlement, in ms.
+pub const SWEEP_MS: u32 = 1800;
+/// How long each building glows as the sweep passes it.
+const GLOW_MS: u32 = 700;
+
+/// The age-up light sweep (`docs/02` [GD-AGE-02]): presentation state the
+/// app keeps, passed in so the scene is still a pure function of its inputs.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Sweep {
+    /// Whose settlement lights up.
+    pub player: u8,
+    /// Milliseconds since the age completed.
+    pub elapsed_ms: u32,
+}
+
 use crate::fx_to_f32;
 use crate::iso;
 use crate::palette;
@@ -52,6 +67,8 @@ pub struct Ghost {
     pub ok: bool,
     /// Player colour row.
     pub row: u8,
+    /// The placing player's age, so the ghost is drawn as the building will be.
+    pub age: u8,
 }
 
 /// A frame's worth of sprites, sorted back to front.
@@ -80,16 +97,46 @@ impl Scene {
         selected: &[u32],
         ghost: Option<Ghost>,
     ) -> Scene {
+        Scene::build_full(sim, atlas, prev, alpha, selected, ghost, None)
+    }
+
+    /// Builds the scene with everything: selection rings, a placement ghost
+    /// and, while an age-up is being celebrated, the light sweep.
+    pub fn build_full(
+        sim: &Simulation,
+        atlas: &Atlas,
+        prev: Option<&[Vec2Fx]>,
+        alpha: f32,
+        selected: &[u32],
+        ghost: Option<Ghost>,
+        sweep: Option<Sweep>,
+    ) -> Scene {
         let world = sim.world();
         let map = sim.map();
         let mut sprites = Vec::with_capacity(world.len() + selected.len() + 2);
+        // The sweep crosses the player's buildings left to right in screen
+        // space, so it needs their extent before any of them is placed.
+        let sweep_span = sweep.and_then(|s| {
+            let xs = world
+                .slots()
+                .map(|s| s.index())
+                .filter(|&i| world.owner[i] == s.player && kinds::info(world.kind[i]).footprint > 0)
+                .map(|i| iso::project(fx_to_f32(world.pos[i].x), fx_to_f32(world.pos[i].y), 0.0).0);
+            let (lo, hi) = xs.fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+            (lo <= hi).then_some((s, lo, hi))
+        });
         for slot in world.slots() {
             let i = slot.index();
             let kind = world.kind[i];
             let info = kinds::info(kind);
             // A site shows pegs until half built, then the building itself.
             let half_built =
-                world.construction[i].is_some_and(|done| done * 2 < info.build_ticks().max(1));
+                world.construction[i].is_some_and(|done| done * 2 < info.build_work().max(1));
+            // Buildings and villagers wear their owner's age.
+            let age = sim
+                .player(world.owner[i])
+                .map_or(0, |p| p.age.index() as u8);
+            let look = atlas.variant(kind, age);
             // What the unit is doing decides which animation plays; the clock
             // is game time plus a per-slot phase so a crowd does not march in
             // lockstep. Presentation only: nothing here feeds the simulation.
@@ -119,7 +166,7 @@ impl Scene {
             let looked_up = if half_built {
                 atlas.site(info.footprint).map(|f| (f, false))
             } else {
-                atlas.frame_at(kind, world.facing[i], anim, time_ms)
+                atlas.frame_at(look, world.facing[i], anim, time_ms)
             };
             let Some((frame, flip)) = looked_up else {
                 continue;
@@ -145,6 +192,23 @@ impl Scene {
                     sprites.push(overlay(r, gx, gy, row, depth - 0.01, i as u32));
                 }
             }
+            if let Some((s, lo, hi)) = sweep_span {
+                if world.owner[i] == s.player
+                    && info.footprint > 0
+                    && world.construction[i].is_none()
+                {
+                    // Each building lights up in turn as the front passes it.
+                    let along = if hi > lo { (gx - lo) / (hi - lo) } else { 0.0 };
+                    let starts = (along * (SWEEP_MS - GLOW_MS) as f32) as u32;
+                    if (starts..starts + GLOW_MS).contains(&s.elapsed_ms) {
+                        // Over the building, not under it: the hatch reads
+                        // as light on the walls, and under it nothing shows.
+                        if let Some(g) = atlas.glow(info.footprint) {
+                            sprites.push(overlay(g, gx, gy, 0, depth + 0.02, i as u32));
+                        }
+                    }
+                }
+            }
             sprites.push(SpriteInstance {
                 x: (gx - anchor_x).round(),
                 y: (gy - ay).round(),
@@ -168,7 +232,7 @@ impl Scene {
             let h = iso::ground_height(map, cx, cy);
             let (gx, gy) = iso::project(cx, cy, h);
             let depth = cx + cy + (fp as f32 - 1.0) * 0.5;
-            if let Some((frame, _)) = atlas.frame(g.kind, 0) {
+            if let Some((frame, _)) = atlas.frame(atlas.variant(g.kind, g.age), 0) {
                 sprites.push(overlay(frame, gx, gy, g.row, depth + 0.5, u32::MAX));
             }
             // The valid/blocked hatch draws over the ghost so it always shows.
@@ -258,6 +322,7 @@ mod tests {
             y: sy,
             ok: sim.can_place(0, kinds::HOUSE, sx + 4, sy).is_ok(),
             row: 1,
+            age: 0,
         };
         let scene = Scene::build_with(&sim, &atlas, None, 0.0, &[first], Some(ghost));
         assert_eq!(scene.sprites.len(), sim.world().len() + 3);
@@ -275,6 +340,105 @@ mod tests {
             scene.sprites.iter().filter(|s| s.slot == u32::MAX).count(),
             2,
             "footprint and ghost building"
+        );
+    }
+
+    /// The visible half of an age-up: every building of the player's swaps to
+    /// its new-age variant, and the light sweep crosses them in turn.
+    ///
+    /// REQ: GD-AGE-02
+    /// REQ: RM-M3-01
+    #[test]
+    fn buildings_wear_their_owners_age_and_the_sweep_lights_them() {
+        let mut sim = Simulation::new(
+            5,
+            SimConfig {
+                starting_stockpile: [5000; 4],
+                wander: false,
+                ..SimConfig::default()
+            },
+        );
+        let atlas = Atlas::placeholder();
+        let tc_of = |scene: &Scene, sim: &Simulation| {
+            scene
+                .sprites
+                .iter()
+                .find(|s| {
+                    s.slot != u32::MAX && sim.world().kind[s.slot as usize] == kinds::TOWN_CENTER
+                })
+                .map(|s| (s.u, s.v))
+                .unwrap()
+        };
+        let stone = tc_of(&Scene::build(&sim, &atlas, None, 0.0), &sim);
+
+        // Two Stone Age buildings, then the advance, then sixty seconds.
+        let (sx, sy) = sim.starts()[0];
+        let fp = kinds::info(kinds::BARRACKS).footprint as i32;
+        for (dx, kind) in [(6, kinds::BARRACKS), (12, kinds::STOREHOUSE)] {
+            sim.issue(sim::Command {
+                player: 0,
+                kind: sim::CommandKind::Spawn {
+                    kind,
+                    pos: sim::nav::building_centre(sx + dx, sy, fp),
+                },
+            });
+        }
+        for _ in 0..3 {
+            sim.step();
+        }
+        let tc = sim
+            .world()
+            .slots()
+            .find(|s| sim.world().kind[s.index()] == kinds::TOWN_CENTER)
+            .map(|s| sim.world().id_at(s))
+            .unwrap();
+        sim.issue(sim::Command {
+            player: 0,
+            kind: sim::CommandKind::Research {
+                building: tc,
+                tech: sim::tech::AGE_TOOL,
+            },
+        });
+        for _ in 0..(sim::tech::info(sim::tech::AGE_TOOL).unwrap().ticks() + 5) {
+            sim.step();
+        }
+        assert_eq!(sim.player(0).unwrap().age, sim::Age::Tool);
+        let tool = tc_of(&Scene::build(&sim, &atlas, None, 0.0), &sim);
+        assert_ne!(stone, tool, "the Tool Age Town Center is a different frame");
+
+        let sweep = Some(Sweep {
+            player: 0,
+            elapsed_ms: 10,
+        });
+        let lit = Scene::build_full(&sim, &atlas, None, 0.0, &[], None, sweep);
+        let glow = *atlas
+            .glow(kinds::info(kinds::TOWN_CENTER).footprint)
+            .unwrap();
+        let glows = lit
+            .sprites
+            .iter()
+            .filter(|s| s.u == glow.x && s.v == glow.y)
+            .count();
+        assert!(
+            glows >= 1,
+            "at the start of the sweep the leftmost building glows"
+        );
+        let done = Scene::build_full(
+            &sim,
+            &atlas,
+            None,
+            0.0,
+            &[],
+            None,
+            Some(Sweep {
+                player: 0,
+                elapsed_ms: SWEEP_MS + 1,
+            }),
+        );
+        assert_eq!(
+            done.sprites.len(),
+            lit.sprites.len() - glows,
+            "and then it is over"
         );
     }
 

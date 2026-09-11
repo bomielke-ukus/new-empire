@@ -22,8 +22,8 @@ pub mod terrain;
 
 pub use camera::Camera;
 pub use hud::{Action, Button, Hud, HudInput};
-pub use scene::{Ghost, Scene, SpriteInstance};
-pub use sprites::{Anim, Atlas, Frame};
+pub use scene::{Ghost, Scene, SpriteInstance, Sweep, SWEEP_MS};
+pub use sprites::{Anim, Atlas, Frame, Ink};
 pub use terrain::{ChunkMesh, TerrainVertex, CHUNK_TILES};
 
 /// Converts a fixed-point value to `f32` for presentation.

@@ -201,6 +201,19 @@ doing. Art authored at 2× draws at 1× size and is crisp at 2× zoom, as
 
 ---
 
+### D20 — Static tables stay in Rust until the roster stops moving
+**Date:** 2026-09-11
+
+`docs/04` §9 plans a `data` crate that loads unit, building and technology
+tables from RON at startup, behind a validator. M3 added the technology table
+and ten buildings as Rust constants in `sim::tech` and `sim::kinds` instead.
+While the roster is still being invented, a table the compiler checks and
+`cargo test` exercises is worth more than one a validator checks at startup;
+files pay off when someone who does not build the game needs to edit them,
+which is the balance pass at the earliest. The shapes are the ones the RON
+will take (`KindInfo`, `TechInfo`, `Effect`), so the move is mechanical when
+it comes.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?
@@ -215,7 +228,10 @@ Temple, generating gold — it gives priests a second job and creates map tensio
 ### Q3 — Does the Government Centre earn its own building?
 Its upgrades could fold into the Town Center, saving a building and a data
 table. Counter-argument: a separate building is a real strategic investment and
-a target. **Undecided.**
+a target. **Undecided.** M3 gives it a placeholder and a Bronze Age price so
+the roster is complete, and hides the Town Center from the villager's build
+panel until this is settled — in the original a second Town Center needed
+the Government Centre.
 
 ### Q4 — Campaign fiction: written by us, or straight history?
 Straight history is free, accurate and evocative. Original fiction gives us

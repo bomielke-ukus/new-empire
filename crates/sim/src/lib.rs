@@ -32,6 +32,7 @@ pub mod orders;
 pub mod replay;
 pub mod rng;
 pub mod simulation;
+pub mod tech;
 mod trig_table;
 pub mod vec2;
 
@@ -45,9 +46,14 @@ pub use fx::Fx;
 pub use hash::{HashState, StateHasher};
 pub use map::{Terrain, TileMap, MAX_ELEVATION};
 pub use mapgen::{MapKind, MapSpec};
-pub use orders::{GatherPhase, Nav, NavState, Order, Player, Production, Rally};
+pub use orders::{
+    GatherPhase, Item, Modifiers, Nav, NavState, Order, Player, Production, QueueItem, Rally,
+};
 pub use replay::{Divergence, Replay, ReplayError, Trace, VerifyError};
 pub use rng::Rng;
-pub use simulation::{PlaceError, TickStats, Violation};
-pub use simulation::{SimConfig, Simulation, TICKS_PER_SECOND, TICK_MS};
+pub use simulation::{ConfigError, PlaceError, ResearchError, TickStats, Violation};
+pub use simulation::{
+    SimConfig, Simulation, DEFAULT_STOCKPILE, POP_CAP_RANGE, TICKS_PER_SECOND, TICK_MS,
+};
+pub use tech::{Age, Effect, TechId, TechInfo};
 pub use vec2::Vec2Fx;

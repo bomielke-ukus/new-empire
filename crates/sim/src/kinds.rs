@@ -7,6 +7,7 @@
 
 use crate::entity::KindId;
 use crate::fx::Fx;
+use crate::tech::Age;
 
 /// Villager: gathers, builds, repairs.
 pub const VILLAGER: KindId = 1;
@@ -18,6 +19,29 @@ pub const TOWN_CENTER: KindId = 10;
 pub const HOUSE: KindId = 11;
 /// Storehouse: universal drop-off.
 pub const STOREHOUSE: KindId = 12;
+/// Barracks: infantry.
+pub const BARRACKS: KindId = 13;
+/// Farm: renewable food, reseeded for wood.
+pub const FARM: KindId = 14;
+/// Archery Range: ranged units.
+pub const ARCHERY_RANGE: KindId = 15;
+/// Stable: mounted units.
+pub const STABLE: KindId = 16;
+/// Market: economy technology and trade.
+pub const MARKET: KindId = 17;
+/// Watch Tower: static defence.
+pub const WATCH_TOWER: KindId = 18;
+/// Temple: priests.
+pub const TEMPLE: KindId = 19;
+/// Academy: heavy infantry.
+pub const ACADEMY: KindId = 20;
+/// Siege Workshop.
+pub const SIEGE_WORKSHOP: KindId = 21;
+/// Government Centre: civic upgrades.
+pub const GOVERNMENT_CENTRE: KindId = 22;
+
+/// Wood to reseed a farm.
+pub const FARM_RESEED_COST: Cost = [0, 60, 0, 0];
 /// A tree. Removed when its wood is exhausted.
 pub const TREE: KindId = 100;
 /// A berry bush.
@@ -79,19 +103,19 @@ impl Resource {
         }
     }
 
-    /// Villager gather rate for this resource, in units per second.
+    /// Villager gather rate for this resource, in units per second. One base
+    /// rate for all four (`docs/02` §3.3); civilisation bonuses and
+    /// technologies modify it per player.
     pub const fn gather_rate(self) -> Fx {
-        match self {
-            Resource::Food => Fx::from_ratio(40, 100),
-            Resource::Wood => Fx::from_ratio(45, 100),
-            Resource::Stone => Fx::from_ratio(40, 100),
-            Resource::Gold => Fx::from_ratio(40, 100),
-        }
+        BASE_GATHER_RATE
     }
 }
 
 /// A cost in `[food, wood, stone, gold]`.
 pub type Cost = [i32; 4];
+
+/// The base gather rate, resources per second.
+pub const BASE_GATHER_RATE: Fx = Fx::from_ratio(45, 100);
 
 /// How much a villager carries before walking it home.
 pub const CARRY_CAPACITY: i32 = 10;
@@ -130,12 +154,25 @@ pub struct KindInfo {
     pub trains: bool,
     /// A player may build it.
     pub buildable: bool,
+    /// The age from which it is available.
+    pub age: Age,
 }
+
+/// Units of construction work per builder per tick at normal speed.
+///
+/// A site's `construction` counter is in these units, not ticks, so a
+/// percentage build-speed bonus lands exactly instead of rounding away.
+pub const BUILD_WORK_PER_TICK: u32 = 100;
 
 impl KindInfo {
     /// Construction or training time in ticks.
     pub const fn build_ticks(&self) -> u32 {
         (self.build_seconds * crate::simulation::TICKS_PER_SECOND as i32) as u32
+    }
+
+    /// Construction work to finish a site, in [`BUILD_WORK_PER_TICK`] units.
+    pub const fn build_work(&self) -> u32 {
+        self.build_ticks() * BUILD_WORK_PER_TICK
     }
 }
 
@@ -154,6 +191,7 @@ const BASE: KindInfo = KindInfo {
     dropoff: false,
     trains: false,
     buildable: false,
+    age: Age::Stone,
 };
 
 const fn unit(
@@ -225,6 +263,51 @@ const TABLE: &[KindInfo] = &[
         dropoff: true,
         ..building(STOREHOUSE, "Storehouse", 200, 2, [0, 100, 0, 0], 30)
     },
+    building(BARRACKS, "Barracks", 350, 2, [0, 125, 0, 0], 45),
+    KindInfo {
+        age: Age::Tool,
+        resource: Some((Resource::Food, 250)),
+        ..building(FARM, "Farm", 60, 2, [0, 75, 0, 0], 20)
+    },
+    KindInfo {
+        age: Age::Tool,
+        ..building(ARCHERY_RANGE, "Archery Range", 350, 2, [0, 150, 0, 0], 45)
+    },
+    KindInfo {
+        age: Age::Tool,
+        ..building(STABLE, "Stable", 350, 2, [0, 150, 0, 0], 45)
+    },
+    KindInfo {
+        age: Age::Tool,
+        ..building(MARKET, "Market", 300, 2, [0, 150, 0, 0], 45)
+    },
+    KindInfo {
+        age: Age::Tool,
+        ..building(WATCH_TOWER, "Watch Tower", 250, 1, [0, 0, 120, 0], 40)
+    },
+    KindInfo {
+        age: Age::Bronze,
+        ..building(TEMPLE, "Temple", 400, 2, [0, 200, 0, 0], 60)
+    },
+    KindInfo {
+        age: Age::Bronze,
+        ..building(ACADEMY, "Academy", 400, 2, [0, 200, 0, 0], 60)
+    },
+    KindInfo {
+        age: Age::Bronze,
+        ..building(SIEGE_WORKSHOP, "Siege Workshop", 400, 2, [0, 200, 0, 0], 60)
+    },
+    KindInfo {
+        age: Age::Bronze,
+        ..building(
+            GOVERNMENT_CENTRE,
+            "Government Centre",
+            400,
+            2,
+            [0, 175, 0, 0],
+            60,
+        )
+    },
     node(TREE, "Tree", 20, Resource::Wood, 75),
     node(BERRY_BUSH, "Berry Bush", 1, Resource::Food, 150),
     node(GOLD_MINE, "Gold Vein", 1, Resource::Gold, 400),
@@ -257,11 +340,20 @@ pub fn all() -> &'static [KindInfo] {
     TABLE
 }
 
-/// True if a villager can gather from this kind right now: a static node
-/// with a resource. Animals need hunting, which arrives with combat.
+/// True if a villager can gather from this kind: a static node with a
+/// resource. Animals need hunting, which arrives with combat. Farms count,
+/// but only their owner may work them; the simulation checks that.
 pub fn gatherable(kind: KindId) -> bool {
     let k = info(kind);
     k.resource.is_some() && !k.mobile
+}
+
+/// Buildings that count toward advancing an age (`docs/02` §4): what a
+/// player builds, less the Town Center and Houses the table excludes, and
+/// less Farms, which are fields rather than a commitment to a direction.
+pub fn counts_for_age(kind: KindId) -> bool {
+    let k = info(kind);
+    k.buildable && !k.mobile && kind != HOUSE && kind != TOWN_CENTER && kind != FARM
 }
 
 #[cfg(test)]

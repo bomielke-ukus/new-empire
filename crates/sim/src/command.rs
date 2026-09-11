@@ -14,6 +14,7 @@
 use crate::entity::{EntityId, KindId};
 use crate::hash::{HashState, StateHasher};
 use crate::orders::Rally;
+use crate::tech::TechId;
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -105,6 +106,18 @@ pub enum CommandKind {
         /// Destination.
         rally: Rally,
     },
+    /// Queue a technology at a building. The cost is paid on queueing.
+    Research {
+        /// The building.
+        building: EntityId,
+        /// The technology.
+        tech: TechId,
+    },
+    /// Whether the player's exhausted farms are reseeded automatically.
+    SetAutoReseed {
+        /// On or off.
+        enabled: bool,
+    },
 }
 
 /// A command with its issuing player.
@@ -171,7 +184,9 @@ impl Command {
             | CommandKind::Despawn { .. }
             | CommandKind::Train { .. }
             | CommandKind::CancelTrain { .. }
-            | CommandKind::SetRally { .. } => 0,
+            | CommandKind::SetRally { .. }
+            | CommandKind::Research { .. }
+            | CommandKind::SetAutoReseed { .. } => 0,
         };
         if named > MAX_COMMAND_IDS {
             return Err(CommandError::TooManyIds { len: named });
@@ -234,6 +249,15 @@ impl HashState for CommandKind {
                 h.write_u8(9);
                 h.write(building);
                 h.write(rally);
+            }
+            CommandKind::Research { building, tech } => {
+                h.write_u8(10);
+                h.write(building);
+                h.write_u16(*tech);
+            }
+            CommandKind::SetAutoReseed { enabled } => {
+                h.write_u8(11);
+                h.write_u8(*enabled as u8);
             }
         }
     }

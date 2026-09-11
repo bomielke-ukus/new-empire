@@ -1,5 +1,6 @@
 //! Selection state: what is selected, control groups, picking and band-box.
 
+use sim::entity::KindId;
 use sim::kinds;
 use sim::{EntityId, Simulation};
 use view::{Atlas, Camera, Scene};
@@ -86,6 +87,17 @@ impl Selection {
         self.filter(sim, |i| {
             sim.world().owner[i] == player
                 && kinds::info(sim.world().kind[i]).trains
+                && sim.world().construction[i].is_none()
+        })
+        .into_iter()
+        .next()
+    }
+
+    /// The first selected, finished building of `kind` belonging to `player`.
+    pub fn own_building(&self, sim: &Simulation, player: u8, kind: KindId) -> Option<EntityId> {
+        self.filter(sim, |i| {
+            sim.world().owner[i] == player
+                && sim.world().kind[i] == kind
                 && sim.world().construction[i].is_none()
         })
         .into_iter()

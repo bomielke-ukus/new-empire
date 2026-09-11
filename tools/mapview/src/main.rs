@@ -1,7 +1,9 @@
 //! ```text
-//! mapview [--seed N] [--size N] [--players N] [--ticks N]
+//! mapview [--seed N] [--size N] [--players N] [--ticks N] [--stockpile N]
 //!         [--zoom 0.5|1|1.5|2] [--width W] [--height H]
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
+//!         [--scenario gather|build|ages] [--select N] [--select-tc 1] [--hud 1]
+//!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //! ```
 //!
 //! Generates a map, runs it for `--ticks`, and writes a frame rendered by the
@@ -10,7 +12,7 @@
 use sim::kinds;
 use std::process::ExitCode;
 use view::camera::ZOOM_LEVELS;
-use view::{raster, Atlas, Camera, Ghost, Hud, HudInput, Scene};
+use view::{raster, Atlas, Camera, Ghost, Hud, HudInput, Scene, Sweep};
 
 struct Args {
     seed: u64,
@@ -30,6 +32,10 @@ struct Args {
     hud: bool,
     ghost: Option<String>,
     assets: Option<std::path::PathBuf>,
+    stockpile: Option<i32>,
+    select_tc: bool,
+    sweep: Option<u32>,
+    hover: Option<(f32, f32)>,
 }
 
 fn parse() -> Result<Args, String> {
@@ -51,6 +57,10 @@ fn parse() -> Result<Args, String> {
         hud: false,
         ghost: None,
         assets: None,
+        stockpile: None,
+        select_tc: false,
+        sweep: None,
+        hover: None,
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -88,6 +98,13 @@ fn parse() -> Result<Args, String> {
             "--hud" => a.hud = val == "1" || val == "true",
             "--ghost" => a.ghost = Some(val.clone()),
             "--assets" => a.assets = Some(std::path::PathBuf::from(val)),
+            "--stockpile" => a.stockpile = Some(val.parse().map_err(|e| format!("{key}: {e}"))?),
+            "--select-tc" => a.select_tc = val == "1" || val == "true",
+            "--sweep" => a.sweep = Some(val.parse().map_err(|e| format!("{key}: {e}"))?),
+            "--hover" => {
+                let (x, y) = val.split_once(',').ok_or("--hover wants X,Y")?;
+                a.hover = Some((num(x)?, num(y)?));
+            }
             _ => return Err(format!("unknown flag {key}")),
         }
         i += 2;
@@ -108,8 +125,12 @@ fn run() -> Result<(), String> {
             size: a.size,
             players: a.players,
         },
+        starting_stockpile: a.stockpile.map_or(sim::DEFAULT_STOCKPILE, |n| [n; 4]),
         ..sim::SimConfig::default()
     };
+    // This is the front door a setup screen would use, so it runs the
+    // setup screen's check.
+    config.validate().map_err(|e| format!("match setup: {e}"))?;
     let mut sim = sim::Simulation::new(a.seed, config);
     if let Some(name) = &a.scenario {
         scenario(&mut sim, name)?;
@@ -158,31 +179,51 @@ fn run() -> Result<(), String> {
     }
 
     let chunks = view::terrain::build_all(map);
+    let want = if a.select_tc {
+        kinds::TOWN_CENTER
+    } else {
+        kinds::VILLAGER
+    };
     let selected: Vec<u32> = sim
         .world()
         .slots()
-        .filter(|s| {
-            sim.world().owner[s.index()] == 0 && sim.world().kind[s.index()] == kinds::VILLAGER
-        })
-        .take(a.select)
+        .filter(|s| sim.world().owner[s.index()] == 0 && sim.world().kind[s.index()] == want)
+        .take(if a.select_tc { 1 } else { a.select })
         .map(|s| s.index() as u32)
         .collect();
     let (gx, gy) = sim.starts()[0];
-    let ghost = a.ghost.as_deref().map(|g| {
-        let kind = if g == "store" {
-            kinds::STOREHOUSE
-        } else {
-            kinds::HOUSE
-        };
-        Ghost {
-            kind,
-            x: gx + 4,
-            y: gy + 1,
-            ok: sim.can_place(0, kind, gx + 4, gy + 1).is_ok(),
-            row: 1,
+    let age = sim.player(0).map_or(0, |p| p.age.index() as u8);
+    let ghost = match a.ghost.as_deref() {
+        None => None,
+        Some(g) => {
+            let kind = match g {
+                "store" => kinds::STOREHOUSE,
+                "house" => kinds::HOUSE,
+                name => kinds::all()
+                    .iter()
+                    .find(|k| k.name.to_lowercase().replace(' ', "_") == name)
+                    .map(|k| k.id)
+                    .ok_or(format!("no such kind {name}"))?,
+            };
+            Some(Ghost {
+                kind,
+                x: gx + 4,
+                y: gy + 1,
+                ok: sim.can_place(0, kind, gx + 4, gy + 1).is_ok(),
+                row: 1,
+                age,
+            })
         }
+    };
+    let sweep = a.sweep.map(|elapsed_ms| Sweep {
+        player: 0,
+        elapsed_ms,
     });
-    let mut scene = Scene::build_with(&sim, &atlas, None, 0.0, &selected, ghost);
+    let banner = a
+        .sweep
+        .and_then(|_| sim.player(0))
+        .map(|p| p.age.name().to_uppercase());
+    let mut scene = Scene::build_full(&sim, &atlas, None, 0.0, &selected, ghost, sweep);
     let mut cam = Camera::new(map.width(), map.height(), (a.width as f32, a.height as f32));
     cam.set_zoom_index(a.zoom);
     if let Some((x, y)) = a.at {
@@ -204,6 +245,8 @@ fn run() -> Result<(), String> {
                 paused: false,
                 speed: 1.0,
                 status: &format!("TICK {}", sim.tick()),
+                hover: a.hover,
+                banner: banner.as_deref(),
             },
         );
         scene.ui = hud.sprites;
@@ -297,6 +340,66 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
                 x: sx - 4,
                 y: sy + 3,
                 ids: villagers[2..].to_vec(),
+            }));
+        }
+        "ages" => {
+            // Two Stone Age buildings appear finished, the Tool Age is
+            // researched, and once it lands two Tool Age buildings and a
+            // farm appear and the Bronze Age is queued. `--ticks` then runs
+            // on from there: at 100 more the Tool Age settlement; at 1900
+            // more the Bronze Age has just arrived. Needs `--stockpile`
+            // high enough to pay for it all.
+            let spot = |sim: &sim::Simulation, kind| {
+                let (sx, sy) = sim.starts()[0];
+                for dy in [-4, 4, -8, 8, 0] {
+                    for dx in (4..=24).chain((-24..=-4).rev()) {
+                        if sim.can_place(0, kind, sx + dx, sy + dy).is_ok() {
+                            return Ok((sx + dx, sy + dy));
+                        }
+                    }
+                }
+                Err(format!("no room for {}", kinds::info(kind).name))
+            };
+            let tree = nearest(kinds::TREE).ok_or("no tree")?;
+            let place = |sim: &mut sim::Simulation, kind| -> Result<(), String> {
+                let (x, y) = spot(sim, kind)?;
+                let fp = kinds::info(kind).footprint as i32;
+                sim.issue(cmd(CommandKind::Spawn {
+                    kind,
+                    pos: sim::nav::building_centre(x, y, fp),
+                }));
+                for _ in 0..3 {
+                    sim.step();
+                }
+                Ok(())
+            };
+            place(sim, kinds::BARRACKS)?;
+            place(sim, kinds::STOREHOUSE)?;
+            sim.issue(cmd(CommandKind::Research {
+                building: tc,
+                tech: sim::tech::AGE_TOOL,
+            }));
+            sim.issue(cmd(CommandKind::Gather {
+                ids: villagers.clone(),
+                node: tree,
+            }));
+            let tool = sim::tech::info(sim::tech::AGE_TOOL).unwrap().ticks();
+            for _ in 0..tool + 5 {
+                sim.step();
+            }
+            if sim.player(0).map(|p| p.age) != Some(sim::Age::Tool) {
+                return Err("the Tool Age did not arrive; is --stockpile high enough?".into());
+            }
+            place(sim, kinds::MARKET)?;
+            place(sim, kinds::ARCHERY_RANGE)?;
+            place(sim, kinds::FARM)?;
+            sim.issue(cmd(CommandKind::Research {
+                building: tc,
+                tech: sim::tech::AGE_BRONZE,
+            }));
+            sim.issue(cmd(CommandKind::Train {
+                building: tc,
+                kind: kinds::VILLAGER,
             }));
         }
         other => return Err(format!("unknown scenario {other}")),

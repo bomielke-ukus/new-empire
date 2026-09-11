@@ -120,6 +120,26 @@ settlement visibly changes at each transition.
 
 **Size:** Medium.
 
+**Status:** landed, with the same caveat as M1 and M2 (the GPU window is
+verified by compilation and the software rasteriser). Ages advance through a
+`Research` command at the Town Center, gated on resources and on two finished
+buildings of the current age — Houses, the Town Center and Farms do not
+count. Technologies queue at the Storehouse and Market alongside villagers
+and apply through `Player::modifiers` (gather rate per resource, carry
+capacity, farm yield, villager speed, build speed). Farms hold 250 food, are
+seeded for free on completion, and reseed for 60 wood when they run dry while
+the owner's auto-reseed is on; the resource bar warns when the wood is not
+there. Ten buildings join the roster (Barracks, Farm, Archery Range, Stable,
+Market, Watch Tower, Temple, Academy, Siege Workshop, Government Centre),
+placeable from the age that unlocks them. The command panel is a five-by-three
+grid that lists what the selection can do, greys what it cannot with the
+reason, and carries a queue strip; an age-up swaps every building and
+villager to its new-age variant, sweeps a light across the settlement and
+raises a banner. Deferred: the fanfare (there is no audio yet), a per-farm
+reseed toggle (the toggle is per player), the Town Center as a buildable
+(it waits on Q3), and rendered-art age variants (the placeholder buildings
+have them; the villager sheet does not).
+
 ---
 
 ## M4 — Combat

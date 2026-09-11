@@ -1,10 +1,11 @@
-//! The heads-up display: resource bar, selection panel, command buttons,
-//! health bars. Produces screen-space sprites and the buttons' hit rectangles;
-//! the app decides what a click means.
+//! The heads-up display: resource bar, selection panel, command grid, queue
+//! strip, health bars and the age banner. Produces screen-space sprites and
+//! the buttons' hit rectangles; the app decides what a click means.
 
-use sim::entity::KindId;
-use sim::kinds::{self, Resource};
-use sim::{GatherPhase, Order, Simulation};
+use sim::entity::{KindId, Slot};
+use sim::kinds::{self, Cost, KindInfo, Resource};
+use sim::tech::{self, TechId, TechInfo};
+use sim::{GatherPhase, Item, Order, Simulation};
 
 use crate::camera::Camera;
 use crate::font;
@@ -12,14 +13,26 @@ use crate::fx_to_f32;
 use crate::iso;
 use crate::palette::*;
 use crate::scene::SpriteInstance;
-use crate::sprites::{Atlas, Frame};
+use crate::sprites::{Atlas, Frame, Ink};
 
 /// Height of the top resource bar.
 pub const TOP_BAR: f32 = 26.0;
 /// Height of the bottom panel.
-pub const BOTTOM_PANEL: f32 = 112.0;
+pub const BOTTOM_PANEL: f32 = 132.0;
 /// Width reserved on the right of the bottom panel for the minimap.
 pub const MINIMAP_RESERVE: f32 = 300.0;
+/// The command grid (`docs/03` §3): five across, three down.
+pub const GRID_COLS: usize = 5;
+/// Rows in the command grid.
+pub const GRID_ROWS: usize = 3;
+/// Widest a command button gets.
+const BUTTON_W: f32 = 100.0;
+/// Narrowest a command button gets before buttons are dropped instead.
+const BUTTON_MIN_W: f32 = 48.0;
+/// Command button height.
+const BUTTON_H: f32 = 30.0;
+/// Gap between command buttons.
+const BUTTON_GAP: f32 = 4.0;
 
 /// What a button does when clicked.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -34,6 +47,10 @@ pub enum Action {
     Cancel,
     /// Remove the last queued item.
     CancelTrain,
+    /// Queue a technology (an age advance included) at the selected building.
+    Research(TechId),
+    /// Flip the player's farm auto-reseed.
+    ToggleReseed,
 }
 
 /// A clickable region.
@@ -51,8 +68,14 @@ pub struct Button {
     pub action: Action,
     /// Label text.
     pub label: String,
+    /// Cost shorthand, shown under the label; empty when free.
+    pub cost: String,
     /// Hotkey shown on the button.
     pub hotkey: char,
+    /// Whether clicking does anything right now.
+    pub enabled: bool,
+    /// Why not, when it does not; the cost and full name when it does.
+    pub reason: String,
 }
 
 impl Button {
@@ -82,6 +105,10 @@ pub struct HudInput<'a> {
     pub speed: f32,
     /// Window title-style status; shown top right.
     pub status: &'a str,
+    /// Cursor position, for button hover and the tooltip line.
+    pub hover: Option<(f32, f32)>,
+    /// A line to celebrate across the top of the world, if any.
+    pub banner: Option<&'a str>,
 }
 
 /// A built HUD.
@@ -144,9 +171,20 @@ impl<'a> Painter<'a> {
 
     /// Text at a pixel position, at an integer scale. Returns the width drawn.
     pub fn text(&mut self, x: f32, y: f32, text: &str, dark: bool, scale: f32) -> f32 {
+        self.text_in(
+            x,
+            y,
+            text,
+            if dark { Ink::Black } else { Ink::White },
+            scale,
+        )
+    }
+
+    /// Text in an ink. Returns the width drawn.
+    pub fn text_in(&mut self, x: f32, y: f32, text: &str, ink: Ink, scale: f32) -> f32 {
         let mut cx = x;
         for ch in text.chars() {
-            if let Some(g) = self.atlas.glyph(ch, dark) {
+            if let Some(g) = self.atlas.glyph_ink(ch, ink) {
                 let g = *g;
                 if ch != ' ' {
                     self.push(&g, cx, y, g.w as f32 * scale, g.h as f32 * scale, 0);
@@ -157,22 +195,465 @@ impl<'a> Painter<'a> {
         cx - x
     }
 
-    /// A labelled button.
+    /// A labelled button. Greyed when disabled; lit when hovered.
     pub fn button(&mut self, b: &Button, hover: bool) {
-        let fill = if hover { TAN } else { BROWN };
+        let (fill, ink) = if !b.enabled {
+            (GREY_DARK, Ink::White)
+        } else if hover {
+            (TAN, Ink::Black)
+        } else {
+            (BROWN, Ink::Black)
+        };
         self.rect(b.x, b.y, b.w, b.h, BROWN_DARK, 0);
         self.rect(b.x + 1.0, b.y + 1.0, b.w - 2.0, b.h - 2.0, fill, 0);
         self.outline(b.x, b.y, b.w, b.h, BLACK);
-        self.text(b.x + 6.0, b.y + 6.0, &b.label, true, 1.0);
+        let label = fit(&b.label, b.w - 8.0);
+        self.text_in(b.x + 4.0, b.y + 5.0, &label, ink, 1.0);
         let key = format!("({})", b.hotkey);
-        let kw = font::width(&key);
-        self.text(
-            b.x + b.w - kw as f32 - 4.0,
-            b.y + b.h - 11.0,
-            &key,
-            true,
-            1.0,
-        );
+        let kw = font::width(&key) as f32;
+        let cost = fit(&b.cost, b.w - kw - 10.0);
+        self.text_in(b.x + 4.0, b.y + b.h - 11.0, &cost, ink, 1.0);
+        self.text_in(b.x + b.w - kw - 4.0, b.y + b.h - 11.0, &key, ink, 1.0);
+    }
+}
+
+/// Truncates text to what fits in `width` px at 1×.
+fn fit(text: &str, width: f32) -> String {
+    let max = (width / font::ADVANCE as f32).max(1.0) as usize;
+    text.chars().take(max).collect()
+}
+
+/// "400F 200W": a cost in the resource bar's shorthand.
+fn cost_label(cost: &Cost) -> String {
+    let parts: Vec<String> = Resource::ALL
+        .iter()
+        .filter(|r| cost[r.index()] > 0)
+        .map(|r| {
+            format!(
+                "{}{}",
+                cost[r.index()],
+                r.name().chars().next().unwrap_or('?').to_ascii_uppercase()
+            )
+        })
+        .collect();
+    parts.join(" ")
+}
+
+/// "400 FOOD 200 WOOD": a cost in full, for the tooltip line.
+fn cost_words(cost: &Cost) -> String {
+    let parts: Vec<String> = Resource::ALL
+        .iter()
+        .filter(|r| cost[r.index()] > 0)
+        .map(|r| format!("{} {}", cost[r.index()], r.name().to_uppercase()))
+        .collect();
+    if parts.is_empty() {
+        "FREE".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
+/// A short name that fits a button beside its cost.
+fn short_name(kind: KindId) -> &'static str {
+    match kind {
+        kinds::HOUSE => "HOUSE",
+        kinds::STOREHOUSE => "STORE",
+        kinds::BARRACKS => "BARRACKS",
+        kinds::FARM => "FARM",
+        kinds::MARKET => "MARKET",
+        kinds::ARCHERY_RANGE => "ARCHERY",
+        kinds::STABLE => "STABLE",
+        kinds::WATCH_TOWER => "TOWER",
+        kinds::TEMPLE => "TEMPLE",
+        kinds::ACADEMY => "ACADEMY",
+        kinds::SIEGE_WORKSHOP => "SIEGE",
+        kinds::GOVERNMENT_CENTRE => "GOVT",
+        other => kinds::info(other).name,
+    }
+}
+
+/// The key that places a building.
+fn build_hotkey(kind: KindId) -> char {
+    match kind {
+        kinds::HOUSE => 'H',
+        kinds::STOREHOUSE => 'S',
+        kinds::BARRACKS => 'B',
+        kinds::FARM => 'F',
+        kinds::MARKET => 'M',
+        kinds::ARCHERY_RANGE => 'A',
+        kinds::STABLE => 'L',
+        kinds::WATCH_TOWER => 'W',
+        kinds::TEMPLE => 'P',
+        kinds::ACADEMY => 'Y',
+        kinds::SIEGE_WORKSHOP => 'G',
+        kinds::GOVERNMENT_CENTRE => 'C',
+        _ => 'N',
+    }
+}
+
+/// Technology hotkeys, by position at the building.
+const TECH_KEYS: [char; 6] = ['Q', 'W', 'E', 'I', 'O', 'K'];
+
+/// A button before it has a place on the grid.
+struct Def {
+    action: Action,
+    label: String,
+    cost: String,
+    hotkey: char,
+    enabled: bool,
+    reason: String,
+}
+
+impl Def {
+    fn on(
+        action: Action,
+        label: impl Into<String>,
+        hotkey: char,
+        reason: impl Into<String>,
+    ) -> Def {
+        Def {
+            action,
+            label: label.into(),
+            cost: String::new(),
+            hotkey,
+            enabled: true,
+            reason: reason.into(),
+        }
+    }
+
+    fn costing(mut self, cost: &Cost) -> Def {
+        self.cost = cost_label(cost);
+        self
+    }
+
+    fn gated(mut self, check: Result<(), String>) -> Def {
+        if let Err(why) = check {
+            self.enabled = false;
+            self.reason = why;
+        }
+        self
+    }
+}
+
+/// The commands the selection offers, in grid order. Everything the player
+/// could do from here is listed; what they cannot do yet is greyed with the
+/// reason, so the panel visibly gains buttons as an age arrives.
+fn commands(sim: &Simulation, me: u8, selected: &[Slot], build_mode: Option<KindId>) -> Vec<Def> {
+    let world = sim.world();
+    let mut defs = Vec::new();
+    if build_mode.is_some() {
+        defs.push(Def::on(Action::Cancel, "CANCEL", 'X', "LEAVE PLACEMENT"));
+        return defs;
+    }
+    let Some(pl) = sim.player(me) else {
+        return defs;
+    };
+    let own = |s: &Slot| world.owner[s.index()] == me;
+    let any_villager = selected
+        .iter()
+        .any(|s| own(s) && world.kind[s.index()] == kinds::VILLAGER);
+    let any_mobile = selected
+        .iter()
+        .any(|s| own(s) && kinds::info(world.kind[s.index()]).mobile);
+    let building = selected.iter().copied().find(|s| {
+        own(s)
+            && !kinds::info(world.kind[s.index()]).mobile
+            && world.construction[s.index()].is_none()
+    });
+
+    if any_mobile {
+        defs.push(Def::on(
+            Action::Stop,
+            "STOP",
+            'T',
+            "STOP WHAT THEY ARE DOING",
+        ));
+    }
+    if any_villager {
+        let next = pl.age.next().unwrap_or(pl.age);
+        // The Town Center is buildable in the table but not from a villager's
+        // panel: in the design it comes with the Government Centre (M4+).
+        let mut kinds_: Vec<&KindInfo> = kinds::all()
+            .iter()
+            .filter(|k| k.buildable && !k.mobile && k.id != kinds::TOWN_CENTER && k.age <= next)
+            .collect();
+        kinds_.sort_by_key(|k| (k.age, k.id));
+        for k in kinds_ {
+            let check = if k.age > pl.age {
+                Err(format!("NEEDS THE {}", k.age.name().to_uppercase()))
+            } else if !pl.can_afford(&k.cost) {
+                Err("NOT ENOUGH RESOURCES".to_string())
+            } else {
+                Ok(())
+            };
+            defs.push(
+                Def::on(
+                    Action::Build(k.id),
+                    short_name(k.id),
+                    build_hotkey(k.id),
+                    format!("{}: {}", k.name.to_uppercase(), cost_words(&k.cost)),
+                )
+                .costing(&k.cost)
+                .gated(check),
+            );
+        }
+    }
+    if let Some(b) = building {
+        let i = b.index();
+        let id = world.id_at(b);
+        let kind = world.kind[i];
+        let info = kinds::info(kind);
+        let queue_len = world.production[i].as_ref().map_or(0, |q| q.queue.len());
+        if info.trains {
+            let v = kinds::info(kinds::VILLAGER);
+            let check = if queue_len >= 5 {
+                Err("QUEUE IS FULL".to_string())
+            } else if !pl.can_afford(&v.cost) {
+                Err("NOT ENOUGH RESOURCES".to_string())
+            } else {
+                Ok(())
+            };
+            defs.push(
+                Def::on(
+                    Action::Train,
+                    "VILLAGER",
+                    'V',
+                    format!("TRAIN A VILLAGER: {}", cost_words(&v.cost)),
+                )
+                .costing(&v.cost)
+                .gated(check),
+            );
+        }
+        if kind == kinds::TOWN_CENTER {
+            if let Some(t) = tech::age_advance(pl.age) {
+                let check = sim
+                    .can_research(me, id, t.id)
+                    .map_err(|e| e.to_string().to_uppercase());
+                defs.push(
+                    Def::on(
+                        Action::Research(t.id),
+                        t.name.to_uppercase(),
+                        'U',
+                        format!("{}: {}", t.name.to_uppercase(), cost_words(&t.cost)),
+                    )
+                    .costing(&t.cost)
+                    .gated(check),
+                );
+            }
+        }
+        let techs: Vec<&TechInfo> = tech::at_building(kind)
+            .filter(|t| t.advances_age().is_none() && !pl.has_researched(t.id))
+            .collect();
+        for (n, t) in techs.iter().enumerate() {
+            let check = sim
+                .can_research(me, id, t.id)
+                .map_err(|e| e.to_string().to_uppercase());
+            defs.push(
+                Def::on(
+                    Action::Research(t.id),
+                    t.name.to_uppercase(),
+                    TECH_KEYS[n % TECH_KEYS.len()],
+                    format!("{}: {}", t.name.to_uppercase(), cost_words(&t.cost)),
+                )
+                .costing(&t.cost)
+                .gated(check),
+            );
+        }
+        if matches!(kind, kinds::FARM | kinds::MARKET | kinds::TOWN_CENTER) {
+            let label = if pl.auto_reseed {
+                "RESEED ON"
+            } else {
+                "RESEED OFF"
+            };
+            defs.push(Def::on(
+                Action::ToggleReseed,
+                label,
+                'R',
+                format!(
+                    "FARMS RESEED FOR {} WHEN EMPTY",
+                    cost_words(&kinds::FARM_RESEED_COST)
+                ),
+            ));
+        }
+        if queue_len > 0 {
+            defs.push(Def::on(
+                Action::CancelTrain,
+                "UNQUEUE",
+                'X',
+                "REMOVE THE LAST QUEUED ITEM AND REFUND IT",
+            ));
+        }
+    }
+    defs
+}
+
+/// True if a farm of `me` sits empty because the wood for reseeding is not
+/// there ([GD-ECON-05]'s notification).
+fn farm_needs_wood(sim: &Simulation, me: u8) -> bool {
+    let world = sim.world();
+    let Some(pl) = sim.player(me) else {
+        return false;
+    };
+    pl.auto_reseed
+        && !pl.can_afford(&kinds::FARM_RESEED_COST)
+        && world.slots().any(|s| {
+            let i = s.index();
+            world.owner[i] == me
+                && world.kind[i] == kinds::FARM
+                && world.construction[i].is_none()
+                && world.resource[i] <= 0
+        })
+}
+
+/// "STONE AGE: 1/2 BUILDINGS FOR THE TOOL AGE", or the last age's name.
+fn age_progress(sim: &Simulation, me: u8) -> String {
+    let Some(pl) = sim.player(me) else {
+        return String::new();
+    };
+    match (pl.age.next(), tech::age_advance(pl.age)) {
+        (Some(next), Some(_)) => format!(
+            "{}: {}/{} BUILDINGS FOR THE {}",
+            pl.age.name().to_uppercase(),
+            sim.age_buildings(me, pl.age),
+            tech::AGE_BUILDINGS_REQUIRED,
+            next.name().to_uppercase()
+        ),
+        _ => pl.age.name().to_uppercase(),
+    }
+}
+
+/// One entry in the resource bar.
+struct Seg {
+    text: String,
+    /// Shown small after the text: the worker count.
+    sub: Option<String>,
+    /// A box behind it, for warnings.
+    boxed: Option<u8>,
+}
+
+/// The resource bar. Reflows rather than overlaps: at widths where the
+/// large text and worker counts no longer fit beside the status, the counts
+/// go, then the text shrinks, then the status goes.
+fn top_bar(p: &mut Painter<'_>, sim: &Simulation, me: u8, vw: f32, status: &str) {
+    p.rect(0.0, 0.0, vw, TOP_BAR, BROWN_DARK, 0);
+    p.rect(0.0, TOP_BAR - 2.0, vw, 2.0, BLACK, 0);
+    let world = sim.world();
+    let mut segs: Vec<Seg> = Vec::new();
+    if let Some(pl) = sim.player(me) {
+        for r in Resource::ALL {
+            let workers = world
+                .slots()
+                .filter(|s| {
+                    world.owner[s.index()] == me
+                        && matches!(world.order[s.index()], Order::Gather { resource, .. } if resource == r)
+                })
+                .count();
+            segs.push(Seg {
+                text: format!("{} {}", r.name().to_uppercase(), pl.stockpile[r.index()]),
+                sub: Some(format!("({workers})")),
+                boxed: None,
+            });
+        }
+        let housed = pl.pop >= pl.pop_cap;
+        segs.push(Seg {
+            text: format!("POP {}/{}", pl.pop, pl.pop_cap),
+            sub: None,
+            boxed: housed.then_some(RED_DARK),
+        });
+        let idle = sim.idle_villagers(me).len();
+        if idle > 0 {
+            segs.push(Seg {
+                text: format!("IDLE {idle}"),
+                sub: None,
+                boxed: Some(if idle > 3 { RED } else { GOLD_DARK }),
+            });
+        }
+        segs.push(Seg {
+            text: pl.age.name().to_uppercase(),
+            sub: None,
+            boxed: None,
+        });
+        if farm_needs_wood(sim, me) {
+            segs.push(Seg {
+                text: "FARM NEEDS WOOD".to_string(),
+                sub: None,
+                boxed: Some(RED_DARK),
+            });
+        }
+    }
+    let status_w = font::width(status) as f32 + 20.0;
+    let measure = |scale: f32, subs: bool, gap: f32| -> f32 {
+        10.0 + segs
+            .iter()
+            .map(|s| {
+                let sub = match (&s.sub, subs) {
+                    (Some(t), true) => font::width(t) as f32 + 4.0,
+                    _ => 0.0,
+                };
+                font::width(&s.text) as f32 * scale + sub + gap
+            })
+            .sum::<f32>()
+    };
+    // (scale, worker counts, gap): the layouts in order of preference.
+    let layouts = [
+        (2.0, true, 40.0),
+        (2.0, false, 24.0),
+        (1.0, true, 16.0),
+        (1.0, false, 12.0),
+    ];
+    let with_status = layouts
+        .iter()
+        .find(|(s, sub, g)| measure(*s, *sub, *g) + status_w <= vw);
+    let (scale, subs, gap, show_status, two_lines) = match with_status {
+        Some(&(s, sub, g)) => (s, sub, g, true, false),
+        None => match layouts
+            .iter()
+            .find(|(s, sub, g)| measure(*s, *sub, *g) <= vw)
+        {
+            Some(&(s, sub, g)) => (s, sub, g, false, false),
+            // Narrower than even the small layout: two lines, no status.
+            None => (1.0, false, 12.0, false, true),
+        },
+    };
+    let mut y = if two_lines {
+        3.0
+    } else if scale > 1.5 {
+        6.0
+    } else {
+        10.0
+    };
+    let mut x = 10.0;
+    for s in &segs {
+        let w = font::width(&s.text) as f32 * scale;
+        if two_lines && x + w > vw - 10.0 {
+            if y > 3.0 {
+                break; // Out of lines: the rest is dropped, not overlapped.
+            }
+            y = 14.0;
+            x = 10.0;
+        }
+        if let Some(colour) = s.boxed {
+            let pad = if two_lines { 1.0 } else { 3.0 };
+            p.rect(
+                x - 4.0,
+                y - pad,
+                w + 8.0,
+                7.0 * scale + 2.0 * pad,
+                colour,
+                0,
+            );
+        }
+        p.text(x, y, &s.text, false, scale);
+        x += w;
+        if let (Some(t), true) = (&s.sub, subs) {
+            p.text(x + 4.0, y + 7.0 * scale - 7.0, t, false, 1.0);
+            x += font::width(t) as f32 + 4.0;
+        }
+        x += gap;
+    }
+    if show_status {
+        let sw = font::width(status) as f32;
+        p.text(vw - sw - 10.0, 10.0, status, false, 1.0);
     }
 }
 
@@ -184,54 +665,9 @@ impl Hud {
         let mut buttons = Vec::new();
         let sim = input.sim;
         let world = sim.world();
+        let me = input.player;
 
-        // ----- top bar: resources, population, idle villagers, status
-        p.rect(0.0, 0.0, vw, TOP_BAR, BROWN_DARK, 0);
-        p.rect(0.0, TOP_BAR - 2.0, vw, 2.0, BLACK, 0);
-        let mut x = 10.0;
-        if let Some(pl) = sim.player(input.player) {
-            for r in Resource::ALL {
-                let workers = world
-                    .slots()
-                    .filter(|s| {
-                        world.owner[s.index()] == input.player
-                            && matches!(world.order[s.index()], Order::Gather { resource, .. } if resource == r)
-                    })
-                    .count();
-                let label = format!("{} {}", r.name().to_uppercase(), pl.stockpile[r.index()]);
-                let w = p.text(x, 6.0, &label, false, 2.0);
-                p.text(x + w + 4.0, 12.0, &format!("({workers})"), false, 1.0);
-                x += w + 40.0;
-            }
-            let housed = pl.pop >= pl.pop_cap;
-            let pop = format!("POP {}/{}", pl.pop, pl.pop_cap);
-            if housed {
-                p.rect(
-                    x - 4.0,
-                    3.0,
-                    font::width(&pop) as f32 * 2.0 + 8.0,
-                    20.0,
-                    RED_DARK,
-                    0,
-                );
-            }
-            let w = p.text(x, 6.0, &pop, false, 2.0);
-            x += w + 40.0;
-            let idle = sim.idle_villagers(input.player).len();
-            if idle > 0 {
-                let label = format!("IDLE {idle}");
-                let bw = font::width(&label) as f32 * 2.0 + 8.0;
-                p.rect(
-                    x - 4.0,
-                    3.0,
-                    bw,
-                    20.0,
-                    if idle > 3 { RED } else { GOLD_DARK },
-                    0,
-                );
-                p.text(x, 6.0, &label, false, 2.0);
-            }
-        }
+        // ----- top bar: resources, population, idle villagers, age, status
         let status = format!(
             "{}{} {:.0} FPS {:.1}X",
             input.status,
@@ -239,25 +675,24 @@ impl Hud {
             input.fps,
             input.speed
         );
-        let sw = font::width(&status) as f32;
-        p.text(vw - sw - 10.0, 10.0, &status, false, 1.0);
+        top_bar(&mut p, sim, me, vw, &status);
 
         // ----- bottom panel
         let py = vh - BOTTOM_PANEL;
         p.rect(0.0, py, vw, BOTTOM_PANEL, BROWN_DARK, 0);
         p.rect(0.0, py, vw, 2.0, BLACK, 0);
-        let panel_w = vw - MINIMAP_RESERVE;
-        let left_w = 260.0_f32.min(panel_w * 0.4);
+        let reserve = MINIMAP_RESERVE.min(vw * 0.3);
+        let panel_w = vw - reserve;
+        let left_w = 260.0_f32.min(panel_w * 0.4).floor();
         p.rect(left_w, py + 8.0, 2.0, BOTTOM_PANEL - 16.0, BLACK, 0);
 
         // Selection summary.
-        let selected: Vec<usize> = input
-            .selected
-            .iter()
-            .map(|&s| s as usize)
-            .filter(|&i| i < world.capacity() && world.slots().any(|s| s.index() == i))
+        let selected: Vec<Slot> = world
+            .slots()
+            .filter(|s| input.selected.contains(&(s.index() as u32)))
             .collect();
         let mut ty = py + 10.0;
+        let text_w = left_w - 20.0;
         match selected.len() {
             0 => {
                 p.text(10.0, ty, "NOTHING SELECTED", false, 1.0);
@@ -265,9 +700,15 @@ impl Hud {
                 p.text(10.0, ty, "CLICK OR DRAG TO SELECT", false, 1.0);
             }
             1 => {
-                let i = selected[0];
+                let i = selected[0].index();
                 let info = kinds::info(world.kind[i]);
-                p.text(10.0, ty, &info.name.to_uppercase(), false, 2.0);
+                p.text(
+                    10.0,
+                    ty,
+                    &fit(&info.name.to_uppercase(), text_w / 2.0),
+                    false,
+                    2.0,
+                );
                 ty += 20.0;
                 let hp = fx_to_f32(world.health[i]);
                 p.text(
@@ -278,7 +719,7 @@ impl Hud {
                     1.0,
                 );
                 // Health bar.
-                let bw = left_w - 20.0;
+                let bw = text_w;
                 p.rect(10.0, ty + 10.0, bw, 6.0, BLACK, 0);
                 let frac = (hp / info.max_health as f32).clamp(0.0, 1.0);
                 p.rect(
@@ -291,7 +732,7 @@ impl Hud {
                 );
                 ty += 22.0;
                 if let Some(done) = world.construction[i] {
-                    let pct = done * 100 / info.build_ticks().max(1);
+                    let pct = done * 100 / info.build_work().max(1);
                     p.text(10.0, ty, &format!("BUILDING {pct}%"), false, 1.0);
                     ty += 12.0;
                 }
@@ -304,6 +745,19 @@ impl Hud {
                         1.0,
                     );
                     ty += 12.0;
+                }
+                if let Some((r, full)) = info.resource {
+                    if !info.mobile && world.owner[i] != kinds::GAIA {
+                        let full = sim.modifiers(world.owner[i]).farm_yield(full);
+                        p.text(
+                            10.0,
+                            ty,
+                            &format!("{} {}/{}", r.name().to_uppercase(), world.resource[i], full),
+                            false,
+                            1.0,
+                        );
+                        ty += 12.0;
+                    }
                 }
                 let job = match world.order[i] {
                     Order::Idle if info.mobile => "IDLE",
@@ -327,26 +781,58 @@ impl Hud {
                 }
                 if let Some(q) = world.production[i].as_ref() {
                     if let Some(head) = q.queue.first() {
-                        let pct = head.progress * 100 / kinds::info(head.kind).build_ticks().max(1);
+                        let (verb, name, total) = match head.item {
+                            Item::Unit(k) => {
+                                let u = kinds::info(k);
+                                ("TRAINING", u.name.to_uppercase(), u.build_ticks())
+                            }
+                            Item::Tech(t) => {
+                                let t = tech::info(t);
+                                (
+                                    "RESEARCHING",
+                                    t.map_or("?", |t| t.name).to_uppercase(),
+                                    t.map_or(1, |t| t.ticks()),
+                                )
+                            }
+                        };
+                        let pct = head.progress * 100 / total.max(1);
                         p.text(
                             10.0,
                             ty,
-                            &format!(
-                                "TRAINING {} {}% ({} QUEUED)",
-                                kinds::info(head.kind).name.to_uppercase(),
-                                pct,
-                                q.queue.len()
-                            ),
+                            &fit(&format!("{verb} {name} {pct}%"), text_w),
                             false,
                             1.0,
                         );
+                    }
+                    // The queue strip: one box per item, the head filling
+                    // as it progresses ([UX-CMD-06]).
+                    let sy = py + BOTTOM_PANEL - 30.0;
+                    for (n, item) in q.queue.iter().enumerate().take(5) {
+                        let bx = 10.0 + n as f32 * 26.0;
+                        p.rect(bx, sy, 22.0, 20.0, BLACK, 0);
+                        p.rect(bx + 1.0, sy + 1.0, 20.0, 18.0, BROWN, 0);
+                        let (letter, total) = match item.item {
+                            Item::Unit(k) => {
+                                let u = kinds::info(k);
+                                (u.name.chars().next().unwrap_or('?'), u.build_ticks())
+                            }
+                            Item::Tech(t) => tech::info(t).map_or(('?', 1), |t| {
+                                (t.name.chars().next().unwrap_or('?'), t.ticks())
+                            }),
+                        };
+                        if n == 0 {
+                            let frac = item.progress as f32 / total.max(1) as f32;
+                            let fill = (18.0 * frac.clamp(0.0, 1.0)).round();
+                            p.rect(bx + 1.0, sy + 19.0 - fill, 20.0, fill, GOLD, 0);
+                        }
+                        p.text(bx + 8.0, sy + 6.0, &letter.to_string(), true, 1.0);
                     }
                 }
             }
             n => {
                 let villagers = selected
                     .iter()
-                    .filter(|&&i| world.kind[i] == kinds::VILLAGER)
+                    .filter(|s| world.kind[s.index()] == kinds::VILLAGER)
                     .count();
                 p.text(10.0, ty, &format!("{n} SELECTED"), false, 2.0);
                 ty += 20.0;
@@ -356,69 +842,52 @@ impl Hud {
             }
         }
 
-        // Command buttons.
-        let any_villager = selected
-            .iter()
-            .any(|&i| world.kind[i] == kinds::VILLAGER && world.owner[i] == input.player);
-        let trainer = selected
-            .iter()
-            .find(|&&i| {
-                kinds::info(world.kind[i]).trains
-                    && world.owner[i] == input.player
-                    && world.construction[i].is_none()
-            })
-            .copied();
-        let any_mobile = selected
-            .iter()
-            .any(|&i| kinds::info(world.kind[i]).mobile && world.owner[i] == input.player);
-        let mut defs: Vec<(Action, &str, char)> = Vec::new();
-        if input.build_mode.is_some() {
-            defs.push((Action::Cancel, "CANCEL", 'X'));
-        } else {
-            if any_villager {
-                defs.push((Action::Build(kinds::HOUSE), "HOUSE 30W", 'H'));
-                defs.push((Action::Build(kinds::STOREHOUSE), "STORE 100W", 'S'));
-            }
-            if trainer.is_some() {
-                defs.push((Action::Train, "VILLAGER 50F", 'V'));
-                defs.push((Action::CancelTrain, "UNQUEUE", 'X'));
-            }
-            if any_mobile {
-                defs.push((Action::Stop, "STOP", 'T'));
-            }
-        }
-        let (bw, bh) = (100.0, 30.0);
-        for (n, (action, label, key)) in defs.into_iter().enumerate() {
-            let col = (n % 3) as f32;
-            let rowi = (n / 3) as f32;
+        // Command grid: five across, three down, sized to the room it has.
+        let grid_x = left_w + 14.0;
+        let grid_w = (panel_w - grid_x - 6.0).max(BUTTON_MIN_W);
+        let bw = ((grid_w - BUTTON_GAP * (GRID_COLS as f32 - 1.0)) / GRID_COLS as f32)
+            .clamp(BUTTON_MIN_W, BUTTON_W)
+            .floor();
+        let defs = commands(sim, me, &selected, input.build_mode);
+        for (n, d) in defs.into_iter().take(GRID_COLS * GRID_ROWS).enumerate() {
+            let col = (n % GRID_COLS) as f32;
+            let row = (n / GRID_COLS) as f32;
             let b = Button {
-                x: left_w + 14.0 + col * (bw + 8.0),
-                y: py + 10.0 + rowi * (bh + 8.0),
+                x: grid_x + col * (bw + BUTTON_GAP),
+                y: py + 10.0 + row * (BUTTON_H + BUTTON_GAP),
                 w: bw,
-                h: bh,
-                action,
-                label: label.to_string(),
-                hotkey: key,
+                h: BUTTON_H,
+                action: d.action,
+                label: d.label,
+                cost: d.cost,
+                hotkey: d.hotkey,
+                enabled: d.enabled,
+                reason: d.reason,
             };
-            p.button(&b, false);
+            let hover = input.hover.is_some_and(|(hx, hy)| b.contains(hx, hy));
+            p.button(&b, hover);
             buttons.push(b);
         }
-        if let Some(kind) = input.build_mode {
-            let info = kinds::info(kind);
-            p.text(
-                left_w + 14.0,
-                py + BOTTOM_PANEL - 24.0,
-                &format!(
-                    "PLACING {}: CLICK TO BUILD, ESC TO CANCEL",
-                    info.name.to_uppercase()
-                ),
-                false,
-                1.0,
-            );
-        }
+        // The line under the grid: the hovered button's story, else what
+        // placement is doing, else where the player stands toward the next
+        // age.
+        let hovered = buttons
+            .iter()
+            .find(|b| input.hover.is_some_and(|(hx, hy)| b.contains(hx, hy)));
+        let line = match (hovered, input.build_mode) {
+            (Some(b), _) => b.reason.clone(),
+            (None, Some(kind)) => format!(
+                "PLACING {}: CLICK TO BUILD, ESC TO CANCEL",
+                kinds::info(kind).name.to_uppercase()
+            ),
+            (None, None) => age_progress(sim, me),
+        };
+        let line_y = py + 10.0 + GRID_ROWS as f32 * (BUTTON_H + BUTTON_GAP) + 2.0;
+        p.text(grid_x, line_y, &fit(&line, grid_w), false, 1.0);
 
         // Health bars over selected damaged units and construction bars over sites.
-        for &i in &selected {
+        for s in &selected {
+            let i = s.index();
             let info = kinds::info(world.kind[i]);
             let hp = fx_to_f32(world.health[i]) / info.max_health as f32;
             let under_construction = world.construction[i].is_some();
@@ -433,7 +902,7 @@ impl Hud {
             let w = 32.0;
             p.rect(sx - w / 2.0 - 1.0, sy - lift - 1.0, w + 2.0, 6.0, BLACK, 0);
             let frac = if under_construction {
-                world.construction[i].unwrap_or(0) as f32 / info.build_ticks().max(1) as f32
+                world.construction[i].unwrap_or(0) as f32 / info.build_work().max(1) as f32
             } else {
                 hp.clamp(0.0, 1.0)
             };
@@ -445,6 +914,22 @@ impl Hud {
                 RED
             };
             p.rect(sx - w / 2.0, sy - lift, w * frac, 4.0, colour, 0);
+        }
+
+        // The age banner ([GD-AGE-02]): the moment gets the middle of the screen.
+        if let Some(text) = input.banner {
+            let scale = 3.0;
+            let w = font::width(text) as f32 * scale + 32.0;
+            let x = ((vw - w) / 2.0).round();
+            let y = TOP_BAR + 28.0;
+            p.rect(x, y, w, 40.0, BLACK, 0);
+            p.rect(x + 2.0, y + 2.0, w - 4.0, 36.0, BROWN_DARK, 0);
+            p.rect(x + 2.0, y + 2.0, w - 4.0, 2.0, GOLD, 0);
+            p.rect(x + 2.0, y + 36.0, w - 4.0, 2.0, GOLD, 0);
+            p.text_in(x + 16.0, y + 10.0, text, Ink::Gold, scale);
+            let sub = "NEW BUILDINGS AND TECHNOLOGIES AVAILABLE";
+            let sw = font::width(sub) as f32;
+            p.text(((vw - sw) / 2.0).round(), y + 46.0, sub, false, 1.0);
         }
 
         Hud {
@@ -459,28 +944,26 @@ mod tests {
     use super::*;
     use sim::SimConfig;
 
+    fn first_owned(sim: &Simulation, kind: KindId) -> u32 {
+        sim.world()
+            .slots()
+            .find(|s| sim.world().kind[s.index()] == kind && sim.world().owner[s.index()] == 0)
+            .unwrap()
+            .index() as u32
+    }
+
+    /// The command grid gains its buttons as the age arrives, the queue strip
+    /// shows what is in production, and the age banner goes up.
+    ///
+    /// REQ: GD-AGE-02
+    /// REQ: UX-CMD-06
     #[test]
     fn hud_draws_resources_and_context_buttons() {
         let sim = Simulation::new(5, SimConfig::default());
         let atlas = Atlas::placeholder();
         let camera = Camera::new(sim.map().width(), sim.map().height(), (1280.0, 720.0));
-        let villager = sim
-            .world()
-            .slots()
-            .find(|s| {
-                sim.world().kind[s.index()] == kinds::VILLAGER && sim.world().owner[s.index()] == 0
-            })
-            .unwrap()
-            .index() as u32;
-        let tc = sim
-            .world()
-            .slots()
-            .find(|s| {
-                sim.world().kind[s.index()] == kinds::TOWN_CENTER
-                    && sim.world().owner[s.index()] == 0
-            })
-            .unwrap()
-            .index() as u32;
+        let villager = first_owned(&sim, kinds::VILLAGER);
+        let tc = first_owned(&sim, kinds::TOWN_CENTER);
         let base = HudInput {
             sim: &sim,
             player: 0,
@@ -491,12 +974,16 @@ mod tests {
             paused: false,
             speed: 1.0,
             status: "T0",
+            hover: None,
+            banner: None,
         };
         let none = Hud::build(&atlas, &base);
         assert!(none.buttons.is_empty());
         assert!(none.sprites.iter().all(|s| s.screen));
         assert!(none.sprites.len() > 40, "resource bar text");
 
+        // A villager offers Stop, the Stone Age buildings, and the Tool Age
+        // ones greyed with the reason.
         let v = Hud::build(
             &atlas,
             &HudInput {
@@ -504,17 +991,31 @@ mod tests {
                 ..base
             },
         );
-        let actions: Vec<_> = v.buttons.iter().map(|b| b.action).collect();
+        let find =
+            |hud: &Hud, action: Action| hud.buttons.iter().find(|b| b.action == action).cloned();
+        assert_eq!(v.buttons[0].action, Action::Stop);
+        let house = find(&v, Action::Build(kinds::HOUSE)).expect("house");
+        assert!(house.enabled);
         assert_eq!(
-            actions,
-            vec![
-                Action::Build(kinds::HOUSE),
-                Action::Build(kinds::STOREHOUSE),
-                Action::Stop
-            ]
+            (house.label.as_str(), house.cost.as_str()),
+            ("HOUSE", "30W")
         );
-        assert!(v.buttons[0].contains(v.buttons[0].x + 1.0, v.buttons[0].y + 1.0));
+        assert!(
+            find(&v, Action::Build(kinds::TOWN_CENTER)).is_none(),
+            "a villager's panel does not offer a Town Center"
+        );
+        assert!(house.contains(house.x + 1.0, house.y + 1.0));
+        assert!(find(&v, Action::Build(kinds::STOREHOUSE)).unwrap().enabled);
+        let market = find(&v, Action::Build(kinds::MARKET)).expect("market is listed");
+        assert!(!market.enabled);
+        assert_eq!(market.reason, "NEEDS THE TOOL AGE");
+        assert!(
+            find(&v, Action::Build(kinds::SIEGE_WORKSHOP)).is_none(),
+            "two ages ahead is not shown"
+        );
+        assert!(v.buttons.len() <= GRID_COLS * GRID_ROWS);
 
+        // The Town Center trains, advances, and toggles reseeding.
         let t = Hud::build(
             &atlas,
             &HudInput {
@@ -522,8 +1023,28 @@ mod tests {
                 ..base
             },
         );
-        assert!(t.buttons.iter().any(|b| b.action == Action::Train));
-        assert!(!t.buttons.iter().any(|b| b.action == Action::Stop));
+        assert!(find(&t, Action::Train).unwrap().enabled);
+        assert!(find(&t, Action::Stop).is_none());
+        let age = find(&t, Action::Research(tech::AGE_TOOL)).expect("age-up button");
+        assert!(!age.enabled);
+        assert_eq!(age.label, "TOOL AGE");
+        assert!(age.reason.contains("BUILDINGS"), "{}", age.reason);
+        assert_eq!(find(&t, Action::ToggleReseed).unwrap().label, "RESEED ON");
+        assert!(
+            find(&t, Action::CancelTrain).is_none(),
+            "nothing queued yet"
+        );
+
+        // Hovering a button puts its reason on the line under the grid.
+        let hovered = Hud::build(
+            &atlas,
+            &HudInput {
+                selected: &[tc],
+                hover: Some((age.x + 2.0, age.y + 2.0)),
+                ..base
+            },
+        );
+        assert!(hovered.sprites.len() > t.sprites.len() - 40);
 
         let b = Hud::build(
             &atlas,
@@ -535,5 +1056,70 @@ mod tests {
         );
         assert_eq!(b.buttons.len(), 1);
         assert_eq!(b.buttons[0].action, Action::Cancel);
+
+        let banner = Hud::build(
+            &atlas,
+            &HudInput {
+                banner: Some("TOOL AGE"),
+                ..base
+            },
+        );
+        assert!(banner.sprites.len() > none.sprites.len() + 8);
+    }
+
+    #[test]
+    fn the_resource_bar_reflows_instead_of_overlapping() {
+        let sim = Simulation::new(5, SimConfig::default());
+        let atlas = Atlas::placeholder();
+        for width in [1280.0, 960.0, 640.0, 400.0] {
+            let camera = Camera::new(sim.map().width(), sim.map().height(), (width, 360.0));
+            let hud = Hud::build(
+                &atlas,
+                &HudInput {
+                    sim: &sim,
+                    player: 0,
+                    camera: &camera,
+                    selected: &[],
+                    build_mode: None,
+                    fps: 60.0,
+                    paused: false,
+                    speed: 1.0,
+                    status: "SEED 5 TICK 0",
+                    hover: None,
+                    banner: None,
+                },
+            );
+            // Every glyph in the top bar stays inside the window.
+            let glyphs: Vec<&SpriteInstance> = hud
+                .sprites
+                .iter()
+                .filter(|s| s.y < TOP_BAR && s.uw == font::GLYPH_W as u16)
+                .collect();
+            assert!(!glyphs.is_empty());
+            for g in &glyphs {
+                assert!(
+                    g.x >= 0.0 && g.x + g.w <= width,
+                    "glyph off screen at {width}px"
+                );
+            }
+            // And no two glyph rows collide: text is laid out left to right
+            // with a gap, so sort by x and check each starts after the last
+            // one on the same line ends.
+            let mut rows: Vec<(i32, f32, f32)> = glyphs
+                .iter()
+                .map(|g| (g.y as i32, g.x, g.x + g.w))
+                .collect();
+            rows.sort_by(|a, b| (a.0, a.1).partial_cmp(&(b.0, b.1)).unwrap());
+            for pair in rows.windows(2) {
+                if pair[0].0 == pair[1].0 {
+                    assert!(
+                        pair[1].1 >= pair[0].2 - 0.01,
+                        "glyphs overlap at {width}px: {:?} {:?}",
+                        pair[0],
+                        pair[1]
+                    );
+                }
+            }
+        }
     }
 }

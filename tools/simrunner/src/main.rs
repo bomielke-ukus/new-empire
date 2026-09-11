@@ -471,6 +471,11 @@ fn randomised_scenario(seed: u64, ticks: u64) -> Scenario {
                 1 => 1,
                 _ => r.below(200),
             },
+            starting_stockpile: match r.below(4) {
+                0 => [0; 4],
+                1 => [5000; 4],
+                _ => sim::DEFAULT_STOCKPILE,
+            },
         },
         style,
     }

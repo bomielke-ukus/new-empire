@@ -90,6 +90,34 @@ pub const HIDE: u8 = index("hide_tan", 5);
 /// The HUD's accent colour.
 pub const UI_ACCENT: u8 = index("ui_accent", 0);
 
+// Age materials, for the placeholder buildings' progression
+// (`docs/02` §4, `docs/05` §3): thatch and timber, then mudbrick, then
+// dressed limestone, then granite and iron.
+/// Tool Age wall.
+pub const MUDBRICK: u8 = index("mudbrick", 6);
+/// Tool Age wall, in shadow.
+pub const MUDBRICK_DARK: u8 = index("mudbrick_shadow", 4);
+/// Thatched roof.
+pub const THATCH: u8 = index("thatch", 5);
+/// Thatch in shadow.
+pub const THATCH_DARK: u8 = index("thatch", 3);
+/// Bronze Age wall.
+pub const LIMESTONE: u8 = index("limestone", 6);
+/// Bronze Age wall, in shadow.
+pub const LIMESTONE_DARK: u8 = index("limestone", 3);
+/// Bronze trim.
+pub const BRONZE: u8 = index("bronze", 5);
+/// Iron trim.
+pub const IRON: u8 = index("iron", 5);
+/// Iron, in shadow.
+pub const IRON_DARK: u8 = index("iron", 3);
+/// Linen cloth.
+pub const LINEN: u8 = index("linen", 6);
+/// Tilled earth.
+pub const DIRT: u8 = index("dirt", 4);
+/// A furrow.
+pub const DIRT_DARK: u8 = index("dirt", 2);
+
 /// The eight indices remapped per player, dark to light.
 pub const PLAYER_RAMP: core::ops::Range<u8> = PLAYER_SLOT.0..PLAYER_SLOT.1 + 1;
 /// Player colour, much darker.

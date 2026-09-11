@@ -533,7 +533,7 @@ anticipate:
   shader honours. No text library, no second pipeline, and the software
   rasteriser draws it identically.
 
-## 17. Implementation notes from Q10
+## 18. Implementation notes from Q10
 
 - **The palette has one source of truth**, `assets/palette/ancient.ron`. The
   art tool bakes it (`atlas export --rust`) into
@@ -554,3 +554,38 @@ anticipate:
   sampled at full resolution when zoomed in.
 - **Animation is chosen from simulation state** (walking, working, idle)
   and timed from game ticks plus a per-slot phase. It never feeds back.
+
+## 19. Implementation notes from M3
+
+- **Technology is a queue item.** A building's production queue holds
+  `Item::Unit` and `Item::Tech` alike; research pays on queueing, refunds on
+  cancel, and completes through the same `production` pass as a villager.
+  Effects fold into `Player::modifiers`, which the gather, movement and
+  construction systems read; an age advance is an effect like any other.
+- **The age gate is a query, `Simulation::can_research`**, and the command
+  runs the same query before paying, so the panel greys a button for the
+  reason the simulation would refuse it. `age_buildings` counts finished,
+  owned buildings of the player's current age, less Houses, the Town Center
+  and Farms.
+- **Construction progress is in hundredths of a builder-tick**
+  (`KindInfo::build_work`), so a percentage build-speed bonus applies
+  exactly. Anything that reads `World::construction` divides by
+  `build_work`, not `build_ticks`.
+- **Farms are nodes that belong to someone.** `gatherable_by` is the one
+  place that rule lives: a farm is worked only by its owner, a site holds
+  nothing, and an exhausted farm stays standing at zero for the `farms` pass
+  to reseed before orders run, so a villager mid-harvest never notices.
+- **`SimConfig::validate` is the setup screen's check, not the engine's.**
+  The population-cap range from `docs/02` is enforced there; the engine and
+  the replay path stay permissive because tests and the soak deliberately
+  run caps of 0, 6 and 12.
+- **Age variants are atlas lookups, not sprite state.** `Atlas::variant`
+  maps `(kind, age)` to the id the age-styled frames are filed under;
+  placeholders draw four material sets (timber, mudbrick, limestone,
+  granite), and rendered sets answer with themselves until their manifests
+  carry variants. The sweep and banner are app-side timers passed into
+  `Scene::build_full` and `HudInput`, so a frame is still a pure function of
+  its inputs and `mapview --sweep` can render any moment of it.
+- **The HUD owns the hotkey table.** Each button carries its key; the app
+  looks the pressed letter up in the buttons it last drew, so the panel and
+  the keyboard cannot disagree.

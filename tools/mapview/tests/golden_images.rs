@@ -116,16 +116,59 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
-        // A CHARACTERISATION SCENE, not an endorsement.
-        //
-        // Below roughly 960px the resource bar does not reflow or truncate:
-        // `GOLD` runs into `POP`, and both run into the right-aligned status
-        // text, producing unreadable overlap. `docs/03` §1 says the layout
-        // "scales proportionally and reflows"; overlapping is not reflowing.
-        //
-        // This golden records the defect as it stands so that fixing it shows
-        // up as a deliberate image change rather than passing unnoticed. It is
-        // listed in `docs/09-test-plan.md` under known gaps.
+        // The Tool Age settlement: mudbrick buildings, the Town Center
+        // selected with the Bronze Age button and its gate on the grid, a
+        // technology queued, the farm in the field.
+        name: "ages-tool-hud",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "ages",
+            "--stockpile",
+            "5000",
+            "--ticks",
+            "100",
+            "--select-tc",
+            "1",
+            "--hud",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // The Bronze Age has just landed: limestone buildings, the light
+        // sweep part-way across the settlement, the banner up.
+        name: "ages-bronze-sweep",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "ages",
+            "--stockpile",
+            "5000",
+            "--ticks",
+            "1900",
+            "--sweep",
+            "700",
+            "--hud",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // Once a characterisation scene for a defect: below roughly 960px the
+        // resource bar used to run `GOLD` into `POP` and both into the
+        // status text. `docs/03` §1 says the layout reflows, and since M3 it
+        // does: the worker counts go first, then the text shrinks, then the
+        // status. The name is kept so the history of the image reads as one
+        // scene.
         name: "narrow-hud-overlap",
         args: &[
             "--seed",

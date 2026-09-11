@@ -202,11 +202,24 @@ Same seed produces a bit-identical map (`GD-MAP-01`, `RM-M1-01`), covered.
 Still owed: a nightly sweep over 1,000 seeds, because a generator that fails
 one seed in five hundred will meet that seed in front of a player.
 
-### Economy — M2 shipped, M3 to come
+### Economy and ages — M2 and M3 shipped
 
-The strong one, not yet written: **resource conservation** as a per-tick
+M3's tests live in `crates/sim/tests/behaviour_ages.rs`: the building gate
+(`GD-AGE-01`, three ways), technology queued at its building in its age after
+its prerequisites and applied through modifiers, cancel refunds, farms
+reseeding for sixty wood until the wood runs out and the toggle off and on
+(`GD-ECON-05`), farms worked only by their owner, a farm seeded on
+completion, and the milestone walk Stone → Tool → Bronze by commands alone
+(`RM-M3-01`). The presentation half (`GD-AGE-02`) is pinned in `view`'s
+tests and by the `ages-tool-hud` and `ages-bronze-sweep` golden images. The
+corpus gained `ages-2p`, a rich two-player match whose bot researches,
+advances and farms.
+
+The strong one, still not written: **resource conservation** as a per-tick
 invariant — map remaining + carried + stockpiled + spent is constant. Every
-duplication and every leak violates it and it costs nothing to check.
+duplication and every leak violates it and it costs nothing to check. Farms
+make it slightly more interesting: a reseed converts 60 wood into 250 food
+at the moment of seeding.
 
 ### Combat — M4
 
@@ -282,7 +295,6 @@ stays on the list hides the next one.
 
 | ID | Blocker |
 |---|---|
-| `GD-ECON-05` | Farms auto-reseed. Farms are M3; there is nothing to test. |
 | `TA-PATH-02` | See below. Needs a design decision, not a test. |
 
 ### TA-PATH-02: the number in the spec cannot be shipped as it stands
@@ -416,10 +428,11 @@ Stated rather than left to be discovered.
   on the milestone the roadmap calls the risk.
 - **No resource-conservation invariant.** The strongest economy check
   available and it is not written.
-- **The HUD overlaps below ~960px.** `GOLD` runs into `POP` and both run into
-  the right-aligned status. `docs/03` §1 says the layout reflows; overlapping
-  is not reflowing. Pinned by the `narrow-hud-overlap` golden, which records
-  the defect so a fix shows up as a deliberate image change.
+- ~~**The HUD overlaps below ~960px.**~~ Fixed in M3: the resource bar
+  drops worker counts, then shrinks, then drops the status, then wraps to two
+  lines, and `view`'s `the_resource_bar_reflows_instead_of_overlapping` pins
+  it at four widths. The `narrow-hud-overlap` golden keeps its name and now
+  shows the reflow.
 - **No fuzzing.** `cargo-fuzz` targets for the replay reader and the command
   interface were written against M0 and need rebuilding for M2's ten command
   variants.

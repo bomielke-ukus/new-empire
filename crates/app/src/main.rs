@@ -13,12 +13,16 @@ use clock::FixedClock;
 use input::Input;
 use selection::Selection;
 use sim::kinds;
-use sim::{Command, CommandKind, EntityId, Rally, SimConfig, Simulation, Vec2Fx, TICK_MS};
+use sim::tech;
+use sim::{Age, Command, CommandKind, EntityId, Rally, SimConfig, Simulation, Vec2Fx, TICK_MS};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use view::hud::{Action, BOTTOM_PANEL, TOP_BAR};
 use view::minimap::{Minimap, MinimapRect};
-use view::{Atlas, Camera, Ghost, Hud, HudInput, Scene};
+use view::{Atlas, Camera, Ghost, Hud, HudInput, Scene, Sweep, SWEEP_MS};
+
+/// How long the age banner stays up, in ms.
+const BANNER_MS: u128 = 4000;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -138,6 +142,10 @@ struct App {
     selection: Selection,
     /// Building being placed.
     build_mode: Option<sim::entity::KindId>,
+    /// The age the player was in last frame, to notice an advance.
+    last_age: Age,
+    /// When the last advance completed, and to what, for the celebration.
+    age_up: Option<(Instant, Age)>,
     /// Last built scene, for picking.
     scene: Scene,
     /// Last built HUD, for button hit-testing.
@@ -157,7 +165,11 @@ impl App {
             .nth(1)
             .and_then(|s| s.parse().ok())
             .unwrap_or(1);
-        let sim = Simulation::new(seed, SimConfig::default());
+        let config = SimConfig::default();
+        if let Err(e) = config.validate() {
+            eprintln!("warning: match setup: {e}");
+        }
+        let sim = Simulation::new(seed, config);
         let map = sim.map();
         let mut camera = Camera::new(map.width(), map.height(), (1280.0, 720.0));
         let (sx, sy) = sim.starts()[ME as usize];
@@ -185,6 +197,8 @@ impl App {
             input: Input::new(),
             selection: Selection::new(),
             build_mode: None,
+            last_age: Age::Stone,
+            age_up: None,
             scene: Scene::default(),
             hud: Hud::default(),
             modifiers: ModifiersState::empty(),
@@ -230,6 +244,7 @@ impl App {
             y,
             ok: self.sim.can_place(ME, kind, x, y).is_ok(),
             row: view::palette::row_for_owner(ME),
+            age: self.sim.player(ME).map_or(0, |p| p.age.index() as u8),
         })
     }
 
@@ -261,14 +276,32 @@ impl App {
         }
         self.selection.prune(&self.sim);
 
+        // An age completing is the moment the presentation celebrates
+        // ([GD-AGE-02]): the sweep over the settlement and the banner.
+        let age = self.sim.player(ME).map_or(Age::Stone, |p| p.age);
+        if age != self.last_age {
+            self.age_up = Some((now, age));
+            self.last_age = age;
+        }
+        let since = self.age_up.map(|(t, _)| t.elapsed().as_millis());
+        let sweep = since.filter(|&ms| ms < SWEEP_MS as u128).map(|ms| Sweep {
+            player: ME,
+            elapsed_ms: ms as u32,
+        });
+        let banner = match (self.age_up, since) {
+            (Some((_, a)), Some(ms)) if ms < BANNER_MS => Some(a.name().to_uppercase()),
+            _ => None,
+        };
+
         let selected = self.selection.slots(&self.sim);
-        let mut scene = Scene::build_with(
+        let mut scene = Scene::build_full(
             &self.sim,
             &self.atlas,
             Some(&self.prev_pos),
             self.clock.alpha(),
             &selected,
             self.ghost(),
+            sweep,
         );
         // Band-box outline.
         if let (Some(from), Some(to)) = (self.selection.drag_from, self.input.cursor) {
@@ -293,6 +326,8 @@ impl App {
                 paused: self.clock.paused(),
                 speed: self.clock.speed,
                 status: &status,
+                hover: self.input.cursor,
+                banner: banner.as_deref(),
             },
         );
         scene.ui.extend(hud.sprites.iter().cloned());
@@ -342,7 +377,7 @@ impl App {
         let i = slot.index();
         let world = self.sim.world();
         let villagers = !self.selection.own_villagers(&self.sim, ME).is_empty();
-        if villagers && kinds::gatherable(world.kind[i]) && world.resource[i] > 0 {
+        if villagers && gatherable_by_me(&self.sim, i) {
             return Some(Target::Gather);
         }
         if villagers && world.owner[i] == ME && world.construction[i].is_some() {
@@ -361,7 +396,9 @@ impl App {
                 .find(|b| b.contains(px, py))
                 .cloned()
             {
-                self.do_action(b.action);
+                if b.enabled {
+                    self.do_action(b.action);
+                }
             }
             return;
         }
@@ -465,7 +502,7 @@ impl App {
             let slot = self.sim.world().slot(id).unwrap();
             let i = slot.index();
             let world = self.sim.world();
-            let gatherable = kinds::gatherable(world.kind[i]) && world.resource[i] > 0;
+            let gatherable = gatherable_by_me(&self.sim, i);
             let site = world.owner[i] == ME && world.construction[i].is_some();
             if !villagers.is_empty() && gatherable {
                 self.issue(CommandKind::Gather {
@@ -533,7 +570,39 @@ impl App {
                 }
             }
             Action::Cancel => self.build_mode = None,
+            Action::Research(t) => {
+                let Some(info) = tech::info(t) else {
+                    return;
+                };
+                if let Some(b) = self.selection.own_building(&self.sim, ME, info.building) {
+                    self.issue(CommandKind::Research {
+                        building: b,
+                        tech: t,
+                    });
+                }
+            }
+            Action::ToggleReseed => {
+                let on = self.sim.player(ME).is_some_and(|p| p.auto_reseed);
+                self.issue(CommandKind::SetAutoReseed { enabled: !on });
+            }
         }
+    }
+
+    /// Presses the enabled command button carrying this hotkey, if any. The
+    /// HUD decides which keys mean what for the current selection, so the
+    /// app does not keep a second copy of that table.
+    fn hotkey(&mut self, ch: char) -> bool {
+        let Some(b) = self
+            .hud
+            .buttons
+            .iter()
+            .find(|b| b.hotkey == ch && b.enabled)
+            .cloned()
+        else {
+            return false;
+        };
+        self.do_action(b.action);
+        true
     }
 
     fn key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode) {
@@ -582,16 +651,8 @@ impl App {
                 let (sx, sy) = self.sim.starts()[ME as usize];
                 self.camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
             }
-            KeyCode::KeyH => self.do_action(Action::Build(kinds::HOUSE)),
-            KeyCode::KeyB => self.do_action(Action::Build(kinds::STOREHOUSE)),
-            KeyCode::KeyV => self.do_action(Action::Train),
-            KeyCode::KeyT => self.do_action(Action::Stop),
-            KeyCode::KeyX => {
-                if self.build_mode.is_some() {
-                    self.do_action(Action::Cancel);
-                } else {
-                    self.do_action(Action::CancelTrain);
-                }
+            KeyCode::KeyE if self.modifiers.shift_key() => {
+                self.input.edge_scroll = !self.input.edge_scroll;
             }
             KeyCode::Period => {
                 if let Some(id) = self.selection.next_idle(&self.sim, ME) {
@@ -601,7 +662,6 @@ impl App {
                         .look_at_tile(view::fx_to_f32(p.x), view::fx_to_f32(p.y));
                 }
             }
-            KeyCode::KeyE => self.input.edge_scroll = !self.input.edge_scroll,
             KeyCode::Delete => {
                 let ids = self.selection.own_mobile(&self.sim, ME);
                 let sites: Vec<_> = self
@@ -620,7 +680,11 @@ impl App {
                     self.issue(CommandKind::Despawn { id });
                 }
             }
-            _ => {}
+            code => {
+                if let Some(ch) = letter(code) {
+                    self.hotkey(ch);
+                }
+            }
         }
     }
 }
@@ -631,6 +695,50 @@ enum Target {
     Assist,
     #[allow(dead_code)]
     Other(EntityId),
+}
+
+/// True if the player's villagers may gather from entity `i`: a node with
+/// something in it, and — for a farm — one of ours.
+fn gatherable_by_me(sim: &Simulation, i: usize) -> bool {
+    let world = sim.world();
+    let kind = world.kind[i];
+    kinds::gatherable(kind)
+        && world.resource[i] > 0
+        && world.construction[i].is_none()
+        && (kind != kinds::FARM || world.owner[i] == ME)
+}
+
+/// The letter a key carries, for command hotkeys.
+fn letter(code: KeyCode) -> Option<char> {
+    Some(match code {
+        KeyCode::KeyA => 'A',
+        KeyCode::KeyB => 'B',
+        KeyCode::KeyC => 'C',
+        KeyCode::KeyD => 'D',
+        KeyCode::KeyE => 'E',
+        KeyCode::KeyF => 'F',
+        KeyCode::KeyG => 'G',
+        KeyCode::KeyH => 'H',
+        KeyCode::KeyI => 'I',
+        KeyCode::KeyJ => 'J',
+        KeyCode::KeyK => 'K',
+        KeyCode::KeyL => 'L',
+        KeyCode::KeyM => 'M',
+        KeyCode::KeyN => 'N',
+        KeyCode::KeyO => 'O',
+        KeyCode::KeyP => 'P',
+        KeyCode::KeyQ => 'Q',
+        KeyCode::KeyR => 'R',
+        KeyCode::KeyS => 'S',
+        KeyCode::KeyT => 'T',
+        KeyCode::KeyU => 'U',
+        KeyCode::KeyV => 'V',
+        KeyCode::KeyW => 'W',
+        KeyCode::KeyX => 'X',
+        KeyCode::KeyY => 'Y',
+        KeyCode::KeyZ => 'Z',
+        _ => return None,
+    })
 }
 
 impl ApplicationHandler for App {

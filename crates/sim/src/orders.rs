@@ -4,7 +4,8 @@
 use crate::entity::{EntityId, KindId};
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
-use crate::kinds::{Cost, Resource};
+use crate::kinds::{Cost, Resource, CARRY_CAPACITY};
+use crate::tech::{Age, TechId};
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
 
@@ -144,13 +145,40 @@ impl HashState for Nav {
     }
 }
 
+/// What a queue slot is producing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Item {
+    /// A unit.
+    Unit(KindId),
+    /// A technology.
+    Tech(TechId),
+}
+
 /// One item in a building's production queue.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct QueueItem {
-    /// What is being trained.
-    pub kind: KindId,
+    /// What is being produced.
+    pub item: Item,
     /// Ticks of work done.
     pub progress: u32,
+}
+
+impl QueueItem {
+    /// A unit to train.
+    pub const fn unit(kind: KindId) -> QueueItem {
+        QueueItem {
+            item: Item::Unit(kind),
+            progress: 0,
+        }
+    }
+
+    /// A technology to research.
+    pub const fn tech(tech: TechId) -> QueueItem {
+        QueueItem {
+            item: Item::Tech(tech),
+            progress: 0,
+        }
+    }
 }
 
 /// Where a building sends what it produces.
@@ -193,10 +221,66 @@ impl HashState for Production {
     fn hash_state(&self, h: &mut StateHasher) {
         h.write_u64(self.queue.len() as u64);
         for q in &self.queue {
-            h.write_u16(q.kind);
+            match q.item {
+                Item::Unit(k) => {
+                    h.write_u8(0);
+                    h.write_u16(k);
+                }
+                Item::Tech(t) => {
+                    h.write_u8(1);
+                    h.write_u16(t);
+                }
+            }
             h.write_u32(q.progress);
         }
         h.write(&self.rally.unwrap_or(Rally::None));
+    }
+}
+
+/// Everything technology has changed about a player.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub struct Modifiers {
+    /// Percent added to the gather rate, per resource.
+    pub gather_rate_pct: [i32; 4],
+    /// Units added to carry capacity.
+    pub carry_bonus: i32,
+    /// Food added to a fresh farm.
+    pub farm_yield_bonus: i32,
+    /// Percent added to villager speed.
+    pub villager_speed_pct: i32,
+    /// Percent added to construction speed.
+    pub build_speed_pct: i32,
+}
+
+impl Modifiers {
+    /// Gather rate for a resource after modifiers, per second.
+    pub fn gather_rate(&self, r: Resource) -> Fx {
+        r.gather_rate().mul_div(
+            Fx::from_int(100 + self.gather_rate_pct[r.index()]),
+            Fx::from_int(100),
+        )
+    }
+
+    /// Carry capacity after modifiers.
+    pub fn carry_capacity(&self) -> i32 {
+        (CARRY_CAPACITY + self.carry_bonus).max(1)
+    }
+
+    /// Food a fresh farm holds.
+    pub fn farm_yield(&self, base: i32) -> i32 {
+        base + self.farm_yield_bonus
+    }
+}
+
+impl HashState for Modifiers {
+    fn hash_state(&self, h: &mut StateHasher) {
+        for v in self.gather_rate_pct {
+            h.write_i32(v);
+        }
+        h.write_i32(self.carry_bonus);
+        h.write_i32(self.farm_yield_bonus);
+        h.write_i32(self.villager_speed_pct);
+        h.write_i32(self.build_speed_pct);
     }
 }
 
@@ -211,16 +295,45 @@ pub struct Player {
     pub pop_cap: u32,
     /// Running totals gathered, for the score screen.
     pub gathered: Cost,
+    /// Current age.
+    pub age: Age,
+    /// What technology has changed.
+    pub modifiers: Modifiers,
+    /// Technologies completed, sorted.
+    pub researched: Vec<TechId>,
+    /// Whether exhausted farms are reseeded automatically.
+    pub auto_reseed: bool,
 }
 
 impl Player {
     /// A player with the standard opening stockpile.
     pub fn new() -> Player {
+        Player::with_stockpile([200, 200, 100, 100])
+    }
+
+    /// A player with a chosen opening stockpile.
+    pub fn with_stockpile(stockpile: Cost) -> Player {
         Player {
-            stockpile: [200, 200, 100, 100],
+            stockpile,
             pop: 0,
             pop_cap: 0,
             gathered: [0; 4],
+            age: Age::Stone,
+            modifiers: Modifiers::default(),
+            researched: Vec::new(),
+            auto_reseed: true,
+        }
+    }
+
+    /// True if the technology is complete.
+    pub fn has_researched(&self, tech: TechId) -> bool {
+        self.researched.binary_search(&tech).is_ok()
+    }
+
+    /// Records a completed technology.
+    pub fn mark_researched(&mut self, tech: TechId) {
+        if let Err(i) = self.researched.binary_search(&tech) {
+            self.researched.insert(i, tech);
         }
     }
 
@@ -270,6 +383,13 @@ impl HashState for Player {
         for v in self.gathered {
             h.write_i32(v);
         }
+        h.write_u8(self.age as u8);
+        h.write(&self.modifiers);
+        h.write_u64(self.researched.len() as u64);
+        for t in &self.researched {
+            h.write_u16(*t);
+        }
+        h.write_bool(self.auto_reseed);
     }
 }
 

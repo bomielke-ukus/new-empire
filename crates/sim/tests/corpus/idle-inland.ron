@@ -1,1 +1,1 @@
-(version:1,seed:4,config:(map:(kind:Inland,size:128,players:4),max_entities:4000,wander:true,pop_cap_max:75),ticks:2000,commands:[])
+(version:1,seed:4,config:(map:(kind:Inland,size:128,players:4),max_entities:4000,wander:true,pop_cap_max:75,starting_stockpile:(200,200,100,100)),ticks:2000,commands:[])

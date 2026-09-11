@@ -4,14 +4,14 @@
 //! corpus can be regenerated reproducibly (`simrunner record`) and that adding
 //! a scenario is a code review rather than a YAML edit nobody reads.
 //!
-//! These drive M2's actual systems — gathering, drop-off, construction,
-//! training, group pathing — rather than the random spawn-and-move stream the
-//! M0 runner used. A corpus that only exercises movement would not notice a
-//! change to the economy.
+//! These drive the actual systems — gathering, drop-off, construction,
+//! training, research and age advances, farms, group pathing — rather than
+//! the random spawn-and-move stream the M0 runner used. A corpus that only
+//! exercises movement would not notice a change to the economy.
 
 use sim::{
-    kinds, Command, CommandKind, EntityId, KindId, MapKind, MapSpec, PlayerId, Rally, Replay, Rng,
-    SimConfig, Simulation, Vec2Fx,
+    kinds, tech, Command, CommandKind, EntityId, KindId, MapKind, MapSpec, PlayerId, Rally, Replay,
+    Rng, SimConfig, Simulation, Vec2Fx,
 };
 
 /// A reproducible synthetic match.
@@ -45,6 +45,10 @@ pub enum Style {
     Marching,
     /// Economy plus marching, plus spawned crowds. The busiest thing here.
     Everything,
+    /// An economy that builds its way up the ages: construction pulls
+    /// villagers off their nodes, research is tried at every building, and
+    /// the stockpile is expected to be deep enough to pay for it.
+    Ages,
 }
 
 fn inland(size: u16, players: u8) -> SimConfig {
@@ -83,6 +87,17 @@ pub fn corpus() -> Vec<Scenario> {
             ticks: 4_000,
             config: inland(128, 2),
             style: Style::Economy,
+        },
+        Scenario {
+            name: "ages-2p",
+            purpose: "rich enough to advance: research, age-ups, farms and the later buildings",
+            seed: 12,
+            ticks: 6_000,
+            config: SimConfig {
+                starting_stockpile: [5000; 4],
+                ..inland(128, 2)
+            },
+            style: Style::Ages,
         },
         Scenario {
             name: "economy-8p",
@@ -229,15 +244,28 @@ impl Scenario {
         if !bot.chance(1, 10) {
             return;
         }
+        if self.style == Style::Ages {
+            match bot.below(12) {
+                0..=2 => self.gather(sim, bot, player),
+                3..=6 => self.build(sim, bot, player),
+                7 => self.train(sim, bot, player),
+                8 => self.rally(sim, bot, player),
+                9..=10 => self.research(sim, bot, player),
+                _ => self.reseed(sim, bot, player),
+            }
+            return;
+        }
         let economy = matches!(self.style, Style::Economy | Style::Everything);
         let marching = matches!(self.style, Style::Marching | Style::Everything);
 
-        match bot.below(10) {
+        match bot.below(12) {
             0..=3 if economy => self.gather(sim, bot, player),
             4..=5 if economy => self.build(sim, bot, player),
             6 if economy => self.train(sim, bot, player),
             7 if economy => self.rally(sim, bot, player),
-            8 if matches!(self.style, Style::Everything) => self.spawn(sim, bot, player),
+            8 if economy => self.research(sim, bot, player),
+            9 if economy => self.reseed(sim, bot, player),
+            10 if matches!(self.style, Style::Everything) => self.spawn(sim, bot, player),
             _ if marching => self.march(sim, bot, player),
             // A style that has nothing to do this tick simply does nothing,
             // which keeps the decision RNG in step across styles.
@@ -273,22 +301,95 @@ impl Scenario {
         });
     }
 
-    /// Place a house or storehouse on a legal tile near the player's start.
+    /// Place a building on a legal tile near the player's start. Houses
+    /// mostly; the rest of the roster now and then, which the simulation
+    /// refuses until the age allows, so the refusal path is exercised too.
     fn build(&self, sim: &mut Simulation, bot: &mut Rng, player: PlayerId) {
+        if self.style == Style::Ages {
+            return self.build_up(sim, bot, player);
+        }
         let idle = sim.idle_villagers(player);
         if idle.is_empty() {
+            return;
+        }
+        let kind = match bot.below(12) {
+            0..=4 => kinds::HOUSE,
+            5..=6 => kinds::STOREHOUSE,
+            7 => kinds::BARRACKS,
+            8 => kinds::FARM,
+            9 => kinds::MARKET,
+            10 => kinds::ARCHERY_RANGE,
+            _ => kinds::WATCH_TOWER,
+        };
+        self.place(sim, bot, player, kind, idle.into_iter().take(3).collect());
+    }
+
+    /// The ages bot's construction: finish the site in hand first, house
+    /// when housed out, and otherwise put up the roster kind of the current
+    /// age it has fewest of, three of each, so the gate for every age is
+    /// met without the map filling with houses.
+    fn build_up(&self, sim: &mut Simulation, bot: &mut Rng, player: PlayerId) {
+        let world = sim.world();
+        let site = world
+            .slots()
+            .find(|s| world.owner[s.index()] == player && world.construction[s.index()].is_some())
+            .map(|s| world.id_at(s));
+        if let Some(site) = site {
+            let idle = sim.idle_villagers(player);
+            if !idle.is_empty() {
+                sim.issue(Command {
+                    player,
+                    kind: CommandKind::Assist { ids: idle, site },
+                });
+            }
+            return;
+        }
+        let Some(pl) = sim.player(player) else {
+            return;
+        };
+        let age = pl.age;
+        let housed = pl.pop + 2 > pl.pop_cap;
+        let fewest = kinds::all()
+            .iter()
+            .filter(|k| {
+                k.buildable
+                    && !k.mobile
+                    && k.id != kinds::TOWN_CENTER
+                    && k.id != kinds::HOUSE
+                    && k.age <= age
+            })
+            .map(|k| (owned(sim, player, |o, _| o == k.id).len(), k.id))
+            .min()
+            .filter(|&(n, _)| n < 3)
+            .map(|(_, id)| id);
+        let kind = match (housed, fewest) {
+            (true, _) => kinds::HOUSE,
+            (false, Some(k)) => k,
+            (false, None) => return,
+        };
+        let builders: Vec<EntityId> = owned(sim, player, |k, _| k == kinds::VILLAGER)
+            .into_iter()
+            .take(3)
+            .collect();
+        self.place(sim, bot, player, kind, builders);
+    }
+
+    /// Try a handful of nearby tiles and take the first the sim accepts, so
+    /// the corpus records placements that actually happen.
+    fn place(
+        &self,
+        sim: &mut Simulation,
+        bot: &mut Rng,
+        player: PlayerId,
+        kind: KindId,
+        builders: Vec<EntityId>,
+    ) {
+        if builders.is_empty() {
             return;
         }
         let Some(&(sx, sy)) = sim.starts().get(player as usize) else {
             return;
         };
-        let kind = if bot.chance(1, 3) {
-            kinds::STOREHOUSE
-        } else {
-            kinds::HOUSE
-        };
-        // Try a handful of nearby tiles and take the first the sim accepts,
-        // so the corpus records placements that actually happen.
         for _ in 0..8 {
             let x = sx + bot.range_i32(-10, 11);
             let y = sy + bot.range_i32(-10, 11);
@@ -299,12 +400,57 @@ impl Scenario {
                         kind,
                         x,
                         y,
-                        ids: idle.into_iter().take(3).collect(),
+                        ids: builders,
                     },
                 });
                 return;
             }
         }
+    }
+
+    /// Queue a technology — an age advance included — at a building that
+    /// offers one. The simulation checks the gate; a refused command is a
+    /// recorded command like any other.
+    fn research(&self, sim: &mut Simulation, bot: &mut Rng, player: PlayerId) {
+        let buildings = owned(sim, player, |k, _| {
+            k == kinds::TOWN_CENTER || tech::at_building(k).next().is_some()
+        });
+        if buildings.is_empty() {
+            return;
+        }
+        let building = buildings[bot.below(buildings.len() as u32) as usize];
+        let Some(slot) = sim.world().slot(building) else {
+            return;
+        };
+        let kind = sim.world().kind[slot.index()];
+        let age = sim.player(player).map(|p| p.age);
+        let mut techs: Vec<tech::TechId> = tech::at_building(kind).map(|t| t.id).collect();
+        if kind == kinds::TOWN_CENTER {
+            if let Some(t) = age.and_then(tech::age_advance) {
+                techs.push(t.id);
+            }
+        }
+        if techs.is_empty() {
+            return;
+        }
+        let tech = techs[bot.below(techs.len() as u32) as usize];
+        sim.issue(Command {
+            player,
+            kind: CommandKind::Research { building, tech },
+        });
+    }
+
+    /// Flip farm auto-reseed now and then.
+    fn reseed(&self, sim: &mut Simulation, bot: &mut Rng, player: PlayerId) {
+        if !bot.chance(1, 4) {
+            return;
+        }
+        sim.issue(Command {
+            player,
+            kind: CommandKind::SetAutoReseed {
+                enabled: bot.chance(3, 4),
+            },
+        });
     }
 
     /// Queue a villager at a training building.

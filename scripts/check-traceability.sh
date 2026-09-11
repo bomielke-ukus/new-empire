@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 # Which milestones' requirements must be covered *now*. Extend this as
 # milestones land; that edit is the moment the new requirements start being
 # enforced, and it belongs in the same commit as the milestone.
-LANDED_PREFIXES="${TRACEABILITY_LANDED:-TA-FX TA-VEC TA-ANG TA-RNG TA-CMD TA-ENT TA-DET TA-CLOCK TA-DEP RM-M0 RM-M2 TA-PATH GD-ECON GD-POP}"
+LANDED_PREFIXES="${TRACEABILITY_LANDED:-TA-FX TA-VEC TA-ANG TA-RNG TA-CMD TA-ENT TA-DET TA-CLOCK TA-DEP RM-M0 RM-M2 RM-M3 TA-PATH GD-ECON GD-POP GD-AGE}"
 
 python3 - "$LANDED_PREFIXES" <<'PY'
 import re, subprocess, sys
@@ -72,7 +72,6 @@ for path in files("crates/**/*.rs", "tools/**/*.rs", "scripts/*", "*.yml", ".git
 # unwatched, which is the failure this script exists to prevent. Each entry
 # needs a reason, and the reason has to be a blocker rather than a shrug.
 DEFERRED = {
-    "GD-ECON-05": "farms are M3; there is nothing to test yet",
     "TA-PATH-02": (
         "the spec asks for a repath within 3 ticks; every STALL_TICKS below "
         "its current 40 strands villagers in "

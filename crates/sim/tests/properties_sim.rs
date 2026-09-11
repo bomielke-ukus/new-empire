@@ -21,17 +21,27 @@ fn any_config() -> impl Strategy<Value = SimConfig> {
         prop_oneof![6 => 200u32..4000, 1 => Just(0u32), 1 => Just(1u32)],
         prop_oneof![6 => 1u32..200, 1 => Just(0u32)],
         any::<bool>(),
+        // Rich, broke, and the default: the opening stockpile decides how
+        // many of the random commands can be afforded at all.
+        prop_oneof![
+            6 => Just(sim::DEFAULT_STOCKPILE),
+            1 => Just([0; 4]),
+            1 => Just([5000; 4]),
+        ],
     )
         .prop_map(
-            |(kind, size, players, max_entities, pop_cap_max, wander)| SimConfig {
-                map: MapSpec {
-                    kind,
-                    size,
-                    players,
-                },
-                max_entities,
-                wander,
-                pop_cap_max,
+            |(kind, size, players, max_entities, pop_cap_max, wander, starting_stockpile)| {
+                SimConfig {
+                    map: MapSpec {
+                        kind,
+                        size,
+                        players,
+                    },
+                    max_entities,
+                    wander,
+                    pop_cap_max,
+                    starting_stockpile,
+                }
             },
         )
 }

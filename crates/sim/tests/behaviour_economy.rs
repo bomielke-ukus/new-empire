@@ -5,10 +5,10 @@
 //! House that stops paying for itself, changes the pace of every match without
 //! failing anything else in the repository.
 //!
-//! Two of them do not match the code, and this file says so out loud rather
-//! than asserting whichever value happens to be there. See
-//! `the_gather_rate_is_not_the_single_base_rate_the_spec_describes` and
-//! `the_population_cap_is_not_range_checked`.
+//! Two of them used to disagree with the code, and this file said so rather
+//! than asserting whichever value happened to be there. M3 settled both: the
+//! table now carries the one base rate the spec describes, and the population
+//! cap is range-checked where the spec puts the check — at match setup.
 
 mod common;
 use common::{index_of, inland, nearest_kind, owned, pos_of, run};
@@ -28,40 +28,32 @@ fn a_villager_carries_ten_before_walking_home() {
     );
 }
 
-/// The spec says one **base** rate of 0.45/s. The table has four rates, and
-/// only wood is 0.45 — food, stone and gold are 0.40.
-///
-/// This test pins what the code does and names the disagreement, because the
-/// alternative is asserting 0.45 (which fails) or asserting 0.40 (which
-/// silently blesses a departure from the design). Which one is wrong is a
-/// design decision: either wood is deliberately faster and `docs/02` should
-/// say so, or the table should be flattened to 0.45.
+/// The spec says one **base** rate of 0.45/s. Until M3 the table had two
+/// (wood 0.45, everything else 0.40), and a test here recorded the
+/// disagreement. Technology is now where rates diverge: a fresh player
+/// gathers everything at the base rate, and only research moves it.
 ///
 /// REQ: GD-ECON-02
 #[test]
-fn the_gather_rate_is_not_the_single_base_rate_the_spec_describes() {
-    let rates = [
-        (Resource::Food, 40),
-        (Resource::Wood, 45),
-        (Resource::Stone, 40),
-        (Resource::Gold, 40),
-    ];
-    for (r, hundredths) in rates {
+fn every_resource_gathers_at_the_single_base_rate() {
+    for r in Resource::ALL {
         assert_eq!(
             r.gather_rate(),
-            sim::Fx::from_ratio(hundredths, 100),
-            "{} gathers at {hundredths}/100 per second",
+            sim::Fx::from_ratio(45, 100),
+            "{} gathers at the base rate of 0.45 per second",
             r.name()
         );
     }
-    let mut distinct: Vec<i32> = rates.iter().map(|(_, h)| *h).collect();
-    distinct.sort_unstable();
-    distinct.dedup();
-    assert_eq!(
-        distinct,
-        vec![40, 45],
-        "there are two rates in the table, not the one base rate [GD-ECON-02] describes"
-    );
+    let fresh = sim::Modifiers::default();
+    for r in Resource::ALL {
+        assert_eq!(
+            fresh.gather_rate(r),
+            r.gather_rate(),
+            "with nothing researched, {} is gathered at the base rate",
+            r.name()
+        );
+    }
+    assert_eq!(fresh.carry_capacity(), CARRY_CAPACITY);
 }
 
 /// REQ: GD-ECON-03
@@ -218,30 +210,45 @@ fn houses_raise_the_cap_and_the_cap_is_enforced() {
     );
 }
 
-/// `docs/02` says the cap is "configurable 50–200". Nothing range-checks it:
-/// `SimConfig::pop_cap_max` is a bare `u32` and the simulation honours
-/// whatever it is given, including 0 and `u32::MAX`.
-///
-/// That may well be correct — the range reads like a skirmish-setup slider,
-/// and that screen is M6 — but until something enforces it, the requirement
-/// is not met by the simulation, and this test records that rather than
-/// leaving [GD-POP-02] looking covered.
+/// `docs/02` says the cap is "configurable 50–200 in skirmish setup". The
+/// check lives at the front door, `SimConfig::validate`, which is what a
+/// setup screen calls before starting a match. The engine itself stays
+/// permissive: tests and scenarios run caps of 0, 6 and 12 on purpose, and a
+/// replay recorded under one of them must still verify.
 ///
 /// REQ: GD-POP-02
 #[test]
-fn the_population_cap_is_not_range_checked() {
+fn the_skirmish_setup_range_checks_the_population_cap() {
     for cap in [0, 1, 49, 201, u32::MAX] {
         let config = SimConfig {
             pop_cap_max: cap,
             ..SimConfig::default()
         };
+        assert_eq!(
+            config.validate(),
+            Err(sim::ConfigError::PopCapOutOfRange { got: cap }),
+            "setup refuses pop_cap_max = {cap}"
+        );
         let mut sim = Simulation::new(3, config);
         run(&mut sim, 20);
         assert!(
             sim.check().is_ok(),
-            "the simulation accepts pop_cap_max = {cap} without complaint"
+            "the engine still runs pop_cap_max = {cap}: the check is the setup screen's"
         );
     }
+    for cap in [50, 75, 200] {
+        let config = SimConfig {
+            pop_cap_max: cap,
+            ..SimConfig::default()
+        };
+        assert_eq!(
+            config.validate(),
+            Ok(()),
+            "setup accepts pop_cap_max = {cap}"
+        );
+    }
+    assert_eq!(*sim::POP_CAP_RANGE.start(), 50);
+    assert_eq!(*sim::POP_CAP_RANGE.end(), 200);
 }
 
 /// REQ: GD-POP-03
