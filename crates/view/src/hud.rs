@@ -39,8 +39,8 @@ const BUTTON_GAP: f32 = 4.0;
 pub enum Action {
     /// Enter placement mode for a building.
     Build(KindId),
-    /// Queue a villager at the selected building.
-    Train,
+    /// Queue a unit at the selected building that trains it.
+    Train(KindId),
     /// Stop the selected units.
     Stop,
     /// Leave placement mode.
@@ -144,6 +144,7 @@ pub fn controls() -> [Vec<(String, String)>; 2] {
         s(".", "NEXT IDLE VILLAGER"),
         s("RIGHT", "MOVE, GATHER, BUILD, RALLY"),
         s("T", "STOP"),
+        s("C P G B L", "TRAIN AT A BARRACKS, RANGE, STABLE"),
         s("DELETE", "DISMISS"),
         s("SPACE", "PAUSE"),
         s("[ ]", "SLOWER, FASTER"),
@@ -367,6 +368,79 @@ fn build_hotkey(kind: KindId) -> char {
     }
 }
 
+/// The key that trains a unit. Keys repeat across buildings (the panel
+/// only ever shows one building's roster) but never within one.
+fn train_hotkey(kind: KindId) -> char {
+    match kind {
+        kinds::VILLAGER => 'V',
+        kinds::CLUBMAN | kinds::AXEMAN | kinds::SCOUT => 'C',
+        kinds::SPEARMAN => 'P',
+        kinds::SLINGER => 'G',
+        kinds::BOWMAN => 'B',
+        kinds::LIGHT_CAVALRY => 'L',
+        _ => 'N',
+    }
+}
+
+/// A unit's name as a button fits it.
+fn unit_label(kind: KindId) -> String {
+    match kind {
+        kinds::LIGHT_CAVALRY => "CAVALRY".to_string(),
+        other => kinds::info(other).name.to_uppercase(),
+    }
+}
+
+/// A unit's name in the plural, for the selection panel.
+fn unit_plural(kind: KindId) -> String {
+    match kind {
+        kinds::CLUBMAN => "CLUBMEN".to_string(),
+        kinds::AXEMAN => "AXEMEN".to_string(),
+        kinds::SPEARMAN => "SPEARMEN".to_string(),
+        kinds::BOWMAN => "BOWMEN".to_string(),
+        kinds::LIGHT_CAVALRY => "LIGHT CAVALRY".to_string(),
+        other => format!("{}S", kinds::info(other).name.to_uppercase()),
+    }
+}
+
+/// The tooltip standard (`UX-TIP-01`): cost, time, what it does per hit,
+/// what it counters and what counters it.
+fn unit_tooltip(kind: KindId) -> String {
+    let u = kinds::info(kind);
+    let c = &u.combat;
+    let mut t = format!(
+        "{}: {}, {}S. {} HP",
+        u.name.to_uppercase(),
+        cost_words(&u.cost),
+        u.build_seconds,
+        u.max_health
+    );
+    if c.attack > 0 {
+        t.push_str(&format!(
+            ", {} {}",
+            c.attack,
+            c.damage.name().to_uppercase()
+        ));
+        if c.range > 0 {
+            t.push_str(&format!(" RANGE {}", c.range));
+        }
+    }
+    for (class, bonus) in c.bonuses {
+        t.push_str(&format!(
+            ". BONUS {bonus} VS {}",
+            class.plural().to_uppercase()
+        ));
+    }
+    let weak_to: Vec<String> = kinds::all()
+        .iter()
+        .filter(|k| k.combat.bonuses.iter().any(|(class, _)| *class == u.class))
+        .map(|k| unit_plural(k.id))
+        .collect();
+    if !weak_to.is_empty() {
+        t.push_str(&format!(". WEAK TO {}", weak_to.join(", ")));
+    }
+    t
+}
+
 /// Technology hotkeys, by position at the building.
 const TECH_KEYS: [char; 5] = ['Q', 'E', 'I', 'K', 'Z'];
 
@@ -481,24 +555,24 @@ fn commands(sim: &Simulation, me: u8, selected: &[Slot], build_mode: Option<Kind
         let info = kinds::info(kind);
         let queue_len = world.production[i].as_ref().map_or(0, |q| q.queue.len());
         if info.trains {
-            let v = kinds::info(kinds::VILLAGER);
-            let check = if queue_len >= 5 {
-                Err("QUEUE IS FULL".to_string())
-            } else if !pl.can_afford(&v.cost) {
-                Err("NOT ENOUGH RESOURCES".to_string())
-            } else {
-                Ok(())
-            };
-            defs.push(
-                Def::on(
-                    Action::Train,
-                    "VILLAGER",
-                    'V',
-                    format!("TRAIN A VILLAGER: {}", cost_words(&v.cost)),
-                )
-                .costing(&v.cost)
-                .gated(check),
-            );
+            // The roster, age-locked and unresearched lines greyed with
+            // the reason, so the panel shows what is coming.
+            for k in sim.roster(me, kind) {
+                let u = kinds::info(k);
+                let check = sim
+                    .can_train(me, id, k)
+                    .map_err(|e| e.to_string().to_uppercase());
+                defs.push(
+                    Def::on(
+                        Action::Train(k),
+                        unit_label(k),
+                        train_hotkey(k),
+                        unit_tooltip(k),
+                    )
+                    .costing(&u.cost)
+                    .gated(check),
+                );
+            }
         }
         if kind == kinds::TOWN_CENTER {
             if let Some(t) = tech::age_advance(pl.age) {
@@ -852,6 +926,20 @@ impl Hud {
                         ty += 12.0;
                     }
                 }
+                if info.combat.attack > 0 && info.mobile {
+                    let m = sim.modifiers(world.owner[i]);
+                    let armour = crate::combat_view::armour_words(info, &m);
+                    p.text(
+                        10.0,
+                        ty,
+                        &fit(&crate::combat_view::attack_words(info, &m), text_w),
+                        false,
+                        1.0,
+                    );
+                    ty += 12.0;
+                    p.text(10.0, ty, &fit(&armour, text_w), false, 1.0);
+                    ty += 12.0;
+                }
                 let job = match world.order[i] {
                     Order::Idle if info.mobile => "IDLE",
                     Order::Idle => "",
@@ -931,6 +1019,29 @@ impl Hud {
                 ty += 20.0;
                 if villagers > 0 {
                     p.text(10.0, ty, &format!("{villagers} VILLAGERS"), false, 1.0);
+                    ty += 12.0;
+                }
+                // Soldiers by kind, in table order, as many as fit.
+                let mut kinds_: Vec<KindId> = selected
+                    .iter()
+                    .map(|s| world.kind[s.index()])
+                    .filter(|&k| k != kinds::VILLAGER && kinds::info(k).mobile)
+                    .collect();
+                kinds_.sort_unstable();
+                kinds_.dedup();
+                for k in kinds_.into_iter().take(4) {
+                    let count = selected
+                        .iter()
+                        .filter(|s| world.kind[s.index()] == k)
+                        .count();
+                    p.text(
+                        10.0,
+                        ty,
+                        &fit(&format!("{count} {}", unit_plural(k)), text_w),
+                        false,
+                        1.0,
+                    );
+                    ty += 12.0;
                 }
             }
         }
@@ -1129,6 +1240,45 @@ mod tests {
         }
     }
 
+    /// Every unit tooltip carries cost, time, what it does per hit, what it
+    /// counters and what counters it; every roster's keys are distinct.
+    ///
+    /// REQ: UX-TIP-01
+    #[test]
+    fn unit_tooltips_follow_the_standard_and_roster_keys_are_distinct() {
+        let spear = unit_tooltip(kinds::SPEARMAN);
+        assert!(
+            spear.starts_with("SPEARMAN: 40 FOOD 20 WOOD, 26S. 45 HP, 4 MELEE"),
+            "{spear}"
+        );
+        assert!(spear.contains("BONUS 6 VS CAVALRY"), "{spear}");
+        assert!(spear.contains("WEAK TO SLINGERS"), "{spear}");
+        let bow = unit_tooltip(kinds::BOWMAN);
+        assert!(bow.contains("5 PIERCE RANGE 5"), "{bow}");
+        assert!(
+            !bow.contains("WEAK TO"),
+            "nothing counters archers yet: {bow}"
+        );
+        let cav = unit_tooltip(kinds::LIGHT_CAVALRY);
+        assert!(cav.contains("WEAK TO SPEARMEN"), "{cav}");
+        let vill = unit_tooltip(kinds::VILLAGER);
+        assert!(vill.contains("25 HP, 3 MELEE"), "{vill}");
+        for b in kinds::all().iter().filter(|k| k.trains) {
+            let keys: Vec<char> = kinds::trained_at(b.id)
+                .filter(|u| tech::upgrade_of(u.id).is_none())
+                .map(|u| train_hotkey(u.id))
+                .collect();
+            let mut unique = keys.clone();
+            unique.sort_unstable();
+            unique.dedup();
+            assert_eq!(keys.len(), unique.len(), "{}: {keys:?}", b.name);
+            for u in kinds::trained_at(b.id) {
+                assert_ne!(train_hotkey(u.id), 'N', "{}: has a key", u.name);
+                assert!(!"WASD".contains(train_hotkey(u.id)), "{}: off WASD", u.name);
+            }
+        }
+    }
+
     fn first_owned(sim: &Simulation, kind: KindId) -> u32 {
         sim.world()
             .slots()
@@ -1210,7 +1360,7 @@ mod tests {
                 ..base
             },
         );
-        assert!(find(&t, Action::Train).unwrap().enabled);
+        assert!(find(&t, Action::Train(kinds::VILLAGER)).unwrap().enabled);
         assert!(find(&t, Action::Stop).is_none());
         let age = find(&t, Action::Research(tech::AGE_TOOL)).expect("age-up button");
         assert!(!age.enabled);

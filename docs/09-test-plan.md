@@ -236,11 +236,20 @@ at the moment of seeding.
 
 ### Combat — M4
 
-A damage matrix generated from `docs/02` §8 and committed, covering armour
-types, class bonuses, elevation, minimum damage 1 and siege friendly fire
-(`GD-COMBAT-01`–`05`). A deterministic 40v40 that terminates. Counters win as
-designed over N trials — balance drift is a real regression and headless is the
-cheapest place to catch it.
+**Landed in chunk 2:** the damage model as a pure function
+(`crates/sim/src/combat.rs`), with one unit test per rule claiming
+`GD-COMBAT-01` to `05`; the damage matrix generated from the kinds table by
+`simrunner matrix`, committed at `docs/damage-matrix.md` and diffed by
+`scripts/check-generated.sh`; and `behaviour_military.rs`, which trains at
+the Barracks, Archery Range and Stable, checks the age and line gates with
+the words the panel shows, walks the Axe upgrade through live and queued
+Clubmen, and reads the effect of Toolworking, Leather Armour and Fletching
+off `Simulation::damage_between`. The `army-hud` golden image pins the
+roster panel and the six placeholders.
+
+**Still to come:** a deterministic 40v40 that terminates. Counters win as
+designed over N trials — balance drift is a real regression and headless is
+the cheapest place to catch it.
 
 ### The AI — M5
 
@@ -468,6 +477,7 @@ cargo test -p sim --features debug-checks
 # Deliberate updates, which must be reviewed as diffs.
 cargo run -p simrunner -- record          # re-record the corpus inputs
 cargo run -p simrunner -- golden --update # re-record the expected digests
+cargo run -p simrunner -- matrix --out docs/damage-matrix.md # after a stat change
 UPDATE_GOLDEN=1 cargo test -p mapview --test golden_images
 ```
 

@@ -2,7 +2,7 @@
 //! mapview [--seed N] [--size N] [--players N] [--ticks N] [--stockpile N]
 //!         [--zoom 0.5|1|1.5|2] [--width W] [--height H]
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
-//!         [--scenario gather|build|ages] [--select N] [--select-tc 1] [--hud 1]
+//!         [--scenario gather|build|ages|army] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--dpi N] [--ui-scale N] [--controls 1]
 //! ```
@@ -35,6 +35,7 @@ struct Args {
     assets: Option<std::path::PathBuf>,
     stockpile: Option<i32>,
     select_tc: bool,
+    select_kind: Option<String>,
     sweep: Option<u32>,
     hover: Option<(f32, f32)>,
     dpi: f32,
@@ -63,6 +64,7 @@ fn parse() -> Result<Args, String> {
         assets: None,
         stockpile: None,
         select_tc: false,
+        select_kind: None,
         sweep: None,
         hover: None,
         dpi: 1.0,
@@ -107,6 +109,7 @@ fn parse() -> Result<Args, String> {
             "--assets" => a.assets = Some(std::path::PathBuf::from(val)),
             "--stockpile" => a.stockpile = Some(val.parse().map_err(|e| format!("{key}: {e}"))?),
             "--select-tc" => a.select_tc = val == "1" || val == "true",
+            "--select-kind" => a.select_kind = Some(val.clone()),
             "--sweep" => a.sweep = Some(val.parse().map_err(|e| format!("{key}: {e}"))?),
             "--hover" => {
                 let (x, y) = val.split_once(',').ok_or("--hover wants X,Y")?;
@@ -191,16 +194,26 @@ fn run() -> Result<(), String> {
     }
 
     let chunks = view::terrain::build_all(map);
-    let want = if a.select_tc {
-        kinds::TOWN_CENTER
-    } else {
-        kinds::VILLAGER
+    // What to select: the first own building of `--select-kind`
+    // (`barracks`, `light_cavalry`, ...), the Town Center, or the first
+    // `--select` villagers.
+    let (want, take) = match (&a.select_kind, a.select_tc) {
+        (Some(name), _) => {
+            let kind = kinds::all()
+                .iter()
+                .find(|k| k.name.to_lowercase().replace(' ', "_") == *name)
+                .map(|k| k.id)
+                .ok_or_else(|| format!("--select-kind: no kind called {name}"))?;
+            (kind, 1)
+        }
+        (None, true) => (kinds::TOWN_CENTER, 1),
+        (None, false) => (kinds::VILLAGER, a.select),
     };
     let selected: Vec<u32> = sim
         .world()
         .slots()
         .filter(|s| sim.world().owner[s.index()] == 0 && sim.world().kind[s.index()] == want)
-        .take(if a.select_tc { 1 } else { a.select })
+        .take(take)
         .map(|s| s.index() as u32)
         .collect();
     let (gx, gy) = sim.starts()[0];
@@ -416,6 +429,84 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
                 building: tc,
                 kind: kinds::VILLAGER,
             }));
+        }
+        "army" => {
+            // A Tool Age garrison: the three training buildings finished
+            // beside the Town Center, a line of every soldier the slice
+            // has in front of them, the Barracks selected so the panel
+            // shows its roster. Needs `--stockpile` high enough for the
+            // Tool Age and `--select-kind barracks`.
+            let spot = |sim: &sim::Simulation, kind| {
+                let (sx, sy) = sim.starts()[0];
+                for dy in [-4, 4, -8, 8, 0] {
+                    for dx in (4..=24).chain((-24..=-4).rev()) {
+                        if sim.can_place(0, kind, sx + dx, sy + dy).is_ok() {
+                            return Ok((sx + dx, sy + dy));
+                        }
+                    }
+                }
+                Err(format!("no room for {}", kinds::info(kind).name))
+            };
+            let place = |sim: &mut sim::Simulation, kind| -> Result<(), String> {
+                let (x, y) = spot(sim, kind)?;
+                let fp = kinds::info(kind).footprint as i32;
+                sim.issue(cmd(CommandKind::Spawn {
+                    kind,
+                    pos: sim::nav::building_centre(x, y, fp),
+                }));
+                for _ in 0..3 {
+                    sim.step();
+                }
+                Ok(())
+            };
+            place(sim, kinds::BARRACKS)?;
+            place(sim, kinds::STOREHOUSE)?;
+            sim.issue(cmd(CommandKind::Research {
+                building: tc,
+                tech: sim::tech::AGE_TOOL,
+            }));
+            let tool = sim::tech::info(sim::tech::AGE_TOOL).unwrap().ticks();
+            for _ in 0..tool + 5 {
+                sim.step();
+            }
+            if sim.player(0).map(|p| p.age) != Some(sim::Age::Tool) {
+                return Err("the Tool Age did not arrive; is --stockpile high enough?".into());
+            }
+            place(sim, kinds::ARCHERY_RANGE)?;
+            place(sim, kinds::STABLE)?;
+            let line = [
+                kinds::CLUBMAN,
+                kinds::AXEMAN,
+                kinds::SPEARMAN,
+                kinds::SLINGER,
+                kinds::BOWMAN,
+                kinds::LIGHT_CAVALRY,
+                kinds::SCOUT,
+            ];
+            for (n, kind) in line.iter().enumerate() {
+                sim.issue(cmd(CommandKind::Spawn {
+                    kind: *kind,
+                    pos: sim::nav::centre((sx - 3 + n as i32, sy + 4)),
+                }));
+            }
+            for _ in 0..3 {
+                sim.step();
+            }
+            let barracks = sim
+                .world()
+                .slots()
+                .find(|s| {
+                    sim.world().owner[s.index()] == 0
+                        && sim.world().kind[s.index()] == kinds::BARRACKS
+                })
+                .map(|s| sim.world().id_at(s))
+                .ok_or("no barracks")?;
+            for kind in [kinds::SPEARMAN, kinds::CLUBMAN] {
+                sim.issue(cmd(CommandKind::Train {
+                    building: barracks,
+                    kind,
+                }));
+            }
         }
         other => return Err(format!("unknown scenario {other}")),
     }

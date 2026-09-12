@@ -93,6 +93,12 @@ impl Selection {
         .next()
     }
 
+    /// The first selected, finished building of `player` that trains `kind`.
+    pub fn own_trainer_of(&self, sim: &Simulation, player: u8, kind: KindId) -> Option<EntityId> {
+        let home = kinds::info(kind).trained_at?;
+        self.own_building(sim, player, home)
+    }
+
     /// The first selected, finished building of `kind` belonging to `player`.
     pub fn own_building(&self, sim: &Simulation, player: u8, kind: KindId) -> Option<EntityId> {
         self.filter(sim, |i| {

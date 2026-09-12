@@ -8,6 +8,7 @@
 //! simrunner golden [--dir DIR] [--update]
 //! simrunner soak   [--matches N] [--seed N] [--ticks N] [--timeout SECS] [--dump DIR]
 //! simrunner bench  [--seed N] [--ticks N] [--size N] [--json] [--repeats N] [--stats]
+//! simrunner matrix [--out FILE]
 //! ```
 //!
 //! `golden` is the one CI leans on hardest: it replays the committed corpus
@@ -689,6 +690,26 @@ fn write_trace(path: &Path, trace: &Trace) -> Result<(), String> {
 
 // ---------------------------------------------------------------------------
 
+/// The damage matrix (`docs/02` §8) from the kinds table, as Markdown, to
+/// stdout or `--out`. Committed at `docs/damage-matrix.md`;
+/// `scripts/check-generated.sh` regenerates and diffs it.
+fn matrix(f: &Flags) -> ExitCode {
+    let md = sim::combat::matrix_markdown();
+    match &f.out {
+        Some(path) => match std::fs::write(path, md) {
+            Ok(()) => {
+                println!("wrote {path}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(&format!("{path}: {e}")),
+        },
+        None => {
+            print!("{md}");
+            ExitCode::SUCCESS
+        }
+    }
+}
+
 fn usage(err: &str) -> ExitCode {
     eprintln!("error: {err}\n");
     eprintln!("usage:");
@@ -703,6 +724,7 @@ fn usage(err: &str) -> ExitCode {
     eprintln!(
         "  simrunner bench  [--seed N] [--ticks N] [--size N] [--json] [--repeats N] [--stats]"
     );
+    eprintln!("  simrunner matrix [--out FILE]");
     ExitCode::from(2)
 }
 
@@ -728,6 +750,7 @@ fn main() -> ExitCode {
         "golden" => golden(&flags),
         "soak" => soak(&flags),
         "bench" => bench(&flags),
+        "matrix" => matrix(&flags),
         other => usage(&format!("unknown subcommand {other}")),
     }
 }

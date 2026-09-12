@@ -453,20 +453,27 @@ impl Scenario {
         });
     }
 
-    /// Queue a villager at a training building.
-    fn train(&self, sim: &mut Simulation, _bot: &mut Rng, player: PlayerId) {
-        let Some(building) = owned(sim, player, |k, _| kinds::info(k).trains)
-            .into_iter()
-            .next()
-        else {
+    /// Queue a unit at one of the training buildings: whatever the
+    /// building offers, chosen at random, so soldiers come out of the
+    /// Barracks, Range and Stable as well as villagers from the Town
+    /// Center. The simulation refuses what the age does not allow yet.
+    fn train(&self, sim: &mut Simulation, bot: &mut Rng, player: PlayerId) {
+        let trainers = owned(sim, player, |k, _| kinds::info(k).trains);
+        if trainers.is_empty() {
+            return;
+        }
+        let building = trainers[bot.below(trainers.len() as u32) as usize];
+        let Some(slot) = sim.world().slot(building) else {
             return;
         };
+        let roster = sim.roster(player, sim.world().kind[slot.index()]);
+        if roster.is_empty() {
+            return;
+        }
+        let kind = roster[bot.below(roster.len() as u32) as usize];
         sim.issue(Command {
             player,
-            kind: CommandKind::Train {
-                building,
-                kind: kinds::VILLAGER,
-            },
+            kind: CommandKind::Train { building, kind },
         });
     }
 

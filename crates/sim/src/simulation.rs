@@ -16,6 +16,7 @@
 //!
 //! Nothing here reads a clock or a float; see the crate docs.
 
+use crate::combat;
 use crate::command::{Command, CommandKind, CommandQueue, PlayerId};
 use crate::entity::{EntityId, KindId, Slot, World, WorldViolation};
 use crate::flow;
@@ -312,6 +313,59 @@ impl core::fmt::Display for ResearchError {
     }
 }
 
+/// Why a unit cannot be trained.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TrainError {
+    /// Not a unit anyone trains.
+    UnknownKind,
+    /// The building does not exist or belongs to someone else.
+    NotYourBuilding,
+    /// The unit is trained somewhere else.
+    WrongBuilding,
+    /// The building is still a site.
+    UnderConstruction,
+    /// The player has not reached the age it belongs to.
+    AgeLocked {
+        /// The age it unlocks in.
+        needs: Age,
+    },
+    /// A line upgrade must be researched first.
+    NeedsTech {
+        /// Which one.
+        tech: TechId,
+    },
+    /// The line has moved on: this kind is no longer trained.
+    Superseded {
+        /// What is trained instead.
+        by: KindId,
+    },
+    /// The building's queue is full.
+    QueueFull,
+    /// The stockpile does not cover the cost.
+    Unaffordable,
+}
+
+impl core::fmt::Display for TrainError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            TrainError::UnknownKind => write!(f, "no such unit"),
+            TrainError::NotYourBuilding => write!(f, "not your building"),
+            TrainError::WrongBuilding => write!(f, "trained elsewhere"),
+            TrainError::UnderConstruction => write!(f, "still under construction"),
+            TrainError::AgeLocked { needs } => write!(f, "needs the {}", needs.name()),
+            TrainError::NeedsTech { tech } => {
+                let name = tech::info(*tech).map_or("another technology", |t| t.name);
+                write!(f, "needs {name}")
+            }
+            TrainError::Superseded { by } => {
+                write!(f, "replaced by the {}", kinds::info(*by).name)
+            }
+            TrainError::QueueFull => write!(f, "queue is full"),
+            TrainError::Unaffordable => write!(f, "not enough resources"),
+        }
+    }
+}
+
 /// A running match.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Simulation {
@@ -460,6 +514,97 @@ impl Simulation {
             return Err(PlaceError::Unaffordable);
         }
         Ok(())
+    }
+
+    /// Whether `p` may queue a `kind` at `building` right now, and if not,
+    /// why. The same check `Train` runs before paying, so a command panel
+    /// can grey a button with the words the simulation would use.
+    pub fn can_train(
+        &self,
+        p: PlayerId,
+        building: EntityId,
+        kind: KindId,
+    ) -> Result<(), TrainError> {
+        let u = kinds::info(kind);
+        let home = u.trained_at.ok_or(TrainError::UnknownKind)?;
+        let bs = self
+            .owned_slot(building, p)
+            .ok_or(TrainError::NotYourBuilding)?;
+        let i = bs.index();
+        if self.world.kind[i] != home {
+            return Err(TrainError::WrongBuilding);
+        }
+        if self.world.construction[i].is_some() {
+            return Err(TrainError::UnderConstruction);
+        }
+        let player = self
+            .players
+            .get(p as usize)
+            .ok_or(TrainError::NotYourBuilding)?;
+        if player.age < u.age {
+            return Err(TrainError::AgeLocked { needs: u.age });
+        }
+        if let Some(t) = tech::unlocked_by(kind) {
+            if !player.has_researched(t.id) {
+                return Err(TrainError::NeedsTech { tech: t.id });
+            }
+        }
+        if let Some(t) = tech::upgrade_of(kind) {
+            if player.has_researched(t.id) {
+                let by = t.upgrades_line().map_or(kind, |(_, to)| to);
+                return Err(TrainError::Superseded { by });
+            }
+        }
+        if self.world.production[i]
+            .as_ref()
+            .is_some_and(|q| q.queue.len() >= QUEUE_LIMIT)
+        {
+            return Err(TrainError::QueueFull);
+        }
+        if !player.can_afford(&u.cost) {
+            return Err(TrainError::Unaffordable);
+        }
+        Ok(())
+    }
+
+    /// The units a building of `kind` offers `p` today: its roster less
+    /// the kinds a line upgrade has moved past. Age locks and unresearched
+    /// upgrades are left in, greyed by [`Simulation::can_train`], so the
+    /// panel shows what is coming.
+    pub fn roster(&self, p: PlayerId, kind: KindId) -> Vec<KindId> {
+        let researched = |t: TechId| {
+            self.players
+                .get(p as usize)
+                .is_some_and(|pl| pl.has_researched(t))
+        };
+        kinds::trained_at(kind)
+            .filter(|u| !tech::upgrade_of(u.id).is_some_and(|t| researched(t.id)))
+            .map(|u| u.id)
+            .collect()
+    }
+
+    /// Damage one live entity would do to another per hit, with both
+    /// owners' technologies and the ground between them (`docs/02` §8).
+    /// `None` if either is gone, the attacker cannot fight, or the target
+    /// cannot be hit.
+    pub fn damage_between(&self, attacker: EntityId, target: EntityId) -> Option<i32> {
+        let a = self.world.slot(attacker)?.index();
+        let t = self.world.slot(target)?.index();
+        let (at, tt) = (
+            nav::tile_of(self.world.pos[a]),
+            nav::tile_of(self.world.pos[t]),
+        );
+        let elevation = combat::Elevation::between(
+            self.map.elevation(at.0, at.1),
+            self.map.elevation(tt.0, tt.1),
+        );
+        combat::between(
+            kinds::info(self.world.kind[a]),
+            &self.modifiers(self.world.owner[a]),
+            kinds::info(self.world.kind[t]),
+            &self.modifiers(self.world.owner[t]),
+            elevation,
+        )
     }
 
     /// Whether `p` could queue `tech` at `building` right now.
@@ -895,23 +1040,14 @@ impl Simulation {
                 self.assign_builders(&ids, p, site);
             }
             CommandKind::Train { building, kind } => {
+                if self.can_train(p, building, kind).is_err() {
+                    return;
+                }
                 let Some(bs) = self.owned_slot(building, p) else {
                     return;
                 };
                 let i = bs.index();
-                let binfo = kinds::info(self.world.kind[i]);
-                let uinfo = kinds::info(kind);
-                if !binfo.trains
-                    || self.world.construction[i].is_some()
-                    || !uinfo.mobile
-                    || kind != kinds::VILLAGER
-                {
-                    return;
-                }
-                let full = self.world.production[i]
-                    .as_ref()
-                    .is_some_and(|q| q.queue.len() >= QUEUE_LIMIT);
-                if full || !self.players[p as usize].pay(&uinfo.cost) {
+                if !self.players[p as usize].pay(&kinds::info(kind).cost) {
                     return;
                 }
                 self.world.production[i]
@@ -1983,6 +2119,7 @@ impl Simulation {
             return;
         };
         p.mark_researched(id);
+        let mut upgrades = Vec::new();
         for effect in t.effects {
             match *effect {
                 Effect::GatherRate(r, pct) => p.modifiers.gather_rate_pct[r.index()] += pct,
@@ -1991,6 +2128,41 @@ impl Simulation {
                 Effect::VillagerSpeed(pct) => p.modifiers.villager_speed_pct += pct,
                 Effect::BuildSpeed(pct) => p.modifiers.build_speed_pct += pct,
                 Effect::AdvanceAge(age) => p.age = age,
+                Effect::Attack(c, n) => p.modifiers.attack_bonus[c.index()] += n,
+                Effect::Armour(c, m, pi) => {
+                    p.modifiers.melee_armour_bonus[c.index()] += m;
+                    p.modifiers.pierce_armour_bonus[c.index()] += pi;
+                }
+                Effect::Range(c, n) => p.modifiers.range_bonus[c.index()] += n,
+                Effect::UpgradeLine(from, to) => upgrades.push((from, to)),
+            }
+        }
+        for (from, to) in upgrades {
+            self.upgrade_line(owner, from, to);
+        }
+    }
+
+    /// A line upgrade lands: every unit of `from` the player owns becomes
+    /// `to`, keeping its damage taken in hit points, and every `from`
+    /// waiting in a queue becomes a `to` at the same progress.
+    fn upgrade_line(&mut self, owner: PlayerId, from: KindId, to: KindId) {
+        let delta = Fx::from_int(kinds::info(to).max_health - kinds::info(from).max_health);
+        let slots: Vec<Slot> = self.world.slots().collect();
+        for slot in slots {
+            let i = slot.index();
+            if self.world.owner[i] != owner {
+                continue;
+            }
+            if self.world.kind[i] == from {
+                self.world.kind[i] = to;
+                self.world.health[i] = (self.world.health[i] + delta).max(Fx::ONE);
+            }
+            if let Some(q) = self.world.production[i].as_mut() {
+                for item in &mut q.queue {
+                    if item.item == Item::Unit(from) {
+                        item.item = Item::Unit(to);
+                    }
+                }
             }
         }
     }

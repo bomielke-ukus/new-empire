@@ -638,3 +638,41 @@ anticipate:
 - **What A\* is still for.** `nav::find_path` remains for tests and for
   anything that wants one explicit path (the debug overlay); the
   simulation no longer calls it.
+
+## 21. Implementation notes from M4, chunk 2: the damage model and the roster
+
+- **Combat numbers live in the kinds table, not on entities.** `KindInfo`
+  gained a `class` (villager, infantry, archers, cavalry, siege, buildings,
+  animals) and a `combat` block: attack, damage type, range, reload, the two
+  armours, class bonuses and line of sight. Technology never edits the
+  table; it accumulates in `Modifiers` as per-class attack, armour and range
+  bonuses, and `combat::attack_of` / `armour_of` / `range_of` add the two
+  together at the moment of asking. A unit's numbers are therefore always
+  the table plus its owner's research, with nothing to keep in sync.
+- **`combat::damage` is the whole rule.** `max(1, elevation(attack) −
+  armour_of_matching_type + bonus)`, in integers, with elevation rounded to
+  nearest and halves up; siege meets no armour and `hits_friends`. The
+  simulation's `damage_between(a, b)` wraps it with both owners' modifiers
+  and the map's elevation under each unit, and is what the attack order of
+  chunk 3 will call. Nothing in chunk 2 deals a hit.
+- **The matrix is generated, committed and diffed.** `simrunner matrix`
+  writes `docs/damage-matrix.md` from the table; `check-generated.sh`
+  regenerates and compares it, so a stat change shows up as a reviewable
+  diff of hits-to-kill rather than as a surprise in a playtest.
+- **Rosters are derived, not declared per building.** Each unit names the
+  building that trains it (`trained_at`); `kinds::trained_at(building)` is
+  the roster and `Simulation::roster(player, building)` drops the kinds a
+  line upgrade has moved past. `can_train` gives the reason a button is
+  grey in the simulation's words (age, unresearched line, superseded,
+  queue full, unaffordable), and the `Train` command runs the same check
+  before paying.
+- **A line upgrade is an effect.** `Effect::UpgradeLine(from, to)` swaps
+  the kind of every live unit the player owns and every queued item, adding
+  the hit-point difference so a full Clubman is a full Axeman. The Axe is
+  the slice's one line upgrade; Toolworking, Leather Armour and Fletching
+  are the per-class bonuses.
+- **Placeholders share one body.** The six soldiers draw the villager's
+  body with a weapon over it (`foot_body` and `shaft`), so they read as
+  the same people with different jobs, and the infantry take the
+  villager's age costume. The atlas tool already catalogued their sprite
+  sets; `kind_for_set` now maps the names.

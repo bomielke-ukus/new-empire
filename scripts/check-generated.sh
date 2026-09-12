@@ -57,4 +57,11 @@ check "palette table" \
   "crates/view/src/palette_table.rs" \
   "cargo run --quiet -p atlas -- export --out \"$scratch\" --rust crates/view/src/palette_table.rs"
 
+# The damage matrix is the kinds table's combat numbers written out, so a
+# stat change that is not meant to change the matrix shows up as a diff
+# here rather than as a surprise in a playtest (docs/09 §5, "Combat").
+check "damage matrix" \
+  "docs/damage-matrix.md" \
+  "cargo run --quiet -p simrunner -- matrix --out docs/damage-matrix.md"
+
 exit $status

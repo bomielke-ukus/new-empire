@@ -19,6 +19,7 @@
 #![warn(missing_docs)]
 
 pub mod angle;
+pub mod combat;
 pub mod command;
 pub mod entity;
 pub mod flow;
@@ -38,6 +39,7 @@ mod trig_table;
 pub mod vec2;
 
 pub use angle::Angle;
+pub use combat::{Armour, Elevation};
 pub use command::{
     Command, CommandError, CommandKind, CommandQueue, PlayerId, COMMAND_DELAY, MAX_COMMAND_IDS,
     MAX_PLAYERS,
@@ -45,6 +47,7 @@ pub use command::{
 pub use entity::{EntityId, KindId, Slot, World, WorldViolation};
 pub use fx::Fx;
 pub use hash::{HashState, StateHasher};
+pub use kinds::{Class, Combat, DamageType};
 pub use map::{Terrain, TileMap, MAX_ELEVATION};
 pub use mapgen::{MapKind, MapSpec};
 pub use orders::{
@@ -52,7 +55,7 @@ pub use orders::{
 };
 pub use replay::{Divergence, Replay, ReplayError, Trace, VerifyError};
 pub use rng::Rng;
-pub use simulation::{ConfigError, PlaceError, ResearchError, TickStats, Violation};
+pub use simulation::{ConfigError, PlaceError, ResearchError, TickStats, TrainError, Violation};
 pub use simulation::{
     SimConfig, Simulation, DEFAULT_STOCKPILE, POP_CAP_RANGE, TICKS_PER_SECOND, TICK_MS,
 };

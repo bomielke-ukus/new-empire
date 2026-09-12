@@ -588,12 +588,9 @@ impl App {
                     self.build_mode = Some(kind);
                 }
             }
-            Action::Train => {
-                if let Some(b) = self.selection.own_trainer(&self.sim, ME) {
-                    self.issue(CommandKind::Train {
-                        building: b,
-                        kind: kinds::VILLAGER,
-                    });
+            Action::Train(kind) => {
+                if let Some(b) = self.selection.own_trainer_of(&self.sim, ME, kind) {
+                    self.issue(CommandKind::Train { building: b, kind });
                 }
             }
             Action::CancelTrain(building) => {

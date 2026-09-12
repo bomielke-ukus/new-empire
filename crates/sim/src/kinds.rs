@@ -13,6 +13,18 @@ use crate::tech::Age;
 pub const VILLAGER: KindId = 1;
 /// Scout: fast, wide vision, weak.
 pub const SCOUT: KindId = 2;
+/// Clubman: the first soldier.
+pub const CLUBMAN: KindId = 3;
+/// Axeman: the Clubman line after the Axe upgrade.
+pub const AXEMAN: KindId = 4;
+/// Spearman: the anti-cavalry infantry.
+pub const SPEARMAN: KindId = 5;
+/// Slinger: the cheap anti-infantry ranged unit.
+pub const SLINGER: KindId = 6;
+/// Bowman: the backbone ranged unit.
+pub const BOWMAN: KindId = 7;
+/// Light Cavalry: fast, raids villagers.
+pub const LIGHT_CAVALRY: KindId = 8;
 /// Town Center: the settlement's heart.
 pub const TOWN_CENTER: KindId = 10;
 /// House: population.
@@ -114,6 +126,142 @@ impl Resource {
 /// A cost in `[food, wood, stone, gold]`.
 pub type Cost = [i32; 4];
 
+/// What a kind is for the counter system (`docs/02` §8): bonus damage and
+/// technology bonuses apply per class.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
+pub enum Class {
+    /// Trees, mines, bushes: not a combatant at all.
+    #[default]
+    Other = 0,
+    /// Villagers.
+    Villager = 1,
+    /// Foot soldiers with a melee weapon.
+    Infantry = 2,
+    /// Foot soldiers with a ranged weapon.
+    Ranged = 3,
+    /// Mounted units.
+    Cavalry = 4,
+    /// Siege engines.
+    Siege = 5,
+    /// Buildings.
+    Building = 6,
+    /// Huntable animals.
+    Animal = 7,
+}
+
+impl Class {
+    /// Every class, in index order.
+    pub const ALL: [Class; 8] = [
+        Class::Other,
+        Class::Villager,
+        Class::Infantry,
+        Class::Ranged,
+        Class::Cavalry,
+        Class::Siege,
+        Class::Building,
+        Class::Animal,
+    ];
+
+    /// Index into a per-class table.
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Display name, plural, as a tooltip says it.
+    pub const fn plural(self) -> &'static str {
+        match self {
+            Class::Other => "things",
+            Class::Villager => "villagers",
+            Class::Infantry => "infantry",
+            Class::Ranged => "archers",
+            Class::Cavalry => "cavalry",
+            Class::Siege => "siege",
+            Class::Building => "buildings",
+            Class::Animal => "animals",
+        }
+    }
+}
+
+/// How an attack is delivered, and which armour resists it
+/// (`docs/02` §8, `GD-COMBAT-01`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub enum DamageType {
+    /// Resisted by melee armour.
+    #[default]
+    Melee,
+    /// Resisted by pierce armour.
+    Pierce,
+    /// Resisted by nothing, and hits friends in the blast (`GD-COMBAT-04`).
+    Siege,
+}
+
+impl DamageType {
+    /// Display name.
+    pub const fn name(self) -> &'static str {
+        match self {
+            DamageType::Melee => "melee",
+            DamageType::Pierce => "pierce",
+            DamageType::Siege => "siege",
+        }
+    }
+}
+
+/// A kind's fighting numbers. Zero attack means it cannot fight.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Combat {
+    /// Damage per hit before armour.
+    pub attack: i32,
+    /// What kind of hit.
+    pub damage: DamageType,
+    /// Reach in tiles; 0 is hand to hand (an adjacent tile).
+    pub range: i32,
+    /// Ticks between hits.
+    pub reload_ticks: u32,
+    /// Armour against melee hits.
+    pub melee_armour: i32,
+    /// Armour against pierce hits.
+    pub pierce_armour: i32,
+    /// Extra damage against a class, per hit (`GD-COMBAT-02`).
+    pub bonuses: &'static [(Class, i32)],
+    /// How far it sees, in tiles.
+    pub line_of_sight: i32,
+}
+
+/// Ticks between hits for most units: a hit and a half a second.
+pub const RELOAD_TICKS: u32 = 30;
+
+const NO_COMBAT: Combat = Combat {
+    attack: 0,
+    damage: DamageType::Melee,
+    range: 0,
+    reload_ticks: RELOAD_TICKS,
+    melee_armour: 0,
+    pierce_armour: 0,
+    bonuses: &[],
+    line_of_sight: 4,
+};
+
+const fn melee(attack: i32, melee_armour: i32, pierce_armour: i32) -> Combat {
+    Combat {
+        attack,
+        melee_armour,
+        pierce_armour,
+        ..NO_COMBAT
+    }
+}
+
+const fn ranged(attack: i32, range: i32, pierce_armour: i32) -> Combat {
+    Combat {
+        attack,
+        damage: DamageType::Pierce,
+        range,
+        pierce_armour,
+        line_of_sight: range + 1,
+        ..NO_COMBAT
+    }
+}
+
 /// The base gather rate, resources per second.
 pub const BASE_GATHER_RATE: Fx = Fx::from_ratio(45, 100);
 
@@ -156,6 +304,12 @@ pub struct KindInfo {
     pub buildable: bool,
     /// The age from which it is available.
     pub age: Age,
+    /// What it is to the counter system.
+    pub class: Class,
+    /// How it fights.
+    pub combat: Combat,
+    /// The building that trains it, for units.
+    pub trained_at: Option<KindId>,
 }
 
 /// Units of construction work per builder per tick at normal speed.
@@ -192,6 +346,9 @@ const BASE: KindInfo = KindInfo {
     trains: false,
     buildable: false,
     age: Age::Stone,
+    class: Class::Other,
+    combat: NO_COMBAT,
+    trained_at: None,
 };
 
 const fn unit(
@@ -231,6 +388,7 @@ const fn building(
         cost,
         build_seconds: seconds,
         buildable: true,
+        class: Class::Building,
         ..BASE
     }
 }
@@ -247,8 +405,74 @@ const fn node(id: KindId, name: &'static str, hp: i32, r: Resource, amount: i32)
 }
 
 const TABLE: &[KindInfo] = &[
-    unit(VILLAGER, "Villager", 25, 9, [50, 0, 0, 0], 25),
-    unit(SCOUT, "Scout", 45, 16, [60, 0, 0, 0], 30),
+    KindInfo {
+        class: Class::Villager,
+        // Fights badly (`docs/02` §5.1).
+        combat: melee(3, 0, 0),
+        trained_at: Some(TOWN_CENTER),
+        ..unit(VILLAGER, "Villager", 25, 9, [50, 0, 0, 0], 25)
+    },
+    KindInfo {
+        class: Class::Cavalry,
+        // Weak attack, wide line of sight.
+        combat: Combat {
+            line_of_sight: 8,
+            ..melee(2, 0, 0)
+        },
+        trained_at: Some(STABLE),
+        ..unit(SCOUT, "Scout", 45, 16, [60, 0, 0, 0], 30)
+    },
+    KindInfo {
+        age: Age::Stone,
+        class: Class::Infantry,
+        combat: melee(3, 0, 0),
+        trained_at: Some(BARRACKS),
+        ..unit(CLUBMAN, "Clubman", 40, 11, [50, 0, 0, 0], 26)
+    },
+    KindInfo {
+        age: Age::Tool,
+        class: Class::Infantry,
+        combat: melee(5, 0, 0),
+        trained_at: Some(BARRACKS),
+        ..unit(AXEMAN, "Axeman", 50, 11, [50, 20, 0, 0], 26)
+    },
+    KindInfo {
+        age: Age::Tool,
+        class: Class::Infantry,
+        combat: Combat {
+            bonuses: &[(Class::Cavalry, 6)],
+            ..melee(4, 0, 1)
+        },
+        trained_at: Some(BARRACKS),
+        ..unit(SPEARMAN, "Spearman", 45, 11, [40, 20, 0, 0], 26)
+    },
+    KindInfo {
+        age: Age::Tool,
+        class: Class::Ranged,
+        combat: Combat {
+            bonuses: &[(Class::Infantry, 4)],
+            ..ranged(4, 4, 0)
+        },
+        trained_at: Some(ARCHERY_RANGE),
+        ..unit(SLINGER, "Slinger", 40, 10, [40, 0, 10, 0], 25)
+    },
+    KindInfo {
+        age: Age::Tool,
+        class: Class::Ranged,
+        combat: ranged(5, 5, 0),
+        trained_at: Some(ARCHERY_RANGE),
+        ..unit(BOWMAN, "Bowman", 40, 10, [40, 20, 0, 0], 30)
+    },
+    KindInfo {
+        age: Age::Tool,
+        class: Class::Cavalry,
+        combat: Combat {
+            line_of_sight: 6,
+            ..melee(7, 0, 0)
+        },
+        trained_at: Some(STABLE),
+        ..unit(LIGHT_CAVALRY, "Light Cavalry", 90, 20, [60, 0, 0, 20], 40)
+    },
     KindInfo {
         pop_provided: 5,
         dropoff: true,
@@ -263,7 +487,10 @@ const TABLE: &[KindInfo] = &[
         dropoff: true,
         ..building(STOREHOUSE, "Storehouse", 200, 2, [0, 100, 0, 0], 30)
     },
-    building(BARRACKS, "Barracks", 350, 2, [0, 125, 0, 0], 45),
+    KindInfo {
+        trains: true,
+        ..building(BARRACKS, "Barracks", 350, 2, [0, 125, 0, 0], 45)
+    },
     KindInfo {
         age: Age::Tool,
         resource: Some((Resource::Food, 250)),
@@ -271,10 +498,12 @@ const TABLE: &[KindInfo] = &[
     },
     KindInfo {
         age: Age::Tool,
+        trains: true,
         ..building(ARCHERY_RANGE, "Archery Range", 350, 2, [0, 150, 0, 0], 45)
     },
     KindInfo {
         age: Age::Tool,
+        trains: true,
         ..building(STABLE, "Stable", 350, 2, [0, 150, 0, 0], 45)
     },
     KindInfo {
@@ -316,6 +545,7 @@ const TABLE: &[KindInfo] = &[
         id: GAZELLE,
         name: "Gazelle",
         max_health: 8,
+        class: Class::Animal,
         mobile: true,
         speed_per_second: Fx::from_ratio(14, 10),
         resource: Some((Resource::Food, 140)),
@@ -338,6 +568,12 @@ pub fn info(kind: KindId) -> &'static KindInfo {
 /// Every known kind.
 pub fn all() -> &'static [KindInfo] {
     TABLE
+}
+
+/// The units a building kind trains, in table order. Whether a player may
+/// train one right now (age, line upgrades) is the simulation's question.
+pub fn trained_at(building: KindId) -> impl Iterator<Item = &'static KindInfo> {
+    TABLE.iter().filter(move |k| k.trained_at == Some(building))
 }
 
 /// True if a villager can gather from this kind: a static node with a
@@ -395,6 +631,37 @@ mod tests {
         assert_eq!(info(VILLAGER).pop_cost, 1);
         assert_eq!(info(HOUSE).pop_provided, 5);
         assert!(info(HOUSE).buildable && !info(TREE).buildable && !info(VILLAGER).buildable);
+        for k in all() {
+            if let Some(b) = k.trained_at {
+                assert!(
+                    k.mobile && info(b).trains,
+                    "{}: trained at a trainer",
+                    k.name
+                );
+                assert!(
+                    k.build_seconds > 0 && k.cost.iter().any(|&c| c > 0),
+                    "{}",
+                    k.name
+                );
+            }
+            if k.combat.attack > 0 {
+                assert!(k.combat.reload_ticks > 0, "{}", k.name);
+                assert!(k.class != Class::Other, "{}: a fighter has a class", k.name);
+            }
+            for (c, b) in k.combat.bonuses {
+                assert!(*b > 0 && *c != Class::Other, "{}: bonus vs {c:?}", k.name);
+            }
+        }
+        assert_eq!(trained_at(BARRACKS).count(), 3);
+        assert_eq!(trained_at(ARCHERY_RANGE).count(), 2);
+        assert_eq!(trained_at(STABLE).count(), 2);
+        assert_eq!(trained_at(TOWN_CENTER).count(), 1);
+        assert_eq!(info(SPEARMAN).combat.bonuses, &[(Class::Cavalry, 6)]);
+        assert_eq!(info(BOWMAN).combat.damage, DamageType::Pierce);
+        assert_eq!(info(TREE).combat.attack, 0);
+        for c in Class::ALL {
+            assert_eq!(Class::ALL[c.index()], c);
+        }
         assert!(
             gatherable(TREE) && gatherable(GOLD_MINE) && !gatherable(GAZELLE) && !gatherable(HOUSE)
         );

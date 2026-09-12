@@ -280,6 +280,14 @@ pub struct Modifiers {
     pub villager_speed_pct: i32,
     /// Percent added to construction speed.
     pub build_speed_pct: i32,
+    /// Attack added per hit, by [`Class::index`].
+    pub attack_bonus: [i32; 8],
+    /// Melee armour added, by class.
+    pub melee_armour_bonus: [i32; 8],
+    /// Pierce armour added, by class.
+    pub pierce_armour_bonus: [i32; 8],
+    /// Tiles of reach added, by class.
+    pub range_bonus: [i32; 8],
 }
 
 impl Modifiers {
@@ -311,6 +319,16 @@ impl HashState for Modifiers {
         h.write_i32(self.farm_yield_bonus);
         h.write_i32(self.villager_speed_pct);
         h.write_i32(self.build_speed_pct);
+        for table in [
+            &self.attack_bonus,
+            &self.melee_armour_bonus,
+            &self.pierce_armour_bonus,
+            &self.range_bonus,
+        ] {
+            for v in table {
+                h.write_i32(*v);
+            }
+        }
     }
 }
 

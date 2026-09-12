@@ -42,6 +42,8 @@ for call in "${calls[@]}"; do
       probe="verify $tmp/replay.ron" ;;
     record*) # would rewrite the committed corpus, so send it to scratch
       probe="$probe --dir $tmp" ;;
+    matrix*) # would rewrite the committed matrix, so send it to scratch
+      probe="matrix --out $tmp/matrix.md" ;;
     # `golden` without --update is read-only, so it runs against the real
     # corpus and doubles as a corpus check.
   esac

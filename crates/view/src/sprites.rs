@@ -567,6 +567,12 @@ pub fn kind_for_set(name: &str) -> Option<KindId> {
     Some(match name {
         "villager" => kinds::VILLAGER,
         "scout" => kinds::SCOUT,
+        "clubman" => kinds::CLUBMAN,
+        "axeman" => kinds::AXEMAN,
+        "spearman" => kinds::SPEARMAN,
+        "slinger" => kinds::SLINGER,
+        "bowman" => kinds::BOWMAN,
+        "light_cavalry" => kinds::LIGHT_CAVALRY,
         "town_center" => kinds::TOWN_CENTER,
         "house" => kinds::HOUSE,
         "storehouse" => kinds::STOREHOUSE,
@@ -685,10 +691,85 @@ pub fn variant_id(kind: KindId, age: u8) -> KindId {
 }
 
 /// Kinds whose placeholder changes with the owner's age: what players build,
-/// bar the Farm (a field is a field), and the villager's costume.
+/// bar the Farm (a field is a field), and the costumes of villagers and
+/// infantry (`docs/02` §4: "villager and infantry sprites swap").
 fn has_age_variants(kind: KindId) -> bool {
     let k = kinds::info(kind);
-    kind == kinds::VILLAGER || (k.buildable && !k.mobile && kind != kinds::FARM)
+    kind == kinds::VILLAGER
+        || k.class == kinds::Class::Infantry
+        || (k.buildable && !k.mobile && kind != kinds::FARM)
+}
+
+/// The costume band a foot unit wears at an age: hides, then linen,
+/// bronze, iron.
+fn costume(age: u8) -> Option<u8> {
+    match age {
+        0 => None,
+        1 => Some(LINEN),
+        2 => Some(BRONZE),
+        _ => Some(IRON),
+    }
+}
+
+/// A foot unit's body, shared by the villager and the infantry: shadow,
+/// tunic in the player colour, the age's costume band, and a head turned
+/// to the facing. Weapons are drawn over it by the caller.
+fn foot_body(c: &mut Canvas, dx: f32, dy: f32, age: u8) {
+    c.ellipse(20.0, 42.0, 11.0, 5.0, SHADOW);
+    c.ellipse(20.0, 30.0, 8.0, 12.0, BLACK);
+    c.ellipse(20.0, 30.0, 7.0, 11.0, P_BASE);
+    c.ellipse(22.0, 27.0, 3.5, 6.0, P_LIGHT);
+    c.ellipse(16.5, 32.0, 3.0, 7.0, P_DARK);
+    if let Some(band) = costume(age) {
+        c.ellipse(20.0, 34.0, 7.0, 2.0, band);
+    }
+    c.circle(20.0, 14.0, 7.0, BLACK);
+    c.circle(20.0, 14.0, 6.0, SKIN);
+    c.circle(20.0 + dx * 5.0, 14.0 + dy * 5.0, 2.0, BLACK);
+}
+
+/// A straight weapon: length and width in px, the shaft's colour and the
+/// head's.
+#[derive(Clone, Copy)]
+struct Weapon {
+    len: f32,
+    w: f32,
+    shaft: u8,
+    head: u8,
+}
+
+const fn weapon(len: f32, w: f32, shaft: u8, head: u8) -> Weapon {
+    Weapon {
+        len,
+        w,
+        shaft,
+        head,
+    }
+}
+
+/// A straight weapon held out from the hand along the facing `dir`.
+fn shaft(c: &mut Canvas, hand: (f32, f32), dir: (f32, f32), weapon: Weapon) {
+    let (hx, hy) = hand;
+    let (dx, dy) = dir;
+    let Weapon {
+        len,
+        w,
+        shaft: idx,
+        head,
+    } = weapon;
+    // The facing's perpendicular, for the shaft's width.
+    let (px, py) = (-dy * w * 0.5, dx * w * 0.5);
+    let (ex, ey) = (hx + dx * len, hy + dy * len);
+    c.convex(
+        &[
+            (hx + px, hy + py),
+            (ex + px, ey + py),
+            (ex - px, ey - py),
+            (hx - px, hy - py),
+        ],
+        idx,
+    );
+    c.circle(ex, ey, w * 0.5 + 1.0, head);
 }
 
 /// The materials a building is drawn in at each age (`docs/05` §3): timber
@@ -740,23 +821,91 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
     match kind {
         kinds::VILLAGER => {
             let mut c = Canvas::new(40, 48, (20, 42));
-            c.ellipse(20.0, 42.0, 11.0, 5.0, SHADOW);
-            c.ellipse(20.0, 30.0, 8.0, 12.0, BLACK);
-            c.ellipse(20.0, 30.0, 7.0, 11.0, P_BASE);
-            c.ellipse(22.0, 27.0, 3.5, 6.0, P_LIGHT);
-            c.ellipse(16.5, 32.0, 3.0, 7.0, P_DARK);
-            // The costume progression: hides, then linen, bronze, iron.
-            if let Some(band) = match age {
-                0 => None,
-                1 => Some(LINEN),
-                2 => Some(BRONZE),
-                _ => Some(IRON),
-            } {
-                c.ellipse(20.0, 34.0, 7.0, 2.0, band);
-            }
-            c.circle(20.0, 14.0, 7.0, BLACK);
-            c.circle(20.0, 14.0, 6.0, SKIN);
-            c.circle(20.0 + dx * 5.0, 14.0 + dy * 5.0, 2.0, BLACK);
+            foot_body(&mut c, dx, dy, age);
+            c
+        }
+        kinds::CLUBMAN => {
+            // A short, thick club held low.
+            let mut c = Canvas::new(40, 48, (20, 42));
+            foot_body(&mut c, dx, dy, age);
+            shaft(
+                &mut c,
+                (20.0 + dx * 6.0, 30.0 + dy * 4.0),
+                (dx, dy),
+                weapon(9.0, 3.0, BROWN_DARK, BROWN_DARK),
+            );
+            c
+        }
+        kinds::AXEMAN => {
+            // The club with a bright head: the same silhouette, one step on.
+            let mut c = Canvas::new(40, 48, (20, 42));
+            foot_body(&mut c, dx, dy, age);
+            shaft(
+                &mut c,
+                (20.0 + dx * 6.0, 30.0 + dy * 4.0),
+                (dx, dy),
+                weapon(9.0, 2.0, BROWN_DARK, GREY_LIGHT),
+            );
+            c
+        }
+        kinds::SPEARMAN => {
+            // A long thin spear, held high, tip forward.
+            let mut c = Canvas::new(40, 48, (20, 42));
+            foot_body(&mut c, dx, dy, age);
+            shaft(
+                &mut c,
+                (20.0 + dx * 2.0, 26.0 + dy * 2.0),
+                (dx, dy),
+                weapon(16.0, 1.5, BROWN, GREY_LIGHT),
+            );
+            c
+        }
+        kinds::SLINGER => {
+            // A sling: a cord and a stone, low at the side.
+            let mut c = Canvas::new(40, 48, (20, 42));
+            foot_body(&mut c, dx, dy, age);
+            shaft(
+                &mut c,
+                (20.0 + dx * 5.0, 32.0 + dy * 3.0),
+                (dx, dy),
+                weapon(5.0, 1.0, BROWN_DARK, GREY_DARK),
+            );
+            c
+        }
+        kinds::BOWMAN => {
+            // A bow: a stave across the facing, string side toward the body.
+            let mut c = Canvas::new(40, 48, (20, 42));
+            foot_body(&mut c, dx, dy, age);
+            let (hx, hy) = (20.0 + dx * 7.0, 28.0 + dy * 4.0);
+            shaft(
+                &mut c,
+                (hx - dy * 6.0, hy + dx * 6.0),
+                (dy, -dx),
+                weapon(12.0, 1.5, BROWN, BROWN),
+            );
+            c
+        }
+        kinds::LIGHT_CAVALRY => {
+            // The scout's horse with a rider in the player colour and a
+            // lance: the same silhouette as the scout, armed.
+            let mut c = Canvas::new(56, 56, (28, 50));
+            c.ellipse(28.0, 50.0, 19.0, 7.0, SHADOW);
+            c.ellipse(28.0, 37.0, 18.0, 10.0, BLACK);
+            c.ellipse(28.0, 37.0, 17.0, 9.0, HIDE);
+            c.circle(28.0 + dx * 15.0, 37.0 + dy * 11.0, 5.0, BLACK);
+            c.circle(28.0 + dx * 15.0, 37.0 + dy * 11.0, 4.0, BROWN_DARK);
+            c.ellipse(28.0, 32.0, 8.0, 5.0, P_BASE);
+            c.ellipse(28.0, 24.0, 5.0, 7.0, BLACK);
+            c.ellipse(28.0, 24.0, 4.0, 6.0, P_BASE);
+            c.ellipse(29.0, 22.0, 2.0, 4.0, P_LIGHT);
+            c.circle(28.0, 16.0, 5.0, BLACK);
+            c.circle(28.0, 16.0, 4.0, SKIN);
+            shaft(
+                &mut c,
+                (28.0 + dx * 4.0, 24.0 + dy * 3.0),
+                (dx, dy),
+                weapon(14.0, 1.5, BROWN, GREY_LIGHT),
+            );
             c
         }
         kinds::SCOUT => {

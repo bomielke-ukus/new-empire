@@ -9,7 +9,7 @@
 //! `data` crate's RON files can replace it without touching the systems.
 
 use crate::entity::KindId;
-use crate::kinds::{self, Cost, Resource};
+use crate::kinds::{self, Class, Cost, Resource};
 use serde::{Deserialize, Serialize};
 
 /// A technology id.
@@ -87,6 +87,15 @@ pub enum Effect {
     BuildSpeed(i32),
     /// Move the player to an age.
     AdvanceAge(Age),
+    /// Attack added per hit for a class of unit.
+    Attack(Class, i32),
+    /// Melee and pierce armour added for a class of unit.
+    Armour(Class, i32, i32),
+    /// Tiles of reach added for a class of unit.
+    Range(Class, i32),
+    /// Every unit of the first kind becomes the second, queued ones
+    /// included, and the building trains the second from then on.
+    UpgradeLine(KindId, KindId),
 }
 
 /// Static properties of a technology.
@@ -124,6 +133,14 @@ impl TechInfo {
             _ => None,
         })
     }
+
+    /// The line upgrade this performs, if any: `(from, to)`.
+    pub fn upgrades_line(&self) -> Option<(KindId, KindId)> {
+        self.effects.iter().find_map(|e| match e {
+            Effect::UpgradeLine(from, to) => Some((*from, *to)),
+            _ => None,
+        })
+    }
 }
 
 /// Advance to the Tool Age.
@@ -146,6 +163,14 @@ pub const DOMESTICATION: TechId = 20;
 pub const PLOUGH: TechId = 21;
 /// +20% construction speed.
 pub const SCAFFOLDING: TechId = 22;
+/// Clubmen become Axemen.
+pub const AXE: TechId = 30;
+/// +2 attack for infantry and cavalry.
+pub const TOOLWORKING: TechId = 31;
+/// +1/+1 armour for infantry.
+pub const LEATHER_ARMOUR: TechId = 32;
+/// +1 range and +1 attack for archers.
+pub const FLETCHING: TechId = 33;
 
 /// Buildings of the current age needed to advance, excluding houses and the
 /// Town Center.
@@ -252,6 +277,52 @@ const TABLE: &[TechInfo] = &[
         requires: &[],
         effects: &[Effect::BuildSpeed(20)],
     },
+    TechInfo {
+        id: AXE,
+        name: "Axe",
+        cost: [100, 0, 0, 0],
+        seconds: 40,
+        building: kinds::BARRACKS,
+        age: Age::Tool,
+        requires: &[],
+        effects: &[Effect::UpgradeLine(kinds::CLUBMAN, kinds::AXEMAN)],
+    },
+    TechInfo {
+        id: TOOLWORKING,
+        name: "Toolworking",
+        cost: [100, 0, 0, 0],
+        seconds: 40,
+        building: kinds::STOREHOUSE,
+        age: Age::Tool,
+        requires: &[],
+        effects: &[
+            Effect::Attack(Class::Infantry, 2),
+            Effect::Attack(Class::Cavalry, 2),
+        ],
+    },
+    TechInfo {
+        id: LEATHER_ARMOUR,
+        name: "Leather Armour",
+        cost: [75, 0, 0, 0],
+        seconds: 30,
+        building: kinds::BARRACKS,
+        age: Age::Tool,
+        requires: &[],
+        effects: &[Effect::Armour(Class::Infantry, 1, 1)],
+    },
+    TechInfo {
+        id: FLETCHING,
+        name: "Fletching",
+        cost: [100, 50, 0, 0],
+        seconds: 40,
+        building: kinds::ARCHERY_RANGE,
+        age: Age::Tool,
+        requires: &[],
+        effects: &[
+            Effect::Range(Class::Ranged, 1),
+            Effect::Attack(Class::Ranged, 1),
+        ],
+    },
 ];
 
 /// Looks up a technology.
@@ -267,6 +338,21 @@ pub fn all() -> &'static [TechInfo] {
 /// Technologies researched at a building kind, in table order.
 pub fn at_building(kind: KindId) -> impl Iterator<Item = &'static TechInfo> {
     TABLE.iter().filter(move |t| t.building == kind)
+}
+
+/// The technology that upgrades `kind` into something else, if any.
+pub fn upgrade_of(kind: KindId) -> Option<&'static TechInfo> {
+    TABLE
+        .iter()
+        .find(|t| t.upgrades_line().is_some_and(|(from, _)| from == kind))
+}
+
+/// The technology that makes `kind` trainable, if it is the far end of a
+/// line upgrade.
+pub fn unlocked_by(kind: KindId) -> Option<&'static TechInfo> {
+    TABLE
+        .iter()
+        .find(|t| t.upgrades_line().is_some_and(|(_, to)| to == kind))
 }
 
 /// The technology that advances from `age`, if any.
@@ -321,11 +407,31 @@ mod tests {
                     t.name
                 );
             }
+            if let Some((from, to)) = t.upgrades_line() {
+                let (f, u) = (kinds::info(from), kinds::info(to));
+                assert_eq!(f.trained_at, u.trained_at, "{}: same building", t.name);
+                assert_eq!(
+                    f.trained_at,
+                    Some(t.building),
+                    "{}: upgraded where trained",
+                    t.name
+                );
+                assert!(
+                    u.age <= t.age,
+                    "{}: the upgrade is not before its unit",
+                    t.name
+                );
+                assert_eq!(f.class, u.class, "{}: a line keeps its class", t.name);
+            }
         }
+        assert_eq!(upgrade_of(kinds::CLUBMAN).map(|t| t.id), Some(AXE));
+        assert_eq!(unlocked_by(kinds::AXEMAN).map(|t| t.id), Some(AXE));
+        assert!(upgrade_of(kinds::AXEMAN).is_none() && unlocked_by(kinds::CLUBMAN).is_none());
         assert_eq!(age_advance(Age::Stone).map(|t| t.id), Some(AGE_TOOL));
         assert_eq!(age_advance(Age::Bronze).map(|t| t.id), Some(AGE_IRON));
         assert!(age_advance(Age::Iron).is_none());
-        assert_eq!(at_building(kinds::STOREHOUSE).count(), 4);
+        assert_eq!(at_building(kinds::STOREHOUSE).count(), 5);
+        assert_eq!(at_building(kinds::BARRACKS).count(), 2);
         assert_eq!(info(AGE_TOOL).unwrap().ticks(), 1200);
         assert!(info(999).is_none());
     }

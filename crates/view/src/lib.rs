@@ -8,6 +8,7 @@
 //! Floats are fine here. Nothing flows back into the simulation.
 
 pub mod camera;
+pub mod combat_view;
 pub mod font;
 pub mod hud;
 pub mod iso;

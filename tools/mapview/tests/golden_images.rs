@@ -163,6 +163,30 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The Tool Age garrison: every soldier of the slice in a line, the
+        // Barracks selected with its roster on the grid (the Axeman greyed
+        // for the Axe), two units queued.
+        name: "army-hud",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "army",
+            "--stockpile",
+            "5000",
+            "--ticks",
+            "40",
+            "--select-kind",
+            "barracks",
+            "--hud",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The F1 controls overlay over a fresh match, with the resource bar
         // still carrying its first-minute hint.
         name: "controls-overlay",
