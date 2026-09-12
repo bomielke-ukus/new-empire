@@ -2,7 +2,7 @@
 //! mapview [--seed N] [--size N] [--players N] [--ticks N] [--stockpile N]
 //!         [--zoom 0.5|1|1.5|2] [--width W] [--height H]
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
-//!         [--scenario gather|build|ages|army|battle] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1]
+//!         [--scenario gather|build|ages|army|battle|siege] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--dpi N] [--ui-scale N] [--controls 1]
 //! ```
@@ -236,7 +236,9 @@ fn run() -> Result<(), String> {
                 y: gy + 1,
                 ok: sim.can_place(0, kind, gx + 4, gy + 1).is_ok(),
                 row: 1,
+                player: 0,
                 age,
+                run: None,
             })
         }
     };
@@ -276,6 +278,7 @@ fn run() -> Result<(), String> {
                 ui_scale: a.dpi * a.ui_scale,
                 help: a.controls,
                 targeting: false,
+                defences: false,
             },
         );
         scene.ui = hud.sprites;
@@ -561,6 +564,87 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
                     target: sim::nav::centre((sx - 8, sy + 7)),
                 },
             });
+        }
+        "siege" => {
+            // A palisade with a gate sealing the map in front of the
+            // settlement, a Watch Tower behind it with two bowmen inside,
+            // and their axemen and slingers attack-moving at the Town
+            // Center: they find the gate shut, set about the wall, and
+            // take the tower's arrows. Run `--ticks 260` from here;
+            // `--select-kind watch_tower` shows the tower's panel with its
+            // garrison.
+            let x = sx + 7;
+            for y in 0..sim.map().height() {
+                let kind = if y == sy {
+                    kinds::GATE
+                } else {
+                    kinds::PALISADE_WALL
+                };
+                sim.issue(cmd(CommandKind::Spawn {
+                    kind,
+                    pos: sim::nav::centre((x, y)),
+                }));
+            }
+            sim.issue(cmd(CommandKind::Spawn {
+                kind: kinds::WATCH_TOWER,
+                pos: sim::nav::centre((x - 3, sy + 4)),
+            }));
+            for k in 0..2 {
+                sim.issue(cmd(CommandKind::Spawn {
+                    kind: kinds::BOWMAN,
+                    pos: sim::nav::centre((x - 4, sy + 5 + k)),
+                }));
+            }
+            for k in 0..4 {
+                for (n, kind) in [kinds::AXEMAN, kinds::SLINGER].iter().enumerate() {
+                    sim.issue(Command {
+                        player: 1,
+                        kind: CommandKind::Spawn {
+                            kind: *kind,
+                            pos: sim::nav::centre((x + 6 + n as i32 * 2, sy - 3 + k * 2)),
+                        },
+                    });
+                }
+            }
+            for _ in 0..3 {
+                sim.step();
+            }
+            let tower = sim
+                .world()
+                .slots()
+                .find(|s| sim.world().kind[s.index()] == kinds::WATCH_TOWER)
+                .map(|s| sim.world().id_at(s))
+                .ok_or("no tower")?;
+            let bows: Vec<sim::EntityId> = sim
+                .world()
+                .slots()
+                .filter(|s| {
+                    sim.world().owner[s.index()] == 0
+                        && sim.world().kind[s.index()] == kinds::BOWMAN
+                })
+                .map(|s| sim.world().id_at(s))
+                .collect();
+            sim.issue(cmd(CommandKind::Garrison {
+                ids: bows,
+                building: tower,
+            }));
+            let theirs: Vec<sim::EntityId> = sim
+                .world()
+                .slots()
+                .filter(|s| {
+                    sim.world().owner[s.index()] == 1
+                        && kinds::info(sim.world().kind[s.index()]).mobile
+                })
+                .map(|s| sim.world().id_at(s))
+                .collect();
+            sim.issue(Command {
+                player: 1,
+                kind: CommandKind::AttackMove {
+                    ids: theirs,
+                    target: tc_pos,
+                },
+            });
+            let _ = tc;
         }
         other => return Err(format!("unknown scenario {other}")),
     }

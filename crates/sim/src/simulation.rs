@@ -59,7 +59,7 @@ const UNIT_RADIUS: Fx = Fx::from_ratio(28, 100);
 /// A unit is "at" a building or node within this distance of a footprint tile centre.
 pub(crate) const REACH: Fx = Fx::from_ratio(15, 10);
 /// A working unit keeps working until pushed this far from its footprint tile.
-const REACH_SLACK: Fx = Fx::from_ratio(225, 100);
+pub(crate) const REACH_SLACK: Fx = Fx::from_ratio(225, 100);
 /// Ticks without progress toward its heading before a walker asks the
 /// field again ([TA-PATH-02]: within 3 ticks).
 const STALL_TICKS: u16 = 3;
@@ -67,6 +67,8 @@ const STALL_TICKS: u16 = 3;
 const QUEUE_LIMIT: usize = 5;
 /// How far a villager looks for a replacement node.
 const REPLACEMENT_RADIUS: Fx = Fx::from_int(10);
+/// How far a builder looks for the next site once one is finished.
+const NEXT_SITE_RADIUS: Fx = Fx::from_int(6);
 
 /// Match parameters that are fixed for the whole match.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -249,6 +251,8 @@ pub enum PlaceError {
     Blocked,
     /// Not enough resources.
     Unaffordable,
+    /// A gate goes onto one of the player's own finished wall segments.
+    NeedsWall,
 }
 
 impl core::fmt::Display for PlaceError {
@@ -258,6 +262,7 @@ impl core::fmt::Display for PlaceError {
             PlaceError::AgeLocked { needs } => write!(f, "needs the {}", needs.name()),
             PlaceError::Blocked => write!(f, "cannot build there"),
             PlaceError::Unaffordable => write!(f, "not enough resources"),
+            PlaceError::NeedsWall => write!(f, "goes onto a wall of yours"),
         }
     }
 }
@@ -273,6 +278,8 @@ pub enum ResearchError {
     WrongBuilding,
     /// The building is still a site.
     UnderConstruction,
+    /// The building is rubble.
+    Destroyed,
     /// The player has not reached the age it belongs to.
     AgeLocked {
         /// The age it unlocks in.
@@ -307,6 +314,7 @@ impl core::fmt::Display for ResearchError {
             ResearchError::NotYourBuilding => write!(f, "not your building"),
             ResearchError::WrongBuilding => write!(f, "researched elsewhere"),
             ResearchError::UnderConstruction => write!(f, "still under construction"),
+            ResearchError::Destroyed => write!(f, "destroyed"),
             ResearchError::AgeLocked { needs } => write!(f, "needs the {}", needs.name()),
             ResearchError::MissingPrerequisite { tech } => {
                 let name = tech::info(*tech).map_or("another technology", |t| t.name);
@@ -334,6 +342,8 @@ pub enum TrainError {
     WrongBuilding,
     /// The building is still a site.
     UnderConstruction,
+    /// The building is rubble.
+    Destroyed,
     /// The player has not reached the age it belongs to.
     AgeLocked {
         /// The age it unlocks in.
@@ -362,6 +372,7 @@ impl core::fmt::Display for TrainError {
             TrainError::NotYourBuilding => write!(f, "not your building"),
             TrainError::WrongBuilding => write!(f, "trained elsewhere"),
             TrainError::UnderConstruction => write!(f, "still under construction"),
+            TrainError::Destroyed => write!(f, "destroyed"),
             TrainError::AgeLocked { needs } => write!(f, "needs the {}", needs.name()),
             TrainError::NeedsTech { tech } => {
                 let name = tech::info(*tech).map_or("another technology", |t| t.name);
@@ -518,6 +529,7 @@ impl Simulation {
                 let i = s.index();
                 self.world.owner[i] == p
                     && self.world.dying[i] == 0
+                    && self.world.inside[i].is_none()
                     && self.world.kind[i] == kinds::VILLAGER
                     && self.world.order[i] == Order::Idle
             })
@@ -537,13 +549,38 @@ impl Simulation {
         if pl.age < info.age {
             return Err(PlaceError::AgeLocked { needs: info.age });
         }
-        if !self.nav.footprint_clear(x, y, info.footprint as i32) {
+        if kind == kinds::GATE {
+            // A gate is set into a wall: onto one of the player's finished
+            // segments, which it replaces, or onto clear ground.
+            if self.wall_at(p, x, y).is_none()
+                && !self.nav.footprint_clear(x, y, info.footprint as i32)
+            {
+                return Err(if self.nav.in_bounds(x, y) {
+                    PlaceError::NeedsWall
+                } else {
+                    PlaceError::Blocked
+                });
+            }
+        } else if !self.nav.footprint_clear(x, y, info.footprint as i32) {
             return Err(PlaceError::Blocked);
         }
         if !pl.can_afford(&info.cost) {
             return Err(PlaceError::Unaffordable);
         }
         Ok(())
+    }
+
+    /// `p`'s finished, standing wall segment on tile `(x, y)`, if any.
+    fn wall_at(&self, p: PlayerId, x: i32, y: i32) -> Option<EntityId> {
+        self.world.slots().find_map(|s| {
+            let i = s.index();
+            (self.world.owner[i] == p
+                && kinds::is_wall(self.world.kind[i])
+                && self.world.dying[i] == 0
+                && self.world.construction[i].is_none()
+                && nav::tile_of(self.world.pos[i]) == (x, y))
+                .then(|| self.world.id_at(s))
+        })
     }
 
     /// Whether `p` may queue a `kind` at `building` right now, and if not,
@@ -566,6 +603,9 @@ impl Simulation {
         }
         if self.world.construction[i].is_some() {
             return Err(TrainError::UnderConstruction);
+        }
+        if self.world.dying[i] > 0 {
+            return Err(TrainError::Destroyed);
         }
         let player = self
             .players
@@ -658,6 +698,9 @@ impl Simulation {
         if self.world.construction[i].is_some() {
             return Err(ResearchError::UnderConstruction);
         }
+        if self.world.dying[i] > 0 {
+            return Err(ResearchError::Destroyed);
+        }
         let player = self
             .players
             .get(p as usize)
@@ -712,6 +755,7 @@ impl Simulation {
                 let k = self.world.kind[i];
                 self.world.owner[i] == p
                     && self.world.construction[i].is_none()
+                    && self.world.dying[i] == 0
                     && kinds::counts_for_age(k)
                     && kinds::info(k).age == age
             })
@@ -754,6 +798,7 @@ impl Simulation {
         }
         self.apply_commands();
         self.farms();
+        self.gates();
         self.nav.refresh();
         self.orders();
         self.nav.refresh();
@@ -866,6 +911,19 @@ impl Simulation {
                     facing: self.world.facing[i],
                 });
             }
+            if let Some(b) = self.world.inside[i] {
+                let ok = self.world.slot(b).is_some_and(|bs| {
+                    let j = bs.index();
+                    self.world.owner[j] == self.world.owner[i]
+                        && self.world.dying[j] == 0
+                        && kinds::info(self.world.kind[j]).garrison > 0
+                        && kinds::info(self.world.kind[i]).mobile
+                        && self.world.dying[i] == 0
+                });
+                if !ok {
+                    return Err(Violation::BadGarrison { slot: s });
+                }
+            }
         }
 
         for (player, p) in self.players.iter().enumerate() {
@@ -941,7 +999,10 @@ impl Simulation {
         };
         let i = slot.index();
         let info = kinds::info(self.world.kind[i]);
-        if info.footprint > 0 {
+        if info.footprint > 0 && self.world.dying[i] == 0 {
+            // A standing building goes: anyone inside steps out first, and
+            // its footprint opens. Rubble opened its footprint when it fell.
+            self.eject(slot);
             let (ax, ay) = nav::anchor_tile(self.world.pos[i], info.footprint as i32);
             self.nav.unblock_footprint(ax, ay, info.footprint as i32);
             // Relabel now, not at the end of the tick.
@@ -988,7 +1049,13 @@ impl Simulation {
         let p = cmd.player;
         match cmd.kind {
             CommandKind::Spawn { kind, pos } => {
-                self.spawn(kind, p, pos);
+                if let Some(id) = self.spawn(kind, p, pos) {
+                    if kind == kinds::GATE {
+                        // A spawned gate is a finished gate, and stands open.
+                        let t = nav::tile_of(self.world.pos[id.index()]);
+                        self.nav.unblock(t.0, t.1);
+                    }
+                }
             }
             CommandKind::Despawn { id } => {
                 if self.owned_slot(id, p).is_some() {
@@ -1038,9 +1105,12 @@ impl Simulation {
                     return;
                 }
                 let (goals, pace, field) = self.group_goals(&units, target);
+                // The order keeps the point asked for; the trip goes to the
+                // unit's slot in the formation, or as near as it can get.
+                let wanted = self.clamp_to_map(target);
                 for (slot, goal) in units.iter().zip(goals) {
                     let i = slot.index();
-                    self.world.order[i] = Order::AttackMove { target: goal };
+                    self.world.order[i] = Order::AttackMove { target: wanted };
                     self.world.nav[i] =
                         Some(Nav::along(goal, Fx::from_ratio(15, 100), field).paced(pace));
                 }
@@ -1092,6 +1162,24 @@ impl Simulation {
                     }
                 }
             }
+            CommandKind::Garrison { ids, building } => {
+                if self.shelter_slot(building, p).is_none() {
+                    return;
+                }
+                for id in ids {
+                    if let Some(slot) = self.owned_mobile(id, p) {
+                        let i = slot.index();
+                        self.world.order[i] = Order::Garrison { building };
+                        self.world.nav[i] = None;
+                        self.world.move_target[i] = None;
+                    }
+                }
+            }
+            CommandKind::Ungarrison { building } => {
+                if let Some(bs) = self.owned_slot(building, p) {
+                    self.eject(bs);
+                }
+            }
             CommandKind::Stop { ids } => {
                 for id in ids {
                     if let Some(slot) = self.owned_mobile(id, p) {
@@ -1130,6 +1218,31 @@ impl Simulation {
                     return;
                 }
                 let info = kinds::info(kind);
+                if kind == kinds::GATE {
+                    // The wall segment the gate replaces is taken down and
+                    // its cost handed back.
+                    if let Some(wall) = self.wall_at(p, x, y) {
+                        let cost = kinds::info(self.world.kind[wall.index()]).cost;
+                        self.remove(wall);
+                        self.players[p as usize].refund(&cost);
+                    }
+                }
+                // Rubble under a new site is cleared away.
+                let fp = nav::footprint_tiles(x, y, info.footprint as i32);
+                let rubble: Vec<EntityId> = self
+                    .world
+                    .slots()
+                    .filter(|s| {
+                        let i = s.index();
+                        self.world.dying[i] > 0
+                            && !kinds::info(self.world.kind[i]).mobile
+                            && self.footprint_of(i).iter().any(|t| fp.contains(t))
+                    })
+                    .map(|s| self.world.id_at(s))
+                    .collect();
+                for r in rubble {
+                    self.remove(r);
+                }
                 self.players[p as usize].pay(&info.cost);
                 let pos = nav::building_centre(x, y, info.footprint as i32);
                 let Some(site) = self.spawn(kind, p, pos) else {
@@ -1294,13 +1407,18 @@ impl Simulation {
     // ----- orders ------------------------------------------------------------
 
     fn orders(&mut self) {
+        // Units, and the buildings that shoot: a tower holds an attack
+        // order like anything else, and drops it the same way.
         let slots: Vec<Slot> = self
             .world
             .slots()
             .filter(|s| {
-                self.world.owner[s.index()] != GAIA
-                    && self.world.dying[s.index()] == 0
-                    && kinds::info(self.world.kind[s.index()]).mobile
+                let i = s.index();
+                self.world.owner[i] != GAIA
+                    && self.world.dying[i] == 0
+                    && self.world.inside[i].is_none()
+                    && (kinds::info(self.world.kind[i]).mobile
+                        || matches!(self.world.order[i], Order::Attack { .. }))
             })
             .collect();
         for slot in slots {
@@ -1314,7 +1432,8 @@ impl Simulation {
                 } => self.tick_attack(slot, target, then, leash),
                 Order::AttackMove { target } => self.tick_attack_move(slot, target),
                 Order::Patrol { from, to, leg } => self.tick_patrol(slot, from, to, leg),
-                Order::Flee { target } => self.tick_flee(slot, target),
+                Order::Flee { target, into } => self.tick_flee(slot, target, into),
+                Order::Garrison { building } => self.tick_garrison(slot, building),
                 Order::Move { .. } => {
                     if self.nav_settled(i) {
                         self.world.nav[i] = None;
@@ -1589,7 +1708,7 @@ impl Simulation {
     }
 
     /// True if unit `i` stands within [`REACH`] of any footprint tile of `target`.
-    fn within_reach(&self, i: usize, target: Slot) -> bool {
+    pub(crate) fn within_reach(&self, i: usize, target: Slot) -> bool {
         self.within(i, target, REACH)
     }
 
@@ -1615,7 +1734,7 @@ impl Simulation {
     /// The tile a unit should stand on to work at `target`: the nearest
     /// reachable passable tile adjacent to its footprint, preferring one no
     /// other worker is already anchored on so a crowd spreads round a node.
-    fn approach(&self, i: usize, target: Slot) -> Option<Vec2Fx> {
+    pub(crate) fn approach(&self, i: usize, target: Slot) -> Option<Vec2Fx> {
         let pos = self.world.pos[i];
         let from = self.standing_tile(i)?;
         let fp = self.footprint_of(target.index());
@@ -1664,6 +1783,7 @@ impl Simulation {
         kinds::gatherable(k)
             && self.world.resource[n] > 0
             && self.world.construction[n].is_none()
+            && self.world.dying[n] == 0
             && (k != kinds::FARM || self.world.owner[n] == p)
     }
 
@@ -1679,6 +1799,7 @@ impl Simulation {
             if self.world.kind[i] != kinds::FARM
                 || self.world.resource[i] > 0
                 || self.world.construction[i].is_some()
+                || self.world.dying[i] > 0
             {
                 continue;
             }
@@ -1696,6 +1817,7 @@ impl Simulation {
         self.world.owner[slot] == p
             && kinds::info(self.world.kind[slot]).dropoff
             && self.world.construction[slot].is_none()
+            && self.world.dying[slot] == 0
     }
 
     fn nearest_dropoff(&self, i: usize, p: PlayerId) -> Option<EntityId> {
@@ -1919,7 +2041,7 @@ impl Simulation {
         for slot in self.world.slots().collect::<Vec<_>>() {
             let i = slot.index();
             let info = kinds::info(self.world.kind[i]);
-            if !info.mobile || self.world.dying[i] > 0 {
+            if !info.mobile || self.world.dying[i] > 0 || self.world.inside[i].is_some() {
                 continue;
             }
             let per_second = match self.world.kind[i] {
@@ -2057,7 +2179,11 @@ impl Simulation {
             .world
             .slots()
             .map(|s| s.index())
-            .filter(|&i| kinds::info(self.world.kind[i]).mobile && self.world.dying[i] == 0)
+            .filter(|&i| {
+                kinds::info(self.world.kind[i]).mobile
+                    && self.world.dying[i] == 0
+                    && self.world.inside[i].is_none()
+            })
             .collect();
         for &i in &mobile {
             let t = nav::tile_of(self.world.pos[i]);
@@ -2144,7 +2270,10 @@ impl Simulation {
     fn keep_off_blocked(&mut self) {
         for slot in self.world.slots().collect::<Vec<_>>() {
             let i = slot.index();
-            if !kinds::info(self.world.kind[i]).mobile || self.world.dying[i] > 0 {
+            if !kinds::info(self.world.kind[i]).mobile
+                || self.world.dying[i] > 0
+                || self.world.inside[i].is_some()
+            {
                 continue;
             }
             let pos = self.clamp_to_map(self.world.pos[i]);
@@ -2214,16 +2343,50 @@ impl Simulation {
                     // A finished farm is seeded for free; only reseeds cost.
                     self.world.resource[i] = modifiers.farm_yield(base);
                 }
+                if self.world.kind[i] == kinds::GATE {
+                    // A finished gate stands open; the gates pass shuts it
+                    // when an enemy comes near.
+                    let t = nav::tile_of(self.world.pos[i]);
+                    self.nav.unblock(t.0, t.1);
+                }
                 let id = self.world.id_at(*site);
                 for s in self.world.slots().collect::<Vec<_>>() {
                     if matches!(self.world.order[s.index()], Order::Build { site: b, .. } if b == id)
                     {
-                        self.world.order[s.index()] = Order::Idle;
                         self.world.nav[s.index()] = None;
+                        // On to the next site nearby, if there is one: a
+                        // wall run is built segment by segment this way.
+                        self.world.order[s.index()] = match self.next_site(s.index()) {
+                            Some(next) => Order::Build {
+                                site: next,
+                                working: false,
+                            },
+                            None => Order::Idle,
+                        };
                     }
                 }
             }
         }
+    }
+
+    /// The nearest unfinished site of builder `i`'s owner within
+    /// [`NEXT_SITE_RADIUS`], for carrying on after one is finished.
+    fn next_site(&self, i: usize) -> Option<EntityId> {
+        let me = self.world.owner[i];
+        let pos = self.world.pos[i];
+        let limit = NEXT_SITE_RADIUS.raw() as u64 * NEXT_SITE_RADIUS.raw() as u64;
+        self.world
+            .slots()
+            .filter(|s| {
+                let j = s.index();
+                self.world.owner[j] == me
+                    && self.world.construction[j].is_some()
+                    && self.world.dying[j] == 0
+            })
+            .map(|s| (pos.distance_sq_raw(self.world.pos[s.index()]), s))
+            .filter(|&(d, _)| d <= limit)
+            .min_by_key(|&(d, s)| (d, s.index()))
+            .map(|(_, s)| self.world.id_at(s))
     }
 
     fn production(&mut self) {
@@ -2236,6 +2399,7 @@ impl Simulation {
                     .as_ref()
                     .is_some_and(|p| !p.queue.is_empty())
                     && self.world.construction[i].is_none()
+                    && self.world.dying[i] == 0
             })
             .collect();
         for slot in buildings {
@@ -2431,7 +2595,9 @@ impl Simulation {
 
     fn owned_mobile(&self, id: EntityId, player: PlayerId) -> Option<Slot> {
         self.owned_slot(id, player).filter(|s| {
-            kinds::info(self.world.kind[s.index()]).mobile && self.world.dying[s.index()] == 0
+            kinds::info(self.world.kind[s.index()]).mobile
+                && self.world.dying[s.index()] == 0
+                && self.world.inside[s.index()].is_none()
         })
     }
 
@@ -2528,6 +2694,12 @@ pub enum Violation {
         /// The match limit.
         limit: u32,
     },
+    /// A unit is inside a building that is gone, rubble, someone else's or
+    /// not built to hold it, or is itself a corpse.
+    BadGarrison {
+        /// Which slot.
+        slot: u32,
+    },
 }
 
 impl core::fmt::Display for Violation {
@@ -2581,6 +2753,9 @@ impl core::fmt::Display for Violation {
                 "player {player} has population headroom {pop_cap}, above the \
                  match limit of {limit}"
             ),
+            Violation::BadGarrison { slot } => {
+                write!(f, "slot {slot} is inside a building that cannot hold it")
+            }
         }
     }
 }

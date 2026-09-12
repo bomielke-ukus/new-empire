@@ -523,6 +523,33 @@ pub fn footprint_tiles(x: i32, y: i32, footprint: i32) -> Vec<Tile> {
     out
 }
 
+/// The tiles of a straight run from `a` to `b` inclusive, one per step
+/// along the longer axis: the line a wall is dragged along
+/// (`UX-PLACE-03`). Eight-connected, so a diagonal run is one tile per
+/// row; the no-corner-cutting rule in [`NavGrid::line_of_sight`] and the
+/// fields makes such a run as solid as an orthogonal one.
+pub fn line_tiles(a: Tile, b: Tile) -> Vec<Tile> {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let steps = dx.abs().max(dy.abs());
+    (0..=steps)
+        .map(|k| {
+            if steps == 0 {
+                return a;
+            }
+            // Rounded to nearest, halves away from zero, in integers.
+            let lerp = |d: i32| {
+                let num = d * k;
+                if num >= 0 {
+                    (2 * num + steps) / (2 * steps)
+                } else {
+                    -((2 * -num + steps) / (2 * steps))
+                }
+            };
+            (a.0 + lerp(dx), a.1 + lerp(dy))
+        })
+        .collect()
+}
+
 /// World position of a building whose footprint is anchored on tile
 /// `(x, y)` the way [`footprint_tiles`] lays it out: the geometric centre.
 pub fn building_centre(x: i32, y: i32, footprint: i32) -> Vec2Fx {
@@ -596,6 +623,33 @@ impl Scratch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tile_run_is_one_tile_per_step_along_the_longer_axis() {
+        assert_eq!(line_tiles((3, 3), (3, 3)), vec![(3, 3)]);
+        assert_eq!(
+            line_tiles((0, 0), (3, 0)),
+            vec![(0, 0), (1, 0), (2, 0), (3, 0)]
+        );
+        assert_eq!(line_tiles((2, 5), (2, 3)), vec![(2, 5), (2, 4), (2, 3)]);
+        assert_eq!(
+            line_tiles((0, 0), (3, 3)),
+            vec![(0, 0), (1, 1), (2, 2), (3, 3)]
+        );
+        // A shallow run: every column once, the row stepping where it must.
+        let run = line_tiles((0, 0), (6, 2));
+        assert_eq!(run.len(), 7);
+        assert_eq!(run.first(), Some(&(0, 0)));
+        assert_eq!(run.last(), Some(&(6, 2)));
+        for w in run.windows(2) {
+            assert_eq!(w[1].0 - w[0].0, 1);
+            assert!((w[1].1 - w[0].1).abs() <= 1);
+        }
+        // Reversed ends give the same tiles, reversed.
+        let mut back = line_tiles((6, 2), (0, 0));
+        back.reverse();
+        assert_eq!(back, run);
+    }
     use crate::map::Terrain;
 
     fn grid(w: i32, h: i32) -> NavGrid {

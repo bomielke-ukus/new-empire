@@ -26,47 +26,50 @@ Elevation is five quarters of the attack downhill and three quarters uphill, rou
 | Slinger | archers | 40 | 4 pierce | 4 | 0/0 | +4 vs infantry |
 | Bowman | archers | 40 | 5 pierce | 5 | 0/0 | — |
 | Light Cavalry | cavalry | 90 | 7 melee | hand | 0/0 | — |
-| Town Center | buildings | 600 | — | — | 0/0 | — |
-| House | buildings | 75 | — | — | 0/0 | — |
-| Storehouse | buildings | 200 | — | — | 0/0 | — |
-| Barracks | buildings | 350 | — | — | 0/0 | — |
-| Farm | buildings | 60 | — | — | 0/0 | — |
-| Archery Range | buildings | 350 | — | — | 0/0 | — |
-| Stable | buildings | 350 | — | — | 0/0 | — |
-| Market | buildings | 300 | — | — | 0/0 | — |
-| Watch Tower | buildings | 250 | — | — | 0/0 | — |
-| Temple | buildings | 400 | — | — | 0/0 | — |
-| Academy | buildings | 400 | — | — | 0/0 | — |
-| Siege Workshop | buildings | 400 | — | — | 0/0 | — |
-| Government Centre | buildings | 400 | — | — | 0/0 | — |
+| Town Center | buildings | 600 | 5 pierce | 5 | 0/6 | — |
+| House | buildings | 75 | — | — | 0/5 | — |
+| Storehouse | buildings | 200 | — | — | 0/5 | — |
+| Barracks | buildings | 350 | — | — | 0/5 | — |
+| Farm | buildings | 60 | — | — | 0/5 | — |
+| Archery Range | buildings | 350 | — | — | 0/5 | — |
+| Stable | buildings | 350 | — | — | 0/5 | — |
+| Market | buildings | 300 | — | — | 0/5 | — |
+| Watch Tower | buildings | 250 | 4 pierce | 5 | 1/6 | — |
+| Palisade Wall | buildings | 150 | — | — | 2/8 | — |
+| Stone Wall | buildings | 400 | — | — | 3/10 | — |
+| Gate | buildings | 350 | — | — | 3/10 | — |
+| Temple | buildings | 400 | — | — | 0/5 | — |
+| Academy | buildings | 400 | — | — | 0/5 | — |
+| Siege Workshop | buildings | 400 | — | — | 0/5 | — |
+| Government Centre | buildings | 400 | — | — | 0/5 | — |
 
 ## Damage per hit, level ground, no technology
 
 Rows attack columns.
 
-| Attacker \ Target | Villager | Scout | Clubman | Axeman | Spearman | Slinger | Bowman | Light Cavalry | Town Center | House | Storehouse | Barracks | Farm | Archery Range | Stable | Market | Watch Tower | Temple | Academy | Siege Workshop | Government Centre |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **Villager** | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 |
-| **Scout** | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 |
-| **Clubman** | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 |
-| **Axeman** | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 |
-| **Spearman** | 4 | 10 | 4 | 4 | 4 | 4 | 4 | 10 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 |
-| **Slinger** | 4 | 4 | 8 | 8 | 7 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 |
-| **Bowman** | 5 | 5 | 5 | 5 | 4 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 |
-| **Light Cavalry** | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 |
+| Attacker \ Target | Villager | Scout | Clubman | Axeman | Spearman | Slinger | Bowman | Light Cavalry | Town Center | House | Storehouse | Barracks | Farm | Archery Range | Stable | Market | Watch Tower | Palisade Wall | Stone Wall | Gate | Temple | Academy | Siege Workshop | Government Centre |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **Villager** | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 2 | 1 | 1 | 1 | 3 | 3 | 3 | 3 |
+| **Scout** | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 1 | 1 | 1 | 1 | 2 | 2 | 2 | 2 |
+| **Clubman** | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 2 | 1 | 1 | 1 | 3 | 3 | 3 | 3 |
+| **Axeman** | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 5 | 4 | 3 | 2 | 2 | 5 | 5 | 5 | 5 |
+| **Spearman** | 4 | 10 | 4 | 4 | 4 | 4 | 4 | 10 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 3 | 2 | 1 | 1 | 4 | 4 | 4 | 4 |
+| **Slinger** | 4 | 4 | 8 | 8 | 7 | 4 | 4 | 4 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 |
+| **Bowman** | 5 | 5 | 5 | 5 | 4 | 5 | 5 | 5 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 |
+| **Light Cavalry** | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 6 | 5 | 4 | 4 | 7 | 7 | 7 | 7 |
 
 ## Hits to kill, level ground, no technology
 
-| Attacker \ Target | Villager | Scout | Clubman | Axeman | Spearman | Slinger | Bowman | Light Cavalry | Town Center | House | Storehouse | Barracks | Farm | Archery Range | Stable | Market | Watch Tower | Temple | Academy | Siege Workshop | Government Centre |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **Villager** | 9 | 15 | 14 | 17 | 15 | 14 | 14 | 30 | 200 | 25 | 67 | 117 | 20 | 117 | 117 | 100 | 84 | 134 | 134 | 134 | 134 |
-| **Scout** | 13 | 23 | 20 | 25 | 23 | 20 | 20 | 45 | 300 | 38 | 100 | 175 | 30 | 175 | 175 | 150 | 125 | 200 | 200 | 200 | 200 |
-| **Clubman** | 9 | 15 | 14 | 17 | 15 | 14 | 14 | 30 | 200 | 25 | 67 | 117 | 20 | 117 | 117 | 100 | 84 | 134 | 134 | 134 | 134 |
-| **Axeman** | 5 | 9 | 8 | 10 | 9 | 8 | 8 | 18 | 120 | 15 | 40 | 70 | 12 | 70 | 70 | 60 | 50 | 80 | 80 | 80 | 80 |
-| **Spearman** | 7 | 5 | 10 | 13 | 12 | 10 | 10 | 9 | 150 | 19 | 50 | 88 | 15 | 88 | 88 | 75 | 63 | 100 | 100 | 100 | 100 |
-| **Slinger** | 7 | 12 | 5 | 7 | 7 | 10 | 10 | 23 | 150 | 19 | 50 | 88 | 15 | 88 | 88 | 75 | 63 | 100 | 100 | 100 | 100 |
-| **Bowman** | 5 | 9 | 8 | 10 | 12 | 8 | 8 | 18 | 120 | 15 | 40 | 70 | 12 | 70 | 70 | 60 | 50 | 80 | 80 | 80 | 80 |
-| **Light Cavalry** | 4 | 7 | 6 | 8 | 7 | 6 | 6 | 13 | 86 | 11 | 29 | 50 | 9 | 50 | 50 | 43 | 36 | 58 | 58 | 58 | 58 |
+| Attacker \ Target | Villager | Scout | Clubman | Axeman | Spearman | Slinger | Bowman | Light Cavalry | Town Center | House | Storehouse | Barracks | Farm | Archery Range | Stable | Market | Watch Tower | Palisade Wall | Stone Wall | Gate | Temple | Academy | Siege Workshop | Government Centre |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **Villager** | 9 | 15 | 14 | 17 | 15 | 14 | 14 | 30 | 200 | 25 | 67 | 117 | 20 | 117 | 117 | 100 | 125 | 150 | 400 | 350 | 134 | 134 | 134 | 134 |
+| **Scout** | 13 | 23 | 20 | 25 | 23 | 20 | 20 | 45 | 300 | 38 | 100 | 175 | 30 | 175 | 175 | 150 | 250 | 150 | 400 | 350 | 200 | 200 | 200 | 200 |
+| **Clubman** | 9 | 15 | 14 | 17 | 15 | 14 | 14 | 30 | 200 | 25 | 67 | 117 | 20 | 117 | 117 | 100 | 125 | 150 | 400 | 350 | 134 | 134 | 134 | 134 |
+| **Axeman** | 5 | 9 | 8 | 10 | 9 | 8 | 8 | 18 | 120 | 15 | 40 | 70 | 12 | 70 | 70 | 60 | 63 | 50 | 200 | 175 | 80 | 80 | 80 | 80 |
+| **Spearman** | 7 | 5 | 10 | 13 | 12 | 10 | 10 | 9 | 150 | 19 | 50 | 88 | 15 | 88 | 88 | 75 | 84 | 75 | 400 | 350 | 100 | 100 | 100 | 100 |
+| **Slinger** | 7 | 12 | 5 | 7 | 7 | 10 | 10 | 23 | 600 | 75 | 200 | 350 | 60 | 350 | 350 | 300 | 250 | 150 | 400 | 350 | 400 | 400 | 400 | 400 |
+| **Bowman** | 5 | 9 | 8 | 10 | 12 | 8 | 8 | 18 | 600 | 75 | 200 | 350 | 60 | 350 | 350 | 300 | 250 | 150 | 400 | 350 | 400 | 400 | 400 | 400 |
+| **Light Cavalry** | 4 | 7 | 6 | 8 | 7 | 6 | 6 | 13 | 86 | 11 | 29 | 50 | 9 | 50 | 50 | 43 | 42 | 30 | 100 | 88 | 58 | 58 | 58 | 58 |
 
 ## Elevation
 

@@ -1,7 +1,7 @@
 //! Turns simulation state into a sorted list of sprite instances.
 
 use sim::kinds;
-use sim::{GatherPhase, NavState, Order, Simulation, Vec2Fx, DECAY_TICKS, TICK_MS};
+use sim::{GatherPhase, NavState, Order, Simulation, Vec2Fx, DECAY_TICKS, RUBBLE_TICKS, TICK_MS};
 
 /// How long the age-up sweep takes to cross a settlement, in ms.
 pub const SWEEP_MS: u32 = 1800;
@@ -67,8 +67,14 @@ pub struct Ghost {
     pub ok: bool,
     /// Player colour row.
     pub row: u8,
+    /// Who is placing, for checking each tile of a run.
+    pub player: u8,
     /// The placing player's age, so the ghost is drawn as the building will be.
     pub age: u8,
+    /// For a wall being dragged: the tile the run started on. The ghost
+    /// then covers every tile of the straight run from there to `(x, y)`,
+    /// each hatched for whether it can be placed (`UX-PLACE-03`).
+    pub run: Option<(i32, i32)>,
 }
 
 /// A frame's worth of sprites, sorted back to front.
@@ -127,6 +133,10 @@ impl Scene {
         });
         for slot in world.slots() {
             let i = slot.index();
+            if world.inside[i].is_some() {
+                // Garrisoned: inside, and nothing to draw.
+                continue;
+            }
             let kind = world.kind[i];
             let info = kinds::info(kind);
             // A site shows pegs until half built, then the building itself.
@@ -170,11 +180,19 @@ impl Scene {
                 } else {
                     Anim::Idle
                 }
+            } else if kind == kinds::GATE && world.dying[i] == 0 && sim.gate_open(i) {
+                // An open gate is the gate's work frame.
+                Anim::Work
             } else {
                 Anim::Idle
             };
             let time_ms = if world.dying[i] > 0 {
-                (DECAY_TICKS - world.dying[i]) as u32 * TICK_MS + (alpha * TICK_MS as f32) as u32
+                let span = if info.mobile {
+                    DECAY_TICKS
+                } else {
+                    RUBBLE_TICKS
+                };
+                (span - world.dying[i]) as u32 * TICK_MS + (alpha * TICK_MS as f32) as u32
             } else {
                 sim.tick() as u32 * TICK_MS
                     + (alpha * TICK_MS as f32) as u32
@@ -182,6 +200,9 @@ impl Scene {
             };
             let looked_up = if half_built {
                 atlas.site(info.footprint).map(|f| (f, false))
+            } else if !info.mobile && world.dying[i] > 0 {
+                // Rubble where it stood, for as long as it lies.
+                atlas.rubble(info.footprint).map(|f| (f, false))
             } else {
                 atlas.frame_at(look, world.facing[i], anim, time_ms)
             };
@@ -255,17 +276,28 @@ impl Scene {
         }
         if let Some(g) = ghost {
             let fp = kinds::info(g.kind).footprint.max(1);
-            let centre = sim::nav::building_centre(g.x, g.y, fp as i32);
-            let (cx, cy) = (fx_to_f32(centre.x), fx_to_f32(centre.y));
-            let h = iso::ground_height(map, cx, cy);
-            let (gx, gy) = iso::project(cx, cy, h);
-            let depth = cx + cy + (fp as f32 - 1.0) * 0.5;
-            if let Some((frame, _)) = atlas.frame(atlas.variant(g.kind, g.age), 0) {
-                sprites.push(overlay(frame, gx, gy, g.row, depth + 0.5, u32::MAX));
-            }
-            // The valid/blocked hatch draws over the ghost so it always shows.
-            if let Some(f) = atlas.footprint(fp, g.ok) {
-                sprites.push(overlay(f, gx, gy, 0, depth + 0.51, u32::MAX));
+            // One tile, or the run being dragged: every tile of it, each
+            // checked on its own.
+            let tiles: Vec<((i32, i32), bool)> = match g.run {
+                Some(from) => sim::nav::line_tiles(from, (g.x, g.y))
+                    .into_iter()
+                    .map(|t| (t, sim.can_place(g.player, g.kind, t.0, t.1).is_ok()))
+                    .collect(),
+                None => vec![((g.x, g.y), g.ok)],
+            };
+            for ((x, y), ok) in tiles {
+                let centre = sim::nav::building_centre(x, y, fp as i32);
+                let (cx, cy) = (fx_to_f32(centre.x), fx_to_f32(centre.y));
+                let h = iso::ground_height(map, cx, cy);
+                let (gx, gy) = iso::project(cx, cy, h);
+                let depth = cx + cy + (fp as f32 - 1.0) * 0.5;
+                if let Some((frame, _)) = atlas.frame(atlas.variant(g.kind, g.age), 0) {
+                    sprites.push(overlay(frame, gx, gy, g.row, depth + 0.5, u32::MAX));
+                }
+                // The valid/blocked hatch draws over the ghost so it always shows.
+                if let Some(f) = atlas.footprint(fp, ok) {
+                    sprites.push(overlay(f, gx, gy, 0, depth + 0.51, u32::MAX));
+                }
             }
         }
         sprites.sort_by(|a, b| a.depth.total_cmp(&b.depth).then(a.slot.cmp(&b.slot)));
@@ -350,7 +382,9 @@ mod tests {
             y: sy,
             ok: sim.can_place(0, kinds::HOUSE, sx + 4, sy).is_ok(),
             row: 1,
+            player: 0,
             age: 0,
+            run: None,
         };
         let scene = Scene::build_with(&sim, &atlas, None, 0.0, &[first], Some(ghost));
         assert_eq!(scene.sprites.len(), sim.world().len() + 3);

@@ -27,6 +27,8 @@ pub const UI_SITE: KindId = 58_300;
 pub const UI_FOOT_GLOW: KindId = 58_400;
 /// An arrow in flight.
 pub const UI_ARROW: KindId = 58_500;
+/// Rubble where a building stood, by footprint (1..=3).
+pub const UI_RUBBLE: KindId = 58_600;
 /// Light glyphs: `UI_GLYPH + index into font::CHARS`.
 pub const UI_GLYPH: KindId = 60_000;
 /// Dark glyphs: `UI_GLYPH_DARK + index into font::CHARS`.
@@ -324,26 +326,28 @@ impl Atlas {
         };
         // A corpse for every mobile placeholder: one frame, any facing, that
         // the death and decay animations both show.
-        let mut fallen = |kind: KindId, base: KindId, age: u8, canvases: &mut Vec<Entry>| {
-            for anim in [Anim::Death, Anim::Decay] {
-                canvases.push(Entry {
-                    kind,
-                    facing: 0,
-                    anim,
-                    index: 0,
-                    scale: 1,
-                    canvas: draw_fallen(base, age),
-                });
-                anims.insert(
-                    (kind, anim),
-                    AnimInfo {
-                        frames: 1,
-                        frame_ms: 1000,
-                        loops: false,
-                    },
-                );
-            }
-        };
+        type Anims = HashMap<(KindId, Anim), AnimInfo>;
+        let fallen =
+            |kind: KindId, base: KindId, age: u8, canvases: &mut Vec<Entry>, anims: &mut Anims| {
+                for anim in [Anim::Death, Anim::Decay] {
+                    canvases.push(Entry {
+                        kind,
+                        facing: 0,
+                        anim,
+                        index: 0,
+                        scale: 1,
+                        canvas: draw_fallen(base, age),
+                    });
+                    anims.insert(
+                        (kind, anim),
+                        AnimInfo {
+                            frames: 1,
+                            frame_ms: 1000,
+                            loops: false,
+                        },
+                    );
+                }
+            };
         for k in kinds::all() {
             if covered.contains(&k.id) {
                 continue;
@@ -352,9 +356,28 @@ impl Atlas {
                 for f in AUTHORED {
                     canvases.push(still(k.id, f, draw_kind(k.id, f)));
                 }
-                fallen(k.id, k.id, 0, &mut canvases);
+                fallen(k.id, k.id, 0, &mut canvases, &mut anims);
             } else {
                 canvases.push(still(k.id, 0, draw_kind(k.id, 1)));
+                if k.id == kinds::GATE {
+                    // The gate standing open, filed under the work animation.
+                    canvases.push(Entry {
+                        kind: k.id,
+                        facing: 0,
+                        anim: Anim::Work,
+                        index: 0,
+                        scale: 1,
+                        canvas: gate(true),
+                    });
+                    anims.insert(
+                        (k.id, Anim::Work),
+                        AnimInfo {
+                            frames: 1,
+                            frame_ms: 1000,
+                            loops: false,
+                        },
+                    );
+                }
             }
             if !has_age_variants(k.id) {
                 continue;
@@ -367,7 +390,7 @@ impl Atlas {
                     for f in AUTHORED {
                         canvases.push(still(id, f, draw_kind_aged(k.id, f, age)));
                     }
-                    fallen(id, k.id, age, &mut canvases);
+                    fallen(id, k.id, age, &mut canvases, &mut anims);
                 } else {
                     canvases.push(still(id, 0, draw_kind_aged(k.id, 1, age)));
                 }
@@ -402,6 +425,7 @@ impl Atlas {
                     footprint(fp, GOLD_LIGHT),
                 ));
                 canvases.push(still(UI_SITE + fp as KindId, 0, site(fp)));
+                canvases.push(still(UI_RUBBLE + fp as KindId, 0, draw_rubble(fp)));
             }
         }
         for (i, ch) in font::CHARS.chars().enumerate() {
@@ -454,6 +478,12 @@ impl Atlas {
     /// Construction site for a footprint.
     pub fn site(&self, footprint: u8) -> Option<&Frame> {
         self.frame(UI_SITE + footprint.clamp(1, 3) as KindId, 0)
+            .map(|(f, _)| f)
+    }
+
+    /// Rubble for a footprint: what a fallen building leaves.
+    pub fn rubble(&self, footprint: u8) -> Option<&Frame> {
+        self.frame(UI_RUBBLE + footprint.clamp(1, 3) as KindId, 0)
             .map(|(f, _)| f)
     }
 
@@ -736,7 +766,11 @@ fn has_age_variants(kind: KindId) -> bool {
     let k = kinds::info(kind);
     kind == kinds::VILLAGER
         || k.class == kinds::Class::Infantry
-        || (k.buildable && !k.mobile && kind != kinds::FARM)
+        || (k.buildable
+            && !k.mobile
+            && kind != kinds::FARM
+            && !kinds::is_wall(kind)
+            && kind != kinds::GATE)
 }
 
 /// The costume band a foot unit wears at an age: hides, then linen,
@@ -1156,6 +1190,9 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
             c.rect(x as i32 - 12, y as i32 - 40, 24, 3, GOLD);
             c
         }
+        kinds::PALISADE_WALL => palisade(),
+        kinds::STONE_WALL => stone_wall(),
+        kinds::GATE => gate(false),
         _ => {
             let mut c = Canvas::new(32, 32, (16, 28));
             c.diamond(16.0, 28.0, 14.0, 7.0, SHADOW);
@@ -1164,6 +1201,160 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
             c
         }
     }
+}
+
+/// A one-tile wall segment: a low block filling the tile, `rise` high, in
+/// two materials, with a player-colour pennant so an owner can be told.
+fn segment(rise: f32, lit: u8, dark: u8, cap: u8) -> Canvas {
+    let (w, h) = (64, 32 + rise as u32 + 4);
+    let cx = 32.0;
+    let base_cy = h as f32 - 16.0;
+    let mut c = Canvas::new(w, h, (cx as i16, base_cy as i16));
+    let (hw, hh) = (31.0, 15.0);
+    c.diamond(cx, base_cy, hw, hh, BLACK);
+    let inset = 0.9;
+    let (bl, bb, br) = (
+        (cx - hw * inset, base_cy),
+        (cx, base_cy + hh * inset),
+        (cx + hw * inset, base_cy),
+    );
+    let up = |p: (f32, f32), d: f32| (p.0, p.1 - d);
+    c.convex(&[bl, bb, up(bb, rise), up(bl, rise)], BLACK);
+    c.convex(&[bb, br, up(br, rise), up(bb, rise)], BLACK);
+    c.convex(
+        &[
+            up(bl, 1.0),
+            up(bb, 1.0),
+            up(bb, rise - 1.0),
+            up(bl, rise - 1.0),
+        ],
+        lit,
+    );
+    c.convex(
+        &[
+            up(bb, 1.0),
+            up(br, 1.0),
+            up(br, rise - 1.0),
+            up(bb, rise - 1.0),
+        ],
+        dark,
+    );
+    let top = base_cy - rise;
+    c.diamond(cx, top, hw * inset + 1.0, hh * inset + 1.0, BLACK);
+    c.diamond(cx, top, hw * inset, hh * inset, cap);
+    c.rect(cx as i32 - 1, (top - 10.0) as i32, 2, 10, BLACK);
+    c.rect(cx as i32 + 1, (top - 10.0) as i32, 6, 4, P_BASE);
+    c
+}
+
+/// Sharpened timber, lashed: uprights along the top edge.
+fn palisade() -> Canvas {
+    let mut c = segment(22.0, BROWN, BROWN_DARK, BROWN_DARK);
+    let top = c.h as f32 - 16.0 - 22.0;
+    for k in 0..5 {
+        let x = 12 + k * 10;
+        c.rect(x, (top - 6.0) as i32, 3, 8, BLACK);
+        c.rect(x + 1, (top - 5.0) as i32, 1, 6, TAN);
+    }
+    c
+}
+
+/// Dressed stone, with a course line.
+fn stone_wall() -> Canvas {
+    let mut c = segment(26.0, LIMESTONE, LIMESTONE_DARK, GREY_LIGHT);
+    let base_cy = c.h as f32 - 16.0;
+    for k in 0..3 {
+        let y = (base_cy - 6.0 - k as f32 * 8.0) as i32;
+        c.rect(6, y, 52, 1, GREY_DARK);
+    }
+    c
+}
+
+/// A gate: a stone segment with an arch, the doors shut or swung open.
+fn gate(open: bool) -> Canvas {
+    let mut c = segment(30.0, LIMESTONE, LIMESTONE_DARK, GREY_LIGHT);
+    let base_cy = c.h as f32 - 16.0;
+    let (cx, cy) = (32.0, base_cy + 6.0);
+    // The opening, through the front faces.
+    c.convex(
+        &[
+            (cx - 9.0, cy - 2.0),
+            (cx + 9.0, cy - 2.0),
+            (cx + 9.0, cy - 22.0),
+            (cx - 9.0, cy - 22.0),
+        ],
+        BLACK,
+    );
+    if open {
+        c.convex(
+            &[
+                (cx - 8.0, cy - 3.0),
+                (cx + 8.0, cy - 3.0),
+                (cx + 8.0, cy - 21.0),
+                (cx - 8.0, cy - 21.0),
+            ],
+            SAND,
+        );
+        // Doors swung back against the posts.
+        c.rect(cx as i32 - 11, (cy - 22.0) as i32, 3, 20, BROWN_DARK);
+        c.rect(cx as i32 + 8, (cy - 22.0) as i32, 3, 20, BROWN_DARK);
+    } else {
+        c.convex(
+            &[
+                (cx - 8.0, cy - 3.0),
+                (cx - 1.0, cy - 3.0),
+                (cx - 1.0, cy - 21.0),
+                (cx - 8.0, cy - 21.0),
+            ],
+            BROWN,
+        );
+        c.convex(
+            &[
+                (cx + 1.0, cy - 3.0),
+                (cx + 8.0, cy - 3.0),
+                (cx + 8.0, cy - 21.0),
+                (cx + 1.0, cy - 21.0),
+            ],
+            BROWN_DARK,
+        );
+        c.rect(cx as i32 - 7, (cy - 14.0) as i32, 14, 1, IRON_DARK);
+    }
+    c
+}
+
+/// Rubble over a footprint: a scatter of broken stone and charred timber
+/// on a dust-coloured ground, no taller than a unit's knee.
+fn draw_rubble(fp: u32) -> Canvas {
+    let (w, h) = (64 * fp, 32 * fp + 12);
+    let cx = w as f32 / 2.0;
+    let cy = h as f32 - 16.0 * fp as f32;
+    let mut c = Canvas::new(w, h, (cx as i16, cy as i16));
+    let (hw, hh) = (cx - 1.0, 16.0 * fp as f32 - 1.0);
+    c.diamond(cx, cy, hw, hh, SHADOW);
+    c.diamond(cx, cy, hw - 3.0, hh - 2.0, DIRT);
+    // Heaps, placed by a fixed pattern so every footprint reads the same.
+    let heaps = [
+        (0.0, 0.0, 9.0, 5.0, GREY),
+        (-0.45, -0.1, 6.0, 3.0, GREY_DARK),
+        (0.4, 0.15, 7.0, 4.0, GREY_LIGHT),
+        (-0.15, 0.4, 5.0, 3.0, BROWN_DARK),
+        (0.2, -0.45, 6.0, 3.0, GREY),
+        (-0.5, 0.3, 4.0, 2.0, GREY_DARK),
+        (0.55, -0.2, 5.0, 3.0, BROWN_DARK),
+    ];
+    for (u, v, rx, ry, idx) in heaps {
+        let x = cx + u * hw * 0.9;
+        let y = cy + v * hh * 0.9;
+        c.ellipse(
+            x,
+            y,
+            rx * fp as f32 * 0.7 + 1.0,
+            ry * fp as f32 * 0.7 + 1.0,
+            BLACK,
+        );
+        c.ellipse(x, y - 1.0, rx * fp as f32 * 0.7, ry * fp as f32 * 0.7, idx);
+    }
+    c
 }
 
 /// A point on the right-hand (door-side) wall of a `block` building, `t`
@@ -1528,6 +1719,12 @@ mod tests {
         assert_eq!(a.footprint(2, true).unwrap().w, 128);
         assert!(a.footprint(2, false).is_some());
         assert_eq!(a.site(3).unwrap().w, 192);
+        assert_eq!(a.rubble(3).unwrap().w, 192);
+        assert!(
+            a.frame_at(kinds::GATE, 0, Anim::Work, 0).is_some(),
+            "the gate opens"
+        );
+        assert!(a.frame(kinds::PALISADE_WALL, 0).is_some());
         assert_eq!(
             a.frame(kinds::STOREHOUSE, 0).unwrap().0.w,
             128,

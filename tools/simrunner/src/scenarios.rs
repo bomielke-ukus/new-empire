@@ -313,16 +313,58 @@ impl Scenario {
         if idle.is_empty() {
             return;
         }
-        let kind = match bot.below(12) {
+        let kind = match bot.below(16) {
             0..=4 => kinds::HOUSE,
             5..=6 => kinds::STOREHOUSE,
             7 => kinds::BARRACKS,
             8 => kinds::FARM,
             9 => kinds::MARKET,
             10 => kinds::ARCHERY_RANGE,
-            _ => kinds::WATCH_TOWER,
+            11 => kinds::WATCH_TOWER,
+            12 => kinds::STONE_WALL,
+            13 => kinds::GATE,
+            _ => kinds::PALISADE_WALL,
         };
-        self.place(sim, bot, player, kind, idle.into_iter().take(3).collect());
+        let builders: Vec<EntityId> = idle.into_iter().take(3).collect();
+        if kinds::is_wall(kind) {
+            // A run of segments, as the player drags one: the builders go
+            // to the first and carry on along it.
+            return self.wall_run(sim, bot, player, kind, builders);
+        }
+        self.place(sim, bot, player, kind, builders);
+    }
+
+    /// A straight run of up to eight wall segments near the start, every
+    /// tile the sim accepts (`UX-PLACE-03`).
+    fn wall_run(
+        &self,
+        sim: &mut Simulation,
+        bot: &mut Rng,
+        player: PlayerId,
+        kind: KindId,
+        mut builders: Vec<EntityId>,
+    ) {
+        if builders.is_empty() {
+            return;
+        }
+        let Some(&(sx, sy)) = sim.starts().get(player as usize) else {
+            return;
+        };
+        let from = (sx + bot.range_i32(-12, 13), sy + bot.range_i32(-12, 13));
+        let to = (from.0 + bot.range_i32(-8, 9), from.1 + bot.range_i32(-8, 9));
+        for (x, y) in sim::nav::line_tiles(from, to) {
+            if sim.can_place(player, kind, x, y).is_ok() {
+                sim.issue(Command {
+                    player,
+                    kind: CommandKind::Build {
+                        kind,
+                        x,
+                        y,
+                        ids: std::mem::take(&mut builders),
+                    },
+                });
+            }
+        }
     }
 
     /// The ages bot's construction: finish the site in hand first, house
@@ -572,7 +614,7 @@ impl Scenario {
             .collect();
         let players = sim.players().len() as u8;
         let enemy = (player + 1 + bot.below(players.max(2) as u32 - 1) as u8) % players.max(2);
-        let kind = match bot.below(6) {
+        let kind = match bot.below(8) {
             0 => CommandKind::SetStance {
                 ids,
                 stance: sim::Stance::ALL[bot.below(4) as usize],
@@ -581,6 +623,26 @@ impl Scenario {
                 ids,
                 formation: sim::Formation::ALL[bot.below(5) as usize],
             },
+            6 => {
+                // Into the nearest tower or Town Center of ours.
+                let shelters = owned(sim, player, |k, _| kinds::garrisons(k));
+                if shelters.is_empty() {
+                    return;
+                }
+                CommandKind::Garrison {
+                    ids,
+                    building: shelters[bot.below(shelters.len() as u32) as usize],
+                }
+            }
+            7 => {
+                let shelters = owned(sim, player, |k, _| kinds::garrisons(k));
+                if shelters.is_empty() {
+                    return;
+                }
+                CommandKind::Ungarrison {
+                    building: shelters[bot.below(shelters.len() as u32) as usize],
+                }
+            }
             2 | 3 => {
                 let theirs = owned(sim, enemy, |k, _| {
                     kinds::info(k).class != kinds::Class::Other

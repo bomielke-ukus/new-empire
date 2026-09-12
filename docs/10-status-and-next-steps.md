@@ -22,7 +22,7 @@ Four milestones landed; the vertical slice is at its halfway point.
 | M1 — A world you can look at | Landed | A map from a seed, scrolled and zoomed, rendered by the GPU path and the software rasteriser alike |
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
-| M4 — Combat | **In progress** (steps 1–4 of 6 landed 2026-09-12) | Two forces of 40 fight; counters work; nothing gets stuck |
+| M4 — Combat | **In progress** (steps 1–5 of 6 landed 2026-09-12) | Two forces of 40 fight; counters work; nothing gets stuck |
 | M5 — An opponent | Not started | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
@@ -42,8 +42,11 @@ gather food, wood, stone and gold, build Houses and Storehouses, train
 villagers from the Town Center with rally points onto resources, put up the
 ten M3 buildings as your age allows, research technologies at the Storehouse
 and Market, advance Stone → Tool → Bronze → Iron behind the resource-and-
-buildings gate, and farm with auto-reseed. There is no combat and no
-opponent: it is an economy sandbox.
+buildings gate, and farm with auto-reseed. Train the six Tool Age soldiers,
+attack, attack-move and patrol with stances and formations; drag a palisade
+or stone wall, set a gate into it, put up a Watch Tower and garrison it or
+the Town Center; knock the other side's buildings down to rubble. There is
+no opponent yet: the other players sit still unless a scenario moves them.
 
 ```sh
 cargo run --release -p new-empire           # the game window
@@ -360,10 +363,45 @@ what was done:
   untouched. Attack-move is `M`, not the `A` `docs/03` names, because
   `A` pans the camera.
 
+### Work record: M4 chunk 4 — buildings in combat (2026-09-12)
+
+- **What landed.** Rubble: a building at zero health is the same entity
+  marked dying for sixty seconds, its footprint open from the first tick,
+  its garrison out, its queue lost, a site refunding nothing. Building
+  armour on the kinds table (arrows do the minimum to any building).
+  Towers and the Town Center shoot through the same passes as units: the
+  Watch Tower one arrow of its own, plus one per unit garrisoned inside
+  either. Palisade Wall (Tool), Stone Wall and Gate (Bronze) as one-tile
+  buildings placed in runs; a gate goes onto a wall segment of yours and
+  shuts while an enemy is within two tiles. Garrison (`UX-CMD-09`): units
+  inside cannot be hit or picked, still count toward population, and come
+  out on ALL OUT or when the building falls; a villager who runs home
+  under attack goes inside. A column on attack-move walled out breaks in.
+  `docs/04` §23 has the design notes; `docs/07` D21 the decisions.
+- **What changed for the player.** J opens a DEFENCES page in place of the
+  build grid: tower, palisade, stone wall, gate, back. A wall is dragged as
+  a run with a live count and cost in the top bar; the ghost hatches every
+  tile of it. Right-click a tower or Town Center of yours with units
+  selected to garrison them; the building's panel shows INSIDE n/cap and
+  offers ALL OUT (`T`). A selected tower or Town Center shows its attack
+  and armour. Rubble is drawn where a building stood; an open gate shows
+  its doors swung back. `mapview --scenario siege` and the `siege-hud`
+  golden image show a siege; the corpus bot builds wall runs, gates and
+  towers and garrisons, so every corpus digest was re-recorded.
+- **Measured.** The gates pass and building acquisition add nothing
+  measurable; `marching-8p` and `crowded` stay inside their ceilings.
+- **Not done, deliberately.** Repair (`docs/03` §3's cursor table) is not
+  in the plan's step and waits; a damaged building stays damaged. The
+  Guard Tower is not a slice item. "Automatic gate suggestion at road
+  crossings" (`UX-PLACE-03`) has no roads to suggest at. Collapse and dust
+  are art (M7); rubble appears at once. The Town Center stays off the
+  build panel until Q3 is answered (§6). Hunting still waits.
+
 ### Resume here next session
 
-M4 chunks 1 to 3 are landed. Next is step 5 below: buildings in combat.
-Art continues on the `docs/08` schedule.
+M4 chunks 1 to 4 are landed. Next is step 6 below: the 40-versus-40
+acceptance match and the balance harness. Art continues on the `docs/08`
+schedule.
 
 ## 4. What comes next: M4 — Combat
 
@@ -388,9 +426,10 @@ shippable on its own and has a headless test before it has a sprite.
    attack-move and patrol (`UX-CMD-02`, `-03`), projectiles, target
    acquisition, stances (`UX-CMD-07`), formations (`UX-CMD-08`), and
    villagers fleeing and raising an alarm (`GD-STANCE-02`).
-5. **Buildings in combat.** Destruction and rubble, towers that shoot,
-   walls and gates, garrison (`UX-CMD-09`), and the Town Center as a
-   buildable once Q3 is decided.
+5. **Buildings in combat.** **Done 2026-09-12**, record above: rubble,
+   building armour, towers and the Town Center shooting, walls in runs,
+   gates that shut on an enemy, garrison (`UX-CMD-09`). The Town Center as
+   a buildable still waits on Q3.
 6. **The 40-versus-40 acceptance match** (`RM-M4-01`) as a corpus entry and
    a golden image, plus the balance harness `docs/09` describes: counters
    win as designed over N trials, headless.
@@ -409,6 +448,10 @@ Stated so they are not rediscovered.
   AI-issued ones) is unimplemented until M5 supplies an AI.
 - **Hunting** (`docs/07` D15) waits for a carcass: animals cannot be
   attacked yet.
+- **Repair** (`docs/03` §3) is unimplemented: a damaged building stays
+  damaged until it falls. Villagers "repair" in `docs/02` §5.1.
+- **Waypoints** (`UX-CMD-04`) are untouched; Shift only keeps placement
+  and targeting armed.
 - **Attack-move is `M`**, where `docs/03` says `A`; `A` pans the camera.
 - The age-up **fanfare** waits for audio (M7). The sweep and banner exist.
 - **Auto-reseed is per player**, not per farm as `docs/02` [GD-ECON-05]
@@ -431,7 +474,7 @@ in the order they bite:
 
 | Question | Blocks | Recommendation |
 |---|---|---|
-| Q3 — Does the Government Centre earn its own building? | M4 step 5 (buildable Town Center), the Bronze roster | Keep it as its own building; it is already placed and priced, and folding its upgrades into the Town Center saves less than it costs in legibility |
+| Q3 — Does the Government Centre earn its own building? | The buildable Town Center (M4 step 5 landed without it), the Bronze roster | Keep it as its own building; it is already placed and priced, and folding its upgrades into the Town Center saves less than it costs in legibility |
 | Q9 — A second ownership cue besides colour | M4 (readability of a fight), M7 | Decide before combat art is commissioned; a banner glyph per player is the cheapest candidate |
 | Q1 — Naval in the vertical slice? | M4 scope | Leave it out of the slice; the map generator has water but nothing sails |
 | Q8 — Four ages or five? | Content tables | Four, as `docs/02` stands; M3 shipped the four-age structure |

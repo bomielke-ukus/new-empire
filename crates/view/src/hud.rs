@@ -37,6 +37,10 @@ const BUTTON_GAP: f32 = 4.0;
 /// What a button does when clicked.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Action {
+    /// Open the defences page: the tower, the walls and the gate.
+    Defences,
+    /// Let everything out of the selected building (`UX-CMD-09`).
+    Ungarrison(u32),
     /// Enter placement mode for a building.
     Build(KindId),
     /// Queue a unit at the selected building that trains it.
@@ -126,6 +130,9 @@ pub struct HudInput<'a> {
     pub help: bool,
     /// Whether the player is picking a point for an attack-move or patrol.
     pub targeting: bool,
+    /// The defences page is open: walls, the tower and the gate in place
+    /// of the build grid.
+    pub defences: bool,
 }
 
 /// How long the "F1 CONTROLS" hint stays in the resource bar: the first
@@ -156,6 +163,8 @@ pub fn controls() -> [Vec<(String, String)>; 2] {
         s("T", "STOP"),
         s("C P G B L", "TRAIN AT A BARRACKS, RANGE, STABLE"),
         s("RIGHT", "ON AN ENEMY: ATTACK"),
+        s("RIGHT", "ON A TOWER OR TOWN CENTER: GARRISON"),
+        s("T", "AT A BUILDING: ALL OUT"),
         s("M, P", "ATTACK-MOVE, PATROL, THEN CLICK"),
         s("Q E I K", "STANCE, AGGRESSIVE TO PASSIVE"),
         s("Z", "NEXT FORMATION"),
@@ -170,24 +179,35 @@ pub fn controls() -> [Vec<(String, String)>; 2] {
         .iter()
         .filter(|k| k.buildable && !k.mobile && k.id != kinds::TOWN_CENTER)
         .collect();
-    build.sort_by_key(|k| (k.age, k.id));
+    build.sort_by_key(|k| (in_defences(k.id), k.age, k.id));
+    let age_tag = |k: &KindInfo| {
+        if k.age == sim::Age::Stone {
+            String::new()
+        } else {
+            format!(
+                " ({})",
+                k.age.name().trim_end_matches(" Age").to_uppercase()
+            )
+        }
+    };
     let mut orders: Vec<(String, String)> = build
         .iter()
+        .filter(|k| !in_defences(k.id))
         .map(|k| {
-            let age = if k.age == sim::Age::Stone {
-                String::new()
-            } else {
-                format!(
-                    " ({})",
-                    k.age.name().trim_end_matches(" Age").to_uppercase()
-                )
-            };
             (
                 build_hotkey(k.id).to_string(),
-                format!("{} {}{age}", short_name(k.id), cost_label(&k.cost)),
+                format!("{} {}{}", short_name(k.id), cost_label(&k.cost), age_tag(k)),
             )
         })
         .collect();
+    orders.push(s(&DEFENCES_KEY.to_string(), "DEFENCES PAGE, THEN ONE OF:"));
+    for k in build.iter().filter(|k| in_defences(k.id)) {
+        orders.push((
+            format!("{DEFENCES_KEY} {}", build_hotkey(k.id)),
+            format!("{} {}{}", short_name(k.id), cost_label(&k.cost), age_tag(k)),
+        ));
+    }
+    orders.push(s("DRAG", "A RUN OF WALL; A GATE GOES ONTO A WALL"));
     orders.push(s("V", "TRAIN A VILLAGER"));
     orders.push(s("U", "ADVANCE THE AGE"));
     let keys: String = TECH_KEYS
@@ -344,6 +364,23 @@ fn cost_words(cost: &Cost) -> String {
     }
 }
 
+/// The kinds on the defences page, in its order: the tower, the walls and
+/// the gate. They share one button on the build grid, which has no room
+/// for them and no letters left (`docs/04` §23).
+pub const DEFENCES: [KindId; 4] = [
+    kinds::WATCH_TOWER,
+    kinds::PALISADE_WALL,
+    kinds::STONE_WALL,
+    kinds::GATE,
+];
+/// The key that opens the defences page: the Watch Tower's old key.
+pub const DEFENCES_KEY: char = 'J';
+
+/// True if `kind` is placed from the defences page.
+pub fn in_defences(kind: KindId) -> bool {
+    DEFENCES.contains(&kind)
+}
+
 /// A short name that fits a button beside its cost.
 fn short_name(kind: KindId) -> &'static str {
     match kind {
@@ -355,6 +392,9 @@ fn short_name(kind: KindId) -> &'static str {
         kinds::ARCHERY_RANGE => "ARCHERY",
         kinds::STABLE => "STABLE",
         kinds::WATCH_TOWER => "TOWER",
+        kinds::PALISADE_WALL => "PALISADE",
+        kinds::STONE_WALL => "STONE WALL",
+        kinds::GATE => "GATE",
         kinds::TEMPLE => "TEMPLE",
         kinds::ACADEMY => "ACADEMY",
         kinds::SIEGE_WORKSHOP => "SIEGE",
@@ -363,9 +403,13 @@ fn short_name(kind: KindId) -> &'static str {
     }
 }
 
-/// The key that places a building.
+/// The key that places a building. The defences page replaces the grid,
+/// so its keys need only be distinct from each other and the general keys.
 fn build_hotkey(kind: KindId) -> char {
     match kind {
+        kinds::PALISADE_WALL => 'P',
+        kinds::STONE_WALL => 'N',
+        kinds::GATE => 'G',
         kinds::HOUSE => 'H',
         kinds::STOREHOUSE => 'O',
         kinds::BARRACKS => 'B',
@@ -546,6 +590,7 @@ fn commands(
     selected: &[Slot],
     build_mode: Option<KindId>,
     targeting: bool,
+    defences: bool,
 ) -> Vec<Def> {
     let world = sim.world();
     let mut defs = Vec::new();
@@ -637,13 +682,62 @@ fn commands(
             ),
         ));
     }
+    if any_villager && defences {
+        // The defences page stands in for the grid: back, then the tower,
+        // the walls and the gate.
+        defs.clear();
+        defs.push(Def::on(
+            Action::Cancel,
+            "BACK",
+            'X',
+            "BACK TO THE BUILDINGS",
+        ));
+        let next = pl.age.next().unwrap_or(pl.age);
+        for k in DEFENCES.iter().map(|id| kinds::info(*id)) {
+            if k.age > next {
+                continue;
+            }
+            let check = if k.age > pl.age {
+                Err(format!("NEEDS THE {}", k.age.name().to_uppercase()))
+            } else if !pl.can_afford(&k.cost) {
+                Err("NOT ENOUGH RESOURCES".to_string())
+            } else {
+                Ok(())
+            };
+            let how = if kinds::is_wall(k.id) {
+                ". DRAG A RUN"
+            } else if k.id == kinds::GATE {
+                ". GOES ONTO A WALL OF YOURS"
+            } else {
+                ""
+            };
+            defs.push(
+                Def::on(
+                    Action::Build(k.id),
+                    short_name(k.id),
+                    build_hotkey(k.id),
+                    format!("{}: {}{how}", k.name.to_uppercase(), cost_words(&k.cost)),
+                )
+                .costing(&k.cost)
+                .gated(check),
+            );
+        }
+        return defs;
+    }
     if any_villager {
         let next = pl.age.next().unwrap_or(pl.age);
         // The Town Center is buildable in the table but not from a villager's
         // panel: in the design it comes with the Government Centre (M4+).
+        // The defences share one button: the grid has no room for four more.
         let mut kinds_: Vec<&KindInfo> = kinds::all()
             .iter()
-            .filter(|k| k.buildable && !k.mobile && k.id != kinds::TOWN_CENTER && k.age <= next)
+            .filter(|k| {
+                k.buildable
+                    && !k.mobile
+                    && k.id != kinds::TOWN_CENTER
+                    && !in_defences(k.id)
+                    && k.age <= next
+            })
             .collect();
         kinds_.sort_by_key(|k| (k.age, k.id));
         for k in kinds_ {
@@ -665,6 +759,12 @@ fn commands(
                 .gated(check),
             );
         }
+        defs.push(Def::on(
+            Action::Defences,
+            "DEFENCES",
+            DEFENCES_KEY,
+            "THE WATCH TOWER, WALLS AND THE GATE",
+        ));
     }
     if let Some(b) = building {
         let i = b.index();
@@ -750,6 +850,27 @@ fn commands(
                 'X',
                 "REMOVE THE LAST QUEUED ITEM AND REFUND IT",
             ));
+        }
+        if info.garrison > 0 {
+            // T is STOP for units; for a building alone it turns the
+            // garrison out. With both selected, STOP comes first.
+            let inside = sim.garrison_of(id).len();
+            defs.push(
+                Def::on(
+                    Action::Ungarrison(i as u32),
+                    "ALL OUT",
+                    'T',
+                    format!(
+                        "LET THE {inside} INSIDE OUT. RIGHT-CLICK THE BUILDING WITH UNITS TO GARRISON {} OF THEM",
+                        info.garrison
+                    ),
+                )
+                .gated(if inside == 0 {
+                    Err("NOBODY INSIDE".to_string())
+                } else {
+                    Ok(())
+                }),
+            );
         }
     }
     defs
@@ -1044,7 +1165,18 @@ impl Hud {
                         ty += 12.0;
                     }
                 }
-                if info.combat.attack > 0 && info.mobile {
+                if info.garrison > 0 && world.construction[i].is_none() {
+                    let inside = sim.garrison_of(world.id_at(selected[0])).len();
+                    p.text(
+                        10.0,
+                        ty,
+                        &format!("INSIDE {inside}/{}", info.garrison),
+                        false,
+                        1.0,
+                    );
+                    ty += 12.0;
+                }
+                if info.combat.attack > 0 {
                     let m = sim.modifiers(world.owner[i]);
                     let armour = crate::combat_view::armour_words(info, &m);
                     p.text(
@@ -1057,7 +1189,7 @@ impl Hud {
                     ty += 12.0;
                     p.text(10.0, ty, &fit(&armour, text_w), false, 1.0);
                     ty += 12.0;
-                    if world.owner[i] == me {
+                    if world.owner[i] == me && info.mobile {
                         let line = format!(
                             "{}, {}",
                             stance_label(world.stance[i]),
@@ -1086,6 +1218,7 @@ impl Hud {
                     Order::AttackMove { .. } => "ATTACK-MOVING",
                     Order::Patrol { .. } => "PATROLLING",
                     Order::Flee { .. } => "FLEEING",
+                    Order::Garrison { .. } => "GOING INSIDE",
                 };
                 if !job.is_empty() {
                     p.text(10.0, ty, job, false, 1.0);
@@ -1183,7 +1316,14 @@ impl Hud {
         let bw = ((grid_w - BUTTON_GAP * (GRID_COLS as f32 - 1.0)) / GRID_COLS as f32)
             .clamp(BUTTON_MIN_W, BUTTON_W)
             .floor();
-        let defs = commands(sim, me, &selected, input.build_mode, input.targeting);
+        let defs = commands(
+            sim,
+            me,
+            &selected,
+            input.build_mode,
+            input.targeting,
+            input.defences,
+        );
         for (n, d) in defs.into_iter().take(GRID_COLS * GRID_ROWS).enumerate() {
             let col = (n % GRID_COLS) as f32;
             let row = (n / GRID_COLS) as f32;
@@ -1211,6 +1351,13 @@ impl Hud {
             .find(|b| hover.is_some_and(|(hx, hy)| b.contains(hx, hy)));
         let line = match (hovered, input.build_mode) {
             (Some(b), _) => b.reason.clone(),
+            (None, Some(kind)) if kinds::is_wall(kind) => format!(
+                "PLACING {}: DRAG A RUN, ESC TO CANCEL",
+                kinds::info(kind).name.to_uppercase()
+            ),
+            (None, Some(kind)) if kind == kinds::GATE => {
+                "PLACING GATE: CLICK A WALL OF YOURS OR OPEN GROUND, ESC TO CANCEL".to_string()
+            }
             (None, Some(kind)) => format!(
                 "PLACING {}: CLICK TO BUILD, ESC TO CANCEL",
                 kinds::info(kind).name.to_uppercase()
@@ -1344,7 +1491,7 @@ mod tests {
         let mut keys = std::collections::BTreeSet::from(['T', 'V', 'X', 'R', 'U']);
         for k in kinds::all()
             .iter()
-            .filter(|k| k.buildable && k.id != kinds::TOWN_CENTER)
+            .filter(|k| k.buildable && k.id != kinds::TOWN_CENTER && !in_defences(k.id))
         {
             let key = build_hotkey(k.id);
             assert!(
@@ -1354,12 +1501,24 @@ mod tests {
             );
             assert!(keys.insert(key), "duplicate build shortcut: {key}");
         }
+        assert!(
+            keys.insert(DEFENCES_KEY),
+            "the defences page has its own key"
+        );
         for key in TECH_KEYS {
             assert!(
                 !"WASD".contains(key),
                 "research conflicts with camera movement"
             );
             assert!(keys.insert(key), "duplicate research shortcut: {key}");
+        }
+        // The defences page replaces the grid, so its keys need only be
+        // distinct from each other and from the keys that stay.
+        let mut page = std::collections::BTreeSet::from(['T', 'V', 'X', 'R', 'U']);
+        for k in DEFENCES {
+            let key = build_hotkey(k);
+            assert!(!"WASD".contains(key));
+            assert!(page.insert(key), "duplicate defences shortcut: {key}");
         }
         for k in kinds::all() {
             assert!(
@@ -1445,6 +1604,7 @@ mod tests {
             ui_scale: 1.0,
             help: false,
             targeting: false,
+            defences: false,
         };
         let none = Hud::build(&atlas, &base);
         assert!(none.buttons.is_empty());
@@ -1566,6 +1726,7 @@ mod tests {
                     ui_scale,
                     help: false,
                     targeting: false,
+                    defences: false,
                 },
             )
         };
@@ -1605,6 +1766,7 @@ mod tests {
                 ui_scale: 2.0,
                 help: false,
                 targeting: false,
+                defences: false,
             },
         );
         assert_ne!(lit.sprites, b.sprites, "the hovered button draws lit");
@@ -1620,12 +1782,18 @@ mod tests {
             .iter()
             .filter(|k| k.buildable && k.id != kinds::TOWN_CENTER)
         {
+            let want = if in_defences(k.id) {
+                format!("{DEFENCES_KEY} {}", build_hotkey(k.id))
+            } else {
+                build_hotkey(k.id).to_string()
+            };
             assert!(
-                keys.contains(&build_hotkey(k.id).to_string()),
+                keys.contains(&want),
                 "{} has no line in the overlay",
                 k.name
             );
         }
+        assert!(keys.contains(&DEFENCES_KEY.to_string()));
         for key in ["V", "U", "R", "X"] {
             assert!(keys.iter().any(|k| k == key), "{key} missing");
         }
@@ -1653,6 +1821,7 @@ mod tests {
             ui_scale: 1.0,
             help: false,
             targeting: false,
+            defences: false,
         };
         let closed = Hud::build(&atlas, &base);
         let open = Hud::build(&atlas, &HudInput { help: true, ..base });
@@ -1703,6 +1872,7 @@ mod tests {
                     ui_scale: 1.0,
                     help: false,
                     targeting: false,
+                    defences: false,
                 },
             );
             // Every glyph in the top bar stays inside the window.

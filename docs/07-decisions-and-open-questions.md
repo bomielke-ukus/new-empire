@@ -214,6 +214,25 @@ which is the balance pass at the earliest. The shapes are the ones the RON
 will take (`KindInfo`, `TechInfo`, `Effect`), so the move is mechanical when
 it comes.
 
+### D21 — Gates shut on proximity; garrison arms towers and the Town Center
+**Date:** 2026-09-12
+
+`docs/02` §6 says a gate lets allies pass and enemies not. The cheap way to
+honour that with one navigation grid and one set of flow fields is to make
+the gate's tile a blocker only while an enemy unit is within two tiles
+(open again once none is within three). Per-player passability would have
+multiplied the fields by the players and doubled the sector graph; this
+costs a distance check per gate per tick. The owner's units are also shut
+out while an enemy stands at the gate, which is how later games behave.
+
+Garrison (`UX-CMD-09`) does two things: units inside cannot be hit, and
+each adds an arrow to the building's volley. The Watch Tower fires one of
+its own; the Town Center fires nothing until someone is inside, so a
+villager who runs home under attack makes the Town Center shoot back. Units
+come out when told to or when the building falls, unhurt. Capacities: Town
+Center fifteen, Watch Tower five. Rubble lies for sixty seconds with the
+footprint open from the first tick, so a breach is a breach.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?

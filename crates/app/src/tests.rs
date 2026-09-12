@@ -53,7 +53,6 @@ fn replacement_shortcuts_work_without_panning_or_key_repeat_orders() {
     for (code, kind) in [
         (KeyCode::KeyO, kinds::STOREHOUSE),
         (KeyCode::KeyN, kinds::ARCHERY_RANGE),
-        (KeyCode::KeyJ, kinds::WATCH_TOWER),
     ] {
         draw(&mut app);
         let before = app.camera.focus;
@@ -65,6 +64,21 @@ fn replacement_shortcuts_work_without_panning_or_key_repeat_orders() {
         assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
         assert_eq!(app.build_mode, None);
     }
+    // J opens the defences page; J again on the page places the tower.
+    draw(&mut app);
+    let before = app.camera.focus;
+    app.keyboard_input(KeyCode::KeyJ, ElementState::Pressed, false);
+    app.input.update_camera(&mut app.camera, 0.1);
+    assert_eq!(app.camera.focus, before);
+    assert!(app.defences && app.build_mode.is_none());
+    app.keyboard_input(KeyCode::KeyJ, ElementState::Released, false);
+    draw(&mut app);
+    app.keyboard_input(KeyCode::KeyJ, ElementState::Pressed, false);
+    assert_eq!(app.build_mode, Some(kinds::WATCH_TOWER));
+    assert!(!app.defences);
+    app.keyboard_input(KeyCode::KeyJ, ElementState::Released, false);
+    assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    assert_eq!(app.build_mode, None);
     app.selection.set(vec![store]);
     draw(&mut app);
     let before = app.camera.focus;
@@ -562,4 +576,141 @@ fn soldiers_attack_move_patrol_and_change_stance_from_the_panel() {
     let (px, py) = app.camera.to_window(g.0, g.1 - 4.0);
     let picked = selection::pick(&app.scene, &app.atlas, &app.camera, &app.sim, px, py);
     assert_ne!(picked, Some(enemy), "a corpse is not a target");
+}
+
+/// The window position of a ground point, lifted `lift` pixels.
+fn on_screen(app: &App, x: f32, y: f32, lift: f32) -> (f32, f32) {
+    let g = view::iso::project(x, y, view::iso::ground_height(app.sim.map(), x, y));
+    app.camera.to_window(g.0, g.1 - lift)
+}
+
+/// Garrison by right-click, out again from the panel, and a wall run
+/// dragged from the defences page (`UX-CMD-09`, `UX-PLACE-03`).
+///
+/// REQ: UX-CMD-09
+/// REQ: UX-PLACE-03
+#[test]
+fn units_garrison_on_a_right_click_and_walls_are_dragged_from_the_defences_page() {
+    let mut app = app();
+    let tc = spawn(&mut app, kinds::TOWN_CENTER, 12, 12);
+    let a = spawn(&mut app, kinds::CLUBMAN, 16, 12);
+    let b = spawn(&mut app, kinds::CLUBMAN, 16, 13);
+    app.camera.look_at_tile(12.0, 12.0);
+    app.selection.set(vec![a, b]);
+    draw(&mut app);
+
+    // Over our Town Center the cursor offers garrison, and the click sends them in.
+    let (px, py) = on_screen(&app, 12.5, 12.5, 24.0);
+    assert!(matches!(app.hovered_target(px, py), Some(Target::Garrison)));
+    let commands = app.sim.replay().commands.len();
+    app.right_press(px, py);
+    assert_eq!(app.sim.replay().commands.len(), commands + 1);
+    for _ in 0..300 {
+        app.sim.step();
+        let w = app.sim.world();
+        if [a, b]
+            .iter()
+            .all(|u| w.slot(*u).is_some_and(|s| w.inside[s.index()] == Some(tc)))
+        {
+            break;
+        }
+    }
+    let w = app.sim.world();
+    assert!(w.inside[w.slot(a).unwrap().index()] == Some(tc), "went in");
+    draw(&mut app);
+    assert!(
+        app.selection.ids.is_empty(),
+        "inside, they leave the selection"
+    );
+    let (px, py) = on_screen(&app, 16.5, 12.5, 4.0);
+    assert!(
+        selection::pick(&app.scene, &app.atlas, &app.camera, &app.sim, px, py).is_none(),
+        "and cannot be picked where they stood"
+    );
+
+    // The building's panel shows them and lets them out.
+    app.selection.set(vec![tc]);
+    draw(&mut app);
+    let out = button(&app, "ALL OUT");
+    assert!(
+        out.reason.starts_with("LET THE 2 INSIDE OUT"),
+        "{}",
+        out.reason
+    );
+    click(&mut app, &out);
+    step(&mut app, 3);
+    let w = app.sim.world();
+    assert!(w.inside[w.slot(a).unwrap().index()].is_none());
+    assert!(w.inside[w.slot(b).unwrap().index()].is_none());
+    draw(&mut app);
+    assert!(!button_enabled(&app, "ALL OUT"), "nobody inside now");
+
+    // The Tool Age, for the palisade.
+    let store = spawn(&mut app, kinds::STOREHOUSE, 6, 6);
+    let _ = spawn(&mut app, kinds::BARRACKS, 6, 18);
+    let _ = store;
+    app.issue(CommandKind::Research {
+        building: tc,
+        tech: tech::AGE_TOOL,
+    });
+    step(&mut app, tech::info(tech::AGE_TOOL).unwrap().ticks() + 5);
+    assert_eq!(app.sim.player(ME).unwrap().age, sim::Age::Tool);
+
+    // A villager: DEFENCES opens the page, PALISADE arms the wall, a drag
+    // places the run, with the villager sent to its first segment.
+    let vill = spawn(&mut app, kinds::VILLAGER, 18, 8);
+    app.selection.set(vec![vill]);
+    draw(&mut app);
+    assert!(app.hud.buttons.iter().all(|b| b.label != "PALISADE"));
+    let defences = button(&app, "DEFENCES");
+    click(&mut app, &defences);
+    assert!(app.defences);
+    draw(&mut app);
+    assert!(button_enabled(&app, "BACK"));
+    assert!(app.hud.buttons.iter().all(|b| b.label != "HOUSE"));
+    let palisade = button(&app, "PALISADE");
+    click(&mut app, &palisade);
+    assert_eq!(app.build_mode, Some(kinds::PALISADE_WALL));
+    assert!(!app.defences);
+    let wood = app.sim.player(ME).unwrap().stockpile[1];
+    let commands = app.sim.replay().commands.len();
+    let (px, py) = on_screen(&app, 20.5, 8.5, 0.0);
+    app.input.cursor = Some((px, py));
+    app.left_press(px, py);
+    assert_eq!(app.wall_from, Some((20, 8)));
+    let (qx, qy) = on_screen(&app, 20.5, 12.5, 0.0);
+    app.input.cursor = Some((qx, qy));
+    draw(&mut app);
+    assert!(
+        !app.hud.sprites.is_empty() && app.run_status().starts_with("5 PALISADE WALL 25 WOOD"),
+        "{}",
+        app.run_status()
+    );
+    app.left_release(qx, qy);
+    assert_eq!(
+        app.sim.replay().commands.len(),
+        commands + 5,
+        "five segments"
+    );
+    assert_eq!(app.build_mode, None, "placed; shift would keep placing");
+    step(&mut app, 3);
+    assert_eq!(app.sim.player(ME).unwrap().stockpile[1], wood - 25);
+    let sites: Vec<_> = app
+        .sim
+        .world()
+        .slots()
+        .filter(|s| app.sim.world().kind[s.index()] == kinds::PALISADE_WALL)
+        .collect();
+    assert_eq!(sites.len(), 5);
+    assert!(matches!(
+        app.sim.world().order[app.sim.world().slot(vill).unwrap().index()],
+        Order::Build { .. }
+    ));
+}
+
+fn button_enabled(app: &App, label: &str) -> bool {
+    app.hud
+        .buttons
+        .iter()
+        .any(|b| b.label == label && b.enabled)
 }

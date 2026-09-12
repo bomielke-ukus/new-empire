@@ -262,6 +262,25 @@ buttons and the right-click attack, and check that a corpse is not
 picked (`UX-CMD-07`). The `battle-hud` golden image pins two lines
 fighting: arrows in the air, the first bodies down.
 
+**Landed in chunk 4:** `behaviour_siege.rs`, on the same flat map with a
+deep stockpile: a palisade hit to nothing becomes rubble, the breach opens
+at once, the rubble goes after a minute; a site takes damage and its
+destruction refunds nothing (`GD-BUILD-01`); a Watch Tower shoots a passer-by
+unordered and two bowmen inside make it three arrows a volley; units garrison
+in a Town Center, stop counting as idle, keep counting toward population,
+take no orders, come out round the footprint when let out, and step out
+unhurt when a tower falls (`UX-CMD-09`); a gate lets its owner through, shuts
+on an enemy who cannot pass and gives up, and opens once they leave; a gate
+set onto an own wall segment replaces and refunds it, and one villager builds
+a three-segment run alone (`UX-PLACE-03`); a column on attack-move walled out
+of its destination breaks the wall where it stands and goes on through the
+breach (`UX-CMD-02`); a villager hit near home shelters in the Town Center
+and it shoots back (`GD-STANCE-02`); and a siege replays identically from its
+command log. The app test drives the right-click garrison, the ALL OUT
+button, the DEFENCES page and a dragged wall run. The `siege-hud` golden
+image pins their column at the shut gate, the tower's volley and the
+tower's panel with its garrison.
+
 **Still to come:** a deterministic 40v40 that terminates. Counters win as
 designed over N trials — balance drift is a real regression and headless is
 the cheapest place to catch it.

@@ -28,10 +28,18 @@ impl Selection {
     }
 
     /// Drops ids that no longer exist.
+    /// Drops what can no longer be selected: the gone, the dead and the
+    /// rubble, and units that have gone inside a building.
     pub fn prune(&mut self, sim: &Simulation) {
-        self.ids.retain(|id| sim.world().contains(*id));
+        let world = sim.world();
+        let live = |id: &EntityId| {
+            world
+                .slot(*id)
+                .is_some_and(|s| world.dying[s.index()] == 0 && world.inside[s.index()].is_none())
+        };
+        self.ids.retain(live);
         for g in &mut self.groups {
-            g.retain(|id| sim.world().contains(*id));
+            g.retain(live);
         }
     }
 
@@ -174,7 +182,9 @@ pub fn pick(
         // Corpses are not picked: the click falls through to the ground.
         let i = s.slot as usize;
         let world = sim.world();
-        if world.dying.get(i).is_some_and(|&d| d > 0) {
+        if world.dying.get(i).is_some_and(|&d| d > 0)
+            || world.inside.get(i).is_some_and(|b| b.is_some())
+        {
             continue;
         }
         if world.slots().any(|sl| sl.index() == i) {
@@ -201,7 +211,7 @@ pub fn band_box(
     let mut fixed = Vec::new();
     for slot in world.slots() {
         let i = slot.index();
-        if world.owner[i] != player || world.dying[i] > 0 {
+        if world.owner[i] != player || world.dying[i] > 0 || world.inside[i].is_some() {
             continue;
         }
         let p = world.pos[i];

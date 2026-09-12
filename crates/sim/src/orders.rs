@@ -35,10 +35,13 @@ impl Stance {
         Stance::Passive,
     ];
 
-    /// The stance a fresh unit of `kind` takes.
+    /// The stance a fresh unit of `kind` takes. Buildings stand their
+    /// ground, which is the only thing a tower can do.
     pub fn default_for(kind: KindId) -> Stance {
         if kind == crate::kinds::VILLAGER {
             Stance::Passive
+        } else if crate::kinds::info(kind).footprint > 0 {
+            Stance::StandGround
         } else {
             Stance::Defensive
         }
@@ -167,6 +170,13 @@ pub enum Order {
     Flee {
         /// Where safety is.
         target: Vec2Fx,
+        /// The Town Center to shelter in on arrival, if there is one.
+        into: Option<EntityId>,
+    },
+    /// Walking to a building to shelter inside it (`UX-CMD-09`).
+    Garrison {
+        /// The building.
+        building: EntityId,
     },
     /// Gather from a node, carrying loads home until it is gone.
     Gather {
@@ -273,9 +283,14 @@ impl HashState for Order {
                 h.write(to);
                 h.write_u8(*leg);
             }
-            Order::Flee { target } => {
+            Order::Flee { target, into } => {
                 h.write_u8(7);
                 h.write(target);
+                h.write(into);
+            }
+            Order::Garrison { building } => {
+                h.write_u8(8);
+                h.write(building);
             }
         }
     }

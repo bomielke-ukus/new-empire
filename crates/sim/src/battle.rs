@@ -1,7 +1,7 @@
-//! Fighting: the attack, attack-move, patrol and flee orders, target
-//! acquisition by stance, hits and projectiles, death and corpses, and the
-//! villagers' alarm (`docs/02` §8, §8.1; `docs/03` `UX-CMD-02`, `-03`,
-//! `-07`).
+//! Fighting: the attack, attack-move, patrol, flee and garrison orders,
+//! target acquisition by stance, hits and projectiles, death, corpses and
+//! rubble, gates, and the villagers' alarm (`docs/02` §6, §8, §8.1;
+//! `docs/03` `UX-CMD-02`, `-03`, `-07`, `-09`).
 //!
 //! The damage numbers come from [`crate::combat`]; this module decides who
 //! swings at whom, when, and what happens to what is hit.
@@ -14,12 +14,15 @@ use crate::hash::{HashState, StateHasher};
 use crate::kinds::{self, DamageType, GAIA};
 use crate::nav;
 use crate::orders::{Nav, NavState, Order, Stance, Then};
-use crate::simulation::{Simulation, REACH, TICKS_PER_SECOND};
+use crate::simulation::{Simulation, REACH, REACH_SLACK, TICKS_PER_SECOND};
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
 
 /// Ticks a corpse stays on the ground: thirty seconds.
 pub const DECAY_TICKS: u16 = 600;
+/// Ticks rubble stays on the ground: sixty seconds (`docs/03` §6.2). The
+/// footprint is open from the first of them.
+pub const RUBBLE_TICKS: u16 = 1200;
 /// A projectile's flight speed in tiles per second.
 pub const PROJECTILE_SPEED: Fx = Fx::from_int(8);
 /// Ticks between one player's alarms, so a raid raises one cry, not fifty.
@@ -29,6 +32,24 @@ pub const ALARM_TICKS: u64 = 200;
 const ACQUIRE_EVERY: u64 = 4;
 /// How far a fleeing villager runs when there is no Town Center to run to.
 const FLEE_TILES: i32 = 8;
+/// A gate shuts when an enemy comes this near (`docs/02` §6: "allies pass,
+/// enemies do not"), and opens again once none is within [`GATE_OPEN`].
+/// Nothing walks the gap between the two in a tick, so no enemy is ever
+/// standing on a gate when it shuts.
+const GATE_CLOSE: Fx = Fx::from_int(2);
+const GATE_OPEN: Fx = Fx::from_int(3);
+/// Where the arrows of a building's volley start, in quarter tiles around
+/// its centre, so a full tower visibly fires more than one.
+const VOLLEY_OFFSETS: [(i32, i32); 8] = [
+    (0, 0),
+    (1, 0),
+    (-1, 0),
+    (0, 1),
+    (0, -1),
+    (1, 1),
+    (-1, -1),
+    (1, -1),
+];
 
 /// Something in flight from a ranged unit to its target.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -78,7 +99,7 @@ pub enum Event {
         /// How much.
         damage: i32,
     },
-    /// Something died.
+    /// Something died. For a building, it fell: rubble is where it stood.
     Death {
         /// What.
         kind: KindId,
@@ -90,18 +111,63 @@ pub enum Event {
 }
 
 impl Simulation {
-    /// A live, fightable target: alive, not a corpse, and not something a
-    /// hit means nothing to.
+    /// A live, fightable target: alive, not a corpse or rubble, not
+    /// sheltering inside a building, and not something a hit means nothing
+    /// to.
     pub(crate) fn target_slot(&self, id: EntityId) -> Option<Slot> {
         let s = self.world.slot(id)?;
         let i = s.index();
         let k = kinds::info(self.world.kind[i]);
-        (self.world.dying[i] == 0 && k.class != kinds::Class::Other).then_some(s)
+        (self.world.dying[i] == 0
+            && self.world.inside[i].is_none()
+            && k.class != kinds::Class::Other)
+            .then_some(s)
     }
 
-    /// True if `i` is a live combatant: not a corpse and able to hit.
+    /// True if `i` is a live combatant: not a corpse, not inside a
+    /// building, finished if it is one, and with something to shoot.
     fn can_fight(&self, i: usize) -> bool {
-        self.world.dying[i] == 0 && kinds::info(self.world.kind[i]).combat.attack > 0
+        self.world.dying[i] == 0
+            && self.world.inside[i].is_none()
+            && self.world.construction[i].is_none()
+            && kinds::info(self.world.kind[i]).combat.attack > 0
+            && self.volley(i) > 0
+    }
+
+    /// Projectiles `i` looses per swing: its own, plus one per unit
+    /// garrisoned inside it if it is a building (`UX-CMD-09`).
+    pub(crate) fn volley(&self, i: usize) -> u32 {
+        let k = kinds::info(self.world.kind[i]);
+        let own = k.combat.arrows as u32;
+        if k.mobile || k.garrison == 0 {
+            own
+        } else {
+            own + self.garrison_count(self.world.id_at(Slot::new(i)))
+        }
+    }
+
+    /// How many units shelter inside `building`.
+    pub(crate) fn garrison_count(&self, building: EntityId) -> u32 {
+        self.world
+            .slots()
+            .filter(|s| self.world.inside[s.index()] == Some(building))
+            .count() as u32
+    }
+
+    /// The units sheltering inside `building`, in slot order.
+    pub fn garrison_of(&self, building: EntityId) -> Vec<EntityId> {
+        self.world
+            .slots()
+            .filter(|s| self.world.inside[s.index()] == Some(building))
+            .map(|s| self.world.id_at(s))
+            .collect()
+    }
+
+    /// True if a finished gate stands open: its tile is passable. A gate
+    /// shuts while an enemy is near and opens again when none is.
+    pub fn gate_open(&self, i: usize) -> bool {
+        let t = nav::tile_of(self.world.pos[i]);
+        self.world.kind[i] == kinds::GATE && self.nav.passable(t.0, t.1)
     }
 
     /// The reach of unit `i`'s weapon as a distance from its position to a
@@ -123,8 +189,9 @@ impl Simulation {
         Fx::from_int(kinds::info(self.world.kind[i]).combat.line_of_sight)
     }
 
-    /// The nearest enemy mobile unit within `radius` of `i`, ties by slot.
-    fn nearest_enemy_unit(&self, i: usize, radius: Fx) -> Option<EntityId> {
+    /// The nearest enemy within `radius` of `i`, ties by slot: mobile units,
+    /// or with `buildings` the enemy's buildings and sites instead.
+    fn nearest_enemy(&self, i: usize, radius: Fx, buildings: bool) -> Option<EntityId> {
         let me = self.world.owner[i];
         let pos = self.world.pos[i];
         let limit = radius.raw() as u64 * radius.raw() as u64;
@@ -132,10 +199,15 @@ impl Simulation {
         for s in self.world.slots() {
             let j = s.index();
             let owner = self.world.owner[j];
-            if owner == me || owner == GAIA || self.world.dying[j] != 0 {
+            if owner == me
+                || owner == GAIA
+                || self.world.dying[j] != 0
+                || self.world.inside[j].is_some()
+            {
                 continue;
             }
-            if !kinds::info(self.world.kind[j]).mobile {
+            let k = kinds::info(self.world.kind[j]);
+            if k.mobile == buildings || k.class == kinds::Class::Other {
                 continue;
             }
             let d = pos.distance_sq_raw(self.world.pos[j]);
@@ -146,8 +218,11 @@ impl Simulation {
         best.map(|(_, j)| self.world.id_at(Slot::new(j)))
     }
 
-    /// Turns `i` to face `target`.
+    /// Turns `i` to face `target`. Buildings have one face.
     fn face(&mut self, i: usize, target: Slot) {
+        if !kinds::info(self.world.kind[i]).mobile {
+            return;
+        }
         let here = self.world.pos[i];
         let there = self.world.pos[target.index()];
         if there != here {
@@ -252,14 +327,21 @@ impl Simulation {
     }
 
     /// One tick of an attack-move: walk to the point; acquisition breaks
-    /// in whenever an enemy comes into sight.
+    /// in whenever an enemy unit comes into sight. Where the walk ends, at
+    /// the point or as near as the way allows, the nearest enemy building
+    /// in sight is taken next: a column walled out breaks in, and a column
+    /// that arrives razes what stands there.
     pub(crate) fn tick_attack_move(&mut self, slot: Slot, target: Vec2Fx) {
         let i = slot.index();
         match &self.world.nav[i] {
             None => self.world.nav[i] = Some(Nav::to(target, Fx::from_ratio(15, 100))),
             Some(n) if matches!(n.state, NavState::Arrived | NavState::Failed) => {
                 self.world.nav[i] = None;
-                self.world.order[i] = Order::Idle;
+                let sight = self.sight_of(i);
+                match self.nearest_enemy(i, sight, true) {
+                    Some(b) => self.engage(i, b, Then::AttackMove(target), None),
+                    None => self.world.order[i] = Order::Idle,
+                }
             }
             Some(_) => {}
         }
@@ -283,11 +365,28 @@ impl Simulation {
         }
     }
 
-    /// One tick of a flight: run; stop when there.
-    pub(crate) fn tick_flee(&mut self, slot: Slot, target: Vec2Fx) {
+    /// One tick of a flight: run; shelter in the Town Center on arrival if
+    /// it has room, else stop there.
+    pub(crate) fn tick_flee(&mut self, slot: Slot, target: Vec2Fx, into: Option<EntityId>) {
         let i = slot.index();
+        let shelter = into.and_then(|b| self.shelter_slot(b, self.world.owner[i]));
+        if let Some(bs) = shelter {
+            if self.within(i, bs, REACH_SLACK) {
+                self.enter(i, bs);
+                return;
+            }
+        }
         match &self.world.nav[i] {
-            None => self.world.nav[i] = Some(Nav::to(target, Fx::HALF)),
+            None => {
+                // To a tile beside the door, or to the point.
+                let door = shelter.and_then(|bs| self.approach(i, bs).map(|g| (g, bs)));
+                self.world.nav[i] = Some(match door {
+                    Some((goal, bs)) => {
+                        Nav::along(goal, Fx::from_ratio(2, 10), self.field_key_of(bs))
+                    }
+                    None => Nav::to(target, Fx::HALF),
+                });
+            }
             Some(n) if matches!(n.state, NavState::Arrived | NavState::Failed) => {
                 self.world.nav[i] = None;
                 self.world.order[i] = Order::Idle;
@@ -296,9 +395,149 @@ impl Simulation {
         }
     }
 
-    /// Units that answer enemies on their own pick a target: what their
-    /// stance allows, from where they stand, keeping what they were doing
-    /// for afterwards (`GD-STANCE-01`).
+    /// One tick of a garrison order: walk to the building and go inside
+    /// (`UX-CMD-09`). Gone, full, unfinished or someone else's: stop.
+    pub(crate) fn tick_garrison(&mut self, slot: Slot, building: EntityId) {
+        let i = slot.index();
+        let Some(bs) = self.shelter_slot(building, self.world.owner[i]) else {
+            self.world.nav[i] = None;
+            self.world.order[i] = Order::Idle;
+            return;
+        };
+        // Beside the door is near enough: the approach tile's centre plus
+        // the stopping tolerance can be a little past [`REACH`].
+        if self.within(i, bs, REACH_SLACK) {
+            self.enter(i, bs);
+            return;
+        }
+        match &self.world.nav[i] {
+            None => match self.approach(i, bs) {
+                // To a tile beside the door, as a builder walks to a site.
+                Some(goal) => {
+                    self.world.nav[i] = Some(Nav::along(
+                        goal,
+                        Fx::from_ratio(2, 10),
+                        self.field_key_of(bs),
+                    ));
+                }
+                None => self.world.order[i] = Order::Idle,
+            },
+            Some(n) if matches!(n.state, NavState::Arrived | NavState::Failed) => {
+                // As close as it gets, and not close enough.
+                self.world.nav[i] = None;
+                self.world.order[i] = Order::Idle;
+            }
+            Some(_) => {}
+        }
+    }
+
+    /// `building` as a place `owner`'s units may shelter right now: theirs,
+    /// finished, standing, built to hold units, and with room.
+    pub(crate) fn shelter_slot(&self, building: EntityId, owner: PlayerId) -> Option<Slot> {
+        let bs = self.world.slot(building)?;
+        let b = bs.index();
+        let k = kinds::info(self.world.kind[b]);
+        (self.world.owner[b] == owner
+            && k.garrison > 0
+            && self.world.dying[b] == 0
+            && self.world.construction[b].is_none()
+            && self.garrison_count(building) < k.garrison as u32)
+            .then_some(bs)
+    }
+
+    /// Unit `i` steps inside `bs`.
+    fn enter(&mut self, i: usize, bs: Slot) {
+        self.world.inside[i] = Some(self.world.id_at(bs));
+        self.world.pos[i] = self.world.pos[bs.index()];
+        self.world.nav[i] = None;
+        self.world.move_target[i] = None;
+        self.world.order[i] = Order::Idle;
+        self.world.reload[i] = 0;
+    }
+
+    /// Everything inside `bs` steps out onto the nearest open tiles around
+    /// its footprint, nearest first.
+    pub(crate) fn eject(&mut self, bs: Slot) {
+        let id = self.world.id_at(bs);
+        let units: Vec<usize> = self
+            .world
+            .slots()
+            .map(|s| s.index())
+            .filter(|&j| self.world.inside[j] == Some(id))
+            .collect();
+        if units.is_empty() {
+            return;
+        }
+        let b = bs.index();
+        let fp = kinds::info(self.world.kind[b]).footprint as i32;
+        let (ax, ay) = nav::anchor_tile(self.world.pos[b], fp);
+        let tiles = self.nav.spread(ax, ay, units.len(), None);
+        let centre = self.world.pos[b];
+        for (n, &j) in units.iter().enumerate() {
+            self.world.inside[j] = None;
+            // Walled in completely: stand on the spot and let the next
+            // tick's nudge find a tile.
+            self.world.pos[j] = tiles.get(n).map_or(centre, |t| nav::centre(*t));
+            self.world.order[j] = Order::Idle;
+            self.world.nav[j] = None;
+            self.world.move_target[j] = None;
+        }
+    }
+
+    /// Gates shut while an enemy is near and open again once none is. The
+    /// gate's tile is a blocker in the one grid everyone walks, so the
+    /// flow fields route the owner through an open gate and route an enemy
+    /// round a shut one, or up to it to break it down.
+    pub(crate) fn gates(&mut self) {
+        let gates: Vec<Slot> = self
+            .world
+            .slots()
+            .filter(|s| {
+                let i = s.index();
+                self.world.kind[i] == kinds::GATE
+                    && self.world.dying[i] == 0
+                    && self.world.construction[i].is_none()
+            })
+            .collect();
+        if gates.is_empty() {
+            return;
+        }
+        let mut changed = false;
+        for g in gates {
+            let i = g.index();
+            let me = self.world.owner[i];
+            let pos = self.world.pos[i];
+            let t = nav::tile_of(pos);
+            let open = self.nav.passable(t.0, t.1);
+            let radius = if open { GATE_CLOSE } else { GATE_OPEN };
+            let limit = radius.raw() as u64 * radius.raw() as u64;
+            let threatened = self.world.slots().any(|s| {
+                let j = s.index();
+                let owner = self.world.owner[j];
+                owner != me
+                    && owner != GAIA
+                    && kinds::info(self.world.kind[j]).mobile
+                    && self.world.dying[j] == 0
+                    && self.world.inside[j].is_none()
+                    && pos.distance_sq_raw(self.world.pos[j]) <= limit
+            });
+            if open && threatened {
+                self.nav.block(t.0, t.1);
+                changed = true;
+            } else if !open && !threatened {
+                self.nav.unblock(t.0, t.1);
+                changed = true;
+            }
+        }
+        if changed {
+            self.nav.refresh();
+        }
+    }
+
+    /// Units and towers that answer enemies on their own pick a target:
+    /// what their stance allows, from where they stand, keeping what they
+    /// were doing for afterwards (`GD-STANCE-01`). Only units are taken
+    /// this way; buildings are taken where an attack-move ends.
     pub(crate) fn acquire(&mut self) {
         let tick = self.tick;
         let slots: Vec<Slot> = self
@@ -307,7 +546,6 @@ impl Simulation {
             .filter(|s| {
                 let i = s.index();
                 self.world.owner[i] != GAIA
-                    && kinds::info(self.world.kind[i]).mobile
                     && self.can_fight(i)
                     && self.world.stance[i] != Stance::Passive
                     && (i as u64 + tick).is_multiple_of(ACQUIRE_EVERY)
@@ -323,7 +561,7 @@ impl Simulation {
                 _ => continue,
             };
             let sight = self.sight_of(i);
-            let Some(target) = self.nearest_enemy_unit(i, sight) else {
+            let Some(target) = self.nearest_enemy(i, sight, false) else {
                 continue;
             };
             let here = self.world.pos[i];
@@ -349,7 +587,7 @@ impl Simulation {
     }
 
     /// Every unit on an attack and in range swings when its reload allows:
-    /// a melee hit lands now, a ranged one loosens a projectile.
+    /// a melee hit lands now, a ranged one loosens its volley.
     pub(crate) fn strike(&mut self) {
         let slots: Vec<Slot> = self.world.slots().collect();
         for slot in slots {
@@ -376,18 +614,23 @@ impl Simulation {
             let k = kinds::info(self.world.kind[i]);
             self.world.reload[i] = k.combat.reload_ticks as u16;
             self.face(i, ts);
+            let from = self.world.pos[i];
             if k.combat.range > 0 {
-                let from = self.world.pos[i];
-                self.projectiles.push(Projectile {
-                    pos: from,
-                    target,
-                    aim: self.world.pos[ts.index()],
-                    damage,
-                    owner: self.world.owner[i],
-                    kind: k.combat.damage,
-                });
+                let aim = self.world.pos[ts.index()];
+                let owner = self.world.owner[i];
+                for n in 0..self.volley(i) as usize {
+                    let (dx, dy) = VOLLEY_OFFSETS[n % VOLLEY_OFFSETS.len()];
+                    let start = from + Vec2Fx::new(Fx::from_ratio(dx, 4), Fx::from_ratio(dy, 4));
+                    self.projectiles.push(Projectile {
+                        pos: self.clamp_to_map(start),
+                        target,
+                        aim,
+                        damage,
+                        owner,
+                        kind: k.combat.damage,
+                    });
+                }
             } else {
-                let from = self.world.pos[i];
                 self.hit(ts, damage, from, self.world.owner[i]);
             }
         }
@@ -399,8 +642,9 @@ impl Simulation {
         let mut landed = Vec::new();
         for (n, p) in self.projectiles.iter_mut().enumerate() {
             if let Some(ts) = self.world.slot(p.target) {
-                if self.world.dying[ts.index()] == 0 {
-                    p.aim = self.world.pos[ts.index()];
+                let t = ts.index();
+                if self.world.dying[t] == 0 && self.world.inside[t].is_none() {
+                    p.aim = self.world.pos[t];
                 }
             }
             if p.pos.distance(p.aim) <= step {
@@ -450,33 +694,38 @@ impl Simulation {
             && self.world.health[t] > Fx::ZERO
             && !matches!(self.world.order[t], Order::Flee { .. })
         {
-            let safety = self.safety_for(t, from);
-            self.world.order[t] = Order::Flee { target: safety };
+            let (safety, into) = self.safety_for(t, from);
+            self.world.order[t] = Order::Flee {
+                target: safety,
+                into,
+            };
             self.world.nav[t] = None;
         }
     }
 
-    /// Where a frightened unit runs: the nearest finished Town Center of
-    /// its owner, else straight away from the attacker.
-    fn safety_for(&self, i: usize, from: Vec2Fx) -> Vec2Fx {
+    /// Where a frightened unit runs: the nearest standing, finished Town
+    /// Center of its owner (and which one, to shelter inside), else
+    /// straight away from the attacker.
+    fn safety_for(&self, i: usize, from: Vec2Fx) -> (Vec2Fx, Option<EntityId>) {
         let me = self.world.owner[i];
         let pos = self.world.pos[i];
-        let mut best: Option<(u64, Vec2Fx)> = None;
+        let mut best: Option<(u64, Slot)> = None;
         for s in self.world.slots() {
             let j = s.index();
             if self.world.owner[j] != me
                 || self.world.kind[j] != kinds::TOWN_CENTER
                 || self.world.construction[j].is_some()
+                || self.world.dying[j] > 0
             {
                 continue;
             }
             let d = pos.distance_sq_raw(self.world.pos[j]);
             if best.is_none_or(|(bd, _)| d < bd) {
-                best = Some((d, self.world.pos[j]));
+                best = Some((d, s));
             }
         }
         if let Some((_, tc)) = best {
-            return tc;
+            return (self.world.pos[tc.index()], Some(self.world.id_at(tc)));
         }
         let away = (pos - from).normalized_or_zero();
         let away = if away.length().is_zero() {
@@ -484,12 +733,15 @@ impl Simulation {
         } else {
             away
         };
-        self.clamp_to_map(pos + away * Fx::from_int(FLEE_TILES))
+        (
+            self.clamp_to_map(pos + away * Fx::from_int(FLEE_TILES)),
+            None,
+        )
     }
 
     /// The dead fall and the fallen go: a unit at zero health becomes a
-    /// corpse for [`DECAY_TICKS`], out of every system but the renderer;
-    /// a building at zero is removed outright (rubble is M4's next chunk).
+    /// corpse for [`DECAY_TICKS`], a building rubble for [`RUBBLE_TICKS`],
+    /// both out of every system but the renderer.
     pub(crate) fn deaths(&mut self) {
         let slots: Vec<Slot> = self.world.slots().collect();
         for slot in slots {
@@ -523,7 +775,37 @@ impl Simulation {
                 self.world.carry[i] = None;
                 self.world.reload[i] = 0;
             } else {
-                self.remove(self.world.id_at(slot));
+                self.demolish(slot);
+            }
+        }
+    }
+
+    /// A building falls: its garrison steps out, its footprint opens (a
+    /// breach, if it was a wall), its queue is lost, its builders stop, and
+    /// rubble lies where it stood for [`RUBBLE_TICKS`]. A site destroyed
+    /// refunds nothing.
+    fn demolish(&mut self, slot: Slot) {
+        let i = slot.index();
+        let id = self.world.id_at(slot);
+        let info = kinds::info(self.world.kind[i]);
+        // Out before the footprint opens, so they land round it, not on it.
+        self.eject(slot);
+        let (ax, ay) = nav::anchor_tile(self.world.pos[i], info.footprint as i32);
+        // An open gate's tile is already clear; the counts saturate.
+        self.nav.unblock_footprint(ax, ay, info.footprint as i32);
+        self.nav.refresh();
+        self.world.production[i] = None;
+        self.world.construction[i] = None;
+        self.world.resource[i] = 0;
+        self.world.health[i] = Fx::ZERO;
+        self.world.order[i] = Order::Idle;
+        self.world.reload[i] = 0;
+        self.world.dying[i] = RUBBLE_TICKS;
+        for s in self.world.slots().collect::<Vec<_>>() {
+            let j = s.index();
+            if matches!(self.world.order[j], Order::Build { site, .. } if site == id) {
+                self.world.order[j] = Order::Idle;
+                self.world.nav[j] = None;
             }
         }
     }

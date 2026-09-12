@@ -51,6 +51,12 @@ pub const ACADEMY: KindId = 20;
 pub const SIEGE_WORKSHOP: KindId = 21;
 /// Government Centre: civic upgrades.
 pub const GOVERNMENT_CENTRE: KindId = 22;
+/// Palisade Wall: a cheap timber segment, one tile.
+pub const PALISADE_WALL: KindId = 23;
+/// Stone Wall: the real fortification, one tile.
+pub const STONE_WALL: KindId = 24;
+/// Gate: a wall segment the owner's units pass through (`docs/02` §6).
+pub const GATE: KindId = 25;
 
 /// Wood to reseed a farm.
 pub const FARM_RESEED_COST: Cost = [0, 60, 0, 0];
@@ -226,6 +232,10 @@ pub struct Combat {
     pub bonuses: &'static [(Class, i32)],
     /// How far it sees, in tiles.
     pub line_of_sight: i32,
+    /// Projectiles per volley before garrison. One for every unit; a
+    /// building adds one per unit garrisoned inside it, so a Town Center
+    /// with none fires nothing.
+    pub arrows: u8,
 }
 
 /// Ticks between hits for most units: a hit and a half a second.
@@ -240,7 +250,33 @@ const NO_COMBAT: Combat = Combat {
     pierce_armour: 0,
     bonuses: &[],
     line_of_sight: 4,
+    arrows: 1,
 };
+
+/// A building that only takes hits: no attack, thick enough that arrows
+/// barely scratch it (`pierce` armour) and hand weapons chip at it.
+const fn fortified(melee_armour: i32, pierce_armour: i32) -> Combat {
+    Combat {
+        melee_armour,
+        pierce_armour,
+        ..NO_COMBAT
+    }
+}
+
+/// A building that shoots: pierce damage over `range`, sight a little
+/// further, `arrows` per volley before garrison.
+const fn battlement(attack: i32, range: i32, arrows: u8, armour: (i32, i32)) -> Combat {
+    Combat {
+        attack,
+        damage: DamageType::Pierce,
+        range,
+        line_of_sight: range + 2,
+        melee_armour: armour.0,
+        pierce_armour: armour.1,
+        arrows,
+        ..NO_COMBAT
+    }
+}
 
 const fn melee(attack: i32, melee_armour: i32, pierce_armour: i32) -> Combat {
     Combat {
@@ -310,6 +346,9 @@ pub struct KindInfo {
     pub combat: Combat,
     /// The building that trains it, for units.
     pub trained_at: Option<KindId>,
+    /// Units that fit inside, for buildings that shelter them
+    /// (`UX-CMD-09`); 0 for everything else.
+    pub garrison: u8,
 }
 
 /// Units of construction work per builder per tick at normal speed.
@@ -349,6 +388,7 @@ const BASE: KindInfo = KindInfo {
     class: Class::Other,
     combat: NO_COMBAT,
     trained_at: None,
+    garrison: 0,
 };
 
 const fn unit(
@@ -389,6 +429,9 @@ const fn building(
         build_seconds: seconds,
         buildable: true,
         class: Class::Building,
+        // Arrows do next to nothing to a wall of any kind; hand weapons
+        // and siege bring buildings down.
+        combat: fortified(0, 5),
         ..BASE
     }
 }
@@ -477,6 +520,9 @@ const TABLE: &[KindInfo] = &[
         pop_provided: 5,
         dropoff: true,
         trains: true,
+        // Shoots only what its garrison gives it: one arrow per unit inside.
+        combat: battlement(5, 5, 0, (0, 6)),
+        garrison: 15,
         ..building(TOWN_CENTER, "Town Center", 600, 3, [0, 200, 0, 0], 120)
     },
     KindInfo {
@@ -512,7 +558,25 @@ const TABLE: &[KindInfo] = &[
     },
     KindInfo {
         age: Age::Tool,
+        // One arrow of its own, one more per unit garrisoned.
+        combat: battlement(4, 5, 1, (1, 6)),
+        garrison: 5,
         ..building(WATCH_TOWER, "Watch Tower", 250, 1, [0, 0, 120, 0], 40)
+    },
+    KindInfo {
+        age: Age::Tool,
+        combat: fortified(2, 8),
+        ..building(PALISADE_WALL, "Palisade Wall", 150, 1, [0, 5, 0, 0], 5)
+    },
+    KindInfo {
+        age: Age::Bronze,
+        combat: fortified(3, 10),
+        ..building(STONE_WALL, "Stone Wall", 400, 1, [0, 0, 5, 0], 10)
+    },
+    KindInfo {
+        age: Age::Bronze,
+        combat: fortified(3, 10),
+        ..building(GATE, "Gate", 350, 1, [0, 0, 30, 0], 15)
     },
     KindInfo {
         age: Age::Bronze,
@@ -586,10 +650,28 @@ pub fn gatherable(kind: KindId) -> bool {
 
 /// Buildings that count toward advancing an age (`docs/02` §4): what a
 /// player builds, less the Town Center and Houses the table excludes, and
-/// less Farms, which are fields rather than a commitment to a direction.
+/// less Farms, which are fields rather than a commitment to a direction,
+/// and less walls and gates, which are segments rather than buildings.
 pub fn counts_for_age(kind: KindId) -> bool {
     let k = info(kind);
-    k.buildable && !k.mobile && kind != HOUSE && kind != TOWN_CENTER && kind != FARM
+    k.buildable
+        && !k.mobile
+        && kind != HOUSE
+        && kind != TOWN_CENTER
+        && kind != FARM
+        && !is_wall(kind)
+        && kind != GATE
+}
+
+/// A wall segment: one tile, placed in runs (`UX-PLACE-03`). A gate is a
+/// wall the owner passes through, and is placed onto a wall.
+pub fn is_wall(kind: KindId) -> bool {
+    matches!(kind, PALISADE_WALL | STONE_WALL)
+}
+
+/// A building that shelters units (`UX-CMD-09`).
+pub fn garrisons(kind: KindId) -> bool {
+    info(kind).garrison > 0
 }
 
 #[cfg(test)]
@@ -656,6 +738,25 @@ mod tests {
         assert_eq!(trained_at(ARCHERY_RANGE).count(), 2);
         assert_eq!(trained_at(STABLE).count(), 2);
         assert_eq!(trained_at(TOWN_CENTER).count(), 1);
+        assert!(is_wall(PALISADE_WALL) && is_wall(STONE_WALL) && !is_wall(GATE));
+        assert!(
+            !counts_for_age(GATE) && !counts_for_age(STONE_WALL) && counts_for_age(WATCH_TOWER)
+        );
+        assert!(garrisons(TOWN_CENTER) && garrisons(WATCH_TOWER) && !garrisons(HOUSE));
+        assert_eq!(
+            info(TOWN_CENTER).combat.arrows,
+            0,
+            "a Town Center shoots only its garrison"
+        );
+        assert!(info(WATCH_TOWER).combat.attack > 0 && info(WATCH_TOWER).combat.range > 0);
+        for k in all() {
+            if k.footprint > 0 && k.garrison > 0 {
+                assert!(k.combat.attack > 0, "{}: a garrison adds arrows", k.name);
+            }
+            if k.mobile {
+                assert_eq!(k.combat.arrows, 1, "{}: one shot a volley", k.name);
+            }
+        }
         assert_eq!(info(SPEARMAN).combat.bonuses, &[(Class::Cavalry, 6)]);
         assert_eq!(info(BOWMAN).combat.damage, DamageType::Pierce);
         assert_eq!(info(TREE).combat.attack, 0);

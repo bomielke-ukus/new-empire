@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 # Which milestones' requirements must be covered *now*. Extend this as
 # milestones land; that edit is the moment the new requirements start being
 # enforced, and it belongs in the same commit as the milestone.
-LANDED_PREFIXES="${TRACEABILITY_LANDED:-TA-FX TA-VEC TA-ANG TA-RNG TA-CMD TA-ENT TA-DET TA-CLOCK TA-DEP RM-M0 RM-M2 RM-M3 TA-PATH GD-ECON GD-POP GD-AGE}"
+LANDED_PREFIXES="${TRACEABILITY_LANDED:-TA-FX TA-VEC TA-ANG TA-RNG TA-CMD TA-ENT TA-DET TA-CLOCK TA-DEP RM-M0 RM-M2 RM-M3 TA-PATH GD-ECON GD-POP GD-AGE GD-BUILD}"
 
 python3 - "$LANDED_PREFIXES" <<'PY'
 import re, subprocess, sys

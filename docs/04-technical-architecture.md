@@ -717,3 +717,80 @@ anticipate:
   is `M` and patrol `P`; stances are `Q E I K` and `Z` cycles the
   formation. Soldier keys appear only when no villager is selected, so a
   villager's building keys never clash with them.
+
+## 23. Implementation notes from M4, chunk 4: buildings in combat
+
+- **Rubble is the building, marked dying,** the way a corpse is the unit.
+  `deaths` hands a building at zero health to `demolish`: the garrison
+  steps out onto the ring around the footprint, the footprint is
+  unblocked at once (a breach, if it was a wall), the production queue is
+  lost, builders on it stop, a site refunds nothing, and `World::dying`
+  counts down `RUBBLE_TICKS` (sixty seconds, `docs/03` §6.2). Every check
+  that asked "is this building finished?" now also asks "is it standing?":
+  drop-offs, farms, the age count, training, research, gates, shelter.
+  `remove` skips the unblock for rubble, since it already happened. A new
+  site placed over rubble clears it.
+- **Buildings fight through the same passes as units.** A kind's `Combat`
+  block gained `arrows`, the projectiles per volley: one for every unit,
+  one for the Watch Tower, none for the Town Center; a building adds one
+  per unit garrisoned inside it, so an empty Town Center is silent and a
+  full one is a bulwark. `can_fight` is "attack above zero and a volley
+  above zero", which is what keeps the empty Town Center out of `acquire`.
+  Buildings default to the stand-ground stance and hold an `Attack` order
+  like anything else; `orders` runs the attack machine for a non-mobile
+  entity when it holds one. A volley's arrows start a quarter tile apart
+  so a full tower visibly fires more than one.
+- **Building armour** is on the kinds table through `fortified(melee,
+  pierce)`: five pierce for an ordinary building, so arrows do the
+  minimum, and more for walls (palisade 2/8, stone 3/10). The matrix shows
+  it: a bowman does one to any building, an axeman three to a palisade
+  and two to stone. Siege is still the answer the design intends, and is
+  not in the slice.
+- **A gate is a wall segment whose tile is a blocker only while an enemy
+  is near.** One grid, one set of flow fields, no per-player passability:
+  the `gates` pass (before `orders`) blocks a finished gate's tile when an
+  enemy unit is within two tiles and unblocks it when none is within three.
+  Nothing walks the gap in a tick, so no enemy is ever standing on a gate
+  as it shuts; an owner's unit caught on the tile is nudged off by
+  `keep_off_blocked` like anything else. The fields re-flood for the sector
+  as the grid changes, so an enemy column finds the way shut and, on an
+  attack-move, sets about the wall. A gate under construction is solid
+  like any site; a finished one opens; a spawned one starts open. The
+  view reads the tile's passability for the open frame.
+- **Attack-move takes buildings only where the walk ends.** Chunk 3's
+  acquisition took units in sight; a first version of this chunk took
+  buildings in sight too, and a column chewed every segment it passed
+  instead of advancing. Now `tick_attack_move` looks for the nearest enemy
+  building in sight when its trip arrives or fails: walled out, it breaks
+  in; arrived, it razes what stands there. The order carries the point
+  the player asked for while the trip goes to the formation slot, so a
+  column that stopped for a wall goes on to the right place afterwards.
+- **Garrison is a column, `World::inside`,** the building's id. A unit
+  inside stands at the building's centre, is drawn by nothing, picked by
+  nothing, hit by nothing and moved by nothing, holds no order, and still
+  counts toward population. `Order::Garrison` walks to an approach tile
+  beside the footprint exactly as a builder does, and enters within
+  `REACH_SLACK`. `eject` (the `Ungarrison` command, a fallen or deleted
+  building) spreads them over the nearest open tiles. A fleeing villager
+  carries the Town Center it runs for in `Order::Flee::into` and steps
+  inside on arrival, which is the town bell of later games without the
+  bell; they come out when told to (`ALL OUT`). `Simulation::check` holds
+  every `inside` to a standing, same-owner building built to hold units.
+- **Walls are one-tile buildings placed in runs.** `nav::line_tiles` is
+  the straight eight-connected run between two tiles; the app drags it,
+  the ghost draws every tile hatched on its own, the release issues one
+  `Build` per tile the simulation accepts with the villagers named on the
+  first, and a builder whose site finishes looks for the next site within
+  six tiles (`next_site`), which is how one villager builds a run. A gate
+  is placed onto one of the player's finished wall segments, which it
+  replaces and refunds, or onto clear ground. Walls and gates do not count
+  toward an age.
+- **The defences page.** The Watch Tower, both walls and the gate share
+  one DEFENCES button (`J`) that swaps the build grid for a page of four
+  plus BACK, because the grid has fifteen slots and the Tool Age already
+  fills them, and because every letter is spoken for in the mixed
+  villager-plus-building panel the hotkey test guards. On the page the
+  keys are `J P N G`; the uniqueness rule is now "distinct within any panel
+  that can be shown at once", and the test says so. `T` on a building alone
+  is ALL OUT; with units also selected it is STOP, which comes first.
+

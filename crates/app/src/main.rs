@@ -147,6 +147,10 @@ struct App {
     build_mode: Option<sim::entity::KindId>,
     /// Picking a point for an attack-move or a patrol.
     targeting: Option<Targeting>,
+    /// The defences page is open on the command grid.
+    defences: bool,
+    /// A wall is being dragged from this tile (`UX-PLACE-03`).
+    wall_from: Option<(i32, i32)>,
     /// When the player's side was last told it was under attack.
     alarm_at: Option<Instant>,
     /// The player's HUD magnification on top of the display scale: 1, 1.5
@@ -210,6 +214,8 @@ impl App {
             selection: Selection::new(),
             build_mode: None,
             targeting: None,
+            defences: false,
+            wall_from: None,
             alarm_at: None,
             ui_scale_user: 1.0,
             show_help: false,
@@ -290,7 +296,9 @@ impl App {
             y,
             ok: self.sim.can_place(ME, kind, x, y).is_ok(),
             row: view::palette::row_for_owner(ME),
+            player: ME,
             age: self.sim.player(ME).map_or(0, |p| p.age.index() as u8),
+            run: self.wall_from,
         })
     }
 
@@ -374,7 +382,8 @@ impl App {
                 scene.ui.extend(p.out);
             }
         }
-        let status = format!("SEED {} TICK {}", self.sim.seed(), self.sim.tick());
+        let run = self.run_status();
+        let status = format!("{run}SEED {} TICK {}", self.sim.seed(), self.sim.tick());
         let hud = Hud::build(
             &self.atlas,
             &HudInput {
@@ -390,6 +399,7 @@ impl App {
                 hover: self.input.cursor,
                 banner: banner.as_deref(),
                 targeting: self.targeting.is_some(),
+                defences: self.defences,
                 ui_scale: self.ui_scale(),
                 help: self.show_help,
             },
@@ -429,6 +439,7 @@ impl App {
                 Some(Target::Gather) => CursorIcon::Grab,
                 Some(Target::Assist) => CursorIcon::Pointer,
                 Some(Target::Attack) => CursorIcon::Crosshair,
+                Some(Target::Garrison) => CursorIcon::Copy,
                 _ => CursorIcon::Default,
             },
             _ => CursorIcon::Default,
@@ -452,7 +463,58 @@ impl App {
         if enemy_of_me(&self.sim, i) && !self.selection.own_fighters(&self.sim, ME).is_empty() {
             return Some(Target::Attack);
         }
+        if shelter_of_me(&self.sim, i) && !self.selection.own_mobile(&self.sim, ME).is_empty() {
+            return Some(Target::Garrison);
+        }
         Some(Target::Other(id))
+    }
+
+    /// "12 PALISADE WALL 60 WOOD " while a run is being dragged, else nothing.
+    fn run_status(&self) -> String {
+        let (Some(kind), Some(from), Some(to)) =
+            (self.build_mode, self.wall_from, self.hover_tile())
+        else {
+            return String::new();
+        };
+        let info = kinds::info(kind);
+        let n = sim::nav::line_tiles(from, to)
+            .into_iter()
+            .filter(|(x, y)| self.sim.can_place(ME, kind, *x, *y).is_ok())
+            .count() as i32;
+        let cost: Vec<String> = info
+            .cost
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| **c > 0)
+            .map(|(r, c)| {
+                format!(
+                    "{} {}",
+                    c * n,
+                    kinds::Resource::from_index(r).name().to_uppercase()
+                )
+            })
+            .collect();
+        format!("{n} {} {} ", info.name.to_uppercase(), cost.join(" "))
+    }
+
+    /// The wall run dragged from `from` to the cursor is placed: every
+    /// tile the simulation accepts, the villagers sent to the first so they
+    /// carry on along it (`UX-PLACE-03`).
+    fn place_run(&mut self, kind: sim::KindId, from: (i32, i32)) {
+        let Some(to) = self.hover_tile() else {
+            return;
+        };
+        let mut ids = self.selection.own_villagers(&self.sim, ME);
+        for (x, y) in sim::nav::line_tiles(from, to) {
+            if self.sim.can_place(ME, kind, x, y).is_ok() {
+                self.issue(CommandKind::Build {
+                    kind,
+                    x,
+                    y,
+                    ids: std::mem::take(&mut ids),
+                });
+            }
+        }
     }
 
     fn left_press(&mut self, px: f32, py: f32) {
@@ -479,7 +541,10 @@ impl App {
         }
         if let Some(kind) = self.build_mode {
             if let Some((x, y)) = self.hover_tile() {
-                if self.sim.can_place(ME, kind, x, y).is_ok() {
+                if kinds::is_wall(kind) {
+                    // A wall is dragged: the run is placed on release.
+                    self.wall_from = Some((x, y));
+                } else if self.sim.can_place(ME, kind, x, y).is_ok() {
                     let ids = self.selection.own_villagers(&self.sim, ME);
                     self.issue(CommandKind::Build { kind, x, y, ids });
                     if !self.modifiers.shift_key() {
@@ -508,6 +573,13 @@ impl App {
 
     fn left_release(&mut self, px: f32, py: f32) {
         self.input.scrubbing = false;
+        if let (Some(kind), Some(from)) = (self.build_mode, self.wall_from.take()) {
+            self.place_run(kind, from);
+            if !self.modifiers.shift_key() {
+                self.build_mode = None;
+            }
+            return;
+        }
         let Some(from) = self.selection.drag_from.take() else {
             return;
         };
@@ -555,9 +627,11 @@ impl App {
     }
 
     fn right_press(&mut self, px: f32, py: f32) {
-        if self.build_mode.is_some() || self.targeting.is_some() {
+        if self.build_mode.is_some() || self.targeting.is_some() || self.defences {
             self.build_mode = None;
+            self.wall_from = None;
             self.targeting = None;
+            self.defences = false;
             return;
         }
         let minimap_uv = self.minimap_rect().to_uv(px, py);
@@ -597,6 +671,13 @@ impl App {
                 self.issue(CommandKind::Attack {
                     ids: fighters,
                     target: id,
+                });
+                return;
+            }
+            if !mobile.is_empty() && shelter_of_me(&self.sim, i) {
+                self.issue(CommandKind::Garrison {
+                    ids: mobile,
+                    building: id,
                 });
                 return;
             }
@@ -644,6 +725,20 @@ impl App {
             Action::Build(kind) => {
                 if !self.selection.own_villagers(&self.sim, ME).is_empty() {
                     self.build_mode = Some(kind);
+                    self.defences = false;
+                }
+            }
+            Action::Defences => self.defences = true,
+            Action::Ungarrison(slot) => {
+                let building = {
+                    let world = self.sim.world();
+                    world
+                        .slots()
+                        .find(|s| s.index() as u32 == slot)
+                        .map(|s| world.id_at(s))
+                };
+                if let Some(building) = building {
+                    self.issue(CommandKind::Ungarrison { building });
                 }
             }
             Action::Train(kind) => {
@@ -662,7 +757,9 @@ impl App {
             }
             Action::Cancel => {
                 self.build_mode = None;
+                self.wall_from = None;
                 self.targeting = None;
+                self.defences = false;
             }
             Action::AttackMove => self.targeting = Some(Targeting::AttackMove),
             Action::Patrol => self.targeting = Some(Targeting::Patrol),
@@ -767,9 +864,11 @@ impl App {
             KeyCode::Escape => {
                 if self.show_help {
                     self.show_help = false;
-                } else if self.build_mode.is_some() || self.targeting.is_some() {
+                } else if self.build_mode.is_some() || self.targeting.is_some() || self.defences {
                     self.build_mode = None;
+                    self.wall_from = None;
                     self.targeting = None;
+                    self.defences = false;
                 } else if !self.selection.ids.is_empty() {
                     self.selection.set(vec![]);
                 } else {
@@ -839,6 +938,7 @@ enum Target {
     Gather,
     Assist,
     Attack,
+    Garrison,
     #[allow(dead_code)]
     Other(EntityId),
 }
@@ -862,6 +962,16 @@ fn enemy_of_me(sim: &Simulation, i: usize) -> bool {
         && owner != kinds::GAIA
         && world.dying[i] == 0
         && kinds::info(world.kind[i]).class != kinds::Class::Other
+}
+
+/// True if entity `i` is a finished building of ours that units can
+/// shelter in (`UX-CMD-09`).
+fn shelter_of_me(sim: &Simulation, i: usize) -> bool {
+    let world = sim.world();
+    world.owner[i] == ME
+        && world.dying[i] == 0
+        && world.construction[i].is_none()
+        && kinds::garrisons(world.kind[i])
 }
 
 /// True if the player's villagers may gather from entity `i`: a node with

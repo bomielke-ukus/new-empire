@@ -209,6 +209,28 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // A siege: their column bunched at the shut gate of a palisade that
+        // seals the map, the Watch Tower behind it shooting with two bowmen
+        // inside, and the tower's panel showing its garrison and its job.
+        name: "siege-hud",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "siege",
+            "--ticks",
+            "262",
+            "--select-kind",
+            "watch_tower",
+            "--hud",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The F1 controls overlay over a fresh match, with the resource bar
         // still carrying its first-minute hint.
         name: "controls-overlay",

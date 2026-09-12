@@ -153,6 +153,19 @@ pub enum CommandKind {
         /// The formation.
         formation: Formation,
     },
+    /// Walk units into one of the player's buildings and shelter there
+    /// (`UX-CMD-09`).
+    Garrison {
+        /// Which units.
+        ids: Vec<EntityId>,
+        /// A finished Town Center or tower of the player's.
+        building: EntityId,
+    },
+    /// Let everything inside a building out (`UX-CMD-09`).
+    Ungarrison {
+        /// The building.
+        building: EntityId,
+    },
 }
 
 /// A command with its issuing player.
@@ -219,8 +232,10 @@ impl Command {
             | CommandKind::AttackMove { ids, .. }
             | CommandKind::Patrol { ids, .. }
             | CommandKind::SetStance { ids, .. }
-            | CommandKind::SetFormation { ids, .. } => ids.len(),
-            CommandKind::Spawn { .. }
+            | CommandKind::SetFormation { ids, .. }
+            | CommandKind::Garrison { ids, .. } => ids.len(),
+            CommandKind::Ungarrison { .. }
+            | CommandKind::Spawn { .. }
             | CommandKind::Despawn { .. }
             | CommandKind::Train { .. }
             | CommandKind::CancelTrain { .. }
@@ -319,6 +334,15 @@ impl HashState for CommandKind {
                 h.write_u8(16);
                 h.write(ids);
                 h.write_u8(*formation as u8);
+            }
+            CommandKind::Garrison { ids, building } => {
+                h.write_u8(17);
+                h.write(ids);
+                h.write(building);
+            }
+            CommandKind::Ungarrison { building } => {
+                h.write_u8(18);
+                h.write(building);
             }
             CommandKind::SetAutoReseed { enabled } => {
                 h.write_u8(11);
