@@ -248,13 +248,19 @@ what was done:
   six levels, steps about the cursor, and accumulates wheel travel so a
   trackpad steps once per unit of travel instead of once per event.
   Pinned by the `retina-hud` golden and by camera, input, HUD and app tests.
-- **Colours are boring; the Town Center and House look boring.** Assessed,
-  not yet done: a palette pass in `assets/palette/ancient.ron` (raise
-  chroma and lightness at the top of the terrain and foliage ramps, add
-  tile variation) to be shown as before/after renders first; and the real
-  buildings come from the render pipeline (`docs/08` §9 step 3), which
-  needs Blender on the Mac. Placeholder polish is possible meanwhile but is
-  thrown away when the models arrive.
+- **Colours are boring.** Done as a palette pass, shown as before/after
+  renders: the light ends of the terrain, foliage and building-material
+  ramps in `assets/palette/ancient.ron` carry more chroma and lightness
+  while the dark ends stay cool and deep, so shadows keep their weight;
+  grass tiles lean toward dry grass in patches a few tiles across so a
+  meadow is not one flat green; per-tile brightness variation widened.
+  The baked table and the villager sheet's palette chunk were regenerated
+  (`atlas export --rust`, `atlas repalette`), the player-colour separation
+  test still passes, and every golden image was re-baselined.
+- **The Town Center and House look boring.** Not done: the real buildings
+  come from the render pipeline (`docs/08` §9 step 3), which needs Blender
+  on the Mac. Placeholder polish is possible meanwhile but is thrown away
+  when the models arrive; the choice is the owner's.
 - **A reminder of the keyboard commands.** Done: `F1` or `?` opens a
   controls overlay generated from the same hotkey tables as the command
   grid, the resource bar shows "F1 CONTROLS" for the first minute, and

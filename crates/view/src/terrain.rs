@@ -63,17 +63,40 @@ pub fn terrain_colour(t: Terrain) -> [f32; 3] {
     })
 }
 
-/// Deterministic per-tile brightness variation in `[0.94, 1.06]`.
-fn variation(x: i32, y: i32) -> f32 {
+fn hash2(x: i32, y: i32) -> u32 {
     let h = (x as u32).wrapping_mul(73_856_093) ^ (y as u32).wrapping_mul(19_349_663);
-    let h = h ^ (h >> 13);
-    0.94 + (h % 1000) as f32 / 1000.0 * 0.12
+    h ^ (h >> 13)
+}
+
+/// Deterministic per-tile brightness variation in `[0.92, 1.08]`.
+fn variation(x: i32, y: i32) -> f32 {
+    0.92 + (hash2(x, y) % 1000) as f32 / 1000.0 * 0.16
+}
+
+/// How far a grass tile leans toward dry grass: patches a few tiles
+/// across, so a meadow has drifts of paler growth in it rather than one
+/// flat green. Zero for most tiles, up to about a third for the driest.
+fn dryness(x: i32, y: i32) -> f32 {
+    // Coarse cells give the patches their size; the fine hash breaks up
+    // their edges so they do not read as a grid.
+    let coarse = hash2(x.div_euclid(3), y.div_euclid(3)) % 100;
+    let fine = hash2(x + 977, y + 331) % 100;
+    let mix = (coarse as f32 * 0.7 + fine as f32 * 0.3) / 100.0;
+    ((mix - 0.55) / 0.45).clamp(0.0, 1.0) * 0.35
 }
 
 /// A tile's own colour: type, variation, and slope shading with the light
 /// coming from the upper-left of the screen.
 pub fn tile_colour(map: &TileMap, x: i32, y: i32) -> [f32; 3] {
-    let base = terrain_colour(map.terrain(x, y));
+    let terrain = map.terrain(x, y);
+    let mut base = terrain_colour(terrain);
+    if terrain == Terrain::Grass {
+        let dry = crate::palette::rgb_f32(crate::palette::index("grass_dry", 5));
+        let d = dryness(x, y);
+        for (b, d_c) in base.iter_mut().zip(dry) {
+            *b += (d_c - *b) * d;
+        }
+    }
     let [top, right, bottom, left] = map.tile_corners(x, y).map(|h| h as f32);
     let slope = ((top + left) - (right + bottom)) * 0.5;
     let shade = (1.0 + 0.16 * slope).clamp(0.6, 1.4);
@@ -235,10 +258,30 @@ mod tests {
         for y in 0..50 {
             for x in 0..50 {
                 let v = variation(x, y);
-                assert!((0.94..=1.06).contains(&v));
+                assert!((0.92..=1.08).contains(&v));
                 assert_eq!(v, variation(x, y));
             }
         }
         assert_ne!(variation(3, 4), variation(4, 3));
+    }
+
+    #[test]
+    fn meadows_have_dry_patches_but_most_grass_is_grass() {
+        let mut dry = 0;
+        for y in 0..60 {
+            for x in 0..60 {
+                let d = dryness(x, y);
+                assert!((0.0..=0.35).contains(&d));
+                assert_eq!(d, dryness(x, y));
+                if d > 0.0 {
+                    dry += 1;
+                }
+            }
+        }
+        let share = dry as f32 / 3600.0;
+        assert!(
+            (0.15..0.55).contains(&share),
+            "a meadow is mostly green with some pale drifts, not {share:.2} dry"
+        );
     }
 }

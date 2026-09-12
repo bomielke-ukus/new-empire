@@ -41,26 +41,28 @@ PaletteSpec(
         (name: "cloth_red",       start:  73, steps: 8, dark: "#3d0f0f", light: "#d95c4a", hue_shift: 10.0),
         (name: "cloth_blue",      start:  81, steps: 8, dark: "#101a3a", light: "#6f92cf", hue_shift:-10.0),
         // Architecture: the age progression thatch -> mudbrick -> dressed stone
-        (name: "timber",          start:  89, steps: 8, dark: "#2b1a0d", light: "#b8895a", hue_shift: -5.0),
+        (name: "timber",          start:  89, steps: 8, dark: "#2b1a0d", light: "#c9955f", hue_shift: -5.0),
         (name: "timber_dark",     start:  97, steps: 8, dark: "#1a0f07", light: "#7a5636", hue_shift: -5.0),
-        (name: "thatch",          start: 105, steps: 8, dark: "#4a3512", light: "#e8cd7e", hue_shift: -8.0),
-        (name: "mudbrick",        start: 113, steps: 8, dark: "#40281a", light: "#d6a878", hue_shift: -5.0),
+        (name: "thatch",          start: 105, steps: 8, dark: "#4a3512", light: "#f2d68a", hue_shift: -8.0),
+        (name: "mudbrick",        start: 113, steps: 8, dark: "#40281a", light: "#e0b07c", hue_shift: -5.0),
         (name: "mudbrick_shadow", start: 121, steps: 8, dark: "#2a1810", light: "#9c7452", hue_shift: -5.0),
-        (name: "limestone",       start: 129, steps: 8, dark: "#423d33", light: "#ece4d0", hue_shift: -8.0),
+        (name: "limestone",       start: 129, steps: 8, dark: "#423d33", light: "#f2eadb", hue_shift: -8.0),
         (name: "granite",         start: 137, steps: 8, dark: "#22242a", light: "#9fa3ab", hue_shift:-10.0),
         // Metals
         (name: "bronze",          start: 145, steps: 8, dark: "#3a2208", light: "#e0a94e", hue_shift:  8.0),
         (name: "iron",            start: 153, steps: 8, dark: "#14161c", light: "#c2c8d2", hue_shift:-12.0),
         (name: "gold",            start: 161, steps: 8, dark: "#4a3208", light: "#ffe07a", hue_shift:  6.0),
-        // Terrain
-        (name: "grass",           start: 169, steps: 8, dark: "#172a12", light: "#7ba84a", hue_shift: -6.0),
-        (name: "grass_dry",       start: 177, steps: 8, dark: "#322a10", light: "#c4b060", hue_shift: -4.0),
-        (name: "dirt",            start: 185, steps: 8, dark: "#2e1f12", light: "#a8845a", hue_shift: -4.0),
-        (name: "earth_dark",      start: 193, steps: 8, dark: "#1a1108", light: "#6b5236", hue_shift: -4.0),
-        (name: "sand",            start: 201, steps: 8, dark: "#4d3f22", light: "#f0dfae", hue_shift: -6.0),
-        (name: "water_shallow",   start: 209, steps: 8, dark: "#0e3040", light: "#6fc4cf", hue_shift: -8.0),
-        (name: "water_deep",      start: 217, steps: 8, dark: "#05131f", light: "#2a6382", hue_shift:-10.0),
-        (name: "foliage",         start: 225, steps: 8, dark: "#0d1c0e", light: "#4e8a3a", hue_shift: -6.0),
+        // Terrain. The dark ends stay cool and deep so shadows keep their
+        // weight; the light ends carry the chroma, which is where a sunlit
+        // field reads as sunlit rather than as olive.
+        (name: "grass",           start: 169, steps: 8, dark: "#163a18", light: "#95d552", hue_shift: -4.0),
+        (name: "grass_dry",       start: 177, steps: 8, dark: "#3c3410", light: "#dccc6c", hue_shift: -4.0),
+        (name: "dirt",            start: 185, steps: 8, dark: "#3a2614", light: "#c39868", hue_shift: -4.0),
+        (name: "earth_dark",      start: 193, steps: 8, dark: "#1a1108", light: "#7a5d3c", hue_shift: -4.0),
+        (name: "sand",            start: 201, steps: 8, dark: "#5c4a24", light: "#f7e6b3", hue_shift: -6.0),
+        (name: "water_shallow",   start: 209, steps: 8, dark: "#0d3d55", light: "#7fdbe8", hue_shift: -8.0),
+        (name: "water_deep",      start: 217, steps: 8, dark: "#061a2c", light: "#2f74a0", hue_shift:-10.0),
+        (name: "foliage",         start: 225, steps: 8, dark: "#0f2a12", light: "#66b447", hue_shift: -6.0),
     ],
 
     reserve: (233, 238),
