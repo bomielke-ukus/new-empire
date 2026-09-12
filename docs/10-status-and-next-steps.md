@@ -206,6 +206,32 @@ chunks 1–3 are merged. The session is paused before chunk 4.
   squash-merged it as `9e0b3e6`, with the verified final head protected
   against intervening changes.
 
+### Work record: chunk 4
+
+- **First launch on the Mac (2026-09-12) aborted before a window
+  appeared.** MacBook Air, Mac16,13, Apple M4, macOS 27.0 (26A428). The
+  crash report shows a Rust panic inside winit's `applicationDidFinishLaunching`
+  callback, which cannot unwind, so the process aborted with SIGABRT.
+- **Diagnosis.** macOS 26 changed the Objective-C type encoding of
+  `countByEnumeratingWithState:objects:count:` from unsigned to signed.
+  winit 0.30 enumerates `NSScreen` through it at launch, and objc2 0.5's
+  signature check (active in debug builds) panics there. Upstream fixed it
+  on winit's main branch by enabling objc2's `relax-sign-encoding` feature
+  (rust-windowing/winit#4302); the 0.30 line does not carry the fix.
+- **Fix.** `crates/app/Cargo.toml` enables `relax-sign-encoding` on objc2
+  for macOS. The app also installs a panic hook that copies every panic
+  message to `new-empire-panic.log` in the working directory, so a crash in
+  a native callback leaves the cause on disk beside the crash report.
+- **The renderer is now exercised on a real device in CI.**
+  `crates/render/tests/headless.rs` creates a wgpu device on whatever
+  adapter exists (a software Vulkan driver on the Linux job, Metal on the
+  macOS runner where available), builds every pipeline, renders a frame and
+  reads it back. It passed here on lavapipe. It skips only when no adapter
+  exists at all.
+- **Still to do:** rerun the live check on the Mac with the fix. If a release
+  build still aborts, the panic line in the terminal, or the log file, names
+  the next cause.
+
 ### Resume here next session
 
 Chunks 1–3 are complete and merged. Chunk 4 has not started; the live

@@ -17,3 +17,12 @@ render = { path = "../render" }
 winit = "0.30"
 wgpu = "23"
 pollster = "0.4"
+
+# macOS 26 changed the Objective-C type encoding of `countByEnumeratingWithState:`
+# from unsigned to signed. winit enumerates NSScreen through it at launch, and
+# objc2's debug-build signature check then panics inside an AppKit callback,
+# which aborts the process before the window exists. Upstream fixed it by
+# turning on this feature (rust-windowing/winit#4302); until winit 0.30 ships
+# with it, enable it here. Feature flags unify, so winit's objc2 gets it too.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.5", features = ["relax-sign-encoding"] }

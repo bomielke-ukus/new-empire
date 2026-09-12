@@ -973,6 +973,7 @@ dependencies = [
 name = "new-empire"
 version = "0.1.0"
 dependencies = [
+ "objc2",
  "pollster",
  "render",
  "sim",
@@ -1557,6 +1558,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "naga",
+ "pollster",
  "sim",
  "view",
  "wgpu",

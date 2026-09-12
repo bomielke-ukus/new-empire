@@ -868,6 +868,23 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
+    // A panic inside an AppKit or Win32 callback cannot unwind, so the
+    // process aborts and the message is easy to lose. Keep a copy on disk
+    // beside the usual stderr line, so a crash report can be paired with
+    // the cause.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default_hook(info);
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("new-empire-panic.log")
+        {
+            let _ = writeln!(f, "{info}");
+            eprintln!("(panic recorded in new-empire-panic.log)");
+        }
+    }));
     let event_loop = EventLoop::new().expect("event loop");
     let mut app = App::new();
     event_loop.run_app(&mut app).expect("event loop failed");

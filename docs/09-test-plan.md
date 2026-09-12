@@ -422,9 +422,12 @@ structured observation sheet, and the criterion operationalised: unprompted
 session length, and whether they start a second match.
 
 **Real hardware.** The golden images run on a software rasteriser, which proves
-the renderer and proves nothing about a GPU driver. One pass on real Mac
-hardware per milestone, recording the macOS version, hardware and display/GPU
-setup.
+the renderer and proves nothing about a GPU driver. `crates/render/tests/headless.rs`
+closes part of that gap: it builds every wgpu pipeline on a real device and
+renders a frame, on a software Vulkan driver in the Linux job and on Metal on
+the macOS runner. What it cannot prove is the window, the swapchain and the
+input path, so one pass on real Mac hardware per milestone stays, recording
+the macOS version, hardware and display/GPU setup.
 
 ---
 
