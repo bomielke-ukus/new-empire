@@ -1041,6 +1041,11 @@ impl Simulation {
 
     fn apply_commands(&mut self) {
         for cmd in self.queue.drain_due(self.tick) {
+            // A command that places or clears a building leaves the grid
+            // dirty; the next one may ask it what is connected. Relabel
+            // between them (free when nothing changed), so a move ordered
+            // in the same tick as a placement sees the new footprint.
+            self.nav.refresh();
             self.apply(cmd);
         }
     }
@@ -3253,6 +3258,55 @@ mod tests {
             sim.nearest_dropoff(near, 0),
             Some(store),
             "villagers should deliver to the storehouse"
+        );
+    }
+
+    /// A building placed and a group move ordered in the same tick: the
+    /// grid is relabelled between the two commands, so the formation's
+    /// connectivity check resolves against the new footprint instead of
+    /// tripping the freshness check. Soldiers, because a formation is what
+    /// asks the grid what is connected; villagers spread without asking.
+    #[test]
+    fn a_placement_and_a_move_in_one_tick_see_the_same_grid() {
+        let mut sim = Simulation::new(3, flat(48, 2));
+        sim.issue(spawn_cmd(0, kinds::VILLAGER, 10, 10));
+        sim.issue(spawn_cmd(1, kinds::CLUBMAN, 30, 30));
+        sim.issue(spawn_cmd(1, kinds::CLUBMAN, 31, 30));
+        run(&mut sim, 3);
+        let mine = owned(&sim, 0, kinds::VILLAGER);
+        let theirs = owned(&sim, 1, kinds::CLUBMAN);
+        assert_eq!(theirs.len(), 2);
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Build {
+                kind: kinds::HOUSE,
+                x: 20,
+                y: 20,
+                ids: mine,
+            },
+        });
+        sim.issue(Command {
+            player: 1,
+            kind: CommandKind::Move {
+                ids: theirs.clone(),
+                target: Vec2Fx::from_int(20, 20),
+            },
+        });
+        run(&mut sim, 3);
+        assert_eq!(
+            owned(&sim, 0, kinds::HOUSE).len(),
+            1,
+            "the house was placed"
+        );
+        let i = sim.world().slot(theirs[0]).unwrap().index();
+        let goal = sim.world().nav[i]
+            .as_ref()
+            .map(|n| n.goal)
+            .expect("walking");
+        let t = nav::tile_of(goal);
+        assert!(
+            sim.nav().passable(t.0, t.1),
+            "the goal was moved off the new footprint: {t:?}"
         );
     }
 

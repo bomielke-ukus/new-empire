@@ -394,7 +394,13 @@ what was done:
   measurable; `marching-8p` and `crowded` stay inside their ceilings.
 - **Verified.** Full CI passed on the first attempt for both M4 commits of
   the day: chunk 3 (`6753c84`, run `34696906353`) and chunk 4 (`a978d73`,
-  run `34699090008`), on every platform job. Not yet seen on a Mac: the
+  run `34699090008`), on every platform job. The status-document commit
+  that followed (`6135fda`, run `34701101338`) failed on macOS in the
+  config sweep (`properties_sim`), on a latent bug older than this chunk:
+  a building placed and a move ordered in the same tick left the grid
+  dirty for the move's connectivity query. Fixed the same day by
+  relabelling the grid between commands, with the seed kept in the
+  regression file and a unit test for the pair. Not yet seen on a Mac: the
   next live check should train soldiers, right-click an enemy, attack-move
   a column into a walled base, drag a wall, set a gate, garrison a tower
   and knock a building down.
