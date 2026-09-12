@@ -7,7 +7,7 @@
 //! simrunner record [--dir DIR]
 //! simrunner golden [--dir DIR] [--update]
 //! simrunner soak   [--matches N] [--seed N] [--ticks N] [--timeout SECS] [--dump DIR]
-//! simrunner bench  [--seed N] [--ticks N] [--size N] [--json] [--repeats N]
+//! simrunner bench  [--seed N] [--ticks N] [--size N] [--json] [--repeats N] [--stats]
 //! ```
 //!
 //! `golden` is the one CI leans on hardest: it replays the committed corpus
@@ -39,6 +39,7 @@ struct Flags {
     size: Option<u16>,
     matches: Option<u32>,
     repeats: Option<u32>,
+    stats: bool,
     timeout: Option<u64>,
     save: Option<String>,
     out: Option<String>,
@@ -63,6 +64,7 @@ fn parse(args: &[String]) -> Result<Flags, String> {
         };
         match key {
             "--json" => f.json = true,
+            "--stats" => f.stats = true,
             "--update" => f.update = true,
             "--seed" => {
                 let v = value(&mut f)?;
@@ -526,6 +528,58 @@ fn bench(f: &Flags) -> ExitCode {
                 best = Some((total, per_tick));
             }
         }
+        if f.stats {
+            // One more run, reading the tick diagnostics, to say where the
+            // time goes: fields built, tiles flooded, corridor searches.
+            let mut sim = sim::Simulation::new(replay.seed, replay.config.clone());
+            let mut next = 0;
+            let mut sum = [0u64; 9];
+            let mut peak = [0u32; 9];
+            while sim.tick() < replay.ticks {
+                while let Some((tick, command)) = replay.commands.get(next) {
+                    if *tick != sim.tick() {
+                        break;
+                    }
+                    sim.issue(command.clone());
+                    next += 1;
+                }
+                sim.step();
+                let st = sim.stats();
+                let row = [
+                    st.path_searches,
+                    st.path_nodes,
+                    st.path_deferred,
+                    st.path_failures,
+                    st.corridors,
+                    st.full_fields,
+                    st.steers,
+                    st.fields_live,
+                    st.own_fallbacks,
+                ];
+                for k in 0..9 {
+                    sum[k] += row[k] as u64;
+                    peak[k] = peak[k].max(row[k]);
+                }
+            }
+            println!(
+                "{:<20} builds {} (peak {}) flooded {} (peak {}) deferred {} failures {} \
+                 corridors {} (peak {}) full {} steers {} (peak {}) live {} own-goal {}",
+                s.name,
+                sum[0],
+                peak[0],
+                sum[1],
+                peak[1],
+                sum[2],
+                sum[3],
+                sum[4],
+                peak[4],
+                sum[5],
+                sum[6],
+                peak[6],
+                peak[7],
+                sum[8]
+            );
+        }
         let (total, mut per_tick) = best.expect("repeats >= 1");
         per_tick.sort_unstable();
         let pick = |q: f64| -> u128 {
@@ -646,7 +700,9 @@ fn usage(err: &str) -> ExitCode {
     eprintln!("  simrunner record [--dir DIR]");
     eprintln!("  simrunner golden [--dir DIR] [--update]");
     eprintln!("  simrunner soak   [--matches N] [--seed N] [--ticks N] [--timeout S] [--dump DIR]");
-    eprintln!("  simrunner bench  [--seed N] [--ticks N] [--size N] [--json] [--repeats N]");
+    eprintln!(
+        "  simrunner bench  [--seed N] [--ticks N] [--size N] [--json] [--repeats N] [--stats]"
+    );
     ExitCode::from(2)
 }
 

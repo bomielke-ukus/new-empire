@@ -14,17 +14,19 @@
 //
 // HOW THESE RELATE TO docs/04 §12
 //
-// They no longer have the comfortable distance the M0 numbers did. §12
-// budgets 6 ms of a 50 ms tick for pathfinding at 200 population and 400
-// entities. `marching-8p` — eight players keeping 40 mobile units each in
-// the field, so ~320 units under way at once, with no combat and no AI —
-// already spends about 5 ms at p99, nearly all of it planning paths.
+// §12 budgets 6 ms of a 50 ms tick for pathfinding at 200 population and
+// 400 entities. `marching-8p` — eight players keeping 40 mobile units each
+// in the field, so ~320 units under way at once, with no combat and no AI —
+// spent about 6.5 ms at p99 on per-unit A* at the end of M3, nearly all of
+// it planning paths. The sector graph and flow fields of M4 chunk 1 brought
+// that to about 2.4 ms (and `crowded` from 2.9 ms to 1.9 ms), measured on
+// the same developer machine; the ceilings below were lowered to three
+// times the new numbers in the same commit.
 //
-// That is not a regression; it is the shape of the work. But it does mean
-// the pathfinding budget is substantially spent before M4 and M5 add combat
-// and an opponent, and the sector-graph and flow-field layers described in
-// §5 are the thing that has to buy it back. Worth knowing now rather than at
-// M7.
+// The scenario is deliberately unkind to flow fields: each order picks a
+// random handful of a player's units, scattered across the map by earlier
+// orders, so a group spans about ten sectors and its corridor is wide. Real
+// groups are clustered and their fields are narrower.
 //
 // The ceilings below are still deliberately loose. The useful signal is the
 // trend, printed on every run. When a system lands that makes a scenario
@@ -43,12 +45,12 @@
         (
             name: "marching-8p",
             note: "eight players pathing ~320 units at once; the docs/04 §5 load",
-            max_p99_us: 17000.0,
+            max_p99_us: 7500.0,
         ),
         (
             name: "crowded",
             note: "economy and marching together on a large map",
-            max_p99_us: 8500.0,
+            max_p99_us: 6000.0,
         ),
     ],
 )

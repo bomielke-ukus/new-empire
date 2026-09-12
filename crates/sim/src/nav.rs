@@ -37,6 +37,15 @@ pub struct NavGrid {
     /// Component label per tile; 0 for impassable. Valid when `!dirty`.
     components: Vec<u16>,
     dirty: bool,
+    /// How many times each 16×16 sector has changed, so the sector graph
+    /// and the flow fields built over it know when they are stale. Not
+    /// hashed: it never decides anything, only when a cache is rebuilt.
+    #[serde(default)]
+    sector_gen: Vec<u32>,
+    /// How many times any tile has changed, so a walker can re-check its
+    /// straight line the tick something is built across it. Not hashed.
+    #[serde(default)]
+    generation: u32,
 }
 
 const ORTHO: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
@@ -53,15 +62,60 @@ impl NavGrid {
                 }
             }
         }
+        let sectors = crate::flow::Sectors::cols_for(w) * crate::flow::Sectors::cols_for(h);
         let mut g = NavGrid {
             width: w,
             height: h,
             blockers,
             components: vec![0; (w * h) as usize],
             dirty: true,
+            sector_gen: vec![0; sectors as usize],
+            generation: 0,
         };
         g.relabel();
         g
+    }
+
+    /// How many times any tile has changed since the grid was made.
+    pub fn generation(&self) -> u32 {
+        self.generation
+    }
+
+    /// How many times the tiles of sector `s` have changed.
+    pub fn sector_generation(&self, s: usize) -> u32 {
+        self.sector_gen.get(s).copied().unwrap_or(0)
+    }
+
+    /// Marks the sector holding `(x, y)` changed, and any neighbour whose
+    /// shared edge the tile sits on, since portals depend on both sides.
+    fn touch_sector(&mut self, x: i32, y: i32) {
+        self.generation = self.generation.wrapping_add(1);
+        let cols = crate::flow::Sectors::cols_for(self.width);
+        let rows = crate::flow::Sectors::cols_for(self.height);
+        if self.sector_gen.len() != (cols * rows) as usize {
+            self.sector_gen = vec![0; (cols * rows) as usize];
+        }
+        let s = crate::flow::SECTOR;
+        let (sx, sy) = (x / s, y / s);
+        let mut bump = |cx: i32, cy: i32| {
+            if cx >= 0 && cy >= 0 && cx < cols && cy < rows {
+                let i = (cy * cols + cx) as usize;
+                self.sector_gen[i] = self.sector_gen[i].wrapping_add(1);
+            }
+        };
+        bump(sx, sy);
+        if x % s == 0 {
+            bump(sx - 1, sy);
+        }
+        if x % s == s - 1 {
+            bump(sx + 1, sy);
+        }
+        if y % s == 0 {
+            bump(sx, sy - 1);
+        }
+        if y % s == s - 1 {
+            bump(sx, sy + 1);
+        }
     }
 
     /// Width in tiles.
@@ -94,6 +148,7 @@ impl NavGrid {
             let i = self.idx(x, y);
             self.blockers[i] = self.blockers[i].saturating_add(1);
             self.dirty = true;
+            self.touch_sector(x, y);
         }
     }
 
@@ -103,6 +158,7 @@ impl NavGrid {
             let i = self.idx(x, y);
             self.blockers[i] = self.blockers[i].saturating_sub(1);
             self.dirty = true;
+            self.touch_sector(x, y);
         }
     }
 

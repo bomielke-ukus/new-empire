@@ -329,44 +329,40 @@ done".
 `GD-ECON`, `GD-POP` and `RM-M2` are enforced. Coverage went from 51 declared
 requirements to 61, and `MISSING (landed)` is zero.
 
-**Two** of the original twelve remain, and neither is waiting on a test being
-written. They are listed by ID in `DEFERRED` in
-`scripts/check-traceability.sh`, each with its blocker, and the script fails if
-one is still listed once a test starts claiming it — a closed deferral that
-stays on the list hides the next one.
+None of the original twelve remain. Requirements inside a landed prefix that
+are knowingly not covered go in `DEFERRED` in `scripts/check-traceability.sh`,
+each with its blocker; the script fails if one is still listed once a test
+starts claiming it, so a closed deferral cannot stay on the list and hide the
+next one. The list has been empty since M4 chunk 1 closed `TA-PATH-02`.
 
-| ID | Blocker |
-|---|---|
-| `TA-PATH-02` | See below. Needs a design decision, not a test. |
+### TA-PATH-02: closed by the flow fields, as predicted
 
-### TA-PATH-02: the number in the spec cannot be shipped as it stands
+The deferral said the number in the spec — a repath "within 3 ticks" — could
+not be shipped on M2's pathfinder, because `STALL_TICKS` and the per-order
+replan allowance `Nav::replans` were one tuning constant pretending to be two:
+the allowance ran out in proportion to journey-time ÷ `STALL_TICKS`, and every
+value below 40 stranded villagers in
+`sixty_villagers_cross_the_map_without_getting_stuck`.
 
-`docs/04` asks for a repath "within 3 ticks". `STALL_TICKS` is 40. Every value
-below 40 strands villagers in M2's own
-`sixty_villagers_cross_the_map_without_getting_stuck`:
+Flow fields separate the two. Asking the field for a new heading costs a
+lookup, not a search, so a walker can re-steer after **3** ticks without
+progress toward its heading (`STALL_TICKS` is now 3) and as often as it
+needs. Giving up is decided by a different measure: `Nav::no_progress`
+counts ticks since the unit last got closer to its *goal*, and only a unit
+that has not improved for `GIVE_UP_TICKS` (20 seconds) **and** is still
+within two tiles of where it last improved is declared jammed — near enough
+counts as arrived, otherwise the trip fails and the order machine re-tasks
+the unit. A unit that is moving but not getting closer is on a detour and
+keeps going. `Nav::replans` is kept as a diagnostic and no longer limits
+anything.
 
-| `STALL_TICKS` | 40 | 20 | 15 | 10 | 8 | 6 | 5 | 4 | 3 |
-|---|---|---|---|---|---|---|---|---|---|
-| villagers failing to arrive (of 60) | 0 | 1 | 5 | 5 | 6 | 5 | 5 | 5 | 9 |
-
-The cause is that `Nav::replans` is a per-order allowance of **3**, never
-reset. How often a unit exhausts it is journey-time ÷ `STALL_TICKS`, so the
-allowance is implicitly calibrated to 40: at 40 a three-minute crossing
-affords about 90 stall windows and using 3 is rare; at 3 it affords 1,200 and
-using 3 is routine. They are one tuning constant pretending to be two.
-
-The economics argue for tightening it. Measured across the corpus at 3:
-`long-run` gathers 3,950 against 3,555 with the same fourteen buildings, and
-`economy-8p` gathers 875 against 715, for 0.24% more path searches on
-`marching-8p` and no movement in p99 outside run-to-run noise.
-
-Resetting `replans` on progress is **not** the fix, and was tried: it drives
-`path_failures` to zero and costs about a third of `long-run`'s gathering,
-because the allowance running out is the *give-up* mechanism — `nav_failed`
-returns the unit to `Order::Idle`, where the idle counter surfaces it and it
-can be re-tasked. A unit that never gives up churns against a contested node
-forever. Making both halves of [TA-PATH-02] true needs a replan allowance
-scaled to the journey rather than a flat 3.
+The claiming test, `a_walker_whose_path_is_blocked_repaths_within_three_ticks`
+in `behaviour_pathfinding.rs`, walls a villager's corridor while it walks and
+asserts a new heading within 3 ticks and arrival after. It needed one more
+thing than the timer: a walker on a straight line-of-sight heading never
+stalls against a wall that appears in front of it, it just fails to advance,
+so `movement` re-checks line of sight whenever the grid's generation has
+changed since the heading was chosen.
 
 ### What TA-PATH-06 got, and did not
 
@@ -389,14 +385,29 @@ p99. Measured spread on a developer machine was 1.1×–1.2×; CI is worse, whic
 is what the headroom is for.
 
 **The number worth knowing.** `marching-8p` — eight players keeping about 320
-mobile units under way, with **no combat and no AI** — already spends roughly
-5 ms at p99, nearly all of it planning paths. `docs/04` §12 budgets 6 ms for
-pathfinding at 200 population and 400 entities.
+mobile units under way, with **no combat and no AI** — spent roughly 6.5 ms
+at p99 on M2's per-unit A\*, nearly all of it planning paths, against the
+6 ms `docs/04` §12 budgets for pathfinding at 200 population and 400
+entities. M4 chunk 1's sector graph and flow fields brought it to about
+2.4 ms p99 (p50 from 0.9 ms to 0.6 ms), and `crowded` from 2.9 ms to 1.9 ms,
+on the same machine; the ceilings were lowered to match.
 
-That is not a regression; it is the shape of the work. But the pathfinding
-budget is substantially spent before M4 and M5 add combat and an opponent, and
-the sector-graph and flow-field layers in `docs/04` §5 are what has to buy it
-back. Finding that out at M7 would be much more expensive.
+Where the time went, and goes, is worth recording because the first flow
+field was *slower* than the A\* it replaced (7.2 ms p99):
+
+| Change | `marching-8p` p99 |
+|---|---|
+| M2 A\* (baseline) | 6.5 ms |
+| First flow fields: one field per destination, full re-flood per straggler | 50 ms |
+| Incremental flood into added sectors only; one corridor search per group | 8.7 ms |
+| Bucket queue instead of a binary heap; stop the flood once every asker is settled | 7.2 ms |
+| Dense per-sector cover table instead of a `BTreeMap` in the inner loop | 4.7 ms |
+| Per-tile mask (passable, covered) for the box; bucket queue inside sectors | 3.8 ms |
+| Portal→tile distance tables built once per sector, so a start costs lookups, not a Dijkstra | **2.4 ms** |
+
+`simrunner bench --stats` prints the diagnostics that found each of these:
+fields built and tiles flooded (sum and peak per tick), corridor searches,
+whole-map fallbacks, steers, live fields and own-goal fallbacks.
 
 The ceilings are cliff detectors, not precision instruments. Verify §12
 properly on known hardware at milestone review; a shared runner cannot answer

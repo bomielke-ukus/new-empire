@@ -1,13 +1,10 @@
 //! The pathfinding behaviour requirements from `docs/04` §5, which introduces
 //! them as "Behaviour requirements, tested explicitly".
 //!
-//! Three of the four are here. [TA-PATH-02] — "repaths within 3 ticks" — is
-//! not, and deliberately: every value of `STALL_TICKS` below its current 40
-//! strands villagers in `sixty_villagers_cross_the_map_without_getting_stuck`,
-//! because `Nav::replans` is a per-order allowance of 3 that is never reset,
-//! so journey-time divided by `STALL_TICKS` decides how often it runs out.
-//! Making both halves of that requirement true needs the allowance decoupled
-//! from the timer, which is a design change rather than a test.
+//! [TA-PATH-02] joined the file with M4's flow fields: a blocked walker no
+//! longer waits out a forty-tick stall and a replan allowance, it asks the
+//! field for a new heading within three ticks, and the field is rebuilt from
+//! the tiles that changed.
 
 mod common;
 use common::{index_of, inland, move_to, owned, pos_of, run, spawn};
@@ -29,6 +26,104 @@ fn far_target(sim: &Simulation, from: Vec2Fx) -> Vec2Fx {
         .nearest_passable(tx, ty, 20, Some(t))
         .expect("somewhere passable in the far quadrant");
     sim::nav::centre(tile)
+}
+
+// ---------------------------------------------------------------------------
+// TA-PATH-02 — repath when blocked
+// ---------------------------------------------------------------------------
+
+/// A villager walking a corridor has a wall of houses dropped across it two
+/// tiles ahead. Within three ticks it must be heading somewhere else, and it
+/// must still get there.
+///
+/// REQ: TA-PATH-02
+#[test]
+fn a_walker_whose_path_is_blocked_repaths_within_three_ticks() {
+    let mut sim = Simulation::new(
+        11,
+        SimConfig {
+            map: sim::MapSpec {
+                kind: sim::MapKind::Flat,
+                size: 48,
+                players: 1,
+            },
+            wander: false,
+            ..SimConfig::default()
+        },
+    );
+    // A corridor: walls north and south of row 20, open at x = 10..40.
+    let house = kinds::info(kinds::HOUSE).footprint as i32;
+    let mut walls = Vec::new();
+    for x in (8..44).step_by(2) {
+        for y in [16, 24] {
+            sim.issue(spawn(
+                0,
+                kinds::HOUSE,
+                sim::nav::building_centre(x, y, house),
+            ));
+        }
+    }
+    sim.issue(spawn(0, kinds::VILLAGER, sim::nav::centre((10, 20))));
+    run(&mut sim, 3);
+    let v = owned(&sim, 0, kinds::VILLAGER)[0];
+    let target = sim::nav::centre((40, 20));
+    sim.issue(move_to(0, vec![v], target));
+    run(&mut sim, sim::COMMAND_DELAY as u32 + 2);
+    let heading_before = sim.world().nav[index_of(&sim, v)]
+        .as_ref()
+        .and_then(|n| n.waypoints.first().copied())
+        .expect("walking");
+    assert!(
+        heading_before.x > Fx::from_int(12),
+        "walking east along the corridor: {heading_before:?}"
+    );
+
+    // Drop a wall across the corridor two tiles ahead of the villager.
+    let vx = pos_of(&sim, v).x.floor();
+    for y in 17..=23 {
+        walls.push((vx + 3, y));
+        sim.issue(spawn(
+            0,
+            kinds::HOUSE,
+            sim::nav::building_centre(vx + 3, y, house),
+        ));
+    }
+    // The wall lands after the command delay; from that tick, count.
+    run(&mut sim, sim::COMMAND_DELAY as u32 + 1);
+    assert!(
+        walls.iter().all(|&(x, y)| !sim.nav().passable(x, y)),
+        "the wall must actually block the corridor"
+    );
+    let mut repathed_after = None;
+    for tick in 1..=3 {
+        sim.step();
+        let i = index_of(&sim, v);
+        let heading = sim.world().nav[i]
+            .as_ref()
+            .and_then(|n| n.waypoints.first().copied());
+        if heading.is_some_and(|h| h != heading_before) {
+            repathed_after = Some(tick);
+            break;
+        }
+    }
+    assert!(
+        repathed_after.is_some(),
+        "no new heading within three ticks of the wall going up"
+    );
+    // The corridor is sealed east of the wall, so the route now goes round
+    // the outside of the houses. It must still arrive.
+    run(&mut sim, 20 * 150);
+    let i = index_of(&sim, v);
+    assert_eq!(
+        sim.world().order[i],
+        Order::Idle,
+        "still walking after 150 s"
+    );
+    assert!(
+        pos_of(&sim, v).distance(target) < Fx::from_int(3),
+        "ended at {:?}, not by the target",
+        pos_of(&sim, v)
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -206,30 +301,30 @@ fn the_same_crowd_settles_identically_twice() {
 // TA-PATH-06 — the path budget
 // ---------------------------------------------------------------------------
 
-/// [TA-PATH-06] has two halves. The budget half is implemented: `plan_paths`
-/// spends a fixed node allowance per tick and counts what it could not serve
-/// in `TickStats::path_deferred`. The requirement's actual content is that a
-/// deferred request **waits a tick** rather than being dropped, so this test
-/// forces deferral and then insists every unit is eventually served.
+/// [TA-PATH-06] has two halves. The budget half: a tick serves a fixed
+/// number of *destinations* (`DESTINATIONS_PER_TICK`), and a unit bound
+/// for one beyond that waits, counted in `TickStats::path_deferred`. The
+/// requirement's actual content is that a deferred request **waits a tick**
+/// rather than being dropped, so this test orders more distinct trips than
+/// one tick serves and then insists every unit is eventually served.
+///
+/// Destinations, not units: forty units sent to one place share one field
+/// and cost one budget slot, which is the point of flow fields.
 ///
 /// The **priority** half — "player-issued orders before AI-issued ones" — is
-/// not implemented and cannot be observed yet: `plan_paths` iterates slots in
-/// index order with no priority queue, and there is no `ai` crate to issue a
-/// competing order. It stays owed to M5.
+/// not implemented and cannot be observed yet: destinations are served in
+/// slot order, and there is no `ai` crate to issue a competing order. It
+/// stays owed to M5.
 ///
 /// REQ: TA-PATH-06
 #[test]
 fn over_budget_path_requests_wait_a_tick_rather_than_being_dropped() {
-    // A large map, because the node cost of one search is what exhausts the
-    // budget: on a small map with clear ground `find_path` takes the
-    // line-of-sight shortcut and barely touches A* at all. This is the shape
-    // of `marching-8p`, the scenario that does reach the budget in practice.
     let mut sim = Simulation::new(
         9,
         SimConfig {
             map: sim::MapSpec {
                 kind: sim::MapKind::Inland,
-                size: 200,
+                size: 128,
                 players: 2,
             },
             max_entities: 4000,
@@ -238,22 +333,30 @@ fn over_budget_path_requests_wait_a_tick_rather_than_being_dropped() {
         },
     );
     let (sx, sy) = sim.starts()[0];
-    // A crowd large enough that one tick's node budget cannot plan for all of
-    // them, all ordered to the far side of the map on the same tick.
-    for k in 0..300 {
+    for k in 0..40 {
         sim.issue(spawn(
             0,
             kinds::VILLAGER,
-            sim::nav::centre((sx + 3 + k % 20, sy + 3 + k / 20)),
+            sim::nav::centre((sx + 3 + k % 8, sy + 3 + k / 8)),
         ));
     }
     run(&mut sim, 10);
     let ids = owned(&sim, 0, kinds::VILLAGER);
-    assert!(ids.len() > 150, "expected a real crowd, got {}", ids.len());
+    assert!(ids.len() >= 40, "expected a crowd, got {}", ids.len());
 
+    // Forty trips to forty different far-off tiles, all on the same tick, so
+    // forty destinations compete for a tick that serves sixteen.
     let start = pos_of(&sim, ids[0]);
-    let target = far_target(&sim, start);
-    sim.issue(move_to(0, ids.clone(), target));
+    let far = far_target(&sim, start);
+    let (fx, fy) = sim::nav::tile_of(far);
+    for (k, &id) in ids.iter().enumerate().take(40) {
+        let (dx, dy) = ((k % 8) as i32 * 2, (k / 8) as i32 * 2);
+        let tile = sim
+            .nav()
+            .nearest_passable(fx - 8 + dx, fy - 5 + dy, 6, Some(sim::nav::tile_of(start)))
+            .expect("a passable tile near the far target");
+        sim.issue(move_to(0, vec![id], sim::nav::centre(tile)));
+    }
 
     // Step past COMMAND_DELAY before testing for completion: on the tick the
     // order is issued every unit is still Idle, and a completion check here
@@ -270,8 +373,8 @@ fn over_budget_path_requests_wait_a_tick_rather_than_being_dropped() {
         .filter(|&&id| sim.world().order[index_of(&sim, id)] != Order::Idle)
         .count();
     assert!(
-        walking_now > 150,
-        "the move order did not reach the crowd: only {walking_now} of {} are \
+        walking_now >= 40,
+        "the move orders did not reach the crowd: only {walking_now} of {} are \
          under way",
         ids.len()
     );
@@ -290,7 +393,7 @@ fn over_budget_path_requests_wait_a_tick_rather_than_being_dropped() {
     assert!(
         deferred_total > 0,
         "the budget was never reached, so this test proves nothing about it — \
-         raise the crowd size or check PATH_BUDGET_PER_TICK"
+         order more distinct destinations or check DESTINATIONS_PER_TICK"
     );
     // Every unit must have been served in the end: deferral delays a request,
     // it does not discard it. `Order::Idle` here means the move finished, one

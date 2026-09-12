@@ -18,6 +18,7 @@
 
 use crate::command::{Command, CommandKind, CommandQueue, PlayerId};
 use crate::entity::{EntityId, KindId, Slot, World, WorldViolation};
+use crate::flow;
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
 use crate::kinds::{self, Cost, Resource, GAIA, MAX_BUILDERS};
@@ -38,18 +39,26 @@ pub const TICKS_PER_SECOND: u32 = 20;
 /// Milliseconds of game time per tick.
 pub const TICK_MS: u32 = 1000 / TICKS_PER_SECOND;
 
-/// A\* nodes one search may expand.
-const PATH_BUDGET_PER_SEARCH: usize = 12_000;
-/// A\* nodes all searches in one tick may expand together.
-const PATH_BUDGET_PER_TICK: usize = 48_000;
+/// Distinct destinations whose fields may be consulted in one tick; units
+/// bound for any further destination wait a tick ([TA-PATH-06]). Counted in
+/// destinations, not in fields built, so a cache never changes a decision.
+const DESTINATIONS_PER_TICK: usize = 16;
+/// How many tiles ahead along a field a unit looks for a straight line.
+const LOOKAHEAD: usize = 12;
+/// Ticks without getting closer to the goal, while staying put, before a
+/// walker gives up: it is jammed behind something that is not moving.
+/// Twenty seconds, because the back of a crowd leaving a Town Center waits
+/// a long time for the front and must not wander off.
+const GIVE_UP_TICKS: u16 = 400;
 /// Half the minimum distance between two units.
 const UNIT_RADIUS: Fx = Fx::from_ratio(28, 100);
 /// A unit is "at" a building or node within this distance of a footprint tile centre.
 const REACH: Fx = Fx::from_ratio(15, 10);
 /// A working unit keeps working until pushed this far from its footprint tile.
 const REACH_SLACK: Fx = Fx::from_ratio(225, 100);
-/// Ticks without progress before a walker reconsiders.
-const STALL_TICKS: u16 = 40;
+/// Ticks without progress toward its heading before a walker asks the
+/// field again ([TA-PATH-02]: within 3 ticks).
+const STALL_TICKS: u16 = 3;
 /// Production queue length.
 const QUEUE_LIMIT: usize = 5;
 /// How far a villager looks for a replacement node.
@@ -168,20 +177,31 @@ impl HashState for SimConfig {
 /// Per-tick diagnostics. Not state: excluded from hashes, saves and equality.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct TickStats {
-    /// Path searches run this tick.
+    /// Flow fields built or rebuilt this tick.
     pub path_searches: u32,
-    /// A\* nodes expanded this tick.
+    /// Tiles flooded this tick.
     pub path_nodes: u32,
     /// Walkers that gave up this tick.
     pub path_failures: u32,
     /// Walkers still waiting for a plan at the end of the tick.
     pub path_deferred: u32,
+    /// Corridor searches over the sector graph this tick.
+    pub corridors: u32,
+    /// Fields that fell back to covering the whole map this tick.
+    pub full_fields: u32,
+    /// Units that took a heading from a field this tick.
+    pub steers: u32,
+    /// Fields live at the end of the tick.
+    pub fields_live: u32,
+    /// Units the shared field did not reach, served from their own goal.
+    pub own_fallbacks: u32,
 }
 
 /// Reusable buffers. Deliberately invisible to equality and serialisation.
 #[derive(Default)]
 struct Scratch {
-    path: nav::Scratch,
+    sectors: flow::Sectors,
+    fields: flow::Fields,
     head: Vec<u32>,
     next: Vec<u32>,
     stats: TickStats,
@@ -309,6 +329,9 @@ pub struct Simulation {
     queue: CommandQueue,
     /// Every command ever issued, with its issue tick. This *is* the replay.
     log: Vec<(u64, Command)>,
+    /// The grid generation walkers last checked their headings against.
+    #[serde(default)]
+    nav_seen: u32,
     #[serde(skip)]
     scratch: Scratch,
 }
@@ -335,6 +358,7 @@ impl Simulation {
             world: World::new(),
             queue: CommandQueue::new(),
             log: Vec::new(),
+            nav_seen: 0,
             scratch: Scratch::default(),
             config,
         };
@@ -798,6 +822,9 @@ impl Simulation {
                 let target = self.clamp_to_map(target);
                 let (tx, ty) = nav::tile_of(target);
                 let spots = self.nav.spread(tx, ty, units.len(), None);
+                // One field for the whole group: every unit walks the same
+                // ground to the same place and only parts at the end.
+                let field = (tx, ty, 0);
                 for (n, slot) in units.iter().enumerate() {
                     let goal = match spots.get(n) {
                         Some(&t) if n == 0 && t == (tx, ty) => target,
@@ -806,7 +833,7 @@ impl Simulation {
                     };
                     let i = slot.index();
                     self.world.order[i] = Order::Move { target: goal };
-                    self.world.nav[i] = Some(Nav::to(goal, Fx::from_ratio(15, 100)));
+                    self.world.nav[i] = Some(Nav::along(goal, Fx::from_ratio(15, 100), field));
                 }
             }
             CommandKind::Stop { ids } => {
@@ -1018,7 +1045,10 @@ impl Simulation {
                     self.world.order[i] = Order::Idle;
                     return;
                 }
-                if !self.nav_settled(i) {
+                // In reach is in reach, even mid-walk: a villager pushed
+                // off the exact tile it wanted by one already working
+                // there starts work from where it stands.
+                if !self.nav_settled(i) && !self.within_reach(i, ns) {
                     return;
                 }
                 self.world.nav[i] = None;
@@ -1030,7 +1060,8 @@ impl Simulation {
                         phase: GatherPhase::Working,
                     };
                 } else if let Some(goal) = self.approach(i, ns) {
-                    self.world.nav[i] = Some(Nav::to(goal, Fx::from_ratio(2, 10)));
+                    let field = self.field_key_of(ns);
+                    self.world.nav[i] = Some(Nav::along(goal, Fx::from_ratio(2, 10), field));
                 } else {
                     // Walled in (a building went up against it, say): treat
                     // it as gone and look for another.
@@ -1094,7 +1125,7 @@ impl Simulation {
                     self.world.order[i] = Order::Idle;
                     return;
                 }
-                if !self.nav_settled(i) {
+                if !self.nav_settled(i) && !self.within_reach(i, ds) {
                     return;
                 }
                 self.world.nav[i] = None;
@@ -1108,7 +1139,8 @@ impl Simulation {
                         phase: GatherPhase::ToNode,
                     };
                 } else if let Some(goal) = self.approach(i, ds) {
-                    self.world.nav[i] = Some(Nav::to(goal, Fx::from_ratio(2, 10)));
+                    let field = self.field_key_of(ds);
+                    self.world.nav[i] = Some(Nav::along(goal, Fx::from_ratio(2, 10), field));
                 } else {
                     self.world.order[i] = Order::Idle;
                 }
@@ -1197,7 +1229,7 @@ impl Simulation {
             self.world.order[i] = Order::Idle;
             return;
         }
-        if !self.nav_settled(i) {
+        if !self.nav_settled(i) && !self.within_reach(i, ss) {
             return;
         }
         self.world.nav[i] = None;
@@ -1207,9 +1239,24 @@ impl Simulation {
                 working: true,
             };
         } else if let Some(goal) = self.approach(i, ss) {
-            self.world.nav[i] = Some(Nav::to(goal, Fx::from_ratio(2, 10)));
+            let field = self.field_key_of(ss);
+            self.world.nav[i] = Some(Nav::along(goal, Fx::from_ratio(2, 10), field));
         } else {
             self.world.order[i] = Order::Idle;
+        }
+    }
+
+    /// The field key for walking up to an entity: its footprint, so every
+    /// unit heading for the same building or node shares one field.
+    fn field_key_of(&self, target: Slot) -> flow::FieldKey {
+        let i = target.index();
+        let fp = kinds::info(self.world.kind[i]).footprint;
+        if fp == 0 {
+            let t = nav::tile_of(self.world.pos[i]);
+            (t.0, t.1, 0)
+        } else {
+            let (ax, ay) = nav::anchor_tile(self.world.pos[i], fp as i32);
+            (ax, ay, fp)
         }
     }
 
@@ -1372,8 +1419,11 @@ impl Simulation {
 
     // ----- planning and movement ----------------------------------------------
 
+    /// Gives every unit that needs a heading one, from the flow field for
+    /// its destination. Per-unit A\* is gone: a field is built once per
+    /// destination and shared, and a unit merely reads the way downhill from
+    /// its tile and walks to the furthest point along it that it can see.
     fn plan_paths(&mut self) {
-        let mut budget = PATH_BUDGET_PER_TICK;
         let slots: Vec<Slot> = self
             .world
             .slots()
@@ -1381,18 +1431,29 @@ impl Simulation {
                 |s| matches!(&self.world.nav[s.index()], Some(n) if n.state == NavState::Planning),
             )
             .collect();
+        let tick = self.tick;
+        self.scratch.fields.flooded = 0;
+        self.scratch.fields.built = 0;
+        self.scratch.fields.corridors = 0;
+        self.scratch.fields.full = 0;
+        // First pass: settle what needs no field (a redirect, a straight
+        // line), and group the rest by destination. The budget is in
+        // destinations served this tick, in slot order, whatever the cache
+        // holds — so the cache can never change what a unit does, only what
+        // it costs.
+        let mut groups: Vec<(flow::FieldKey, Vec<(usize, Tile)>)> = Vec::new();
         for slot in slots {
             let i = slot.index();
-            if budget == 0 {
-                self.scratch.stats.path_deferred += 1;
-                continue;
-            }
             let pos = self.world.pos[i];
             let Some(from) = self.standing_tile(i) else {
                 self.fail_nav(i);
                 continue;
             };
-            let mut goal = self.world.nav[i].as_ref().map(|n| n.goal).unwrap_or(pos);
+            let (mut goal, key, arrive) = match &self.world.nav[i] {
+                Some(n) => (n.goal, n.field, n.arrive),
+                None => continue,
+            };
+            // An unreachable goal becomes the nearest reachable tile.
             let gt = nav::tile_of(goal);
             if !self.nav.passable(gt.0, gt.1) || !self.nav.connected(from, gt) {
                 match self.nav.nearest_passable(gt.0, gt.1, 10, Some(from)) {
@@ -1408,32 +1469,95 @@ impl Simulation {
                     }
                 }
             }
-            let per = budget.min(PATH_BUDGET_PER_SEARCH);
-            let found = self.nav.find_path(pos, goal, per, &mut self.scratch.path);
-            let used = self.scratch.path.expanded;
-            self.scratch.path.expanded = 0;
-            budget = budget.saturating_sub(used.max(1));
-            self.scratch.stats.path_searches += 1;
-            self.scratch.stats.path_nodes += used as u32;
-            let Some(n) = self.world.nav[i].as_mut() else {
-                continue;
-            };
-            match found {
-                Some(way) => {
-                    n.waypoints = way;
+            // Close enough to see it: walk straight there.
+            if pos.distance(goal) <= arrive || self.nav.line_of_sight(pos, goal) {
+                if let Some(n) = self.world.nav[i].as_mut() {
+                    n.waypoints = vec![goal];
                     n.state = NavState::Walking;
                     n.best = Fx::MAX;
                     n.stalled = 0;
                 }
-                None => {
-                    n.replans += 1;
-                    if n.replans >= 3 {
-                        n.state = NavState::Failed;
-                        self.scratch.stats.path_failures += 1;
+                continue;
+            }
+            match groups.iter().position(|(k, _)| *k == key) {
+                Some(g) => groups[g].1.push((i, from)),
+                None if groups.len() >= DESTINATIONS_PER_TICK => {
+                    self.scratch.stats.path_deferred += 1;
+                }
+                None => groups.push((key, vec![(i, from)])),
+            }
+        }
+        // Second pass: one field per destination, every unit of the group
+        // covered by it in one go, then a heading each.
+        for (key, units) in groups {
+            let froms: Vec<Tile> = units.iter().map(|&(_, f)| f).collect();
+            self.scratch
+                .fields
+                .reach_many(&self.nav, &mut self.scratch.sectors, key, &froms, tick);
+            for (i, from) in units {
+                let pos = self.world.pos[i];
+                let goal = match &self.world.nav[i] {
+                    Some(n) => n.goal,
+                    None => continue,
+                };
+                let gt = nav::tile_of(goal);
+                self.scratch.stats.steers += 1;
+                let heading = self
+                    .scratch
+                    .fields
+                    .reach(&self.nav, &mut self.scratch.sectors, key, from, tick)
+                    .and_then(|f| flow::steer(f, &self.nav, pos, LOOKAHEAD));
+                let heading = match heading {
+                    Some(h) => Some(h),
+                    // The field does not reach this tile, which happens when
+                    // the shared destination is one thing and this unit's
+                    // own goal another (a spread spot beside a Town Center,
+                    // say). Fall back to the unit's own goal tile.
+                    None if key != (gt.0, gt.1, 0) => {
+                        let own = (gt.0, gt.1, 0);
+                        self.scratch.stats.own_fallbacks += 1;
+                        if let Some(n) = self.world.nav[i].as_mut() {
+                            n.field = own;
+                        }
+                        self.scratch
+                            .fields
+                            .reach(&self.nav, &mut self.scratch.sectors, own, from, tick)
+                            .and_then(|f| flow::steer(f, &self.nav, pos, LOOKAHEAD))
+                    }
+                    None => None,
+                };
+                let Some(n) = self.world.nav[i].as_mut() else {
+                    continue;
+                };
+                match heading {
+                    Some(h) => {
+                        n.waypoints = vec![h];
+                        n.state = NavState::Walking;
+                        n.best = Fx::MAX;
+                        n.stalled = 0;
+                        n.replans = n.replans.saturating_add(1);
+                    }
+                    None => {
+                        // Standing on the destination ring already, or
+                        // nothing reaches here: settle for where we are.
+                        n.state = if pos.distance(goal) <= Fx::from_ratio(5, 2) {
+                            NavState::Arrived
+                        } else {
+                            NavState::Failed
+                        };
+                        if n.state == NavState::Failed {
+                            self.scratch.stats.path_failures += 1;
+                        }
                     }
                 }
             }
         }
+        self.scratch.stats.path_searches += self.scratch.fields.built;
+        self.scratch.stats.path_nodes += self.scratch.fields.flooded;
+        self.scratch.stats.corridors += self.scratch.fields.corridors;
+        self.scratch.stats.full_fields += self.scratch.fields.full;
+        self.scratch.fields.evict(tick);
+        self.scratch.stats.fields_live = self.scratch.fields.len() as u32;
     }
 
     fn fail_nav(&mut self, i: usize) {
@@ -1472,6 +1596,10 @@ impl Simulation {
     }
 
     fn movement(&mut self) {
+        // Something was built or cleared this tick: every walker checks
+        // that its straight line is still open ([TA-PATH-02]).
+        let grid_changed = self.nav.generation() != self.nav_seen;
+        self.nav_seen = self.nav.generation();
         for slot in self.world.slots().collect::<Vec<_>>() {
             let i = slot.index();
             let info = kinds::info(self.world.kind[i]);
@@ -1513,19 +1641,17 @@ impl Simulation {
                 continue;
             }
             let Some(&w) = n.waypoints.first() else {
-                n.state = NavState::Arrived;
+                n.state = NavState::Planning;
                 continue;
             };
             let wt = nav::tile_of(w);
-            if !self.nav.passable(wt.0, wt.1) {
-                // Something was built on the way; plan again.
+            if !self.nav.passable(wt.0, wt.1) || (grid_changed && !self.nav.line_of_sight(here, w))
+            {
+                // Something was built on the way: ask the field again. The
+                // field itself is rebuilt from the changed tiles, so the new
+                // heading routes around it ([TA-PATH-02]).
                 n.waypoints.clear();
-                n.replans += 1;
-                n.state = if n.replans >= 4 {
-                    NavState::Failed
-                } else {
-                    NavState::Planning
-                };
+                n.state = NavState::Planning;
                 continue;
             }
             if w != here {
@@ -1534,43 +1660,68 @@ impl Simulation {
             let next = here.move_toward(w, speed);
             self.world.pos[i] = next;
             let to_goal = next.distance(n.goal);
-            if next == w {
-                n.waypoints.remove(0);
-                n.best = Fx::MAX;
-                n.stalled = 0;
-            }
-            if n.waypoints.is_empty() || to_goal <= n.arrive {
+            if to_goal <= n.arrive {
                 n.state = NavState::Arrived;
                 continue;
             }
-            // Progress is measured along the path — toward the next waypoint —
-            // so a detour that walks away from the goal is not a stall.
-            let to_waypoint = next.distance(n.waypoints[0]);
+            if next == w {
+                // Reached the heading; the next one comes from the field.
+                n.waypoints.clear();
+                n.state = NavState::Planning;
+                n.best = Fx::MAX;
+                n.stalled = 0;
+            } else if w != n.goal && next.distance(w) <= speed {
+                // About to reach it: ask now, so there is no pause at the
+                // tile centre next tick.
+                n.state = NavState::Planning;
+            }
+            // Progress toward the heading, for stall detection; actual
+            // movement, for giving up. A detour walks away from the goal
+            // for a long time and is not a jam; standing still is.
+            let to_waypoint = next.distance(w);
             if to_waypoint < n.best - Fx::from_ratio(1, 100) {
                 n.best = to_waypoint;
                 n.stalled = 0;
             } else {
                 n.stalled += 1;
             }
-            if n.stalled > STALL_TICKS {
+            if to_goal < n.best_goal - Fx::from_ratio(1, 100) {
+                n.best_goal = to_goal;
+                n.anchor = next;
+                n.no_progress = 0;
+            } else {
+                n.no_progress = n.no_progress.saturating_add(1);
+            }
+            if n.no_progress > GIVE_UP_TICKS {
+                if next.distance(n.anchor) < Fx::from_int(2) {
+                    // No closer to the goal for twenty seconds and still
+                    // where it was: jammed behind something that is not
+                    // moving.
+                    // Near enough counts as there; otherwise this trip is
+                    // over, and the order machine decides what to do next.
+                    n.state = if to_goal <= Fx::from_ratio(5, 2) {
+                        NavState::Arrived
+                    } else {
+                        NavState::Failed
+                    };
+                    if n.state == NavState::Failed {
+                        self.scratch.stats.path_failures += 1;
+                    }
+                    continue;
+                }
+                // Moving, just not closer: a detour. Keep going.
+                n.anchor = next;
+                n.no_progress = 0;
+            }
+            if n.stalled > STALL_TICKS && n.state == NavState::Walking {
                 n.stalled = 0;
                 n.best = Fx::MAX;
-                if n.replans < 3 {
-                    n.replans += 1;
-                    n.waypoints.clear();
-                    n.state = NavState::Planning;
-                } else if to_goal <= Fx::from_ratio(5, 2) {
-                    n.state = NavState::Arrived;
-                } else {
-                    n.state = NavState::Failed;
-                    self.scratch.stats.path_failures += 1;
-                }
+                n.waypoints.clear();
+                n.state = NavState::Planning;
             }
         }
     }
 
-    /// Pushes overlapping units apart. Walkers shove idle units aside more
-    /// than they are shoved, so a crowd parts for someone with somewhere to be.
     fn separation(&mut self) {
         let w = self.nav.width();
         let h = self.nav.height();

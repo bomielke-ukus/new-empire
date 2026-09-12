@@ -502,8 +502,8 @@ anticipate:
   tile grid short-circuits the common short trip. A\* (8-connected, no
   corner cutting, octile heuristic) handles the rest, followed by
   string-pulling so paths take diagonals. Flow fields were not needed to
-  pass the 60-villager test and are deferred to M4, where group combat
-  movement wants them.
+  pass the 60-villager test and were deferred to M4, where group combat
+  movement wants them (§20 records their arrival).
 - **Budgets:** 12,000 nodes per search, 48,000 per tick. Over budget, a
   walker waits a tick; three failures in a row and it gives up. `TickStats`
   reports searches, nodes, failures and deferrals for the profiler.
@@ -593,3 +593,48 @@ anticipate:
 - **The HUD owns the hotkey table.** Each button carries its key; the app
   looks the pressed letter up in the buttons it last drew, so the panel and
   the keyboard cannot disagree.
+
+## 20. Implementation notes from M4, chunk 1: flow fields
+
+- **The three layers of §5 now exist, in `flow.rs`.** A sector graph
+  (16×16-tile sectors, one portal per open run along each edge, walking
+  costs between a sector's portals and from each portal to every tile of
+  its sector, built lazily and rebuilt per sector when its tiles change) is
+  searched once per group to find the *corridor* of sectors a route passes
+  through; a flow field is flooded over that corridor only, from the
+  destination outward; and every unit of the group reads a heading off the
+  field. The local layer (separation, push-through) is M2's, unchanged.
+- **A field is keyed by destination, not by order.** The key is the goal
+  tile, or the footprint of the building or node being walked to, so every
+  villager bound for the same woodline shares one field, and so does every
+  unit of a group order. Fields live in a cache that is *not* simulation
+  state: their contents are a pure function of the grid, so two machines
+  with different caches steer identically. The budget of `TA-PATH-06` is
+  therefore counted in distinct *destinations* served per tick
+  (`DESTINATIONS_PER_TICK`), never in fields built, so a warm cache can
+  change what a tick costs but never what a unit does.
+- **Fields extend rather than rebuild.** A straggler outside a field's
+  corridor adds the sectors of its own route and the flood carries on from
+  the old edge; a flood stops as soon as every tile that asked for it is
+  settled, and records the cost it is exact up to, so the next asker can
+  resume it. A whole-field re-flood happens only when a covered sector's
+  tiles change. Fields nobody has read for 20 seconds are evicted.
+- **Steering is a lookahead along the field, not a waypoint list.** A unit
+  walks toward the furthest of the next twelve tiles downhill that it can
+  see, re-reads the field when it gets there, when it stalls for 3 ticks
+  (`TA-PATH-02`), or when the grid has changed under a straight-line
+  heading. Giving up is a separate measure: no improvement in distance to
+  the goal for 20 seconds *while staying within two tiles of where it last
+  improved* means jammed; moving without getting closer is a detour and
+  continues. The per-order replan allowance that tied `STALL_TICKS` to 40
+  is gone.
+- **The inner loops are arrays, not maps.** The flood reads one byte per
+  neighbour from a per-box mask (passable; passable and covered) and a
+  dense per-sector cover table, and pops from a bucket queue keyed by
+  integer cost; the corridor search indexes portals as
+  `sector × MAX_PORTALS + portal` into stamped scratch tables. Each of
+  those replaced a `BTreeMap` or a binary heap that profiling found in the
+  hot path; `docs/09` §8 has the numbers at each step.
+- **What A\* is still for.** `nav::find_path` remains for tests and for
+  anything that wants one explicit path (the debug overlay); the
+  simulation no longer calls it.

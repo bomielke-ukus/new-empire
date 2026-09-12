@@ -71,16 +71,9 @@ for path in files("crates/**/*.rs", "tools/**/*.rs", "scripts/*", "*.yml", ".git
 # `TA-PATH` to accommodate one blocked requirement would leave the other five
 # unwatched, which is the failure this script exists to prevent. Each entry
 # needs a reason, and the reason has to be a blocker rather than a shrug.
-DEFERRED = {
-    "TA-PATH-02": (
-        "the spec asks for a repath within 3 ticks; every STALL_TICKS below "
-        "its current 40 strands villagers in "
-        "sixty_villagers_cross_the_map_without_getting_stuck, because "
-        "Nav::replans is a per-order allowance of 3 that is never reset. "
-        "Needs the allowance decoupled from the timer — a pathfinding design "
-        "change, not a test"
-    ),
-}
+# Empty since M4 chunk 1 closed TA-PATH-02; the shape is kept so the next
+# deferral has somewhere to go.
+DEFERRED = {}
 
 def is_landed(rid):
     return any(rid.startswith(p) for p in landed) and rid not in DEFERRED

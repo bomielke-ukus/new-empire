@@ -112,15 +112,35 @@ pub struct Nav {
     pub best: Fx,
     /// Ticks without getting closer.
     pub stalled: u16,
-    /// Replans attempted for this goal.
+    /// Times the unit has asked the field for a new heading on this trip.
+    /// A diagnostic, not an allowance: giving up is decided by
+    /// `no_progress`, so a long detour can re-steer as often as it needs.
     pub replans: u8,
     /// Stop when within this distance of the goal.
     pub arrive: Fx,
+    /// The flow field this trip follows: the destination tile, or the
+    /// footprint of the thing being walked to. Units on the same errand
+    /// share one field.
+    pub field: crate::flow::FieldKey,
+    /// Closest the unit has been to the goal, for telling a jam from a
+    /// detour.
+    pub best_goal: Fx,
+    /// Where the unit was when `best_goal` was last improved.
+    pub anchor: Vec2Fx,
+    /// Ticks since `best_goal` last improved.
+    pub no_progress: u16,
 }
 
 impl Nav {
-    /// A new trip.
+    /// A new trip to a point, following the field to that point's tile.
     pub fn to(goal: Vec2Fx, arrive: Fx) -> Nav {
+        let t = crate::nav::tile_of(goal);
+        Nav::along(goal, arrive, (t.0, t.1, 0))
+    }
+
+    /// A new trip to `goal` steered by the field for `field`, which may be
+    /// a group's shared destination or the footprint of a building or node.
+    pub fn along(goal: Vec2Fx, arrive: Fx, field: crate::flow::FieldKey) -> Nav {
         Nav {
             goal,
             waypoints: Vec::new(),
@@ -129,6 +149,10 @@ impl Nav {
             stalled: 0,
             replans: 0,
             arrive,
+            field,
+            best_goal: Fx::MAX,
+            anchor: Vec2Fx::new(Fx::MIN, Fx::MIN),
+            no_progress: 0,
         }
     }
 }
@@ -142,6 +166,12 @@ impl HashState for Nav {
         h.write_u16(self.stalled);
         h.write_u8(self.replans);
         h.write(&self.arrive);
+        h.write_i32(self.field.0);
+        h.write_i32(self.field.1);
+        h.write_u8(self.field.2);
+        h.write(&self.best_goal);
+        h.write(&self.anchor);
+        h.write_u16(self.no_progress);
     }
 }
 

@@ -1,6 +1,6 @@
 # 10 — Status and next steps
 
-**As of 2026-09-11.** The living summary of where the project is and what
+**As of 2026-09-12.** The living summary of where the project is and what
 comes next, for anyone joining or checking in. The roadmap (`docs/06`) holds
 the milestone definitions and their acceptance tests; this document says
 which of them are done, what was learned, and what the next steps are. Update
@@ -22,7 +22,7 @@ Four milestones landed; the vertical slice is at its halfway point.
 | M1 — A world you can look at | Landed | A map from a seed, scrolled and zoomed, rendered by the GPU path and the software rasteriser alike |
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
-| M4 — Combat | Next | Two forces of 40 fight; counters work; nothing gets stuck |
+| M4 — Combat | **In progress** (chunk 1 of 6 landed 2026-09-12) | Two forces of 40 fight; counters work; nothing gets stuck |
 | M5 — An opponent | Not started | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
@@ -87,11 +87,12 @@ The points that affect what comes next:
 - **The HUD owns the hotkey table.** Buttons carry their keys; the app looks
   the pressed letter up in the buttons it last drew. New commands get a
   hotkey by getting a button.
-- **The perf budget is spent early.** `marching-8p` (roughly 320 units
-  pathing at once, no combat, no AI) sits at about 6 ms p99 against the 6 ms
-  `docs/04` §12 allows for pathfinding at full population. It is under its
-  CI ceiling, but M4 adds armies. Flow fields are M4's first task, not its
-  last.
+- **The perf budget was spent early, and has been bought back.**
+  `marching-8p` (roughly 320 units pathing at once, no combat, no AI) sat
+  at about 6.5 ms p99 on per-unit A\* against the 6 ms `docs/04` §12 allows
+  for pathfinding at full population. M4 chunk 1's flow fields brought it
+  to about 2.4 ms (record below), which is the headroom the armies of the
+  rest of M4 and the opponent of M5 will spend.
 
 ---
 
@@ -269,25 +270,54 @@ what was done:
   Escape closes the overlay first. Pinned by the `controls-overlay` golden
   and HUD and app tests.
 
+### Work record: M4 chunk 1 — flow fields and the sector graph (2026-09-12)
+
+- **What landed.** `crates/sim/src/flow.rs`: the sector graph (16×16-tile
+  sectors, portals per open edge run, intra-sector cost tables), corridor
+  search per group, flow fields flooded over the corridor and shared by
+  every unit bound for the same destination, incremental extension for
+  stragglers, stop-early floods, eviction after 20 seconds unread. The
+  simulation's `plan_paths` groups planning units by destination and
+  serves up to 16 destinations a tick; `movement` steers along the field
+  with a twelve-tile lookahead. `docs/04` §20 has the design notes.
+- **`TA-PATH-02` is closed.** `STALL_TICKS` is 3; the give-up rule is a
+  separate measure (no progress toward the goal for 20 seconds while
+  staying put), so the replan allowance that pinned the timer at 40 is
+  gone. The claiming test walls a walker's corridor mid-trip and asserts a
+  new heading within 3 ticks. `DEFERRED` in the traceability script is
+  empty.
+- **Measured.** `marching-8p` p99 6.5 ms → 2.4 ms, p50 0.9 → 0.6 ms;
+  `crowded` p99 2.9 → 1.9 ms; `economy-2p` unchanged. The first version was
+  slower than A\* (7.2 ms); `docs/09` §8 records each step from there,
+  because the lesson — the flood and corridor loops were paying for
+  `BTreeMap` lookups and binary heaps, not for the algorithm — will
+  recur. `simrunner bench --stats` now prints the field diagnostics that
+  found it. Ceilings in `perf/budgets.ron` lowered to three times the new
+  numbers.
+- **What changed for the player.** Nothing visible on purpose: gathering,
+  building and marching behave as before, with units taking straighter
+  lines through open ground and re-steering rather than stopping when a
+  house goes up in front of them. The corpus and five golden images were
+  re-recorded for the changed unit positions.
+- **Not done, deliberately.** The priority half of `TA-PATH-06`
+  (player-issued before AI-issued orders) still waits for M5, when there
+  is an AI to issue anything. Formations are chunk 4's.
+
 ### Resume here next session
 
-The stabilisation pass is complete: all four chunks done, the live Mac check
-passed, and the first round of feedback is landed (scale factor, zoom,
-controls overlay, palette). The plan stands as written: art continues on
-the `docs/08` schedule, and M4 begins with flow fields and the sector
-graph, using the pathfinding acceptance tests and the performance budget
-below.
+M4 chunk 1 is landed. Next is step 2 below, the damage model, then military
+units and their buildings (step 3). Art continues on the `docs/08` schedule.
 
 ## 4. What comes next: M4 — Combat
 
 The roadmap's list, in the order we intend to build it. Each step is
 shippable on its own and has a headless test before it has a sprite.
 
-1. **Flow fields and the sector graph** (`docs/04` §5). Group movement of
-   40 units on one field instead of 40 A\* searches, keeping the
-   `TA-PATH` acceptance tests green. Decoupling `Nav::replans` from
-   `STALL_TICKS` resolves the deferred `TA-PATH-02` at the same time.
-   Measured by `simrunner bench`: the aim is to halve `marching-8p`'s p99.
+1. **Flow fields and the sector graph** (`docs/04` §5). **Done
+   2026-09-12**, record above: group movement of 40 units on one field
+   instead of 40 A\* searches, the `TA-PATH` tests green, `TA-PATH-02`
+   closed, `marching-8p`'s p99 cut from 6.5 ms to 2.4 ms against the aim
+   of halving it.
 2. **The damage model.** Attack, armour classes, class bonuses, elevation,
    minimum damage 1, siege friendly fire (`GD-COMBAT-01`–`05`), as a pure
    function with a generated damage matrix committed and tested. Health
@@ -317,8 +347,8 @@ nightly job.
 
 Stated so they are not rediscovered.
 
-- `TA-PATH-02` (repath within 3 ticks) is deferred pending the design
-  change in step 1 above.
+- The **priority** half of `TA-PATH-06` (player-issued orders before
+  AI-issued ones) is unimplemented until M5 supplies an AI.
 - The age-up **fanfare** waits for audio (M7). The sweep and banner exist.
 - **Auto-reseed is per player**, not per farm as `docs/02` [GD-ECON-05]
   asks. A per-farm flag needs a per-entity toggle in the world store.
@@ -328,7 +358,6 @@ Stated so they are not rediscovered.
   slice (`docs/08` §9 step 3).
 - **The Town Center is hidden from the build panel** until Q3 (Government
   Centre) is decided; the simulation still accepts placing one.
-- **Twelve M1/M2 requirements** still lack a claiming test (`docs/09` §7).
 - **No resource-conservation invariant, no fuzzing, no nightly job**
   (`docs/09` §11).
 
