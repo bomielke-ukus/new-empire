@@ -445,9 +445,15 @@ what was done:
 - Local macOS verification: all 355 workspace tests pass, plus all four
   acceptance/CLI tests in release with debug invariant checks. Formatting,
   Clippy with warnings denied, purity, traceability, generated-file freshness
-  and art conformance pass. Full GitHub CI is pending for this review chunk;
-  it also supplies the CLI-caller and workflow checks (the local tools lack
-  Bash 4 and PyYAML). No live Mac combat playtest has been performed in it.
+  and art conformance pass.
+- Full GitHub CI passed for combined code commit `ecf6cd6` in
+  [run 34702500527](https://github.com/bomielke-ukus/new-empire/actions/runs/34702500527):
+  lint/purity and preliminary gates (including CLI callers and workflows),
+  macOS and additional Linux/Windows tests, release combat/balance trials
+  with invariants, performance, the 300-match soak and cross-platform hash
+  agreement. This result entry was added afterward with no executable changes.
+  [PR #9](https://github.com/bomielke-ukus/new-empire/pull/9) is awaiting review
+  and merge. No live Mac combat playtest has been performed in this chunk.
 
 ### Resume here next session
 
