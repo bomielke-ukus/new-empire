@@ -28,12 +28,14 @@ Four milestones landed; the vertical slice is at its halfway point.
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
-One caveat applies to every landed milestone: the GPU window has been
-verified by compilation and by the shader validator, not by running it on a
-display, because development has been headless. The software rasteriser
-(`docs/07` D13) is the reference renderer and is what the golden images and
-every screenshot in this repository come from. Running the app on a real
-machine is worth doing before M4 goes far.
+The GPU window has run on a real display once: the Mac check of
+2026-09-12 (§3, row 4) walked through selection, gathering, building,
+training, cancellation and age advancement, and its feedback is recorded
+below. Everything M4 has added since, fighting, towers, walls, gates,
+garrison and rubble, has been seen only through the software rasteriser
+(`docs/07` D13), which is the reference renderer and the source of every
+golden image and screenshot in this repository, and through CI. A second
+Mac pass through a fight and a siege is the next real-window check.
 
 ### What you can do in the game today
 
@@ -58,7 +60,7 @@ cargo run -p mapview -- --scenario ages --stockpile 5000 --ticks 100 \
 
 Work has run as three streams that merge into this branch:
 
-- **Core** (simulation, view, app, tools): M0–M3, above.
+- **Core** (simulation, view, app, tools): M0–M3 above, and M4 to step 5.
 - **Art pipeline** (`docs/08`): the render-to-sprite pipeline is built and
   proven end to end. The camera and light rig are frozen, `atlas` validates
   and composes sheets against the one palette (`docs/07` D19), and the
@@ -390,6 +392,12 @@ what was done:
   towers and garrisons, so every corpus digest was re-recorded.
 - **Measured.** The gates pass and building acquisition add nothing
   measurable; `marching-8p` and `crowded` stay inside their ceilings.
+- **Verified.** Full CI passed on the first attempt for both M4 commits of
+  the day: chunk 3 (`6753c84`, run `34696906353`) and chunk 4 (`a978d73`,
+  run `34699090008`), on every platform job. Not yet seen on a Mac: the
+  next live check should train soldiers, right-click an enemy, attack-move
+  a column into a walled base, drag a wall, set a gate, garrison a tower
+  and knock a building down.
 - **Not done, deliberately.** Repair (`docs/03` §3's cursor table) is not
   in the plan's step and waits; a damaged building stays damaged. The
   Guard Tower is not a slice item. "Automatic gate suggestion at road
