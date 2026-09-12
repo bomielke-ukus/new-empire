@@ -314,8 +314,16 @@ in these matchups, not competitive balance across terrain, technologies,
 production times or every roster combination. Workspace tests run them in
 debug; each platform's CI job also runs the CLI in release with invariants.
 
-**Still manual:** the Mac combat/siege pass and the readability half of
-`RM-M4-01`. Automated acceptance does not close the milestone by itself.
+**Manual acceptance status (2026-09-12):** the native Mac functional smoke
+pass is recorded in `docs/10`: training, garrison/ungarrison, wall construction,
+gate replacement/passage, explicit gate attack, attack-move through the breach,
+building rubble and a completed 40-versus-40 fight. Automatic selection of a
+breach in a fully closed wall was not separately established in the native
+pass; its automated coverage remains above. The owner found the combat visuals
+unclear: arrows were visible but looked quite random. The readability half of
+`RM-M4-01` therefore remains open. Recheck the same native battle at 1x after
+presentation improvements, with owner feedback on unit roles and attacks.
+Automated acceptance does not close the milestone by itself.
 
 ### The AI — M5
 
