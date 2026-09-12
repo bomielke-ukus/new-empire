@@ -4,7 +4,7 @@
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
 //!         [--scenario gather|build|ages] [--select N] [--select-tc 1] [--hud 1]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
-//!         [--dpi N] [--ui-scale N]
+//!         [--dpi N] [--ui-scale N] [--controls 1]
 //! ```
 //!
 //! Generates a map, runs it for `--ticks`, and writes a frame rendered by the
@@ -39,6 +39,7 @@ struct Args {
     hover: Option<(f32, f32)>,
     dpi: f32,
     ui_scale: f32,
+    controls: bool,
 }
 
 fn parse() -> Result<Args, String> {
@@ -66,6 +67,7 @@ fn parse() -> Result<Args, String> {
         hover: None,
         dpi: 1.0,
         ui_scale: 1.0,
+        controls: false,
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -114,6 +116,7 @@ fn parse() -> Result<Args, String> {
             // the world and HUD draw at this many device pixels per pixel.
             "--dpi" => a.dpi = num(val)?,
             "--ui-scale" => a.ui_scale = num(val)?,
+            "--controls" => a.controls = val == "1" || val == "true",
             _ => return Err(format!("unknown flag {key}")),
         }
         i += 2;
@@ -258,6 +261,7 @@ fn run() -> Result<(), String> {
                 hover: a.hover,
                 banner: banner.as_deref(),
                 ui_scale: a.dpi * a.ui_scale,
+                help: a.controls,
             },
         );
         scene.ui = hud.sprites;

@@ -148,6 +148,8 @@ struct App {
     /// The player's HUD magnification on top of the display scale: 1, 1.5
     /// or 2. `F2` cycles it.
     ui_scale_user: f32,
+    /// The controls overlay is open (`F1` or `?`).
+    show_help: bool,
     /// The age the player was in last frame, to notice an advance.
     last_age: Age,
     /// When the last advance completed, and to what, for the celebration.
@@ -204,6 +206,7 @@ impl App {
             selection: Selection::new(),
             build_mode: None,
             ui_scale_user: 1.0,
+            show_help: false,
             last_age: Age::Stone,
             age_up: None,
             scene: Scene::default(),
@@ -358,6 +361,7 @@ impl App {
                 hover: self.input.cursor,
                 banner: banner.as_deref(),
                 ui_scale: self.ui_scale(),
+                help: self.show_help,
             },
         );
         scene.ui.extend(hud.sprites.iter().cloned());
@@ -687,8 +691,11 @@ impl App {
             return false;
         }
         match code {
+            KeyCode::F1 | KeyCode::Slash => self.show_help = !self.show_help,
             KeyCode::Escape => {
-                if self.build_mode.is_some() {
+                if self.show_help {
+                    self.show_help = false;
+                } else if self.build_mode.is_some() {
                     self.build_mode = None;
                 } else if !self.selection.ids.is_empty() {
                     self.selection.set(vec![]);

@@ -57,8 +57,9 @@ cargo run -p atlas -- rig                    # render rig, checked against the s
 In the window: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
 `+`/`-` to zoom, from 0.5× to 3×, about the cursor; click the minimap to
 jump; `Space` pause; `[` `]` speed; `Shift`+`E` toggles edge scrolling;
-`F2` cycles the HUD size (1×, 1.5×, 2×). WASD is reserved for camera
-movement. The game honours the display's scale factor, so 1× is the same
+`F2` cycles the HUD size (1×, 1.5×, 2×); `F1` or `?` opens a controls
+overlay listing all of this, and the resource bar points at it for the first
+minute of a match. WASD is reserved for camera movement. The game honours the display's scale factor, so 1× is the same
 apparent size on a Retina screen as on any other.
 
 Rendered sprite sets under `assets/sprites` replace the procedural placeholders

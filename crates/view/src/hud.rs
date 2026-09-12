@@ -114,6 +114,77 @@ pub struct HudInput<'a> {
     /// UI scale. The HUD is laid out in its own pixels and scaled up on
     /// the way out, so text is the same size on any display.
     pub ui_scale: f32,
+    /// Whether the controls overlay is open.
+    pub help: bool,
+}
+
+/// How long the "F1 CONTROLS" hint stays in the resource bar: the first
+/// minute of a match.
+pub const HINT_TICKS: u64 = 60 * sim::TICKS_PER_SECOND as u64;
+
+/// True while the resource bar should point at the controls overlay.
+pub fn controls_hint(sim: &Simulation) -> bool {
+    sim.tick() < HINT_TICKS
+}
+
+/// Every control, as two columns of `(key, what it does)`: the general
+/// controls, and the build, train and research keys. The second column
+/// comes from the same tables the command grid uses, so it cannot drift.
+pub fn controls() -> [Vec<(String, String)>; 2] {
+    let s = |k: &str, a: &str| (k.to_string(), a.to_string());
+    let general = vec![
+        s("WASD", "PAN THE CAMERA"),
+        s("MID DRAG", "PAN"),
+        s("WHEEL +-", "ZOOM 0.5X TO 3X"),
+        s("MINIMAP", "CLICK JUMPS, RIGHT-CLICK SENDS"),
+        s("CLICK", "SELECT, DRAG FOR A BOX"),
+        s("DBL CLICK", "ALL OF A KIND ON SCREEN"),
+        s("SHIFT", "ADD TO THE SELECTION"),
+        s("CTRL+0-9", "SAVE A GROUP, 0-9 RECALLS"),
+        s(".", "NEXT IDLE VILLAGER"),
+        s("RIGHT", "MOVE, GATHER, BUILD, RALLY"),
+        s("T", "STOP"),
+        s("DELETE", "DISMISS"),
+        s("SPACE", "PAUSE"),
+        s("[ ]", "SLOWER, FASTER"),
+        s("SHIFT+E", "EDGE SCROLL ON, OFF"),
+        s("F2", "HUD SIZE"),
+        s("ESC", "CANCEL, DESELECT, QUIT"),
+    ];
+    let mut build: Vec<&KindInfo> = kinds::all()
+        .iter()
+        .filter(|k| k.buildable && !k.mobile && k.id != kinds::TOWN_CENTER)
+        .collect();
+    build.sort_by_key(|k| (k.age, k.id));
+    let mut orders: Vec<(String, String)> = build
+        .iter()
+        .map(|k| {
+            let age = if k.age == sim::Age::Stone {
+                String::new()
+            } else {
+                format!(
+                    " ({})",
+                    k.age.name().trim_end_matches(" Age").to_uppercase()
+                )
+            };
+            (
+                build_hotkey(k.id).to_string(),
+                format!("{} {}{age}", short_name(k.id), cost_label(&k.cost)),
+            )
+        })
+        .collect();
+    orders.push(s("V", "TRAIN A VILLAGER"));
+    orders.push(s("U", "ADVANCE THE AGE"));
+    let keys: String = TECH_KEYS
+        .iter()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    orders.push((keys, "RESEARCH, IN GRID ORDER".to_string()));
+    orders.push(s("R", "AUTO-RESEED ON, OFF"));
+    orders.push(s("X", "UNQUEUE, OR CANCEL PLACING"));
+    orders.push(s("SHIFT", "KEEP PLACING"));
+    [general, orders]
 }
 
 /// A built HUD.
@@ -539,7 +610,7 @@ struct Seg {
 /// The resource bar. Reflows rather than overlaps: at widths where the
 /// large text and worker counts no longer fit beside the status, the counts
 /// go, then the text shrinks, then the status goes.
-fn top_bar(p: &mut Painter<'_>, sim: &Simulation, me: u8, vw: f32, status: &str) {
+fn top_bar(p: &mut Painter<'_>, sim: &Simulation, me: u8, vw: f32, status: &str, hint: bool) {
     p.rect(0.0, 0.0, vw, TOP_BAR, BROWN_DARK, 0);
     p.rect(0.0, TOP_BAR - 2.0, vw, 2.0, BLACK, 0);
     let world = sim.world();
@@ -583,6 +654,13 @@ fn top_bar(p: &mut Painter<'_>, sim: &Simulation, me: u8, vw: f32, status: &str)
                 text: "FARM NEEDS WOOD".to_string(),
                 sub: None,
                 boxed: Some(RED_DARK),
+            });
+        }
+        if hint {
+            segs.push(Seg {
+                text: "F1 CONTROLS".to_string(),
+                sub: None,
+                boxed: Some(GOLD_DARK),
             });
         }
     }
@@ -683,7 +761,14 @@ impl Hud {
             input.fps,
             input.speed
         );
-        top_bar(&mut p, sim, me, vw, &status);
+        top_bar(
+            &mut p,
+            sim,
+            me,
+            vw,
+            &status,
+            !input.help && controls_hint(sim),
+        );
 
         // ----- bottom panel
         let py = vh - BOTTOM_PANEL;
@@ -941,6 +1026,50 @@ impl Hud {
             p.text(((vw - sw) / 2.0).round(), y + 46.0, sub, false, 1.0);
         }
 
+        // The controls overlay, over everything but the panels.
+        if input.help {
+            let [general, orders] = controls();
+            let rows = general.len().max(orders.len());
+            let pw = 620.0_f32.min(vw - 16.0);
+            let line = 11.0;
+            let ph = 40.0 + rows as f32 * line + 22.0;
+            let world_h = vh - TOP_BAR - BOTTOM_PANEL;
+            let x = ((vw - pw) / 2.0).round();
+            let y = (TOP_BAR + ((world_h - ph) / 2.0).max(4.0)).round();
+            p.rect(x, y, pw, ph, BLACK, 0);
+            p.rect(x + 2.0, y + 2.0, pw - 4.0, ph - 4.0, BROWN_DARK, 0);
+            p.rect(x + 2.0, y + 2.0, pw - 4.0, 2.0, GOLD, 0);
+            p.rect(x + 2.0, y + ph - 4.0, pw - 4.0, 2.0, GOLD, 0);
+            let title = "CONTROLS";
+            let tw = font::width(title) as f32 * 2.0;
+            p.text_in(
+                x + ((pw - tw) / 2.0).round(),
+                y + 10.0,
+                title,
+                Ink::Gold,
+                2.0,
+            );
+            let col_w = (pw - 24.0) / 2.0;
+            let key_w = 66.0;
+            for (c, column) in [general, orders].iter().enumerate() {
+                let cx = x + 12.0 + c as f32 * col_w;
+                for (i, (key, what)) in column.iter().enumerate() {
+                    let ly = y + 38.0 + i as f32 * line;
+                    p.text_in(cx, ly, &fit(key, key_w - 6.0), Ink::Gold, 1.0);
+                    p.text(cx + key_w, ly, &fit(what, col_w - key_w - 6.0), false, 1.0);
+                }
+            }
+            let foot = "F1 OR ? CLOSES THIS";
+            let fw = font::width(foot) as f32;
+            p.text(
+                x + ((pw - fw) / 2.0).round(),
+                y + ph - 16.0,
+                foot,
+                false,
+                1.0,
+            );
+        }
+
         // Everything above is in HUD pixels; the window wants device pixels.
         let mut sprites = p.out;
         if s != 1.0 {
@@ -1033,6 +1162,7 @@ mod tests {
             hover: None,
             banner: None,
             ui_scale: 1.0,
+            help: false,
         };
         let none = Hud::build(&atlas, &base);
         assert!(none.buttons.is_empty());
@@ -1152,6 +1282,7 @@ mod tests {
                     hover: None,
                     banner: None,
                     ui_scale,
+                    help: false,
                 },
             )
         };
@@ -1189,9 +1320,79 @@ mod tests {
                 hover: Some((target.x + 2.0, target.y + 2.0)),
                 banner: None,
                 ui_scale: 2.0,
+                help: false,
             },
         );
         assert_ne!(lit.sprites, b.sprites, "the hovered button draws lit");
+    }
+
+    /// The overlay lists every key the grid can hand out, and the hint that
+    /// points at it lasts a minute.
+    #[test]
+    fn the_controls_overlay_covers_every_hotkey() {
+        let [general, orders] = controls();
+        let keys: Vec<String> = orders.iter().map(|(k, _)| k.clone()).collect();
+        for k in kinds::all()
+            .iter()
+            .filter(|k| k.buildable && k.id != kinds::TOWN_CENTER)
+        {
+            assert!(
+                keys.contains(&build_hotkey(k.id).to_string()),
+                "{} has no line in the overlay",
+                k.name
+            );
+        }
+        for key in ["V", "U", "R", "X"] {
+            assert!(keys.iter().any(|k| k == key), "{key} missing");
+        }
+        assert!(keys.iter().any(|k| k.contains('Q') && k.contains('Z')));
+        let gen_keys: Vec<&str> = general.iter().map(|(k, _)| k.as_str()).collect();
+        for key in ["WASD", "F2", "ESC", "SPACE", "T"] {
+            assert!(gen_keys.contains(&key), "{key} missing");
+        }
+
+        let sim = Simulation::new(5, SimConfig::default());
+        let atlas = Atlas::placeholder();
+        let camera = Camera::new(sim.map().width(), sim.map().height(), (960.0, 540.0));
+        let base = HudInput {
+            sim: &sim,
+            player: 0,
+            camera: &camera,
+            selected: &[],
+            build_mode: None,
+            fps: 60.0,
+            paused: false,
+            speed: 1.0,
+            status: "T0",
+            hover: None,
+            banner: None,
+            ui_scale: 1.0,
+            help: false,
+        };
+        let closed = Hud::build(&atlas, &base);
+        let open = Hud::build(&atlas, &HudInput { help: true, ..base });
+        assert!(
+            open.sprites.len() > closed.sprites.len() + 200,
+            "the overlay is drawn"
+        );
+        assert_eq!(open.buttons, closed.buttons, "the grid is untouched");
+        assert!(controls_hint(&sim), "a fresh match shows the hint");
+        let mut later = Simulation::new(
+            5,
+            SimConfig {
+                map: sim::MapSpec {
+                    kind: sim::MapKind::Flat,
+                    size: 48,
+                    players: 1,
+                },
+                wander: false,
+                ..SimConfig::default()
+            },
+        );
+        for _ in 0..HINT_TICKS {
+            later.step();
+        }
+        assert!(!controls_hint(&later), "and drops it after a minute");
     }
 
     #[test]
@@ -1215,6 +1416,7 @@ mod tests {
                     hover: None,
                     banner: None,
                     ui_scale: 1.0,
+                    help: false,
                 },
             );
             // Every glyph in the top bar stays inside the window.

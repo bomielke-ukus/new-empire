@@ -163,6 +163,25 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The F1 controls overlay over a fresh match, with the resource bar
+        // still carrying its first-minute hint.
+        name: "controls-overlay",
+        args: &[
+            "--seed",
+            "1",
+            "--ticks",
+            "0",
+            "--hud",
+            "1",
+            "--controls",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The gather scene on a 2x display: the same window in device
         // pixels is twice as large, and the world and HUD must come out at
         // the same apparent size, not at half.

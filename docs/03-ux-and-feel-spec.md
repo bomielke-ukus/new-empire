@@ -92,6 +92,10 @@ Zoom is six discrete levels from 0.5× to 3× of the sprite's authored size,
 stepped by wheel travel about the cursor or by `+`/`-` about the centre; the
 display's scale factor is applied underneath, so a level looks the same on
 every screen. F2 cycles the HUD between 1×, 1.5× and 2× on top of that.
+F1 or ? opens a controls overlay generated from the same hotkey tables the
+command grid uses, so it cannot go stale; a "F1 CONTROLS" hint sits in the
+resource bar for the first minute of a match and Escape closes the overlay
+before it does anything else.
 
 Completed training remains paid and queued while the global entity cap
 blocks spawning. Opening a slot produces the unit without charging again;

@@ -152,6 +152,27 @@ fn a_retina_display_scales_the_hud_and_the_wheel_steps_whole_levels() {
     assert_eq!(app.ui_scale(), 2.0);
 }
 
+#[test]
+fn f1_opens_the_controls_and_escape_closes_them_first() {
+    let mut app = app();
+    draw(&mut app);
+    let plain = app.hud.sprites.len();
+    assert!(!app.keyboard_input(KeyCode::F1, ElementState::Pressed, false));
+    assert!(app.show_help);
+    draw(&mut app);
+    assert!(app.hud.sprites.len() > plain + 200, "the overlay is drawn");
+    // Escape closes the overlay before it touches placement or selection.
+    app.build_mode = Some(kinds::HOUSE);
+    assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    assert!(!app.show_help);
+    assert_eq!(app.build_mode, Some(kinds::HOUSE));
+    // `?` is the other way in, and a key repeat does not flicker it.
+    assert!(!app.keyboard_input(KeyCode::Slash, ElementState::Pressed, false));
+    assert!(app.show_help);
+    assert!(!app.keyboard_input(KeyCode::Slash, ElementState::Pressed, true));
+    assert!(app.show_help);
+}
+
 fn app() -> App {
     let mut app = App::new();
     app.sim = Simulation::new(

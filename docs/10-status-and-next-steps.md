@@ -255,8 +255,11 @@ what was done:
   buildings come from the render pipeline (`docs/08` §9 step 3), which
   needs Blender on the Mac. Placeholder polish is possible meanwhile but is
   thrown away when the models arrive.
-- **A reminder of the keyboard commands.** In progress: an F1 overlay built
-  from the same table as the buttons.
+- **A reminder of the keyboard commands.** Done: `F1` or `?` opens a
+  controls overlay generated from the same hotkey tables as the command
+  grid, the resource bar shows "F1 CONTROLS" for the first minute, and
+  Escape closes the overlay first. Pinned by the `controls-overlay` golden
+  and HUD and app tests.
 
 ### Resume here next session
 
