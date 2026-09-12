@@ -12,7 +12,7 @@ The rule (`docs/02` §8, `GD-COMBAT-01` to `GD-COMBAT-05`):
 damage = max(1, (attack × elevation) − armour_of_matching_type + bonus_vs_class)
 ```
 
-Elevation is ×1.25 attacking downhill and ×0.75 uphill, rounded to nearest with halves up. Melee hits meet melee armour, pierce hits meet pierce armour, siege hits meet no armour and land on friends in the way too. Nothing does less than 1.
+Elevation is five quarters of the attack downhill and three quarters uphill, rounded to nearest with halves up. Melee hits meet melee armour, pierce hits meet pierce armour, siege hits meet no armour and land on friends in the way too. Nothing does less than 1.
 
 ## Kinds
 

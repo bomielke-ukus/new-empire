@@ -19,9 +19,9 @@ pub enum Elevation {
     /// Same level.
     #[default]
     Level,
-    /// The attacker is higher: ×1.25.
+    /// The attacker is higher: five quarters of the attack.
     Downhill,
-    /// The attacker is lower: ×0.75.
+    /// The attacker is lower: three quarters of the attack.
     Uphill,
 }
 
@@ -196,9 +196,10 @@ pub fn matrix_markdown() -> String {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "Elevation is ×1.25 attacking downhill and ×0.75 uphill, rounded to nearest with \
-         halves up. Melee hits meet melee armour, pierce hits meet pierce armour, siege hits \
-         meet no armour and land on friends in the way too. Nothing does less than 1."
+        "Elevation is five quarters of the attack downhill and three quarters uphill, \
+         rounded to nearest with halves up. Melee hits meet melee armour, pierce hits meet \
+         pierce armour, siege hits meet no armour and land on friends in the way too. \
+         Nothing does less than 1."
     );
     let _ = writeln!(out);
     let _ = writeln!(out, "## Kinds");
@@ -346,8 +347,16 @@ mod tests {
         assert_eq!(Elevation::between(1, 1), Elevation::Level);
         assert_eq!(Elevation::Downhill.apply(8), 10);
         assert_eq!(Elevation::Uphill.apply(8), 6);
-        assert_eq!(Elevation::Downhill.apply(3), 4, "3.75 rounds up");
-        assert_eq!(Elevation::Uphill.apply(3), 2, "2.25 rounds down");
+        assert_eq!(
+            Elevation::Downhill.apply(3),
+            4,
+            "three and three quarters rounds up"
+        );
+        assert_eq!(
+            Elevation::Uphill.apply(3),
+            2,
+            "two and a quarter rounds down"
+        );
         let a = Armour {
             melee: 2,
             pierce: 0,
