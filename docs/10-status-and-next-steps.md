@@ -99,14 +99,14 @@ The points that affect what comes next:
 
 The 2026-09-11 code review identified a short stabilisation pass before the
 combat work below. Keep the work in these independently reviewable chunks;
-chunks 1–3 are merged. The session is paused before chunk 4.
+all four chunks are done.
 
 | Chunk | Scope | Status / completion check |
 |---|---|---|
 | 1 — Restore CI | Fix the stable Clippy failure in PNG palette validation | Merged as `dac80ad` after final CI passed on PR #6 |
 | 2 — Input routing | Handle minimap clicks before the general HUD hit test; allow Storehouse and Market research cancellation | Merged by the owner in PR #7 as `384ae28` |
 | 3 — Commands and production | Resolve WASD/command hotkey conflicts and update controls documentation; retain a paid training item when the entity cap prevents spawning | Merged in PR #8 as `9e0b3e6` after final CI passed; 295 local macOS tests passed |
-| 4 — Real-window check | Run the Mac app through selection, gathering, building, training, cancellation and age advancement | Pending; record the display/GPU and observed results, then resume M4 |
+| 4 — Real-window check | Run the Mac app through selection, gathering, building, training, cancellation and age advancement | Done 2026-09-12 on a MacBook Air (Mac16,13, Apple M4, macOS 27.0). First launch aborted (winit on macOS 26, fixed as `cf5e310`); with the fix, everything in the list worked. Feedback below. |
 
 ### Work record: chunk 1
 
@@ -228,9 +228,11 @@ chunks 1–3 are merged. The session is paused before chunk 4.
   macOS runner where available), builds every pipeline, renders a frame and
   reads it back. It passed here on lavapipe. It skips only when no adapter
   exists at all.
-- **Still to do:** rerun the live check on the Mac with the fix. If a release
-  build still aborts, the panic line in the terminal, or the log file, names
-  the next cause.
+- **Rerun with the fix: passed.** The window, the Metal path and every item
+  on the chunk 4 list (selection, gathering, building, training,
+  cancellation, age advancement, minimap orders, WASD camera) worked on the
+  MacBook Air. The owner's feedback from the session is recorded in the
+  next section, with what was done about each point.
 
 ### Work record: Mac feedback, round 1 (2026-09-12)
 
@@ -257,10 +259,10 @@ what was done:
   The baked table and the villager sheet's palette chunk were regenerated
   (`atlas export --rust`, `atlas repalette`), the player-colour separation
   test still passes, and every golden image was re-baselined.
-- **The Town Center and House look boring.** Not done: the real buildings
-  come from the render pipeline (`docs/08` §9 step 3), which needs Blender
-  on the Mac. Placeholder polish is possible meanwhile but is thrown away
-  when the models arrive; the choice is the owner's.
+- **The Town Center and House look boring.** Decided 2026-09-12: stay with
+  the plan. Real buildings come from the render pipeline (`docs/08` §9
+  step 3), textured in M7, and the placeholders stand until then. No
+  placeholder polish and no early greybox of the two buildings.
 - **A reminder of the keyboard commands.** Done: `F1` or `?` opens a
   controls overlay generated from the same hotkey tables as the command
   grid, the resource bar shows "F1 CONTROLS" for the first minute, and
@@ -269,18 +271,12 @@ what was done:
 
 ### Resume here next session
 
-Chunks 1–3 are complete and merged. Chunk 4 has not started; the live
-macOS window and GPU path remain unverified. This is the stopping point
-for the evening.
-
-1. Start from the latest default branch and reread `docs/09-test-plan.md`.
-2. Launch the Mac app and exercise selection, gathering, building, training,
-   cancellation and age advancement. Include minimap navigation/orders and
-   WASD camera movement with the new command shortcuts.
-3. Record the Mac, display/GPU, observed results and any issues in this file.
-   Address failures in a small follow-up change before marking chunk 4 done.
-4. Once the live check passes, resume M4 with flow fields and the sector
-   graph, using the pathfinding acceptance tests and performance budget below.
+The stabilisation pass is complete: all four chunks done, the live Mac check
+passed, and the first round of feedback is landed (scale factor, zoom,
+controls overlay, palette). The plan stands as written: art continues on
+the `docs/08` schedule, and M4 begins with flow fields and the sector
+graph, using the pathfinding acceptance tests and the performance budget
+below.
 
 ## 4. What comes next: M4 — Combat
 
