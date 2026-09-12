@@ -247,6 +247,21 @@ Clubmen, and reads the effect of Toolworking, Leather Armour and Fletching
 off `Simulation::damage_between`. The `army-hud` golden image pins the
 roster panel and the six placeholders.
 
+**Landed in chunk 3:** `behaviour_combat.rs`, on a flat empty map so no
+start-kit scout wanders into a test: an attack order closes, hits on the
+reload and kills, with the corpse lingering and then going; a bowman
+shoots from range and the arrow takes time to land; the four stances
+decide who engages and how far they chase (`GD-STANCE-01`); a villager hit
+runs for the Town Center and the side is told once (`GD-STANCE-02`);
+attack-move engages on the way and carries on (`UX-CMD-02`); a patrol
+turns round at each end (`UX-CMD-03`); a formation forms a line across the
+way at the slowest member's pace, and no formation is a clump
+(`UX-CMD-08`); and a twelve-a-side fight replays identically. The app
+tests drive the panel's attack-move, patrol, stance and formation
+buttons and the right-click attack, and check that a corpse is not
+picked (`UX-CMD-07`). The `battle-hud` golden image pins two lines
+fighting: arrows in the air, the first bodies down.
+
 **Still to come:** a deterministic 40v40 that terminates. Counters win as
 designed over N trials — balance drift is a real regression and headless is
 the cheapest place to catch it.

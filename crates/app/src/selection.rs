@@ -75,6 +75,14 @@ impl Selection {
         })
     }
 
+    /// Selected units of `player` that can fight.
+    pub fn own_fighters(&self, sim: &Simulation, player: u8) -> Vec<EntityId> {
+        self.filter(sim, |i| {
+            let k = kinds::info(sim.world().kind[i]);
+            sim.world().owner[i] == player && k.mobile && k.combat.attack > 0
+        })
+    }
+
     /// Selected villagers of `player`.
     pub fn own_villagers(&self, sim: &Simulation, player: u8) -> Vec<EntityId> {
         self.filter(sim, |i| {
@@ -163,8 +171,12 @@ pub fn pick(
             continue;
         }
         // Rings share the unit's slot; only the unit's own frame counts.
+        // Corpses are not picked: the click falls through to the ground.
         let i = s.slot as usize;
         let world = sim.world();
+        if world.dying.get(i).is_some_and(|&d| d > 0) {
+            continue;
+        }
         if world.slots().any(|sl| sl.index() == i) {
             return Some(world.id_at(world.slots().find(|sl| sl.index() == i).unwrap()));
         }
@@ -189,7 +201,7 @@ pub fn band_box(
     let mut fixed = Vec::new();
     for slot in world.slots() {
         let i = slot.index();
-        if world.owner[i] != player {
+        if world.owner[i] != player || world.dying[i] > 0 {
             continue;
         }
         let p = world.pos[i];

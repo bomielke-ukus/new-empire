@@ -22,7 +22,7 @@ Four milestones landed; the vertical slice is at its halfway point.
 | M1 — A world you can look at | Landed | A map from a seed, scrolled and zoomed, rendered by the GPU path and the software rasteriser alike |
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
-| M4 — Combat | **In progress** (steps 1–3 of 6 landed 2026-09-12) | Two forces of 40 fight; counters work; nothing gets stuck |
+| M4 — Combat | **In progress** (steps 1–4 of 6 landed 2026-09-12) | Two forces of 40 fight; counters work; nothing gets stuck |
 | M5 — An opponent | Not started | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
@@ -331,11 +331,39 @@ what was done:
   other non-slice units stay out of the table; the siege rule is tested
   on the damage type, not on a unit.
 
+### Work record: M4 chunk 3 — fighting (2026-09-12)
+
+- **What landed.** `crates/sim/src/battle.rs` and `formation.rs`: attack,
+  attack-move and patrol orders; target acquisition by stance
+  (aggressive, defensive, stand ground, passive) with a leash that decides
+  how far a unit chases and a memory of what it goes back to; melee hits
+  and homing projectiles on the reload; death into a corpse that lies for
+  thirty seconds and takes no part in anything; villagers running for
+  the Town Center when hit, with one alarm per ten seconds for their
+  side; formations (line, box, staggered, flank, or none) laid out facing
+  the way the group walks, at the slowest member's pace. `docs/04` §22
+  has the design notes.
+- **What changed for the player.** Right-click an enemy to attack. With
+  soldiers selected the panel offers attack-move (`M`) and patrol (`P`),
+  which arm the cursor for one click; the four stances (`Q E I K`, the
+  current one starred); and the formation (`Z` cycles it). A selected
+  soldier's panel shows its stance and formation and what it is doing.
+  Arrows fly, bodies fall and lie, and "UNDER ATTACK" goes up when your
+  villagers are hit. The bot now raids in the corpus scenarios, so every
+  digest was re-recorded and a `battle-hud` golden image was added.
+- **Measured.** The acquisition scan is every fourth tick per unit over
+  every entity; `marching-8p` and `crowded` stay inside their ceilings.
+- **Not done, deliberately.** Hunting (`docs/07` D15) still waits: animals
+  cannot be attacked and there is no carcass. Buildings die without
+  rubble and without armour of their own, and towers do not shoot yet:
+  step 5. Waypoints (`UX-CMD-04`) and garrison (`UX-CMD-09`) are
+  untouched. Attack-move is `M`, not the `A` `docs/03` names, because
+  `A` pans the camera.
+
 ### Resume here next session
 
-M4 chunks 1 and 2 are landed. Next is step 4 below: attack orders, target
-acquisition, projectiles, stances, formations, and villagers fleeing. Art
-continues on the `docs/08` schedule.
+M4 chunks 1 to 3 are landed. Next is step 5 below: buildings in combat.
+Art continues on the `docs/08` schedule.
 
 ## 4. What comes next: M4 — Combat
 
@@ -356,9 +384,10 @@ shippable on its own and has a headless test before it has a sprite.
    the four military technologies in the `tech` table, the panels and
    placeholders to match. The Siege Workshop still trains nothing: no
    siege unit is in the slice.
-4. **Attack orders.** Attack, attack-move and patrol (`UX-CMD-02`, `-03`),
-   projectiles, target acquisition, stances (`UX-CMD-07`), formations
-   (`UX-CMD-08`), and villagers fleeing and raising an alarm.
+4. **Attack orders.** **Done 2026-09-12**, record above: attack,
+   attack-move and patrol (`UX-CMD-02`, `-03`), projectiles, target
+   acquisition, stances (`UX-CMD-07`), formations (`UX-CMD-08`), and
+   villagers fleeing and raising an alarm (`GD-STANCE-02`).
 5. **Buildings in combat.** Destruction and rubble, towers that shoot,
    walls and gates, garrison (`UX-CMD-09`), and the Town Center as a
    buildable once Q3 is decided.
@@ -378,6 +407,9 @@ Stated so they are not rediscovered.
 
 - The **priority** half of `TA-PATH-06` (player-issued orders before
   AI-issued ones) is unimplemented until M5 supplies an AI.
+- **Hunting** (`docs/07` D15) waits for a carcass: animals cannot be
+  attacked yet.
+- **Attack-move is `M`**, where `docs/03` says `A`; `A` pans the camera.
 - The age-up **fanfare** waits for audio (M7). The sweep and banner exist.
 - **Auto-reseed is per player**, not per farm as `docs/02` [GD-ECON-05]
   asks. A per-farm flag needs a per-entity toggle in the world store.

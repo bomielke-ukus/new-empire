@@ -5,7 +5,7 @@
 use sim::entity::{KindId, Slot};
 use sim::kinds::{self, Cost, KindInfo, Resource};
 use sim::tech::{self, TechId, TechInfo};
-use sim::{EntityId, GatherPhase, Item, Order, Simulation};
+use sim::{EntityId, Formation, GatherPhase, Item, Order, Simulation, Stance};
 
 use crate::camera::Camera;
 use crate::font;
@@ -51,6 +51,14 @@ pub enum Action {
     Research(TechId),
     /// Flip the player's farm auto-reseed.
     ToggleReseed,
+    /// Start picking a point to attack-move to (`UX-CMD-02`).
+    AttackMove,
+    /// Start picking a point to patrol to (`UX-CMD-03`).
+    Patrol,
+    /// Set the selected units' stance (`UX-CMD-07`).
+    Stance(Stance),
+    /// Set the selected units' formation (`UX-CMD-08`).
+    Formation(Formation),
 }
 
 /// A clickable region.
@@ -116,6 +124,8 @@ pub struct HudInput<'a> {
     pub ui_scale: f32,
     /// Whether the controls overlay is open.
     pub help: bool,
+    /// Whether the player is picking a point for an attack-move or patrol.
+    pub targeting: bool,
 }
 
 /// How long the "F1 CONTROLS" hint stays in the resource bar: the first
@@ -145,6 +155,10 @@ pub fn controls() -> [Vec<(String, String)>; 2] {
         s("RIGHT", "MOVE, GATHER, BUILD, RALLY"),
         s("T", "STOP"),
         s("C P G B L", "TRAIN AT A BARRACKS, RANGE, STABLE"),
+        s("RIGHT", "ON AN ENEMY: ATTACK"),
+        s("M, P", "ATTACK-MOVE, PATROL, THEN CLICK"),
+        s("Q E I K", "STANCE, AGGRESSIVE TO PASSIVE"),
+        s("Z", "NEXT FORMATION"),
         s("DELETE", "DISMISS"),
         s("SPACE", "PAUSE"),
         s("[ ]", "SLOWER, FASTER"),
@@ -441,6 +455,44 @@ fn unit_tooltip(kind: KindId) -> String {
     t
 }
 
+fn stance_label(s: Stance) -> &'static str {
+    match s {
+        Stance::Aggressive => "AGGRESSIVE",
+        Stance::Defensive => "DEFENSIVE",
+        Stance::StandGround => "STAND",
+        Stance::Passive => "PASSIVE",
+    }
+}
+
+fn stance_tooltip(s: Stance) -> &'static str {
+    match s {
+        Stance::Aggressive => "AGGRESSIVE: CHASE ENEMIES IN SIGHT, THEN COME BACK",
+        Stance::Defensive => "DEFENSIVE: FIGHT ENEMIES IN SIGHT, DO NOT CHASE FAR",
+        Stance::StandGround => "STAND GROUND: FIGHT IN REACH, NEVER MOVE",
+        Stance::Passive => "PASSIVE: NEVER FIGHT, RUN HOME WHEN HIT",
+    }
+}
+
+fn formation_label(f: Formation) -> &'static str {
+    match f {
+        Formation::None => "NONE",
+        Formation::Line => "LINE",
+        Formation::Box => "BOX",
+        Formation::Staggered => "STAGGER",
+        Formation::Flank => "FLANK",
+    }
+}
+
+fn formation_tooltip(f: Formation) -> &'static str {
+    match f {
+        Formation::None => "NO FORMATION: SPREAD OUT, EACH AT ITS OWN PACE",
+        Formation::Line => "LINE: RANKS ABREAST, AT THE SLOWEST PACE",
+        Formation::Box => "BOX: A SQUARE, AT THE SLOWEST PACE",
+        Formation::Staggered => "STAGGERED: OPEN RANKS, AT THE SLOWEST PACE",
+        Formation::Flank => "FLANK: TWO WINGS, AT THE SLOWEST PACE",
+    }
+}
+
 /// Technology hotkeys, by position at the building.
 const TECH_KEYS: [char; 5] = ['Q', 'E', 'I', 'K', 'Z'];
 
@@ -488,11 +540,26 @@ impl Def {
 /// The commands the selection offers, in grid order. Everything the player
 /// could do from here is listed; what they cannot do yet is greyed with the
 /// reason, so the panel visibly gains buttons as an age arrives.
-fn commands(sim: &Simulation, me: u8, selected: &[Slot], build_mode: Option<KindId>) -> Vec<Def> {
+fn commands(
+    sim: &Simulation,
+    me: u8,
+    selected: &[Slot],
+    build_mode: Option<KindId>,
+    targeting: bool,
+) -> Vec<Def> {
     let world = sim.world();
     let mut defs = Vec::new();
     if build_mode.is_some() {
         defs.push(Def::on(Action::Cancel, "CANCEL", 'X', "LEAVE PLACEMENT"));
+        return defs;
+    }
+    if targeting {
+        defs.push(Def::on(
+            Action::Cancel,
+            "CANCEL",
+            'X',
+            "CLICK THE GROUND TO GO THERE, OR CANCEL",
+        ));
         return defs;
     }
     let Some(pl) = sim.player(me) else {
@@ -517,6 +584,57 @@ fn commands(sim: &Simulation, me: u8, selected: &[Slot], build_mode: Option<Kind
             "STOP",
             'T',
             "STOP WHAT THEY ARE DOING",
+        ));
+    }
+    let fighters: Vec<Slot> = selected
+        .iter()
+        .copied()
+        .filter(|s| {
+            own(s)
+                && kinds::info(world.kind[s.index()]).mobile
+                && kinds::info(world.kind[s.index()]).combat.attack > 0
+        })
+        .collect();
+    if !fighters.is_empty() && !any_villager {
+        // Soldiers only: villagers keep their building keys, and a mixed
+        // selection is a villager selection with an escort.
+        defs.push(Def::on(
+            Action::AttackMove,
+            "ATTACK MOVE",
+            'M',
+            "ADVANCE TO A POINT, FIGHTING ANYTHING ON THE WAY",
+        ));
+        defs.push(Def::on(
+            Action::Patrol,
+            "PATROL",
+            'P',
+            "WALK TO A POINT AND BACK, FIGHTING ANYTHING SEEN",
+        ));
+        let current = world.stance[fighters[0].index()];
+        for (st, key) in Stance::ALL.iter().zip(['Q', 'E', 'I', 'K']) {
+            // The current stance is bracketed: the font has no star.
+            let label = if *st == current {
+                format!("[{}]", stance_label(*st))
+            } else {
+                stance_label(*st).to_string()
+            };
+            defs.push(Def::on(
+                Action::Stance(*st),
+                label,
+                key,
+                stance_tooltip(*st),
+            ));
+        }
+        let formation = world.formation[fighters[0].index()];
+        defs.push(Def::on(
+            Action::Formation(formation.next()),
+            format!("FORM: {}", formation_label(formation)),
+            'Z',
+            format!(
+                "{}. Z CYCLES: NEXT IS {}",
+                formation_tooltip(formation),
+                formation_label(formation.next())
+            ),
         ));
     }
     if any_villager {
@@ -939,6 +1057,15 @@ impl Hud {
                     ty += 12.0;
                     p.text(10.0, ty, &fit(&armour, text_w), false, 1.0);
                     ty += 12.0;
+                    if world.owner[i] == me {
+                        let line = format!(
+                            "{}, {}",
+                            stance_label(world.stance[i]),
+                            formation_label(world.formation[i])
+                        );
+                        p.text(10.0, ty, &fit(&line, text_w), false, 1.0);
+                        ty += 12.0;
+                    }
                 }
                 let job = match world.order[i] {
                     Order::Idle if info.mobile => "IDLE",
@@ -955,6 +1082,10 @@ impl Hud {
                     Order::Gather { .. } => "GOING TO GATHER",
                     Order::Build { working: true, .. } => "BUILDING",
                     Order::Build { .. } => "GOING TO BUILD",
+                    Order::Attack { .. } => "ATTACKING",
+                    Order::AttackMove { .. } => "ATTACK-MOVING",
+                    Order::Patrol { .. } => "PATROLLING",
+                    Order::Flee { .. } => "FLEEING",
                 };
                 if !job.is_empty() {
                     p.text(10.0, ty, job, false, 1.0);
@@ -1052,7 +1183,7 @@ impl Hud {
         let bw = ((grid_w - BUTTON_GAP * (GRID_COLS as f32 - 1.0)) / GRID_COLS as f32)
             .clamp(BUTTON_MIN_W, BUTTON_W)
             .floor();
-        let defs = commands(sim, me, &selected, input.build_mode);
+        let defs = commands(sim, me, &selected, input.build_mode, input.targeting);
         for (n, d) in defs.into_iter().take(GRID_COLS * GRID_ROWS).enumerate() {
             let col = (n % GRID_COLS) as f32;
             let row = (n / GRID_COLS) as f32;
@@ -1313,6 +1444,7 @@ mod tests {
             banner: None,
             ui_scale: 1.0,
             help: false,
+            targeting: false,
         };
         let none = Hud::build(&atlas, &base);
         assert!(none.buttons.is_empty());
@@ -1433,6 +1565,7 @@ mod tests {
                     banner: None,
                     ui_scale,
                     help: false,
+                    targeting: false,
                 },
             )
         };
@@ -1471,6 +1604,7 @@ mod tests {
                 banner: None,
                 ui_scale: 2.0,
                 help: false,
+                targeting: false,
             },
         );
         assert_ne!(lit.sprites, b.sprites, "the hovered button draws lit");
@@ -1518,6 +1652,7 @@ mod tests {
             banner: None,
             ui_scale: 1.0,
             help: false,
+            targeting: false,
         };
         let closed = Hud::build(&atlas, &base);
         let open = Hud::build(&atlas, &HudInput { help: true, ..base });
@@ -1567,6 +1702,7 @@ mod tests {
                     banner: None,
                     ui_scale: 1.0,
                     help: false,
+                    targeting: false,
                 },
             );
             // Every glyph in the top bar stays inside the window.

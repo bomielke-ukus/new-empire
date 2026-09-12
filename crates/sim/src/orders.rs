@@ -9,6 +9,125 @@ use crate::tech::{Age, TechId};
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
 
+/// How a unit answers enemies it has not been ordered at (`docs/02` §8.1,
+/// `GD-STANCE-01`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum Stance {
+    /// Pursues enemies it can see, then returns to where it stood.
+    Aggressive = 0,
+    /// Attacks enemies it can see, does not chase far. Soldiers' default.
+    #[default]
+    Defensive = 1,
+    /// Attacks in range, never moves.
+    StandGround = 2,
+    /// Never attacks; runs for the Town Center when hit. Villagers'
+    /// default.
+    Passive = 3,
+}
+
+impl Stance {
+    /// Every stance, in panel order.
+    pub const ALL: [Stance; 4] = [
+        Stance::Aggressive,
+        Stance::Defensive,
+        Stance::StandGround,
+        Stance::Passive,
+    ];
+
+    /// The stance a fresh unit of `kind` takes.
+    pub fn default_for(kind: KindId) -> Stance {
+        if kind == crate::kinds::VILLAGER {
+            Stance::Passive
+        } else {
+            Stance::Defensive
+        }
+    }
+
+    /// Display name.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Stance::Aggressive => "Aggressive",
+            Stance::Defensive => "Defensive",
+            Stance::StandGround => "Stand ground",
+            Stance::Passive => "Passive",
+        }
+    }
+}
+
+/// The shape a group takes when ordered somewhere together (`UX-CMD-08`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum Formation {
+    /// No shape: spread over the nearest open tiles, each at its own pace.
+    /// Villagers' default.
+    #[default]
+    None = 0,
+    /// Ranks abreast, facing the way they walk. Soldiers' default.
+    Line = 1,
+    /// As square as the count allows.
+    Box = 2,
+    /// Alternate ranks offset by half a step, with room between.
+    Staggered = 3,
+    /// Two wings with a gap between.
+    Flank = 4,
+}
+
+impl Formation {
+    /// Every formation, in the order the panel cycles them.
+    pub const ALL: [Formation; 5] = [
+        Formation::None,
+        Formation::Line,
+        Formation::Box,
+        Formation::Staggered,
+        Formation::Flank,
+    ];
+
+    /// The formation a fresh unit of `kind` takes.
+    pub fn default_for(kind: KindId) -> Formation {
+        if kind == crate::kinds::VILLAGER {
+            Formation::None
+        } else {
+            Formation::Line
+        }
+    }
+
+    /// The next one round.
+    pub const fn next(self) -> Formation {
+        match self {
+            Formation::None => Formation::Line,
+            Formation::Line => Formation::Box,
+            Formation::Box => Formation::Staggered,
+            Formation::Staggered => Formation::Flank,
+            Formation::Flank => Formation::None,
+        }
+    }
+
+    /// Display name.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Formation::None => "No formation",
+            Formation::Line => "Line",
+            Formation::Box => "Box",
+            Formation::Staggered => "Staggered",
+            Formation::Flank => "Flank",
+        }
+    }
+}
+
+/// What a unit goes back to once the fight it picked is over.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Then {
+    /// Stand where the fight ended.
+    Idle,
+    /// Walk back to where it stood before engaging.
+    Return(Vec2Fx),
+    /// Carry on advancing to a point, engaging on the way.
+    AttackMove(Vec2Fx),
+    /// Carry on patrolling between two points.
+    Patrol(Vec2Fx, Vec2Fx, u8),
+}
+
 /// A unit's current job.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum Order {
@@ -18,6 +137,35 @@ pub enum Order {
     /// Walk to a point and stop.
     Move {
         /// Destination.
+        target: Vec2Fx,
+    },
+    /// Close with an enemy and hit it until one of them is dead.
+    Attack {
+        /// The enemy.
+        target: EntityId,
+        /// What to do once it is dead or out of reach.
+        then: Then,
+        /// How far from `origin` a stance lets the chase go; `None` for an
+        /// ordered attack, which chases anywhere.
+        leash: Option<(Vec2Fx, Fx)>,
+    },
+    /// Advance to a point, engaging anything seen on the way (`UX-CMD-02`).
+    AttackMove {
+        /// Destination.
+        target: Vec2Fx,
+    },
+    /// Walk between two points, engaging (`UX-CMD-03`).
+    Patrol {
+        /// Where the patrol was ordered from.
+        from: Vec2Fx,
+        /// The far end.
+        to: Vec2Fx,
+        /// 0 heading `to`, 1 heading `from`.
+        leg: u8,
+    },
+    /// Running from an attacker toward safety (`GD-STANCE-02`).
+    Flee {
+        /// Where safety is.
         target: Vec2Fx,
     },
     /// Gather from a node, carrying loads home until it is gone.
@@ -82,6 +230,53 @@ impl HashState for Order {
                 h.write(site);
                 h.write_bool(*working);
             }
+            Order::Attack {
+                target,
+                then,
+                leash,
+            } => {
+                h.write_u8(4);
+                h.write(target);
+                match then {
+                    Then::Idle => h.write_u8(0),
+                    Then::Return(p) => {
+                        h.write_u8(1);
+                        h.write(p);
+                    }
+                    Then::AttackMove(p) => {
+                        h.write_u8(2);
+                        h.write(p);
+                    }
+                    Then::Patrol(a, b, leg) => {
+                        h.write_u8(3);
+                        h.write(a);
+                        h.write(b);
+                        h.write_u8(*leg);
+                    }
+                }
+                match leash {
+                    None => h.write_u8(0),
+                    Some((origin, radius)) => {
+                        h.write_u8(1);
+                        h.write(origin);
+                        h.write(radius);
+                    }
+                }
+            }
+            Order::AttackMove { target } => {
+                h.write_u8(5);
+                h.write(target);
+            }
+            Order::Patrol { from, to, leg } => {
+                h.write_u8(6);
+                h.write(from);
+                h.write(to);
+                h.write_u8(*leg);
+            }
+            Order::Flee { target } => {
+                h.write_u8(7);
+                h.write(target);
+            }
         }
     }
 }
@@ -129,6 +324,14 @@ pub struct Nav {
     pub anchor: Vec2Fx,
     /// Ticks since `best_goal` last improved.
     pub no_progress: u16,
+    /// Top speed for this trip in tiles per second, so a group in formation
+    /// moves at its slowest member's pace; `Fx::MAX` for the unit's own.
+    #[serde(default = "no_pace")]
+    pub pace: Fx,
+}
+
+fn no_pace() -> Fx {
+    Fx::MAX
 }
 
 impl Nav {
@@ -153,7 +356,14 @@ impl Nav {
             best_goal: Fx::MAX,
             anchor: Vec2Fx::new(Fx::MIN, Fx::MIN),
             no_progress: 0,
+            pace: Fx::MAX,
         }
+    }
+
+    /// The same trip, held to `pace` tiles per second.
+    pub fn paced(mut self, pace: Fx) -> Nav {
+        self.pace = pace;
+        self
     }
 }
 
@@ -172,6 +382,7 @@ impl HashState for Nav {
         h.write(&self.best_goal);
         h.write(&self.anchor);
         h.write_u16(self.no_progress);
+        h.write(&self.pace);
     }
 }
 

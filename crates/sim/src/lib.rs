@@ -19,10 +19,12 @@
 #![warn(missing_docs)]
 
 pub mod angle;
+pub mod battle;
 pub mod combat;
 pub mod command;
 pub mod entity;
 pub mod flow;
+pub mod formation;
 pub mod fx;
 pub mod hash;
 pub mod kinds;
@@ -39,6 +41,7 @@ mod trig_table;
 pub mod vec2;
 
 pub use angle::Angle;
+pub use battle::{Event, Projectile, DECAY_TICKS};
 pub use combat::{Armour, Elevation};
 pub use command::{
     Command, CommandError, CommandKind, CommandQueue, PlayerId, COMMAND_DELAY, MAX_COMMAND_IDS,
@@ -51,7 +54,8 @@ pub use kinds::{Class, Combat, DamageType};
 pub use map::{Terrain, TileMap, MAX_ELEVATION};
 pub use mapgen::{MapKind, MapSpec};
 pub use orders::{
-    GatherPhase, Item, Modifiers, Nav, NavState, Order, Player, Production, QueueItem, Rally,
+    Formation, GatherPhase, Item, Modifiers, Nav, NavState, Order, Player, Production, QueueItem,
+    Rally, Stance, Then,
 };
 pub use replay::{Divergence, Replay, ReplayError, Trace, VerifyError};
 pub use rng::Rng;

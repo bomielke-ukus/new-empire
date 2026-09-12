@@ -145,6 +145,10 @@ struct App {
     selection: Selection,
     /// Building being placed.
     build_mode: Option<sim::entity::KindId>,
+    /// Picking a point for an attack-move or a patrol.
+    targeting: Option<Targeting>,
+    /// When the player's side was last told it was under attack.
+    alarm_at: Option<Instant>,
     /// The player's HUD magnification on top of the display scale: 1, 1.5
     /// or 2. `F2` cycles it.
     ui_scale_user: f32,
@@ -205,6 +209,8 @@ impl App {
             input: Input::new(),
             selection: Selection::new(),
             build_mode: None,
+            targeting: None,
+            alarm_at: None,
             ui_scale_user: 1.0,
             show_help: false,
             last_age: Age::Stone,
@@ -259,6 +265,15 @@ impl App {
         py < TOP_BAR * s || py > self.camera.viewport.1 - BOTTOM_PANEL * s
     }
 
+    /// The world point under a window point, in tiles.
+    fn world_point(&self, px: f32, py: f32) -> Vec2Fx {
+        let (wx, wy) = self.camera.window_to_world(px, py);
+        Vec2Fx::new(
+            sim::Fx::from_ratio((wx * 1000.0) as i32, 1000),
+            sim::Fx::from_ratio((wy * 1000.0) as i32, 1000),
+        )
+    }
+
     /// Tile under the cursor, for placement.
     fn hover_tile(&self) -> Option<(i32, i32)> {
         let (px, py) = self.input.cursor?;
@@ -304,6 +319,14 @@ impl App {
         for _ in 0..ticks {
             self.prev_pos.clone_from(&self.sim.world().pos);
             self.sim.step();
+            if self
+                .sim
+                .events()
+                .iter()
+                .any(|e| matches!(e, sim::Event::Alarm { player, .. } if *player == ME))
+            {
+                self.alarm_at = Some(now);
+            }
         }
         self.selection.prune(&self.sim);
 
@@ -321,7 +344,13 @@ impl App {
         });
         let banner = match (self.age_up, since) {
             (Some((_, a)), Some(ms)) if ms < BANNER_MS => Some(a.name().to_uppercase()),
-            _ => None,
+            _ => match self.alarm_at {
+                // The villagers' alarm ([GD-STANCE-02]): the side is told.
+                Some(t) if t.elapsed().as_millis() < ALARM_BANNER_MS => {
+                    Some("UNDER ATTACK".to_string())
+                }
+                _ => None,
+            },
         };
 
         let selected = self.selection.slots(&self.sim);
@@ -360,6 +389,7 @@ impl App {
                 status: &status,
                 hover: self.input.cursor,
                 banner: banner.as_deref(),
+                targeting: self.targeting.is_some(),
                 ui_scale: self.ui_scale(),
                 help: self.show_help,
             },
@@ -394,9 +424,11 @@ impl App {
         };
         let icon = match (self.build_mode, self.input.cursor) {
             (Some(_), _) => CursorIcon::Cell,
+            (None, _) if self.targeting.is_some() => CursorIcon::Crosshair,
             (None, Some((px, py))) if !self.over_hud(px, py) => match self.hovered_target(px, py) {
                 Some(Target::Gather) => CursorIcon::Grab,
                 Some(Target::Assist) => CursorIcon::Pointer,
+                Some(Target::Attack) => CursorIcon::Crosshair,
                 _ => CursorIcon::Default,
             },
             _ => CursorIcon::Default,
@@ -416,6 +448,9 @@ impl App {
         }
         if villagers && world.owner[i] == ME && world.construction[i].is_some() {
             return Some(Target::Assist);
+        }
+        if enemy_of_me(&self.sim, i) && !self.selection.own_fighters(&self.sim, ME).is_empty() {
+            return Some(Target::Attack);
         }
         Some(Target::Other(id))
     }
@@ -451,6 +486,20 @@ impl App {
                         self.build_mode = None;
                     }
                 }
+            }
+            return;
+        }
+        if let Some(what) = self.targeting {
+            let target = self.world_point(px, py);
+            let ids = self.selection.own_mobile(&self.sim, ME);
+            if !ids.is_empty() {
+                self.issue(match what {
+                    Targeting::AttackMove => CommandKind::AttackMove { ids, target },
+                    Targeting::Patrol => CommandKind::Patrol { ids, target },
+                });
+            }
+            if !self.modifiers.shift_key() {
+                self.targeting = None;
             }
             return;
         }
@@ -506,8 +555,9 @@ impl App {
     }
 
     fn right_press(&mut self, px: f32, py: f32) {
-        if self.build_mode.is_some() {
+        if self.build_mode.is_some() || self.targeting.is_some() {
             self.build_mode = None;
+            self.targeting = None;
             return;
         }
         let minimap_uv = self.minimap_rect().to_uv(px, py);
@@ -542,6 +592,14 @@ impl App {
             let world = self.sim.world();
             let gatherable = gatherable_by_me(&self.sim, i);
             let site = world.owner[i] == ME && world.construction[i].is_some();
+            let fighters = self.selection.own_fighters(&self.sim, ME);
+            if !fighters.is_empty() && enemy_of_me(&self.sim, i) {
+                self.issue(CommandKind::Attack {
+                    ids: fighters,
+                    target: id,
+                });
+                return;
+            }
             if !villagers.is_empty() && gatherable {
                 self.issue(CommandKind::Gather {
                     ids: villagers,
@@ -602,7 +660,24 @@ impl App {
                     self.issue(CommandKind::Stop { ids });
                 }
             }
-            Action::Cancel => self.build_mode = None,
+            Action::Cancel => {
+                self.build_mode = None;
+                self.targeting = None;
+            }
+            Action::AttackMove => self.targeting = Some(Targeting::AttackMove),
+            Action::Patrol => self.targeting = Some(Targeting::Patrol),
+            Action::Stance(stance) => {
+                let ids = self.selection.own_mobile(&self.sim, ME);
+                if !ids.is_empty() {
+                    self.issue(CommandKind::SetStance { ids, stance });
+                }
+            }
+            Action::Formation(formation) => {
+                let ids = self.selection.own_mobile(&self.sim, ME);
+                if !ids.is_empty() {
+                    self.issue(CommandKind::SetFormation { ids, formation });
+                }
+            }
             Action::Research(t) => {
                 let Some(info) = tech::info(t) else {
                     return;
@@ -692,8 +767,9 @@ impl App {
             KeyCode::Escape => {
                 if self.show_help {
                     self.show_help = false;
-                } else if self.build_mode.is_some() {
+                } else if self.build_mode.is_some() || self.targeting.is_some() {
                     self.build_mode = None;
+                    self.targeting = None;
                 } else if !self.selection.ids.is_empty() {
                     self.selection.set(vec![]);
                 } else {
@@ -762,8 +838,30 @@ impl App {
 enum Target {
     Gather,
     Assist,
+    Attack,
     #[allow(dead_code)]
     Other(EntityId),
+}
+
+/// What the next click on the ground orders (`UX-CMD-02`, `UX-CMD-03`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Targeting {
+    AttackMove,
+    Patrol,
+}
+
+/// How long the under-attack banner stays up, in ms.
+const ALARM_BANNER_MS: u128 = 3000;
+
+/// True if entity `i` is another player's and can be fought: not ours, not
+/// nature's, not a corpse.
+fn enemy_of_me(sim: &Simulation, i: usize) -> bool {
+    let world = sim.world();
+    let owner = world.owner[i];
+    owner != ME
+        && owner != kinds::GAIA
+        && world.dying[i] == 0
+        && kinds::info(world.kind[i]).class != kinds::Class::Other
 }
 
 /// True if the player's villagers may gather from entity `i`: a node with

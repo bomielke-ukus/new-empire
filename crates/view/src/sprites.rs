@@ -25,6 +25,8 @@ pub const UI_FOOT_BAD: KindId = 58_200;
 pub const UI_SITE: KindId = 58_300;
 /// The age-up glow, a gold footprint, at this id plus the footprint.
 pub const UI_FOOT_GLOW: KindId = 58_400;
+/// An arrow in flight.
+pub const UI_ARROW: KindId = 58_500;
 /// Light glyphs: `UI_GLYPH + index into font::CHARS`.
 pub const UI_GLYPH: KindId = 60_000;
 /// Dark glyphs: `UI_GLYPH_DARK + index into font::CHARS`.
@@ -320,6 +322,28 @@ impl Atlas {
             scale: 1,
             canvas,
         };
+        // A corpse for every mobile placeholder: one frame, any facing, that
+        // the death and decay animations both show.
+        let mut fallen = |kind: KindId, base: KindId, age: u8, canvases: &mut Vec<Entry>| {
+            for anim in [Anim::Death, Anim::Decay] {
+                canvases.push(Entry {
+                    kind,
+                    facing: 0,
+                    anim,
+                    index: 0,
+                    scale: 1,
+                    canvas: draw_fallen(base, age),
+                });
+                anims.insert(
+                    (kind, anim),
+                    AnimInfo {
+                        frames: 1,
+                        frame_ms: 1000,
+                        loops: false,
+                    },
+                );
+            }
+        };
         for k in kinds::all() {
             if covered.contains(&k.id) {
                 continue;
@@ -328,6 +352,7 @@ impl Atlas {
                 for f in AUTHORED {
                     canvases.push(still(k.id, f, draw_kind(k.id, f)));
                 }
+                fallen(k.id, k.id, 0, &mut canvases);
             } else {
                 canvases.push(still(k.id, 0, draw_kind(k.id, 1)));
             }
@@ -342,6 +367,7 @@ impl Atlas {
                     for f in AUTHORED {
                         canvases.push(still(id, f, draw_kind_aged(k.id, f, age)));
                     }
+                    fallen(id, k.id, age, &mut canvases);
                 } else {
                     canvases.push(still(id, 0, draw_kind_aged(k.id, 1, age)));
                 }
@@ -352,6 +378,14 @@ impl Atlas {
             let mut c = Canvas::new(4, 4, (0, 0));
             c.rect(0, 0, 4, 4, idx);
             canvases.push(still(UI_SOLID + idx as KindId, 0, c));
+        }
+        {
+            // An arrow: a dark shaft with a light head, drawn level; the
+            // scene lifts it off the ground.
+            let mut c = Canvas::new(10, 4, (5, 2));
+            c.rect(0, 1, 8, 2, BROWN_DARK);
+            c.rect(7, 0, 3, 4, GREY_LIGHT);
+            canvases.push(still(UI_ARROW, 0, c));
         }
         for fp in 0..=3u32 {
             canvases.push(still(UI_RING + fp as KindId, 0, ring(fp)));
@@ -380,6 +414,11 @@ impl Atlas {
         atlas.variants = variants;
         atlas.loaded_sets = loaded_sets;
         atlas
+    }
+
+    /// The arrow drawn for a projectile in flight.
+    pub fn arrow(&self) -> Option<&Frame> {
+        self.frame(UI_ARROW, 0).map(|(f, _)| f)
     }
 
     /// A 4×4 fill of a palette index, for stretching into rectangles.
@@ -811,6 +850,32 @@ fn style(age: u8) -> Style {
 
 fn draw_kind(kind: KindId, facing: u8) -> Canvas {
     draw_kind_aged(kind, facing, 0)
+}
+
+/// A kind's placeholder lying dead: the body along the ground in the
+/// player colour, the head at one end, a mount on its side under a rider.
+fn draw_fallen(kind: KindId, age: u8) -> Canvas {
+    let mounted = kinds::info(kind).class == kinds::Class::Cavalry;
+    if mounted {
+        let mut c = Canvas::new(56, 32, (28, 26));
+        c.ellipse(28.0, 26.0, 22.0, 6.0, SHADOW);
+        c.ellipse(28.0, 22.0, 19.0, 7.0, BLACK);
+        c.ellipse(28.0, 22.0, 18.0, 6.0, HIDE);
+        c.ellipse(14.0, 18.0, 6.0, 4.0, P_BASE);
+        c.circle(8.0, 16.0, 4.0, BLACK);
+        c.circle(8.0, 16.0, 3.0, SKIN);
+        return c;
+    }
+    let mut c = Canvas::new(40, 24, (20, 20));
+    c.ellipse(20.0, 20.0, 15.0, 5.0, SHADOW);
+    c.ellipse(22.0, 16.0, 12.0, 5.0, BLACK);
+    c.ellipse(22.0, 16.0, 11.0, 4.0, P_DARK);
+    if let Some(band) = costume(age) {
+        c.ellipse(24.0, 16.0, 3.0, 4.0, band);
+    }
+    c.circle(8.0, 15.0, 5.0, BLACK);
+    c.circle(8.0, 15.0, 4.0, SKIN);
+    c
 }
 
 /// A kind's placeholder as its owner's age (0 Stone .. 3 Iron) draws it.

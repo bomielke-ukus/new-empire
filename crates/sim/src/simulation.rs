@@ -16,10 +16,12 @@
 //!
 //! Nothing here reads a clock or a float; see the crate docs.
 
+use crate::battle::{Event, Projectile};
 use crate::combat;
 use crate::command::{Command, CommandKind, CommandQueue, PlayerId};
 use crate::entity::{EntityId, KindId, Slot, World, WorldViolation};
 use crate::flow;
+use crate::formation;
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
 use crate::kinds::{self, Cost, Resource, GAIA, MAX_BUILDERS};
@@ -28,6 +30,7 @@ use crate::mapgen::{self, MapSpec};
 use crate::nav::{self, NavGrid, Tile};
 use crate::orders::{
     GatherPhase, Item, Modifiers, Nav, NavState, Order, Player, Production, QueueItem, Rally,
+    Stance, Then,
 };
 use crate::replay::Replay;
 use crate::rng::Rng;
@@ -54,7 +57,7 @@ const GIVE_UP_TICKS: u16 = 400;
 /// Half the minimum distance between two units.
 const UNIT_RADIUS: Fx = Fx::from_ratio(28, 100);
 /// A unit is "at" a building or node within this distance of a footprint tile centre.
-const REACH: Fx = Fx::from_ratio(15, 10);
+pub(crate) const REACH: Fx = Fx::from_ratio(15, 10);
 /// A working unit keeps working until pushed this far from its footprint tile.
 const REACH_SLACK: Fx = Fx::from_ratio(225, 100);
 /// Ticks without progress toward its heading before a walker asks the
@@ -196,16 +199,23 @@ pub struct TickStats {
     pub fields_live: u32,
     /// Units the shared field did not reach, served from their own goal.
     pub own_fallbacks: u32,
+    /// Hits that landed this tick.
+    pub hits: u32,
+    /// Units and buildings that died this tick.
+    pub kills: u32,
 }
 
 /// Reusable buffers. Deliberately invisible to equality and serialisation.
 #[derive(Default)]
-struct Scratch {
+pub(crate) struct Scratch {
     sectors: flow::Sectors,
     fields: flow::Fields,
     head: Vec<u32>,
     next: Vec<u32>,
-    stats: TickStats,
+    pub(crate) stats: TickStats,
+    /// The tick each player's side was last told it was under attack; 0
+    /// for never.
+    pub(crate) last_alarm: Vec<u64>,
 }
 
 impl Clone for Scratch {
@@ -370,24 +380,30 @@ impl core::fmt::Display for TrainError {
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Simulation {
     seed: u64,
-    tick: u64,
-    config: SimConfig,
-    rng: Rng,
-    map: TileMap,
+    pub(crate) tick: u64,
+    pub(crate) config: SimConfig,
+    pub(crate) rng: Rng,
+    pub(crate) map: TileMap,
     /// Hash of the immutable map, folded into every state hash.
     map_hash: u64,
     starts: Vec<(i32, i32)>,
-    players: Vec<Player>,
-    nav: NavGrid,
-    world: World,
+    pub(crate) players: Vec<Player>,
+    pub(crate) nav: NavGrid,
+    pub(crate) world: World,
     queue: CommandQueue,
     /// Every command ever issued, with its issue tick. This *is* the replay.
     log: Vec<(u64, Command)>,
     /// The grid generation walkers last checked their headings against.
     #[serde(default)]
     nav_seen: u32,
+    /// Arrows and stones in flight.
+    #[serde(default)]
+    pub(crate) projectiles: Vec<Projectile>,
+    /// What happened this tick that the presentation may care about.
     #[serde(skip)]
-    scratch: Scratch,
+    pub(crate) events: Vec<Event>,
+    #[serde(skip)]
+    pub(crate) scratch: Scratch,
 }
 
 impl Simulation {
@@ -413,6 +429,8 @@ impl Simulation {
             queue: CommandQueue::new(),
             log: Vec::new(),
             nav_seen: 0,
+            projectiles: Vec::new(),
+            events: Vec::new(),
             scratch: Scratch::default(),
             config,
         };
@@ -481,6 +499,17 @@ impl Simulation {
         self.scratch.stats
     }
 
+    /// Arrows and stones in flight.
+    pub fn projectiles(&self) -> &[Projectile] {
+        &self.projectiles
+    }
+
+    /// What happened during the last tick that the presentation may want
+    /// to react to. Cleared at the start of every tick.
+    pub fn events(&self) -> &[Event] {
+        &self.events
+    }
+
     /// Villagers of `p` with nothing to do, in slot order.
     pub fn idle_villagers(&self, p: PlayerId) -> Vec<EntityId> {
         self.world
@@ -488,6 +517,7 @@ impl Simulation {
             .filter(|s| {
                 let i = s.index();
                 self.world.owner[i] == p
+                    && self.world.dying[i] == 0
                     && self.world.kind[i] == kinds::VILLAGER
                     && self.world.order[i] == Order::Idle
             })
@@ -718,6 +748,10 @@ impl Simulation {
     /// Advances the match by one tick. Fixed system order, no exceptions.
     pub fn step(&mut self) {
         self.scratch.stats = TickStats::default();
+        self.events.clear();
+        if self.scratch.last_alarm.len() != self.players.len() {
+            self.scratch.last_alarm.resize(self.players.len(), 0);
+        }
         self.apply_commands();
         self.farms();
         self.nav.refresh();
@@ -728,6 +762,10 @@ impl Simulation {
         self.movement();
         self.separation();
         self.keep_off_blocked();
+        self.acquire();
+        self.strike();
+        self.fly();
+        self.deaths();
         self.construction();
         self.production();
         self.recount_population();
@@ -755,6 +793,7 @@ impl Simulation {
         h.write(&self.nav);
         h.write(&self.world);
         h.write(&self.queue);
+        h.write(&self.projectiles);
         h.finish()
     }
 
@@ -896,7 +935,7 @@ impl Simulation {
         Some(id)
     }
 
-    fn remove(&mut self, id: EntityId) -> bool {
+    pub(crate) fn remove(&mut self, id: EntityId) -> bool {
         let Some(slot) = self.world.slot(id) else {
             return false;
         };
@@ -964,21 +1003,93 @@ impl Simulation {
                 if units.is_empty() {
                     return;
                 }
-                let target = self.clamp_to_map(target);
-                let (tx, ty) = nav::tile_of(target);
-                let spots = self.nav.spread(tx, ty, units.len(), None);
-                // One field for the whole group: every unit walks the same
-                // ground to the same place and only parts at the end.
-                let field = (tx, ty, 0);
-                for (n, slot) in units.iter().enumerate() {
-                    let goal = match spots.get(n) {
-                        Some(&t) if n == 0 && t == (tx, ty) => target,
-                        Some(&t) => nav::centre(t),
-                        None => target,
-                    };
+                let (goals, pace, field) = self.group_goals(&units, target);
+                for (slot, goal) in units.iter().zip(goals) {
                     let i = slot.index();
                     self.world.order[i] = Order::Move { target: goal };
-                    self.world.nav[i] = Some(Nav::along(goal, Fx::from_ratio(15, 100), field));
+                    self.world.nav[i] =
+                        Some(Nav::along(goal, Fx::from_ratio(15, 100), field).paced(pace));
+                }
+            }
+            CommandKind::Attack { ids, target } => {
+                let Some(ts) = self.target_slot(target) else {
+                    return;
+                };
+                let owner = self.world.owner[ts.index()];
+                if owner == p || owner == GAIA {
+                    return;
+                }
+                for id in ids {
+                    if let Some(slot) = self.owned_mobile(id, p) {
+                        let i = slot.index();
+                        if kinds::info(self.world.kind[i]).combat.attack == 0 {
+                            continue;
+                        }
+                        self.engage(i, target, Then::Idle, None);
+                    }
+                }
+            }
+            CommandKind::AttackMove { ids, target } => {
+                let units: Vec<Slot> = ids
+                    .iter()
+                    .filter_map(|&id| self.owned_mobile(id, p))
+                    .collect();
+                if units.is_empty() {
+                    return;
+                }
+                let (goals, pace, field) = self.group_goals(&units, target);
+                for (slot, goal) in units.iter().zip(goals) {
+                    let i = slot.index();
+                    self.world.order[i] = Order::AttackMove { target: goal };
+                    self.world.nav[i] =
+                        Some(Nav::along(goal, Fx::from_ratio(15, 100), field).paced(pace));
+                }
+            }
+            CommandKind::Patrol { ids, target } => {
+                let units: Vec<Slot> = ids
+                    .iter()
+                    .filter_map(|&id| self.owned_mobile(id, p))
+                    .collect();
+                if units.is_empty() {
+                    return;
+                }
+                let (goals, pace, field) = self.group_goals(&units, target);
+                for (slot, goal) in units.iter().zip(goals) {
+                    let i = slot.index();
+                    let from = self.world.pos[i];
+                    self.world.order[i] = Order::Patrol {
+                        from,
+                        to: goal,
+                        leg: 0,
+                    };
+                    self.world.nav[i] = Some(Nav::along(goal, Fx::HALF, field).paced(pace));
+                }
+            }
+            CommandKind::SetStance { ids, stance } => {
+                for id in ids {
+                    if let Some(slot) = self.owned_mobile(id, p) {
+                        let i = slot.index();
+                        self.world.stance[i] = stance;
+                        // A unit told to stand down drops a fight it picked
+                        // itself; one it was ordered into it keeps.
+                        if stance == Stance::Passive {
+                            if let Order::Attack {
+                                then,
+                                leash: Some(_),
+                                ..
+                            } = self.world.order[i]
+                            {
+                                self.finish_fight(i, then);
+                            }
+                        }
+                    }
+                }
+            }
+            CommandKind::SetFormation { ids, formation } => {
+                for id in ids {
+                    if let Some(slot) = self.owned_mobile(id, p) {
+                        self.world.formation[slot.index()] = formation;
+                    }
                 }
             }
             CommandKind::Stop { ids } => {
@@ -1107,6 +1218,66 @@ impl Simulation {
         }
     }
 
+    /// Where each unit of a group goes when sent to `target` together, at
+    /// what pace, and the field they share. In a formation, the shape is
+    /// laid out facing the way the group walks, each unit takes the slot
+    /// on its own side, and the whole group holds its slowest member's
+    /// speed (`UX-CMD-08`). With no formation, the group spreads over the
+    /// nearest open tiles at its own pace.
+    fn group_goals(&self, units: &[Slot], target: Vec2Fx) -> (Vec<Vec2Fx>, Fx, flow::FieldKey) {
+        let target = self.clamp_to_map(target);
+        let (tx, ty) = nav::tile_of(target);
+        // One field for the whole group: every unit walks the same ground
+        // to the same place and only parts at the end.
+        let field = (tx, ty, 0);
+        let formation = self.world.formation[units[0].index()];
+        let n = units.len();
+        let offsets = formation::offsets(formation, n);
+        if offsets.is_empty() || n == 1 {
+            let spots = self.nav.spread(tx, ty, n, None);
+            let goals = (0..n)
+                .map(|k| match spots.get(k) {
+                    Some(&t) if k == 0 && t == (tx, ty) => target,
+                    Some(&t) => nav::centre(t),
+                    None => target,
+                })
+                .collect();
+            return (goals, Fx::MAX, field);
+        }
+        let positions: Vec<Vec2Fx> = units.iter().map(|s| self.world.pos[s.index()]).collect();
+        let mut centroid = Vec2Fx::ZERO;
+        for p in &positions {
+            centroid += *p;
+        }
+        centroid = centroid.scale_ratio(Fx::ONE, Fx::from_int(n as i32));
+        let dir = target - centroid;
+        let slots = formation::place(target, dir, &offsets);
+        let assigned = formation::assign(&positions, dir, slots.len());
+        let goals = units
+            .iter()
+            .enumerate()
+            .map(|(k, slot)| {
+                let want = self.clamp_to_map(slots[assigned[k]]);
+                let t = nav::tile_of(want);
+                let from = self.standing_tile(slot.index());
+                let ok =
+                    self.nav.passable(t.0, t.1) && from.is_none_or(|f| self.nav.connected(f, t));
+                if ok {
+                    want
+                } else {
+                    self.nav
+                        .nearest_passable(t.0, t.1, 6, from)
+                        .map_or(want, nav::centre)
+                }
+            })
+            .collect();
+        let pace = units
+            .iter()
+            .map(|s| kinds::info(self.world.kind[s.index()]).speed_per_second)
+            .fold(Fx::MAX, Fx::min);
+        (goals, pace, field)
+    }
+
     fn assign_builders(&mut self, ids: &[EntityId], p: PlayerId, site: EntityId) {
         for &id in ids {
             if let Some(slot) = self.owned_villager(id, p) {
@@ -1128,6 +1299,7 @@ impl Simulation {
             .slots()
             .filter(|s| {
                 self.world.owner[s.index()] != GAIA
+                    && self.world.dying[s.index()] == 0
                     && kinds::info(self.world.kind[s.index()]).mobile
             })
             .collect();
@@ -1135,6 +1307,14 @@ impl Simulation {
             let i = slot.index();
             match self.world.order[i] {
                 Order::Idle => {}
+                Order::Attack {
+                    target,
+                    then,
+                    leash,
+                } => self.tick_attack(slot, target, then, leash),
+                Order::AttackMove { target } => self.tick_attack_move(slot, target),
+                Order::Patrol { from, to, leg } => self.tick_patrol(slot, from, to, leg),
+                Order::Flee { target } => self.tick_flee(slot, target),
                 Order::Move { .. } => {
                     if self.nav_settled(i) {
                         self.world.nav[i] = None;
@@ -1159,7 +1339,7 @@ impl Simulation {
         }
     }
 
-    fn nav_failed(&self, i: usize) -> bool {
+    pub(crate) fn nav_failed(&self, i: usize) -> bool {
         matches!(&self.world.nav[i], Some(n) if n.state == NavState::Failed)
     }
 
@@ -1384,7 +1564,7 @@ impl Simulation {
 
     /// The field key for walking up to an entity: its footprint, so every
     /// unit heading for the same building or node shares one field.
-    fn field_key_of(&self, target: Slot) -> flow::FieldKey {
+    pub(crate) fn field_key_of(&self, target: Slot) -> flow::FieldKey {
         let i = target.index();
         let fp = kinds::info(self.world.kind[i]).footprint;
         if fp == 0 {
@@ -1414,7 +1594,7 @@ impl Simulation {
     }
 
     /// True if unit `i` stands within `dist` of any footprint tile of `target`.
-    fn within(&self, i: usize, target: Slot, dist: Fx) -> bool {
+    pub(crate) fn within(&self, i: usize, target: Slot, dist: Fx) -> bool {
         let pos = self.world.pos[i];
         self.footprint_of(target.index())
             .into_iter()
@@ -1467,7 +1647,7 @@ impl Simulation {
     }
 
     /// The passable tile a unit counts as standing on.
-    fn standing_tile(&self, i: usize) -> Option<Tile> {
+    pub(crate) fn standing_tile(&self, i: usize) -> Option<Tile> {
         let t = nav::tile_of(self.world.pos[i]);
         if self.nav.passable(t.0, t.1) {
             Some(t)
@@ -1739,7 +1919,7 @@ impl Simulation {
         for slot in self.world.slots().collect::<Vec<_>>() {
             let i = slot.index();
             let info = kinds::info(self.world.kind[i]);
-            if !info.mobile {
+            if !info.mobile || self.world.dying[i] > 0 {
                 continue;
             }
             let per_second = match self.world.kind[i] {
@@ -1753,6 +1933,11 @@ impl Simulation {
                     }
                 }
                 _ => info.speed_per_second,
+            };
+            // A group in formation walks at its slowest member's pace.
+            let per_second = match &self.world.nav[i] {
+                Some(n) => per_second.min(n.pace),
+                None => per_second,
             };
             let speed = per_second / TICKS_PER_SECOND as i32;
             let here = self.world.pos[i];
@@ -1872,7 +2057,7 @@ impl Simulation {
             .world
             .slots()
             .map(|s| s.index())
-            .filter(|&i| kinds::info(self.world.kind[i]).mobile)
+            .filter(|&i| kinds::info(self.world.kind[i]).mobile && self.world.dying[i] == 0)
             .collect();
         for &i in &mobile {
             let t = nav::tile_of(self.world.pos[i]);
@@ -1959,7 +2144,7 @@ impl Simulation {
     fn keep_off_blocked(&mut self) {
         for slot in self.world.slots().collect::<Vec<_>>() {
             let i = slot.index();
-            if !kinds::info(self.world.kind[i]).mobile {
+            if !kinds::info(self.world.kind[i]).mobile || self.world.dying[i] > 0 {
                 continue;
             }
             let pos = self.clamp_to_map(self.world.pos[i]);
@@ -2222,6 +2407,9 @@ impl Simulation {
                 continue;
             }
             let info = kinds::info(self.world.kind[i]);
+            if self.world.dying[i] > 0 {
+                continue;
+            }
             if info.mobile {
                 self.players[owner].pop += info.pop_cost;
             } else if self.world.construction[i].is_none() {
@@ -2242,8 +2430,9 @@ impl Simulation {
     }
 
     fn owned_mobile(&self, id: EntityId, player: PlayerId) -> Option<Slot> {
-        self.owned_slot(id, player)
-            .filter(|s| kinds::info(self.world.kind[s.index()]).mobile)
+        self.owned_slot(id, player).filter(|s| {
+            kinds::info(self.world.kind[s.index()]).mobile && self.world.dying[s.index()] == 0
+        })
     }
 
     fn owned_villager(&self, id: EntityId, player: PlayerId) -> Option<Slot> {
@@ -2251,7 +2440,7 @@ impl Simulation {
             .filter(|s| self.world.kind[s.index()] == kinds::VILLAGER)
     }
 
-    fn clamp_to_map(&self, p: Vec2Fx) -> Vec2Fx {
+    pub(crate) fn clamp_to_map(&self, p: Vec2Fx) -> Vec2Fx {
         let max_x = Fx::from_int(self.map.width()) - Fx::EPSILON;
         let max_y = Fx::from_int(self.map.height()) - Fx::EPSILON;
         Vec2Fx::new(p.x.clamp(Fx::ZERO, max_x), p.y.clamp(Fx::ZERO, max_y))
@@ -2588,6 +2777,21 @@ mod tests {
         run(&mut sim, 3);
         let ids = owned(&sim, 0, kinds::VILLAGER);
         assert!(ids.len() >= 60);
+        // A pathfinding test, not a raid: the other side's scout would
+        // otherwise defend its Town Center and send the crowd fleeing.
+        let theirs: Vec<EntityId> = sim
+            .world()
+            .slots()
+            .filter(|s| sim.world().owner[s.index()] == 1)
+            .map(|s| sim.world().id_at(s))
+            .collect();
+        sim.issue(Command {
+            player: 1,
+            kind: CommandKind::SetStance {
+                ids: theirs,
+                stance: Stance::Passive,
+            },
+        });
         let (ox, oy) = sim.starts()[1];
         let target = nav::centre((ox, oy + 4));
         sim.issue(Command {

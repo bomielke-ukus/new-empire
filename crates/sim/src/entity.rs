@@ -13,7 +13,7 @@ use crate::command::PlayerId;
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
 use crate::kinds::Resource;
-use crate::orders::{Nav, Order, Production};
+use crate::orders::{Formation, Nav, Order, Production, Stance};
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +62,13 @@ impl HashState for EntityId {
 pub struct Slot(usize);
 
 impl Slot {
+    /// A slot from its index; the caller vouches it is live.
+    pub(crate) fn new(i: usize) -> Slot {
+        Slot(i)
+    }
+}
+
+impl Slot {
     /// The raw index.
     #[inline]
     pub const fn index(self) -> usize {
@@ -104,6 +111,19 @@ pub struct World {
     pub production: Vec<Option<Production>>,
     /// Fractional work accumulator (gathering).
     pub work: Vec<Fx>,
+    /// How it answers enemies it was not ordered at.
+    #[serde(default)]
+    pub stance: Vec<Stance>,
+    /// The shape it takes when moved with others.
+    #[serde(default)]
+    pub formation: Vec<Formation>,
+    /// Ticks until it can hit again; 0 means ready.
+    #[serde(default)]
+    pub reload: Vec<u16>,
+    /// Ticks left as a corpse; 0 means alive. A dying entity keeps its slot
+    /// so the corpse can be drawn, but takes no part in anything.
+    #[serde(default)]
+    pub dying: Vec<u16>,
 }
 
 /// A structural invariant of the entity store that does not hold.
@@ -253,6 +273,10 @@ impl World {
             self.construction[i] = None;
             self.production[i] = None;
             self.work[i] = Fx::ZERO;
+            self.stance[i] = Stance::default_for(kind);
+            self.formation[i] = Formation::default_for(kind);
+            self.reload[i] = 0;
+            self.dying[i] = 0;
             EntityId {
                 index: i as u32,
                 generation: self.generation[i],
@@ -274,6 +298,10 @@ impl World {
             self.construction.push(None);
             self.production.push(None);
             self.work.push(Fx::ZERO);
+            self.stance.push(Stance::default_for(kind));
+            self.formation.push(Formation::default_for(kind));
+            self.reload.push(0);
+            self.dying.push(0);
             EntityId {
                 index: i as u32,
                 generation: 0,
@@ -305,6 +333,10 @@ impl World {
         self.construction[i] = None;
         self.production[i] = None;
         self.work[i] = Fx::ZERO;
+        self.stance[i] = Stance::default();
+        self.formation[i] = Formation::default();
+        self.reload[i] = 0;
+        self.dying[i] = 0;
         self.live -= 1;
         // Keep `free` sorted descending: insert at the position that
         // maintains order. Slot counts are small enough that the O(n) insert
@@ -347,7 +379,11 @@ impl World {
     /// tick that noticed.
     pub fn check(&self) -> Result<(), WorldViolation> {
         let n = self.alive.len();
-        let columns: [(&'static str, usize); 13] = [
+        let columns: [(&'static str, usize); 17] = [
+            ("stance", self.stance.len()),
+            ("formation", self.formation.len()),
+            ("reload", self.reload.len()),
+            ("dying", self.dying.len()),
             ("generation", self.generation.len()),
             ("kind", self.kind.len()),
             ("owner", self.owner.len()),
@@ -418,7 +454,11 @@ impl World {
             // Every column `despawn` scrubs is checked, so adding a component
             // without scrubbing it shows up here rather than as a hash that
             // depends on history.
-            let scrubbed: [(&'static str, bool); 13] = [
+            let scrubbed: [(&'static str, bool); 17] = [
+                ("stance", self.stance[i] == Stance::default()),
+                ("formation", self.formation[i] == Formation::default()),
+                ("reload", self.reload[i] == 0),
+                ("dying", self.dying[i] == 0),
                 ("kind", self.kind[i] == 0),
                 ("owner", self.owner[i] == 0),
                 ("pos", self.pos[i] == Vec2Fx::ZERO),
@@ -487,6 +527,10 @@ impl HashState for World {
                 h.write(&self.construction[i]);
                 h.write(&self.production[i]);
                 h.write(&self.work[i]);
+                h.write_u8(self.stance[i] as u8);
+                h.write_u8(self.formation[i] as u8);
+                h.write_u16(self.reload[i]);
+                h.write_u16(self.dying[i]);
             }
         }
     }

@@ -286,6 +286,17 @@ fn technology_changes_what_a_hit_does() {
     let bow = owned(&sim, 0, kinds::BOWMAN)[0];
     let enemy_club = owned(&sim, 1, kinds::CLUBMAN)[0];
     let enemy_cav = owned(&sim, 1, kinds::LIGHT_CAVALRY)[0];
+    // This is a test of the numbers, not a fight: nobody swings.
+    for (p, ids) in [(0, vec![club, bow]), (1, vec![enemy_club, enemy_cav])] {
+        sim.issue(Command {
+            player: p,
+            kind: CommandKind::SetStance {
+                ids,
+                stance: sim::Stance::Passive,
+            },
+        });
+    }
+    run(&mut sim, 3);
     let tree = nearest_kind(&sim, kinds::TREE, tc);
     assert_eq!(sim.damage_between(club, enemy_club), Some(3));
     assert_eq!(sim.damage_between(bow, enemy_club), Some(5));

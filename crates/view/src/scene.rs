@@ -1,7 +1,7 @@
 //! Turns simulation state into a sorted list of sprite instances.
 
 use sim::kinds;
-use sim::{GatherPhase, NavState, Order, Simulation, Vec2Fx, TICK_MS};
+use sim::{GatherPhase, NavState, Order, Simulation, Vec2Fx, DECAY_TICKS, TICK_MS};
 
 /// How long the age-up sweep takes to cross a settlement, in ms.
 pub const SWEEP_MS: u32 = 1800;
@@ -149,8 +149,21 @@ impl Scene {
                         phase: GatherPhase::Working,
                         ..
                     } | Order::Build { working: true, .. }
+                        | Order::Attack { .. }
                 );
-                if walking {
+                if world.dying[i] > 0 {
+                    // Falls, then lies: the death animation's length decides
+                    // when the corpse frame takes over.
+                    let dead_ms = (DECAY_TICKS - world.dying[i]) as u32 * TICK_MS;
+                    let death_ms = atlas
+                        .anim_info(look, Anim::Death)
+                        .map_or(0, |a| a.frames * a.frame_ms);
+                    if dead_ms < death_ms {
+                        Anim::Death
+                    } else {
+                        Anim::Decay
+                    }
+                } else if walking {
                     Anim::Walk
                 } else if working {
                     Anim::Work
@@ -160,9 +173,13 @@ impl Scene {
             } else {
                 Anim::Idle
             };
-            let time_ms = sim.tick() as u32 * TICK_MS
-                + (alpha * TICK_MS as f32) as u32
-                + (i as u32 * 61) % 1000;
+            let time_ms = if world.dying[i] > 0 {
+                (DECAY_TICKS - world.dying[i]) as u32 * TICK_MS + (alpha * TICK_MS as f32) as u32
+            } else {
+                sim.tick() as u32 * TICK_MS
+                    + (alpha * TICK_MS as f32) as u32
+                    + (i as u32 * 61) % 1000
+            };
             let looked_up = if half_built {
                 atlas.site(info.footprint).map(|f| (f, false))
             } else {
@@ -185,7 +202,9 @@ impl Scene {
             let (ax, ay) = frame.draw_anchor();
             let anchor_x = if flip { frame.draw_w() - ax } else { ax };
             let footprint = kinds::info(kind).footprint.max(1) as f32;
-            let depth = px + py + (footprint - 1.0) * 0.5;
+            // Corpses lie under whatever walks over them.
+            let depth =
+                px + py + (footprint - 1.0) * 0.5 - if world.dying[i] > 0 { 0.5 } else { 0.0 };
             let row = palette::row_for_owner(world.owner[i]);
             if selected.contains(&(i as u32)) {
                 if let Some(r) = atlas.ring(kinds::info(kind).footprint) {
@@ -224,6 +243,15 @@ impl Scene {
                 slot: i as u32,
                 screen: false,
             });
+        }
+        // Arrows in flight, lifted off the ground so they read as flying.
+        if let Some(arrow) = atlas.arrow() {
+            for p in sim.projectiles() {
+                let (x, y) = (fx_to_f32(p.pos.x), fx_to_f32(p.pos.y));
+                let h = iso::ground_height(map, x, y);
+                let (gx, gy) = iso::project(x, y, h);
+                sprites.push(overlay(arrow, gx, gy - 12.0, 0, x + y + 0.75, u32::MAX));
+            }
         }
         if let Some(g) = ghost {
             let fp = kinds::info(g.kind).footprint.max(1);

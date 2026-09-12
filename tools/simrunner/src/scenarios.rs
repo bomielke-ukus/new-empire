@@ -266,6 +266,7 @@ impl Scenario {
             8 if economy => self.research(sim, bot, player),
             9 if economy => self.reseed(sim, bot, player),
             10 if matches!(self.style, Style::Everything) => self.spawn(sim, bot, player),
+            11 if marching => self.attack(sim, bot, player),
             _ if marching => self.march(sim, bot, player),
             // A style that has nothing to do this tick simply does nothing,
             // which keeps the decision RNG in step across styles.
@@ -547,6 +548,62 @@ impl Scenario {
                 CommandKind::Move { ids, target }
             },
         });
+    }
+
+    /// Send some soldiers at the enemy: an attack on something of theirs,
+    /// or an attack-move on their start, with a stance or formation change
+    /// now and then so those commands are in the corpus too.
+    fn attack(&self, sim: &mut Simulation, bot: &mut Rng, player: PlayerId) {
+        let fighters = owned(sim, player, |k, _| {
+            let info = kinds::info(k);
+            info.mobile && info.combat.attack > 0 && k != kinds::VILLAGER
+        });
+        if fighters.is_empty() {
+            return;
+        }
+        let n = 1 + bot.below(fighters.len() as u32) as usize;
+        let start = bot.below(fighters.len() as u32) as usize;
+        let ids: Vec<EntityId> = fighters
+            .iter()
+            .cycle()
+            .skip(start)
+            .take(n)
+            .copied()
+            .collect();
+        let players = sim.players().len() as u8;
+        let enemy = (player + 1 + bot.below(players.max(2) as u32 - 1) as u8) % players.max(2);
+        let kind = match bot.below(6) {
+            0 => CommandKind::SetStance {
+                ids,
+                stance: sim::Stance::ALL[bot.below(4) as usize],
+            },
+            1 => CommandKind::SetFormation {
+                ids,
+                formation: sim::Formation::ALL[bot.below(5) as usize],
+            },
+            2 | 3 => {
+                let theirs = owned(sim, enemy, |k, _| {
+                    kinds::info(k).class != kinds::Class::Other
+                });
+                if theirs.is_empty() {
+                    return;
+                }
+                CommandKind::Attack {
+                    ids,
+                    target: theirs[bot.below(theirs.len() as u32) as usize],
+                }
+            }
+            _ => {
+                let (x, y) = sim.starts().get(enemy as usize).copied().unwrap_or((0, 0));
+                let target = Vec2Fx::from_int(x + bot.range_i32(-6, 7), y + bot.range_i32(-6, 7));
+                if bot.chance(1, 3) {
+                    CommandKind::Patrol { ids, target }
+                } else {
+                    CommandKind::AttackMove { ids, target }
+                }
+            }
+        };
+        sim.issue(Command { player, kind });
     }
 
     /// Free units, to press the entity cap and the population recount.

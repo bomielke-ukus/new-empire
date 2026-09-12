@@ -676,3 +676,44 @@ anticipate:
   the same people with different jobs, and the infantry take the
   villager's age costume. The atlas tool already catalogued their sprite
   sets; `kind_for_set` now maps the names.
+
+## 22. Implementation notes from M4, chunk 3: fighting
+
+- **Combat is four passes after movement,** in `battle.rs`: `acquire`
+  (units whose stance allows it pick a target they can see), `strike`
+  (units on an attack and in reach swing when their reload allows; melee
+  lands at once, ranged loosens a projectile), `fly` (projectiles home on
+  their target and land), `deaths` (zero health becomes a corpse for
+  thirty seconds, or removes a building outright). The order machines for
+  attack, attack-move, patrol and flee live in the same file and run in
+  the `orders` pass with the rest. §4's system list had projectiles,
+  combat resolution and death in that order; this is that.
+- **An attack remembers what to do afterwards.** `Order::Attack` carries a
+  `Then`: stand, return to where the unit stood, carry on the attack-move,
+  or resume the patrol leg. Target acquisition fills it in from what the
+  unit was doing, so a defensive unit that steps out to meet a raider
+  walks back to its post and an attack-move column that stops to fight
+  goes on to its destination. A `leash` (origin and radius) is what
+  separates the stances: aggressive chases to twice its sight, defensive
+  to its sight, stand-ground not at all, and an ordered attack has none.
+- **Passive means run.** A passive unit hit by an enemy takes a `Flee`
+  order to its nearest finished Town Center, or eight tiles the other way
+  if it has none, and its side gets one `Event::Alarm` per ten seconds.
+  Events are a per-tick list the presentation reads and the state hash
+  ignores; the app turns the alarm into a banner.
+- **A corpse is the same entity, marked dying.** `World::dying` counts the
+  corpse down; every system skips a dying slot (orders, movement,
+  separation, population, picking, targeting) and the renderer plays the
+  death animation then the decay frame from the tick of death. Buildings
+  have no corpse yet: chunk 4's rubble.
+- **Formations are offsets in quarter tiles** (`formation.rs`), rotated to
+  face the way the group walks and assigned so the left of the group
+  forms the left of the line. A group order with a formation hands every
+  unit its slot and the group's slowest speed as the trip's `pace`;
+  `Formation::None` is the old spread, each at its own pace, which is how
+  the pace matching is switched off (`UX-CMD-08`'s "toggleable").
+- **Keys.** `docs/03` asks for `A` then click for attack-move. `A` is
+  camera panning, which nothing may share (`docs/09` §5), so attack-move
+  is `M` and patrol `P`; stances are `Q E I K` and `Z` cycles the
+  formation. Soldier keys appear only when no villager is selected, so a
+  villager's building keys never clash with them.

@@ -3,7 +3,7 @@
 //! event loop is created; the live macOS smoke pass is still separate.
 
 use super::*;
-use sim::{Item, MapKind, MapSpec, Order};
+use sim::{Command, Formation, Item, MapKind, MapSpec, Order, Stance};
 
 #[test]
 fn camera_keys_pan_without_building_or_spending_and_release_stops_panning() {
@@ -432,4 +432,134 @@ fn mixed_selection_unqueues_the_displayed_building_not_another_trainer() {
         .unwrap()
         .queue
         .is_empty());
+}
+
+/// Soldiers' commands from the panel and the mouse: attack-move and
+/// patrol pick a point, a right-click on an enemy attacks, stance and
+/// formation buttons issue their commands, and a corpse is not selectable.
+///
+/// REQ: UX-CMD-02
+/// REQ: UX-CMD-03
+/// REQ: UX-CMD-07
+#[test]
+fn soldiers_attack_move_patrol_and_change_stance_from_the_panel() {
+    let mut app = app();
+    let club = spawn(&mut app, kinds::CLUBMAN, 10, 10);
+    let bow = spawn(&mut app, kinds::BOWMAN, 11, 10);
+    // An enemy, made passive so nothing happens until it is ordered.
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Spawn {
+            kind: kinds::CLUBMAN,
+            pos: Vec2Fx::from_int(14, 10),
+        },
+    });
+    step(&mut app, 3);
+    let enemy = app
+        .sim
+        .world()
+        .slots()
+        .find(|s| app.sim.world().owner[s.index()] == 1)
+        .map(|s| app.sim.world().id_at(s))
+        .unwrap();
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::SetStance {
+            ids: vec![enemy],
+            stance: Stance::Passive,
+        },
+    });
+    step(&mut app, 3);
+    app.selection.set(vec![club, bow]);
+    app.camera.look_at_tile(12.0, 10.0);
+    draw(&mut app);
+
+    // Attack-move: the button arms targeting, a click on the ground fires.
+    let commands = app.sim.replay().commands.len();
+    let attack_move = button(&app, "ATTACK MOVE");
+    click(&mut app, &attack_move);
+    assert_eq!(app.targeting, Some(Targeting::AttackMove));
+    draw(&mut app);
+    assert!(button(&app, "CANCEL").enabled, "the grid offers a way out");
+    let (px, py) = app.camera.to_window(
+        view::iso::project(20.0, 10.0, 0.0).0,
+        view::iso::project(20.0, 10.0, 0.0).1,
+    );
+    app.left_press(px, py);
+    assert_eq!(app.targeting, None);
+    assert_eq!(app.sim.replay().commands.len(), commands + 1);
+    step(&mut app, 3);
+    assert!(matches!(
+        app.sim.world().order[app.sim.world().slot(club).unwrap().index()],
+        Order::AttackMove { .. }
+    ));
+
+    // Patrol by hotkey, cancelled by escape before any click.
+    draw(&mut app);
+    assert!(app.hotkey('P'));
+    assert_eq!(app.targeting, Some(Targeting::Patrol));
+    assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    assert_eq!(app.targeting, None);
+
+    // A right-click on the enemy attacks it.
+    let commands = app.sim.replay().commands.len();
+    draw(&mut app);
+    let ep = app.sim.world().pos[app.sim.world().slot(enemy).unwrap().index()];
+    let (ex, ey) = (view::fx_to_f32(ep.x), view::fx_to_f32(ep.y));
+    let g = view::iso::project(ex, ey, view::iso::ground_height(app.sim.map(), ex, ey));
+    let (px, py) = app.camera.to_window(g.0, g.1 - 8.0);
+    app.right_press(px, py);
+    assert_eq!(
+        app.sim.replay().commands.len(),
+        commands + 1,
+        "an attack was issued"
+    );
+    step(&mut app, 3);
+    assert!(matches!(
+        app.sim.world().order[app.sim.world().slot(bow).unwrap().index()],
+        Order::Attack { target, .. } if target == enemy
+    ));
+
+    // Stance and formation from the panel.
+    draw(&mut app);
+    let aggressive = button(&app, "AGGRESSIVE");
+    click(&mut app, &aggressive);
+    let formation = button(&app, "FORM: LINE");
+    click(&mut app, &formation);
+    step(&mut app, 3);
+    let ci = app.sim.world().slot(club).unwrap().index();
+    assert_eq!(app.sim.world().stance[ci], Stance::Aggressive);
+    assert_eq!(
+        app.sim.world().formation[ci],
+        Formation::Box,
+        "the next one round"
+    );
+    draw(&mut app);
+    assert!(app.hud.buttons.iter().any(|b| b.label == "[AGGRESSIVE]"));
+
+    // Kill the enemy: its corpse is not picked, so a click there deselects.
+    for _ in 0..20 * 40 {
+        app.sim.step();
+        if app
+            .sim
+            .world()
+            .slot(enemy)
+            .is_none_or(|s| app.sim.world().dying[s.index()] > 0)
+        {
+            break;
+        }
+    }
+    let es = app
+        .sim
+        .world()
+        .slot(enemy)
+        .expect("the corpse is still there");
+    assert!(app.sim.world().dying[es.index()] > 0);
+    draw(&mut app);
+    let ep = app.sim.world().pos[es.index()];
+    let (ex, ey) = (view::fx_to_f32(ep.x), view::fx_to_f32(ep.y));
+    let g = view::iso::project(ex, ey, view::iso::ground_height(app.sim.map(), ex, ey));
+    let (px, py) = app.camera.to_window(g.0, g.1 - 4.0);
+    let picked = selection::pick(&app.scene, &app.atlas, &app.camera, &app.sim, px, py);
+    assert_ne!(picked, Some(enemy), "a corpse is not a target");
 }

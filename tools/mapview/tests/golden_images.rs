@@ -187,6 +187,28 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // Two lines fighting in front of the Town Center: arrows in the
+        // air, the first corpses down, a bowman selected with its stance
+        // and formation on the panel.
+        name: "battle-hud",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "battle",
+            "--ticks",
+            "140",
+            "--select-kind",
+            "bowman",
+            "--hud",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The F1 controls overlay over a fresh match, with the resource bar
         // still carrying its first-minute hint.
         name: "controls-overlay",

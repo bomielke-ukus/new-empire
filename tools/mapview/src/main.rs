@@ -2,7 +2,7 @@
 //! mapview [--seed N] [--size N] [--players N] [--ticks N] [--stockpile N]
 //!         [--zoom 0.5|1|1.5|2] [--width W] [--height H]
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
-//!         [--scenario gather|build|ages|army] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1]
+//!         [--scenario gather|build|ages|army|battle] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--dpi N] [--ui-scale N] [--controls 1]
 //! ```
@@ -275,6 +275,7 @@ fn run() -> Result<(), String> {
                 banner: banner.as_deref(),
                 ui_scale: a.dpi * a.ui_scale,
                 help: a.controls,
+                targeting: false,
             },
         );
         scene.ui = hud.sprites;
@@ -507,6 +508,59 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
                     kind,
                 }));
             }
+        }
+        "battle" => {
+            // Two lines meet in front of the Town Center: our clubmen and
+            // bowmen against their axemen and slingers, both attack-moving
+            // through each other. Run `--ticks` on from here: at 140 the
+            // lines have closed, arrows are in the air and the first
+            // bodies are down. `--select-kind bowman` shows the soldier's
+            // panel.
+            let row = |sim: &mut sim::Simulation, player: u8, kinds: [sim::KindId; 2], x: i32| {
+                for k in 0..5 {
+                    for (n, kind) in kinds.iter().enumerate() {
+                        sim.issue(Command {
+                            player,
+                            kind: CommandKind::Spawn {
+                                kind: *kind,
+                                pos: sim::nav::centre((x + n as i32 * 2, sy + 5 + k)),
+                            },
+                        });
+                    }
+                }
+            };
+            row(sim, 0, [kinds::BOWMAN, kinds::CLUBMAN], sx - 8);
+            row(sim, 1, [kinds::AXEMAN, kinds::SLINGER], sx + 6);
+            for _ in 0..3 {
+                sim.step();
+            }
+            let side = |sim: &sim::Simulation, player: u8| -> Vec<sim::EntityId> {
+                sim.world()
+                    .slots()
+                    .filter(|s| {
+                        sim.world().owner[s.index()] == player
+                            && kinds::info(sim.world().kind[s.index()]).combat.attack > 0
+                            && sim.world().kind[s.index()] != kinds::VILLAGER
+                            && sim.world().kind[s.index()] != kinds::SCOUT
+                    })
+                    .map(|s| sim.world().id_at(s))
+                    .collect()
+            };
+            let (mine, theirs) = (side(sim, 0), side(sim, 1));
+            sim.issue(Command {
+                player: 0,
+                kind: CommandKind::AttackMove {
+                    ids: mine,
+                    target: sim::nav::centre((sx + 8, sy + 7)),
+                },
+            });
+            sim.issue(Command {
+                player: 1,
+                kind: CommandKind::AttackMove {
+                    ids: theirs,
+                    target: sim::nav::centre((sx - 8, sy + 7)),
+                },
+            });
         }
         other => return Err(format!("unknown scenario {other}")),
     }

@@ -13,7 +13,7 @@
 
 use crate::entity::{EntityId, KindId};
 use crate::hash::{HashState, StateHasher};
-use crate::orders::Rally;
+use crate::orders::{Formation, Rally, Stance};
 use crate::tech::TechId;
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
@@ -118,6 +118,41 @@ pub enum CommandKind {
         /// On or off.
         enabled: bool,
     },
+    /// Close with an enemy entity and fight it.
+    Attack {
+        /// Which of the player's units.
+        ids: Vec<EntityId>,
+        /// The enemy unit or building.
+        target: EntityId,
+    },
+    /// Advance to a point, engaging anything seen on the way (`UX-CMD-02`).
+    AttackMove {
+        /// Which units.
+        ids: Vec<EntityId>,
+        /// Destination in tiles.
+        target: Vec2Fx,
+    },
+    /// Walk between here and a point, engaging (`UX-CMD-03`).
+    Patrol {
+        /// Which units.
+        ids: Vec<EntityId>,
+        /// The far end in tiles.
+        target: Vec2Fx,
+    },
+    /// Set how units answer enemies they were not ordered at (`UX-CMD-07`).
+    SetStance {
+        /// Which units.
+        ids: Vec<EntityId>,
+        /// The stance.
+        stance: Stance,
+    },
+    /// Set the shape units take when moved together (`UX-CMD-08`).
+    SetFormation {
+        /// Which units.
+        ids: Vec<EntityId>,
+        /// The formation.
+        formation: Formation,
+    },
 }
 
 /// A command with its issuing player.
@@ -179,7 +214,12 @@ impl Command {
             | CommandKind::Stop { ids }
             | CommandKind::Gather { ids, .. }
             | CommandKind::Build { ids, .. }
-            | CommandKind::Assist { ids, .. } => ids.len(),
+            | CommandKind::Assist { ids, .. }
+            | CommandKind::Attack { ids, .. }
+            | CommandKind::AttackMove { ids, .. }
+            | CommandKind::Patrol { ids, .. }
+            | CommandKind::SetStance { ids, .. }
+            | CommandKind::SetFormation { ids, .. } => ids.len(),
             CommandKind::Spawn { .. }
             | CommandKind::Despawn { .. }
             | CommandKind::Train { .. }
@@ -254,6 +294,31 @@ impl HashState for CommandKind {
                 h.write_u8(10);
                 h.write(building);
                 h.write_u16(*tech);
+            }
+            CommandKind::Attack { ids, target } => {
+                h.write_u8(12);
+                h.write(ids);
+                h.write(target);
+            }
+            CommandKind::AttackMove { ids, target } => {
+                h.write_u8(13);
+                h.write(ids);
+                h.write(target);
+            }
+            CommandKind::Patrol { ids, target } => {
+                h.write_u8(14);
+                h.write(ids);
+                h.write(target);
+            }
+            CommandKind::SetStance { ids, stance } => {
+                h.write_u8(15);
+                h.write(ids);
+                h.write_u8(*stance as u8);
+            }
+            CommandKind::SetFormation { ids, formation } => {
+                h.write_u8(16);
+                h.write(ids);
+                h.write_u8(*formation as u8);
             }
             CommandKind::SetAutoReseed { enabled } => {
                 h.write_u8(11);
