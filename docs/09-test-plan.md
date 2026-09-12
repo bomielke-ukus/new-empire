@@ -60,7 +60,7 @@ raising a tree's wood yield from 75 to 76, which fails four entries by name.
 | Job | Contents |
 |---|---|
 | **Lint and purity** | fmt, clippy, sim purity, generated files, traceability, CLI callers, workflow validation |
-| **Test (×3 OS)** | Every test including the corpus and the golden images; determinism runs; a software-rendered frame |
+| **Test (×3 OS)** | Every test including the corpus and golden images; release counter-balance trials with invariant checks; determinism runs; a software-rendered frame |
 | **Hashes agree** | The final state hash from all three platforms must be identical |
 | **Performance** | Benchmark scenarios against `perf/budgets.ron`, with the numbers posted to the run summary |
 | **Soak** | 300 randomised matches with invariant checking; failure replays uploaded |
@@ -137,8 +137,8 @@ then diverge with no attributable cause.
 The entity store is checked over random operation sequences: slot reuse is
 lowest-index-first (`TA-ENT-02` — the identity a new entity receives is part of
 the state, so machines that allocate differently have already diverged); stale
-handles never resolve; iteration is slot order; and `despawn` scrubs every one
-of the thirteen component columns (`TA-ENT-05`).
+handles never resolve; iteration is slot order; and `despawn` scrubs every
+component column (`TA-ENT-05`).
 
 That last one had no coverage at all before: M2's suite never despawns a
 resource-bearing entity, because an exhausted node is already zero. Removing a
@@ -147,10 +147,11 @@ column first.
 
 ### 4.4 The corpus
 
-Ten recorded matches with a digest over every tick's hash, driving M2's real
-systems — gathering and drop-off, construction, training, rally points, group
-pathing and separation. A corpus that only moved units around would not notice
-a change to the economy, which is most of what the simulation now does.
+Twelve recorded matches with a digest over every tick's hash, driving
+gathering and drop-off, construction, training, research, ages, rally points,
+group pathing, combat and building defences. `battle-40v40` adds a bounded
+mixed-army fight to the economy and edge-case scenarios. A corpus that only
+moved units around would not notice a change to the economy, which is most of what the simulation now does.
 
 They span the *edges* as well as the middle, because the default config is the
 one everything is developed against and therefore the one a bug is least likely
@@ -169,7 +170,7 @@ main job over time, and what turns the soak from a one-off run into a ratchet.
 
 ### 4.5 Rendering
 
-Five scenes rendered through `tools/mapview` and compared against committed
+Thirteen scenes rendered through `tools/mapview` and compared against committed
 PNGs with a tolerance. The test drives the binary rather than the rendering
 library, because the command line is what CI invokes and what a developer
 types.
@@ -196,9 +197,10 @@ inside `MAX_PLAYERS` while a match may have one.
 
 ## 5. What is tested when it lands
 
-### Pathfinding — **M2 shipped, tests owed**
+### Pathfinding — M2 shipped; original test backlog closed
 
-See §7. The system exists; four of its stated behaviours have no test.
+See §7. Flow fields closed `TA-PATH-02`. Player-versus-AI order priority
+remains deferred until M5 supplies competing AI orders.
 
 ### Map generation — M1 shipped
 
@@ -281,9 +283,39 @@ button, the DEFENCES page and a dragged wall run. The `siege-hud` golden
 image pins their column at the shut gate, the tower's volley and the
 tower's panel with its garrison.
 
-**Still to come:** a deterministic 40v40 that terminates. Counters win as
-designed over N trials — balance drift is a real regression and headless is
-the cheapest place to catch it.
+**M4 acceptance automation:** `tools/simrunner/src/arena.rs` supplies a
+command-driven, flat-map fight with exactly 40 units per side: 20 Spearmen,
+10 Slingers and 10 Bowmen versus 20 Axemen, 10 Bowmen and 10 Light Cavalry.
+Both armies attack-move to the centre. The run must finish decisively within
+6,000 ticks. Every tick checks simulation invariants; every living soldier
+must move at least half a tile, attack, or take damage within 400 ticks.
+This catches an individually inactive unit even while others keep fighting.
+It is an inactivity detector for this arena, not proof that every possible
+combat path is free of jams. A deliberately stopped, passive army confirms
+that the detector fails when nobody acts.
+
+`tools/simrunner/tests/combat_acceptance.rs` claims the automated portion of
+`RM-M4-01`, checks exactly 80 spawns, completion and per-tick replay equality,
+and asserts that the recipe still equals the committed `battle-40v40.ron`.
+The corpus pins its digest, and `mapview --replay` renders that same input at
+tick 200 for `battle-40v40.png`. No existing corpus input, digest or image
+needs to change for this addition. These debug-spawned armies deliberately
+bypass economy and age gates; training is covered by `behaviour_military.rs`.
+
+**Counter balance:** `simrunner balance` runs the two explicit slice counters:
+12 Spearmen versus 9 Light Cavalry (720 total resources each), and 14 Slingers
+versus 10 Axemen (700 each). Ten seeds vary spacing, offset and deployment
+axis; every trial swaps owners and starting sides, for 40 fights total.
+Each counter must win at least 90% on each side separately; any inactivity,
+invariant failure or timeout fails the run. The CLI can dump losing or
+failed replays with `--dump`. These equal-budget trials value each resource
+unit equally and use base stats, level ground and no micro. They detect drift
+in these matchups, not competitive balance across terrain, technologies,
+production times or every roster combination. Workspace tests run them in
+debug; each platform's CI job also runs the CLI in release with invariants.
+
+**Still manual:** the Mac combat/siege pass and the readability half of
+`RM-M4-01`. Automated acceptance does not close the milestone by itself.
 
 ### The AI — M5
 
@@ -316,7 +348,8 @@ clock and explicit simulation ticks. They cover input routing and cancellation;
 they do not establish native event delivery, GPU correctness, every binding,
 or the complete production-queue UX. Those checks remain below and in §9.
 
-Every binding in `docs/03` §2–3 exists and is unique. Selection ordering stable
+Still planned for the complete interface: every binding in `docs/03` §2–3
+exists and is unique. Selection ordering stable
 across repeated band-boxes (`UX-SEL-01`) — a pure function, testable with no
 rendering. Click-to-response latency under 100 ms by input injection
 (`UX-PERF-02`). The eight player colours passing a deuteranopia and protanopia
@@ -350,7 +383,10 @@ Every acceptance-bearing statement in `docs/02`, `03`, `04` and `06` carries a
 stable ID, written next to the requirement so it is diffed with it. Tests claim
 one with a `REQ: <id>` marker. `scripts/check-traceability.sh` pairs them up.
 
-Today: **127 declared, 51 covered, 0 gaps in landed work.**
+As of this acceptance chunk: **127 declared, 83 claimed by tests, 0 gaps in
+landed work.** Run the script for current counts. A claim can cover only part
+of a requirement: `RM-M4-01` still needs its manual readability check, and
+`TA-PATH-06` still owes player-versus-AI priority in M5.
 
 The check fails on three things, each verified by breaking it deliberately: a
 landed requirement with no test; a test claiming an ID no document declares;
@@ -369,8 +405,8 @@ done".
 ## 7. The M1/M2 test backlog
 
 `TRACEABILITY_LANDED` now names M1 and M2 as well as M0, so `TA-PATH`,
-`GD-ECON`, `GD-POP` and `RM-M2` are enforced. Coverage went from 51 declared
-requirements to 61, and `MISSING (landed)` is zero.
+`GD-ECON`, `GD-POP` and `RM-M2` are enforced. That pass increased claimed
+requirements from 51 to 61; later milestones extended coverage further. `MISSING (landed)` remains zero.
 
 None of the original twelve remain. Requirements inside a landed prefix that
 are knowingly not covered go in `DEFERRED` in `scripts/check-traceability.sh`,
@@ -501,6 +537,8 @@ scripts/check-workflows.sh
 # Everything else.
 cargo test --workspace
 cargo run --release -p simrunner -- golden
+cargo run --release -p simrunner -- battle
+cargo run --release -p simrunner --features sim/debug-checks -- balance --matches 10 --dump balance-failures
 scripts/check-perf.sh
 
 # Deeper, when changing the simulation.
@@ -525,8 +563,10 @@ the corpus *inputs* is a much larger claim than rewriting the expected
 
 Stated rather than left to be discovered.
 
-- **The twelve M1/M2 requirements in §7**, four of them pathfinding behaviours
-  on the milestone the roadmap calls the risk.
+- **M4 live combat acceptance** remains pending on the Mac. The earlier
+  economy/window pass succeeded; it did not exercise the later combat work.
+- **Player-before-AI path priority** (`TA-PATH-06`) waits for M5; the original
+  twelve M1/M2 test gaps are closed (§7).
 - **No resource-conservation invariant.** The strongest economy check
   available and it is not written.
 - ~~**The HUD overlaps below ~960px.**~~ Fixed in M3: the resource bar
@@ -535,12 +575,13 @@ Stated rather than left to be discovered.
   it at four widths. The `narrow-hud-overlap` golden keeps its name and now
   shows the reflow.
 - **No fuzzing.** `cargo-fuzz` targets for the replay reader and the command
-  interface were written against M0 and need rebuilding for M2's ten command
-  variants.
+  interface were written against M0 and need rebuilding for the current command
+  variants, including combat and garrison.
 - **No nightly job.** The long soak, deep property runs, Miri over the
   hand-rolled entity store, and the mapgen seed sweep all belong there.
-- **No real-hardware GPU pass.** A software rasteriser is not a driver
-  compatibility test.
+- **GPU/window coverage remains bounded.** The real-device render test may
+  skip if no adapter exists; the successful Mac economy playtest and software
+  golden images do not establish the feel or readability of combat.
 - **The perf gate is coarse**, on purpose — see §8. It will not catch a 20%
   regression.
 - **`clippy::indexing_slicing` is not denied** in `crates/sim`. The entity

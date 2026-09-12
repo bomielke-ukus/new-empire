@@ -845,6 +845,7 @@ name = "mapview"
 version = "0.1.0"
 dependencies = [
  "image",
+ "ron",
  "sim",
  "view",
 ]

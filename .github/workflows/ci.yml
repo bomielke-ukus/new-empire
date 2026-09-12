@@ -38,7 +38,7 @@ jobs:
         run: scripts/check-workflows.sh
 
   # The determinism contract: the same command log produces the same hashes,
-  # on every platform we ship to. This is M0's acceptance test.
+  # on macOS and the additional portability platforms. This is M0's acceptance test.
   # REQ: RM-M0-01
   test:
     name: Test (${{ matrix.os }})
@@ -64,6 +64,10 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y -q mesa-vulkan-drivers
       - name: unit tests
         run: cargo test --workspace
+      - name: combat acceptance and counter balance (release, invariant checks)
+        run: |
+          cargo run --release -p simrunner --features sim/debug-checks -- battle
+          cargo run --release -p simrunner --features sim/debug-checks -- balance --matches 10 --dump balance-failures
       - name: determinism, 10,000 ticks
         run: cargo run --release -p simrunner -- determinism --seed 1 --ticks 10000 --players 4 --save replay-ci.ron
       - name: determinism, second seed, 8 players
@@ -90,7 +94,9 @@ jobs:
         if: failure()
         with:
           name: golden-image-failures-${{ matrix.os }}
-          path: golden-failures/
+          path: |
+            golden-failures/
+            balance-failures/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4

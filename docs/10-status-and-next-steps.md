@@ -22,7 +22,7 @@ Four milestones landed; the vertical slice is at its halfway point.
 | M1 — A world you can look at | Landed | A map from a seed, scrolled and zoomed, rendered by the GPU path and the software rasteriser alike |
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
-| M4 — Combat | **In progress** (steps 1–5 of 6 landed 2026-09-12) | Two forces of 40 fight; counters work; nothing gets stuck |
+| M4 — Combat | **In progress** (steps 1–5 landed; step 6 automation added in the current review chunk, Mac combat acceptance pending) | Two forces of 40 fight; counters work; nothing gets stuck |
 | M5 — An opponent | Not started | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
@@ -405,11 +405,52 @@ what was done:
   are art (M7); rubble appears at once. The Town Center stays off the
   build panel until Q3 is answered (§6). Hunting still waits.
 
+### Work record: M4 acceptance automation (2026-09-12, current review chunk)
+
+- Added a command-driven 40-versus-40 mixed-army fixture, with a 6,000-tick
+  deadline and a per-unit 400-tick inactivity check. Invariants run every
+  tick. Both armies converge on the centre of a flat arena; the fixture
+  covers a controlled fight, not all terrain or formation combinations.
+- The reference battle ends at tick 699 (about 35 seconds), with 17 units
+  surviving on side 1 and a longest individual inactivity span of 148 ticks.
+  Its test checks 80 spawns, a decisive outcome, recipe/corpus agreement and
+  per-tick replay determinism. The `RM-M4-01` marker moved from the old
+  one-on-one test to this automated acceptance test; readability stays manual.
+- Added only `battle-40v40.ron`, its digest and its golden image. The new
+  `mapview --replay` option renders the actual corpus at tick 200. Inspected
+  the frame: both armies, ranged fire and the selected unit's HUD are visible.
+  Existing replay inputs, digests and reference images remain unchanged.
+- Added `simrunner battle` and `simrunner balance`. Both specified counters
+  win 10/10 trials on each side: 12 Spearmen versus 9 Light Cavalry, and
+  14 Slingers versus 10 Axemen, at equal total resource budgets. Seeds vary
+  deployment and each is repeated with owners/sides exchanged. The gate
+  requires at least 90% wins separately on each side and no stalled trials.
+  CI also runs balance in release with invariant checks on every platform.
+- Proved the inactivity detector rejects passive, stopped armies. Temporarily
+  removing the Spearman's cavalry bonus made its balance check fail with
+  zero wins. Removing the Slinger bonus did not change its win rate in this
+  arena; its existing damage-model test remains the check for that exact
+  bonus. Restored the original data afterward. No gameplay stats changed.
+- Cleaned up the testing plan's stale corpus/image/coverage counts, closed
+  M1/M2 backlog, GPU claims and old command-count wording, and documented
+  what the new acceptance checks establish and what remains manual.
+- Local macOS verification: all 354 workspace tests pass, plus all four
+  acceptance/CLI tests in release with debug invariant checks. Formatting,
+  Clippy with warnings denied, purity, traceability, generated-file freshness
+  and art conformance pass. Full GitHub CI is pending for this review chunk;
+  it also supplies the CLI-caller and workflow checks (the local tools lack
+  Bash 4 and PyYAML). No live Mac combat playtest has been performed in it.
+
 ### Resume here next session
 
-M4 chunks 1 to 4 are landed. Next is step 6 below: the 40-versus-40
-acceptance match and the balance harness. Art continues on the `docs/08`
-schedule.
+M4 chunks 1 to 4 are landed. The current review chunk adds step 6's
+40-versus-40 acceptance automation and balance harness. After its PR and CI
+are reviewed and merged, run the Mac combat/siege pass: train soldiers,
+right-click an enemy, attack-move into a walled base, drag a wall, set a gate,
+garrison/ungarrison a tower and destroy a building. Record hardware, macOS,
+display/GPU and observed results here. M4 stays in progress until that pass
+also establishes readable fighting; only then begin M5. Art stays on the
+`docs/08` schedule.
 
 ## 4. What comes next: M4 — Combat
 
@@ -438,9 +479,10 @@ shippable on its own and has a headless test before it has a sprite.
    building armour, towers and the Town Center shooting, walls in runs,
    gates that shut on an enemy, garrison (`UX-CMD-09`). The Town Center as
    a buildable still waits on Q3.
-6. **The 40-versus-40 acceptance match** (`RM-M4-01`) as a corpus entry and
-   a golden image, plus the balance harness `docs/09` describes: counters
-   win as designed over N trials, headless.
+6. **The 40-versus-40 acceptance match** (`RM-M4-01`). Automated coverage
+   added in the current review chunk: bounded fight, replay corpus, golden
+   image and equal-budget counter trials. See the record below and
+   `docs/09`. The Mac readability/playtest portion remains pending.
 
 Alongside, not blocking: the resource-conservation invariant (`docs/09`
 §11), rebuilding the fuzz targets for the current command set, and the
