@@ -4,6 +4,7 @@
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
 //!         [--scenario gather|build|ages] [--select N] [--select-tc 1] [--hud 1]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
+//!         [--dpi N] [--ui-scale N]
 //! ```
 //!
 //! Generates a map, runs it for `--ticks`, and writes a frame rendered by the
@@ -36,6 +37,8 @@ struct Args {
     select_tc: bool,
     sweep: Option<u32>,
     hover: Option<(f32, f32)>,
+    dpi: f32,
+    ui_scale: f32,
 }
 
 fn parse() -> Result<Args, String> {
@@ -44,7 +47,7 @@ fn parse() -> Result<Args, String> {
         size: 128,
         players: 2,
         ticks: 0,
-        zoom: 1,
+        zoom: view::camera::DEFAULT_ZOOM_INDEX,
         width: 1280,
         height: 720,
         at: None,
@@ -61,6 +64,8 @@ fn parse() -> Result<Args, String> {
         select_tc: false,
         sweep: None,
         hover: None,
+        dpi: 1.0,
+        ui_scale: 1.0,
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -105,6 +110,10 @@ fn parse() -> Result<Args, String> {
                 let (x, y) = val.split_once(',').ok_or("--hover wants X,Y")?;
                 a.hover = Some((num(x)?, num(y)?));
             }
+            // A Retina window: `--width`/`--height` stay device pixels, and
+            // the world and HUD draw at this many device pixels per pixel.
+            "--dpi" => a.dpi = num(val)?,
+            "--ui-scale" => a.ui_scale = num(val)?,
             _ => return Err(format!("unknown flag {key}")),
         }
         i += 2;
@@ -226,6 +235,7 @@ fn run() -> Result<(), String> {
     let mut scene = Scene::build_full(&sim, &atlas, None, 0.0, &selected, ghost, sweep);
     let mut cam = Camera::new(map.width(), map.height(), (a.width as f32, a.height as f32));
     cam.set_zoom_index(a.zoom);
+    cam.dpi = a.dpi;
     if let Some((x, y)) = a.at {
         cam.look_at_tile(x, y);
     } else if let Some(p) = a.start {
@@ -247,6 +257,7 @@ fn run() -> Result<(), String> {
                 status: &format!("TICK {}", sim.tick()),
                 hover: a.hover,
                 banner: banner.as_deref(),
+                ui_scale: a.dpi * a.ui_scale,
             },
         );
         scene.ui = hud.sprites;

@@ -145,6 +145,9 @@ struct App {
     selection: Selection,
     /// Building being placed.
     build_mode: Option<sim::entity::KindId>,
+    /// The player's HUD magnification on top of the display scale: 1, 1.5
+    /// or 2. `F2` cycles it.
+    ui_scale_user: f32,
     /// The age the player was in last frame, to notice an advance.
     last_age: Age,
     /// When the last advance completed, and to what, for the celebration.
@@ -200,6 +203,7 @@ impl App {
             input: Input::new(),
             selection: Selection::new(),
             build_mode: None,
+            ui_scale_user: 1.0,
             last_age: Age::Stone,
             age_up: None,
             scene: Scene::default(),
@@ -214,8 +218,28 @@ impl App {
         }
     }
 
+    /// Device pixels per HUD pixel.
+    fn ui_scale(&self) -> f32 {
+        self.camera.dpi * self.ui_scale_user
+    }
+
     fn minimap_rect(&self) -> MinimapRect {
-        MinimapRect::bottom_right(self.camera.viewport, 256.0, 16.0)
+        let s = self.ui_scale();
+        MinimapRect::bottom_right(self.camera.viewport, 256.0 * s, 16.0 * s)
+    }
+
+    /// Zooms by whole wheel steps about the cursor, or the centre without one.
+    fn wheel(&mut self, lines: Option<f32>, pixels: Option<f32>) {
+        let steps = self.input.wheel_steps(lines, pixels);
+        if steps == 0 {
+            return;
+        }
+        let (cx, cy) = self
+            .input
+            .cursor
+            .filter(|&(px, py)| !self.over_hud(px, py))
+            .unwrap_or((self.camera.viewport.0 * 0.5, self.camera.viewport.1 * 0.5));
+        self.camera.zoom_step_at(steps, cx, cy);
     }
 
     fn map_size(&self) -> (i32, i32) {
@@ -228,7 +252,8 @@ impl App {
 
     /// True if a window point is over the HUD rather than the world.
     fn over_hud(&self, _px: f32, py: f32) -> bool {
-        py < TOP_BAR || py > self.camera.viewport.1 - BOTTOM_PANEL
+        let s = self.ui_scale();
+        py < TOP_BAR * s || py > self.camera.viewport.1 - BOTTOM_PANEL * s
     }
 
     /// Tile under the cursor, for placement.
@@ -308,7 +333,8 @@ impl App {
         );
         // Band-box outline.
         if let (Some(from), Some(to)) = (self.selection.drag_from, self.input.cursor) {
-            if (from.0 - to.0).abs() > DRAG_THRESHOLD || (from.1 - to.1).abs() > DRAG_THRESHOLD {
+            let thr = DRAG_THRESHOLD * self.camera.dpi;
+            if (from.0 - to.0).abs() > thr || (from.1 - to.1).abs() > thr {
                 let mut p = view::hud::Painter::new(&self.atlas);
                 let (x, y) = (from.0.min(to.0), from.1.min(to.1));
                 let (w, h) = ((from.0 - to.0).abs(), (from.1 - to.1).abs());
@@ -331,6 +357,7 @@ impl App {
                 status: &status,
                 hover: self.input.cursor,
                 banner: banner.as_deref(),
+                ui_scale: self.ui_scale(),
             },
         );
         scene.ui.extend(hud.sprites.iter().cloned());
@@ -344,13 +371,13 @@ impl App {
             self.update_title();
         }
         self.update_cursor();
+        let rect = self.minimap_rect();
         if let Some(gpu) = &mut self.gpu {
             if self.last_minimap.elapsed().as_millis() >= 500 {
                 let m = Minimap::render(&self.sim);
                 gpu.renderer.upload_minimap(&gpu.device, &gpu.queue, &m);
                 self.last_minimap = now;
             }
-            let rect = MinimapRect::bottom_right(self.camera.viewport, 256.0, 16.0);
             gpu.render(&self.camera, &scene, rect);
         }
         self.scene = scene;
@@ -432,7 +459,8 @@ impl App {
             return;
         };
         let shift = self.modifiers.shift_key();
-        if (from.0 - px).abs() > DRAG_THRESHOLD || (from.1 - py).abs() > DRAG_THRESHOLD {
+        let thr = DRAG_THRESHOLD * self.camera.dpi;
+        if (from.0 - px).abs() > thr || (from.1 - py).abs() > thr {
             let ids = selection::band_box(&self.sim, &self.camera, ME, from, (px, py));
             if shift {
                 self.selection.extend(ids);
@@ -676,6 +704,13 @@ impl App {
             KeyCode::BracketLeft => self.clock.speed = (self.clock.speed / 2.0).max(0.25),
             KeyCode::Equal | KeyCode::NumpadAdd => self.camera.zoom_step(1),
             KeyCode::Minus | KeyCode::NumpadSubtract => self.camera.zoom_step(-1),
+            KeyCode::F2 => {
+                self.ui_scale_user = match self.ui_scale_user {
+                    x if x < 1.25 => 1.5,
+                    x if x < 1.75 => 2.0,
+                    _ => 1.0,
+                };
+            }
             KeyCode::KeyH if self.selection.own_villagers(&self.sim, ME).is_empty() => {
                 let (sx, sy) = self.sim.starts()[ME as usize];
                 self.camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
@@ -785,6 +820,9 @@ impl ApplicationHandler for App {
         gpu.renderer.upload_terrain(&gpu.device, &chunks);
         let size = window.inner_size();
         self.camera.viewport = (size.width as f32, size.height as f32);
+        // A Retina display reports twice the device pixels for the same
+        // window; without this the world and the HUD draw at half size.
+        self.camera.dpi = window.scale_factor() as f32;
         self.gpu = Some(gpu);
         self.window = Some(window);
         event_loop.set_control_flow(ControlFlow::Poll);
@@ -798,6 +836,11 @@ impl ApplicationHandler for App {
                 if let Some(gpu) = &mut self.gpu {
                     gpu.resize(size.width, size.height);
                 }
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                // Dragged to a display with a different density; the
+                // matching `Resized` follows and fixes the viewport.
+                self.camera.dpi = scale_factor as f32;
             }
             WindowEvent::Focused(f) => {
                 self.input.focused = f;
@@ -844,17 +887,10 @@ impl ApplicationHandler for App {
                     _ => {}
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                let steps = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => y,
-                    MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
-                };
-                if steps > 0.0 {
-                    self.camera.zoom_step(1);
-                } else if steps < 0.0 {
-                    self.camera.zoom_step(-1);
-                }
-            }
+            WindowEvent::MouseWheel { delta, .. } => match delta {
+                MouseScrollDelta::LineDelta(_, y) => self.wheel(Some(y), None),
+                MouseScrollDelta::PixelDelta(p) => self.wheel(None, Some(p.y as f32)),
+            },
             WindowEvent::RedrawRequested => self.frame(),
             _ => {}
         }

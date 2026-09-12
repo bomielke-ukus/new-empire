@@ -82,6 +82,76 @@ fn replacement_shortcuts_work_without_panning_or_key_repeat_orders() {
     assert!(app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
 }
 
+#[test]
+fn a_retina_display_scales_the_hud_and_the_wheel_steps_whole_levels() {
+    let mut app = app();
+    let v = spawn(&mut app, kinds::VILLAGER, 20, 20);
+    app.selection.set(vec![v]);
+    draw(&mut app);
+    let plain: Vec<_> = app
+        .hud
+        .buttons
+        .iter()
+        .map(|b| (b.label.clone(), b.x, b.y, b.w, b.h))
+        .collect();
+    assert!(!plain.is_empty());
+
+    // The same window on a 2x display: twice the device pixels.
+    app.camera.viewport = (2560.0, 1440.0);
+    app.camera.dpi = 2.0;
+    draw(&mut app);
+    for (a, b) in plain.iter().zip(&app.hud.buttons) {
+        assert_eq!(a.0, b.label);
+        assert_eq!(
+            (b.x, b.y, b.w, b.h),
+            (a.1 * 2.0, a.2 * 2.0, a.3 * 2.0, a.4 * 2.0)
+        );
+    }
+    assert!(
+        app.over_hud(100.0, 1440.0 - 10.0) && !app.over_hud(100.0, 1440.0 - 300.0),
+        "the panel band is scaled too"
+    );
+    // Clicking a scaled button still works.
+    let house = button(&app, "HOUSE");
+    click(&mut app, &house);
+    assert_eq!(app.build_mode, Some(kinds::HOUSE));
+    app.build_mode = None;
+
+    // Zoom is a level, not a device-pixel ratio: 1x on this display draws
+    // two device pixels per sprite pixel.
+    assert_eq!(app.camera.zoom_level(), 1.0);
+    assert_eq!(app.camera.zoom(), 2.0);
+
+    // Trackpad deltas accumulate; a notch steps at once; the cursor's
+    // world point stays put.
+    app.input.cursor = Some((900.0, 500.0));
+    let under = app.camera.window_to_world(900.0, 500.0);
+    for _ in 0..5 {
+        app.wheel(None, Some(8.0));
+    }
+    assert_eq!(app.camera.zoom_level(), 1.0, "40 px is not yet a step");
+    app.wheel(None, Some(25.0));
+    assert_eq!(app.camera.zoom_level(), 1.5);
+    let after = app.camera.window_to_world(900.0, 500.0);
+    assert!((under.0 - after.0).abs() < 1e-2 && (under.1 - after.1).abs() < 1e-2);
+    app.wheel(Some(-1.0), None);
+    assert_eq!(app.camera.zoom_level(), 1.0);
+    app.wheel(Some(-10.0), None);
+    assert_eq!(
+        app.camera.zoom_level(),
+        0.5,
+        "clamped at the overview level"
+    );
+
+    // F2 cycles the player's UI scale on top of the display scale.
+    app.keyboard_input(KeyCode::F2, ElementState::Pressed, false);
+    assert_eq!(app.ui_scale(), 3.0);
+    app.keyboard_input(KeyCode::F2, ElementState::Pressed, false);
+    assert_eq!(app.ui_scale(), 4.0);
+    app.keyboard_input(KeyCode::F2, ElementState::Pressed, false);
+    assert_eq!(app.ui_scale(), 2.0);
+}
+
 fn app() -> App {
     let mut app = App::new();
     app.sim = Simulation::new(

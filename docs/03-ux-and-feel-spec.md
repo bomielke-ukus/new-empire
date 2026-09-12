@@ -88,6 +88,10 @@ the HUD is authoritative as researched technologies leave the list.
 V trains a villager, U advances age, R toggles auto-reseed, X unqueues,
 and T stops units. Shift+E toggles edge scrolling. X cancels placement
 when its separate panel is active. Unmodified E remains available for research.
+Zoom is six discrete levels from 0.5× to 3× of the sprite's authored size,
+stepped by wheel travel about the cursor or by `+`/`-` about the centre; the
+display's scale factor is applied underneath, so a level looks the same on
+every screen. F2 cycles the HUD between 1×, 1.5× and 2× on top of that.
 
 Completed training remains paid and queued while the global entity cap
 blocks spawning. Opening a slot produces the unit without charging again;

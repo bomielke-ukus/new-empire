@@ -163,6 +163,30 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The gather scene on a 2x display: the same window in device
+        // pixels is twice as large, and the world and HUD must come out at
+        // the same apparent size, not at half.
+        name: "retina-hud",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "gather",
+            "--ticks",
+            "600",
+            "--select",
+            "3",
+            "--hud",
+            "1",
+            "--width",
+            "1280",
+            "--height",
+            "720",
+            "--dpi",
+            "2",
+        ],
+    },
+    Scene {
         // Once a characterisation scene for a defect: below roughly 960px the
         // resource bar used to run `GOLD` into `POP` and both into the
         // status text. `docs/03` §1 says the layout reflows, and since M3 it

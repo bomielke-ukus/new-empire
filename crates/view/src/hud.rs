@@ -105,10 +105,15 @@ pub struct HudInput<'a> {
     pub speed: f32,
     /// Window title-style status; shown top right.
     pub status: &'a str,
-    /// Cursor position, for button hover and the tooltip line.
+    /// Cursor position in window (device) pixels, for button hover and the
+    /// tooltip line.
     pub hover: Option<(f32, f32)>,
     /// A line to celebrate across the top of the world, if any.
     pub banner: Option<&'a str>,
+    /// Device pixels per HUD pixel: the display scale times the player's
+    /// UI scale. The HUD is laid out in its own pixels and scaled up on
+    /// the way out, so text is the same size on any display.
+    pub ui_scale: f32,
 }
 
 /// A built HUD.
@@ -660,7 +665,10 @@ fn top_bar(p: &mut Painter<'_>, sim: &Simulation, me: u8, vw: f32, status: &str)
 impl Hud {
     /// Builds the HUD for a frame.
     pub fn build(atlas: &Atlas, input: &HudInput<'_>) -> Hud {
-        let (vw, vh) = input.camera.viewport;
+        let s = input.ui_scale.max(0.5);
+        let scale = s;
+        let (vw, vh) = (input.camera.viewport.0 / s, input.camera.viewport.1 / s);
+        let hover = input.hover.map(|(x, y)| (x / s, y / s));
         let mut p = Painter::new(atlas);
         let mut buttons = Vec::new();
         let sim = input.sim;
@@ -864,8 +872,8 @@ impl Hud {
                 enabled: d.enabled,
                 reason: d.reason,
             };
-            let hover = input.hover.is_some_and(|(hx, hy)| b.contains(hx, hy));
-            p.button(&b, hover);
+            let lit = hover.is_some_and(|(hx, hy)| b.contains(hx, hy));
+            p.button(&b, lit);
             buttons.push(b);
         }
         // The line under the grid: the hovered button's story, else what
@@ -873,7 +881,7 @@ impl Hud {
         // age.
         let hovered = buttons
             .iter()
-            .find(|b| input.hover.is_some_and(|(hx, hy)| b.contains(hx, hy)));
+            .find(|b| hover.is_some_and(|(hx, hy)| b.contains(hx, hy)));
         let line = match (hovered, input.build_mode) {
             (Some(b), _) => b.reason.clone(),
             (None, Some(kind)) => format!(
@@ -898,7 +906,8 @@ impl Hud {
             let (wx, wy) = (fx_to_f32(pos.x), fx_to_f32(pos.y));
             let (gx, gy) = iso::project(wx, wy, iso::ground_height(sim.map(), wx, wy));
             let (sx, sy) = input.camera.to_window(gx, gy);
-            let lift = if info.footprint > 0 { 60.0 } else { 50.0 } * input.camera.zoom();
+            let (sx, sy) = (sx / scale, sy / scale);
+            let lift = if info.footprint > 0 { 60.0 } else { 50.0 } * input.camera.zoom() / scale;
             let w = 32.0;
             p.rect(sx - w / 2.0 - 1.0, sy - lift - 1.0, w + 2.0, 6.0, BLACK, 0);
             let frac = if under_construction {
@@ -932,10 +941,23 @@ impl Hud {
             p.text(((vw - sw) / 2.0).round(), y + 46.0, sub, false, 1.0);
         }
 
-        Hud {
-            sprites: p.out,
-            buttons,
+        // Everything above is in HUD pixels; the window wants device pixels.
+        let mut sprites = p.out;
+        if s != 1.0 {
+            for sp in &mut sprites {
+                sp.x *= s;
+                sp.y *= s;
+                sp.w *= s;
+                sp.h *= s;
+            }
+            for b in &mut buttons {
+                b.x *= s;
+                b.y *= s;
+                b.w *= s;
+                b.h *= s;
+            }
         }
+        Hud { sprites, buttons }
     }
 }
 
@@ -1010,6 +1032,7 @@ mod tests {
             status: "T0",
             hover: None,
             banner: None,
+            ui_scale: 1.0,
         };
         let none = Hud::build(&atlas, &base);
         assert!(none.buttons.is_empty());
@@ -1103,6 +1126,74 @@ mod tests {
         assert!(banner.sprites.len() > none.sprites.len() + 8);
     }
 
+    /// On a 2× display the same window is twice the device pixels; the HUD
+    /// must come out at the same layout, twice the size, not at half size.
+    #[test]
+    fn the_hud_scales_with_the_display_instead_of_shrinking() {
+        let sim = Simulation::new(5, SimConfig::default());
+        let atlas = Atlas::placeholder();
+        let villager = first_owned(&sim, kinds::VILLAGER);
+        let one = Camera::new(sim.map().width(), sim.map().height(), (640.0, 360.0));
+        let mut two = Camera::new(sim.map().width(), sim.map().height(), (1280.0, 720.0));
+        two.dpi = 2.0;
+        let build = |camera: &Camera, ui_scale: f32| {
+            Hud::build(
+                &atlas,
+                &HudInput {
+                    sim: &sim,
+                    player: 0,
+                    camera,
+                    selected: &[villager],
+                    build_mode: None,
+                    fps: 60.0,
+                    paused: false,
+                    speed: 1.0,
+                    status: "T0",
+                    hover: None,
+                    banner: None,
+                    ui_scale,
+                },
+            )
+        };
+        let a = build(&one, 1.0);
+        let b = build(&two, 2.0);
+        assert_eq!(a.buttons.len(), b.buttons.len());
+        assert_eq!(a.sprites.len(), b.sprites.len(), "same layout decisions");
+        for (x, y) in a.buttons.iter().zip(&b.buttons) {
+            assert_eq!(
+                (y.x, y.y, y.w, y.h),
+                (x.x * 2.0, x.y * 2.0, x.w * 2.0, x.h * 2.0)
+            );
+            assert_eq!(x.label, y.label);
+        }
+        for (x, y) in a.sprites.iter().zip(&b.sprites) {
+            assert_eq!(
+                (y.x, y.y, y.w, y.h),
+                (x.x * 2.0, x.y * 2.0, x.w * 2.0, x.h * 2.0)
+            );
+        }
+        // A hover given in device pixels lights the same button.
+        let target = &b.buttons[1];
+        let lit = Hud::build(
+            &atlas,
+            &HudInput {
+                sim: &sim,
+                player: 0,
+                camera: &two,
+                selected: &[villager],
+                build_mode: None,
+                fps: 60.0,
+                paused: false,
+                speed: 1.0,
+                status: "T0",
+                hover: Some((target.x + 2.0, target.y + 2.0)),
+                banner: None,
+                ui_scale: 2.0,
+            },
+        );
+        assert_ne!(lit.sprites, b.sprites, "the hovered button draws lit");
+    }
+
     #[test]
     fn the_resource_bar_reflows_instead_of_overlapping() {
         let sim = Simulation::new(5, SimConfig::default());
@@ -1123,6 +1214,7 @@ mod tests {
                     status: "SEED 5 TICK 0",
                     hover: None,
                     banner: None,
+                    ui_scale: 1.0,
                 },
             );
             // Every glyph in the top bar stays inside the window.

@@ -28,6 +28,30 @@ pub struct Input {
     pub edge_scroll: bool,
     /// Window has focus; edge scroll is suppressed without it.
     pub focused: bool,
+    /// Wheel travel not yet turned into a zoom step. A trackpad sends many
+    /// small deltas; a notched wheel sends whole ones. Both step once per
+    /// unit of travel rather than once per event.
+    pub wheel: f32,
+}
+
+/// Pixel-delta scroll travel that counts as one zoom step.
+const WHEEL_PIXELS_PER_STEP: f32 = 60.0;
+
+impl Input {
+    /// Adds wheel travel and returns how many whole zoom steps it amounts
+    /// to (positive in, negative out), keeping the remainder.
+    pub fn wheel_steps(&mut self, lines: Option<f32>, pixels: Option<f32>) -> i32 {
+        let travel = lines.unwrap_or(0.0) + pixels.unwrap_or(0.0) / WHEEL_PIXELS_PER_STEP;
+        // A change of direction starts afresh: leftover travel one way must
+        // not eat a deliberate turn the other way.
+        if travel * self.wheel < 0.0 {
+            self.wheel = 0.0;
+        }
+        self.wheel += travel;
+        let steps = self.wheel.trunc();
+        self.wheel -= steps;
+        steps as i32
+    }
 }
 
 impl Input {
@@ -42,7 +66,9 @@ impl Input {
 
     /// Applies held keys and edge scrolling for a frame of `dt` seconds.
     pub fn update_camera(&self, cam: &mut Camera, dt: f32) {
-        let step = PAN_SPEED * dt;
+        // Speeds are in logical pixels; the camera pans in device pixels.
+        let step = PAN_SPEED * dt * cam.dpi;
+        let band = EDGE_BAND * cam.dpi;
         let (mut dx, mut dy) = (0.0, 0.0);
         let held = |k: KeyCode| self.held.contains(&k);
         if held(KeyCode::KeyA) || held(KeyCode::ArrowLeft) {
@@ -60,14 +86,14 @@ impl Input {
         if self.edge_scroll && self.focused && self.dragging.is_none() {
             if let Some((cx, cy)) = self.cursor {
                 let (w, h) = cam.viewport;
-                if cx < EDGE_BAND {
+                if cx < band {
                     dx -= step;
-                } else if cx > w - EDGE_BAND {
+                } else if cx > w - band {
                     dx += step;
                 }
-                if cy < EDGE_BAND {
+                if cy < band {
                     dy -= step;
-                } else if cy > h - EDGE_BAND {
+                } else if cy > h - band {
                     dy += step;
                 }
             }
@@ -160,6 +186,22 @@ mod tests {
         input.focused = false;
         input.update_camera(&mut cam2, 0.1);
         assert_eq!(cam2.focus, base.focus, "no edge scroll when unfocused");
+    }
+
+    #[test]
+    fn wheel_travel_accumulates_into_whole_steps() {
+        let mut input = Input::new();
+        // A trackpad: many small pixel deltas.
+        let mut steps = 0;
+        for _ in 0..10 {
+            steps += input.wheel_steps(None, Some(9.0));
+        }
+        assert_eq!(steps, 1, "90 px of travel is one step, not ten");
+        // A notched wheel: one line per notch, one step per notch.
+        assert_eq!(input.wheel_steps(Some(-1.0), None), -1);
+        assert_eq!(input.wheel_steps(Some(-2.0), None), -2);
+        // Jitter the other way does not step until it adds up.
+        assert_eq!(input.wheel_steps(None, Some(-3.0)), 0);
     }
 
     #[test]

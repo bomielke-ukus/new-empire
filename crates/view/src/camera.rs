@@ -3,9 +3,12 @@
 
 use crate::iso;
 
-/// Discrete zoom levels; free zoom makes pixel art swim. `0.5` exists for
-/// overview renders and the map viewer, not for play.
-pub const ZOOM_LEVELS: [f32; 4] = [0.5, 1.0, 1.5, 2.0];
+/// Discrete zoom levels; free zoom makes pixel art swim. These are in
+/// sprite pixels per *logical* pixel: on a 2× display every level draws
+/// twice as many device pixels, so `1.0` looks the same size everywhere.
+pub const ZOOM_LEVELS: [f32; 6] = [0.5, 0.75, 1.0, 1.5, 2.0, 3.0];
+/// The index of `1.0`.
+pub const DEFAULT_ZOOM_INDEX: usize = 2;
 
 /// Camera state.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -18,6 +21,10 @@ pub struct Camera {
     pub viewport: (f32, f32),
     /// Pan limits in world-screen space `(min_x, min_y, max_x, max_y)`.
     pub bounds: (f32, f32, f32, f32),
+    /// Device pixels per logical pixel: 1 on an ordinary display, 2 on a
+    /// Retina one. Folded into [`Camera::zoom`], so nothing downstream has
+    /// to know.
+    pub dpi: f32,
 }
 
 impl Camera {
@@ -27,21 +34,39 @@ impl Camera {
         let focus = iso::project(map_width as f32 / 2.0, map_height as f32 / 2.0, 0.0);
         Camera {
             focus,
-            zoom_index: 1,
+            zoom_index: DEFAULT_ZOOM_INDEX,
             viewport,
             bounds,
+            dpi: 1.0,
         }
     }
 
-    /// The zoom factor.
+    /// Device pixels per sprite pixel: the zoom level times the display
+    /// scale. This is what projection, picking and the renderer use.
     pub fn zoom(&self) -> f32 {
+        ZOOM_LEVELS[self.zoom_index] * self.dpi
+    }
+
+    /// The zoom level as the player understands it, display scale aside.
+    pub fn zoom_level(&self) -> f32 {
         ZOOM_LEVELS[self.zoom_index]
     }
 
     /// Steps zoom in (`+1`) or out (`-1`), keeping the focus point fixed.
     pub fn zoom_step(&mut self, delta: i32) {
         let n = ZOOM_LEVELS.len() as i32;
-        self.zoom_index = (self.zoom_index as i32 + delta).clamp(1, n - 1) as usize;
+        self.zoom_index = (self.zoom_index as i32 + delta).clamp(0, n - 1) as usize;
+    }
+
+    /// Steps zoom keeping the world point under window pixel `(px, py)`
+    /// where it is, which is what a wheel over the map should do.
+    pub fn zoom_step_at(&mut self, delta: i32, px: f32, py: f32) {
+        let before = self.from_window(px, py);
+        self.zoom_step(delta);
+        let after = self.from_window(px, py);
+        self.focus.0 += before.0 - after.0;
+        self.focus.1 += before.1 - after.1;
+        self.clamp();
     }
 
     /// Sets the zoom index directly, including the overview level.
@@ -134,17 +159,57 @@ mod tests {
     #[test]
     fn zoom_scales_about_focus() {
         let mut cam = Camera::new(64, 64, (800.0, 600.0));
+        assert_eq!(cam.zoom(), 1.0, "a fresh camera is at 1x");
         let p = (cam.focus.0 + 100.0, cam.focus.1 + 50.0);
         assert_eq!(cam.to_window(p.0, p.1), (500.0, 350.0));
         cam.zoom_step(1);
         assert_eq!(cam.zoom(), 1.5);
         assert_eq!(cam.to_window(p.0, p.1), (550.0, 375.0));
         cam.zoom_step(10);
-        assert_eq!(cam.zoom(), 2.0);
+        assert_eq!(cam.zoom(), 3.0, "clamped at the top");
         cam.zoom_step(-10);
-        assert_eq!(cam.zoom(), 1.0, "play zoom never drops below 1x");
+        assert_eq!(cam.zoom(), 0.5, "and at the bottom");
         cam.set_zoom_index(0);
         assert_eq!(cam.zoom(), 0.5);
+    }
+
+    #[test]
+    fn zoom_at_a_point_keeps_it_under_the_cursor() {
+        let mut cam = Camera::new(64, 64, (800.0, 600.0));
+        let (px, py) = (650.0, 120.0);
+        let world = cam.window_to_world(px, py);
+        cam.zoom_step_at(1, px, py);
+        let after = cam.window_to_world(px, py);
+        assert!((world.0 - after.0).abs() < 1e-3 && (world.1 - after.1).abs() < 1e-3);
+        assert_ne!(
+            cam.focus,
+            Camera::new(64, 64, (800.0, 600.0)).focus,
+            "the focus moved"
+        );
+    }
+
+    #[test]
+    fn display_scale_doubles_device_pixels_not_the_view() {
+        let mut one = Camera::new(64, 64, (800.0, 600.0));
+        let mut two = Camera::new(64, 64, (1600.0, 1200.0));
+        two.dpi = 2.0;
+        assert_eq!(two.zoom_level(), one.zoom_level());
+        assert_eq!(two.zoom(), 2.0 * one.zoom());
+        // Both windows show the same slice of the world.
+        let a = one.visible_rect();
+        let b = two.visible_rect();
+        assert!((a.2 - a.0 - (b.2 - b.0)).abs() < 1e-3);
+        assert!((a.3 - a.1 - (b.3 - b.1)).abs() < 1e-3);
+        // A point lands at twice the device pixel.
+        let p = (one.focus.0 + 100.0, one.focus.1 + 50.0);
+        let (x1, y1) = one.to_window(p.0, p.1);
+        let (x2, y2) = two.to_window(p.0, p.1);
+        assert_eq!((x2, y2), (x1 * 2.0, y1 * 2.0));
+        // Panning by the same device distance moves the same world distance
+        // only when the caller scales it, which `Input` does.
+        one.pan(30.0, 0.0);
+        two.pan(60.0, 0.0);
+        assert!((one.focus.0 - two.focus.0).abs() < 1e-3);
     }
 
     #[test]

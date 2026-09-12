@@ -232,6 +232,32 @@ chunks 1–3 are merged. The session is paused before chunk 4.
   build still aborts, the panic line in the terminal, or the log file, names
   the next cause.
 
+### Work record: Mac feedback, round 1 (2026-09-12)
+
+The live check passed once the launch abort was fixed. Feedback from it, and
+what was done:
+
+- **"Zoom barely does anything" and "the panel is too small to read"** had
+  one cause: the app ignored the display's scale factor. On the Retina
+  MacBook the window is 2560×1440 device pixels, so the world and the HUD
+  drew at half their intended size, and the zoom range of 1× to 2× only got
+  back to the intended look. Now `Camera::dpi` folds the scale factor into
+  the zoom, the HUD lays out in its own pixels and scales on the way out,
+  the minimap, the panel band and drag thresholds scale with it, and `F2`
+  cycles a further 1×/1.5×/2× HUD magnification. Zoom runs 0.5× to 3× in
+  six levels, steps about the cursor, and accumulates wheel travel so a
+  trackpad steps once per unit of travel instead of once per event.
+  Pinned by the `retina-hud` golden and by camera, input, HUD and app tests.
+- **Colours are boring; the Town Center and House look boring.** Assessed,
+  not yet done: a palette pass in `assets/palette/ancient.ron` (raise
+  chroma and lightness at the top of the terrain and foliage ramps, add
+  tile variation) to be shown as before/after renders first; and the real
+  buildings come from the render pipeline (`docs/08` §9 step 3), which
+  needs Blender on the Mac. Placeholder polish is possible meanwhile but is
+  thrown away when the models arrive.
+- **A reminder of the keyboard commands.** In progress: an F1 overlay built
+  from the same table as the buttons.
+
 ### Resume here next session
 
 Chunks 1–3 are complete and merged. Chunk 4 has not started; the live

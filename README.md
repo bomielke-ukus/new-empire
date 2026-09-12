@@ -55,8 +55,11 @@ cargo run -p atlas -- rig                    # render rig, checked against the s
 ```
 
 In the window: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
-`+`/`-` to zoom; click the minimap to jump; `Space` pause; `[` `]` speed;
-`Shift`+`E` toggles edge scrolling. WASD is reserved for camera movement.
+`+`/`-` to zoom, from 0.5× to 3×, about the cursor; click the minimap to
+jump; `Space` pause; `[` `]` speed; `Shift`+`E` toggles edge scrolling;
+`F2` cycles the HUD size (1×, 1.5×, 2×). WASD is reserved for camera
+movement. The game honours the display's scale factor, so 1× is the same
+apparent size on a Retina screen as on any other.
 
 Rendered sprite sets under `assets/sprites` replace the procedural placeholders
 for their kinds at startup (today: the greybox villager). `cargo run -p atlas
