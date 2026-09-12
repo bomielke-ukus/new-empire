@@ -116,7 +116,9 @@ fn a_frame_renders_on_a_real_device() {
     let mut distinct = std::collections::BTreeSet::new();
     for y in 0..H as usize {
         let row = &data[y * bytes_per_row as usize..][..(W * 4) as usize];
-        for px in row.chunks_exact(4) {
+        // `as_chunks::<4>().0` rather than `chunks_exact(4)`: same pixels,
+        // and the form stable clippy asks for at a constant width.
+        for px in row.as_chunks::<4>().0 {
             distinct.insert([px[0], px[1], px[2]]);
         }
     }
