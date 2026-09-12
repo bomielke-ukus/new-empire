@@ -455,11 +455,43 @@ what was done:
   [PR #9](https://github.com/bomielke-ukus/new-empire/pull/9) is awaiting review
   and merge. No live Mac combat playtest has been performed in this chunk.
 
+### Work record: live Mac combat check (2026-09-12, paused)
+
+- Tested PR #9 head `70df19f`, still awaiting merge. Hardware: MacBook Air
+  (Mac16,13), Apple M4, 16 GB, macOS 27.0 (26A428). The native Metal window
+  visibly rendered, with the title reporting roughly 60 fps during these
+  observations; this is a smoke check, not a performance benchmark.
+- **Normal-start checks passed:** launch, readable HUD at the displayed
+  window size, Space pause/resume, speed adjustment to 8x, F1 controls and
+  Escape dismissal, villager selection, barracks placement/construction,
+  and Clubman training. The visible food/population changes confirmed the
+  unit was produced.
+- **Controlled siege setup:** a local-only bootstrap prepared a Bronze-age
+  arena through Spawn/Research commands, with units, buildings and an enemy
+  wall/gate. It starts paused and records a replay on normal exit; game
+  input, simulation and rendering handlers are unchanged. The temporary
+  bootstrap edits were restored afterward, and the production binary rebuilt.
+  This distinguishes controlled-fixture evidence from the normal-start pass.
+- **Garrison passed:** drag-selected three Bowmen, right-clicked the Watch
+  Tower and resumed. At tick 3315, the tower's live panel showed INSIDE 3/5,
+  HP 250/250 and population unchanged at 9/35.
+- **Paused by the Mac locking**, before the All Out check could execute.
+  Manual unlock is required to continue. Ungarrisoning, wall dragging, own
+  gate replacement, right-click attack, attack-move breach/destruction and
+  the native 40-versus-40 readability check remain unverified in this pass.
+  M4 remains in progress.
+- The initial app-control timeouts were traced to a temporary shell launcher;
+  a fresh native app bundle was controllable. A process sample showed active
+  Metal rendering and no startup panic was found. This is not recorded as a
+  demonstrated game startup defect.
+
 ### Resume here next session
 
-M4 chunks 1 to 4 are landed. The current review chunk adds step 6's
-40-versus-40 acceptance automation and balance harness. After its PR and CI
-are reviewed and merged, run the Mac combat/siege pass: train soldiers,
+M4 chunks 1 to 4 are landed. PR #9 adds step 6's acceptance automation and
+balance harness. The live Mac pass above has started on that branch and is
+paused for manual unlock. Resume from its paused siege window and inspect
+the current state before the All Out action. Complete the remaining Mac
+combat/siege checks and review/merge PR #9 before closing M4: train soldiers,
 right-click an enemy, attack-move into a walled base, drag a wall, set a gate,
 garrison/ungarrison a tower and destroy a building. Record hardware, macOS,
 display/GPU and observed results here. M4 stays in progress until that pass
