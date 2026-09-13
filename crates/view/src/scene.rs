@@ -159,8 +159,12 @@ impl Scene {
                         phase: GatherPhase::Working,
                         ..
                     } | Order::Build { working: true, .. }
-                        | Order::Attack { .. }
-                );
+                ) || (world.reload[i] > 0
+                    && info
+                        .combat
+                        .reload_ticks
+                        .saturating_sub(world.reload[i] as u32)
+                        < 6);
                 if world.dying[i] > 0 {
                     // Falls, then lies: the death animation's length decides
                     // when the corpse frame takes over.
@@ -193,6 +197,12 @@ impl Scene {
                     RUBBLE_TICKS
                 };
                 (span - world.dying[i]) as u32 * TICK_MS + (alpha * TICK_MS as f32) as u32
+            } else if anim == Anim::Work && info.combat.attack > 0 && world.reload[i] > 0 {
+                info.combat
+                    .reload_ticks
+                    .saturating_sub(world.reload[i] as u32)
+                    * TICK_MS
+                    + (alpha * TICK_MS as f32) as u32
             } else {
                 sim.tick() as u32 * TICK_MS
                     + (alpha * TICK_MS as f32) as u32
@@ -265,13 +275,23 @@ impl Scene {
                 screen: false,
             });
         }
-        // Arrows in flight, lifted off the ground so they read as flying.
-        if let Some(arrow) = atlas.arrow() {
-            for p in sim.projectiles() {
+        // Direction and team-coloured fletching connect flight to its source.
+        for p in sim.projectiles() {
+            let facing = (p.aim - p.pos).angle().facing8();
+            if let Some((arrow, flip)) = atlas.arrow(facing) {
                 let (x, y) = (fx_to_f32(p.pos.x), fx_to_f32(p.pos.y));
                 let h = iso::ground_height(map, x, y);
                 let (gx, gy) = iso::project(x, y, h);
-                sprites.push(overlay(arrow, gx, gy - 12.0, 0, x + y + 0.75, u32::MAX));
+                let mut sprite = overlay(
+                    arrow,
+                    gx,
+                    gy - 24.0,
+                    palette::row_for_owner(p.owner),
+                    x + y + 0.75,
+                    u32::MAX,
+                );
+                sprite.flip = flip;
+                sprites.push(sprite);
             }
         }
         if let Some(g) = ghost {
@@ -309,7 +329,7 @@ impl Scene {
 }
 
 /// A world-space overlay sprite anchored on a ground point.
-fn overlay(
+pub(crate) fn overlay(
     frame: &crate::sprites::Frame,
     gx: f32,
     gy: f32,

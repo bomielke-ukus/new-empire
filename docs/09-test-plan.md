@@ -314,16 +314,25 @@ in these matchups, not competitive balance across terrain, technologies,
 production times or every roster combination. Workspace tests run them in
 debug; each platform's CI job also runs the CLI in release with invariants.
 
-**Manual acceptance status (2026-09-12):** the native Mac functional smoke
+**Manual acceptance status (2026-09-13):** the native Mac functional smoke
 pass is recorded in `docs/10`: training, garrison/ungarrison, wall construction,
 gate replacement/passage, explicit gate attack, attack-move through the breach,
 building rubble and a completed 40-versus-40 fight. Automatic selection of a
 breach in a fully closed wall was not separately established in the native
 pass; its automated coverage remains above. The owner found the combat visuals
-unclear: arrows were visible but looked quite random. The readability half of
-`RM-M4-01` therefore remains open. Recheck the same native battle at 1x after
-presentation improvements, with owner feedback on unit roles and attacks.
-Automated acceptance does not close the milestone by itself.
+unclear on the first pass: arrows were visible but looked quite random.
+After PR #10's presentation changes, the same native battle ran at 1x and the
+owner approved it: “Yes, this is clear enough to proceed.” The readability
+half of `RM-M4-01` has passed; milestone closure still awaits PR review/merge.
+Automated acceptance alone does not close the milestone.
+
+The readability follow-up adds regression checks for all eight arrowhead
+orientations, owner-colour fletching, impact cue expiry and replay equivalence,
+and the distinction between age-up and attack banner subtitles. Four combat
+reference images are intentionally updated; replay inputs and digests remain
+unchanged. The initial app-control timeout was resolved on retry. Native checks
+confirmed the corrected attack warning, the expected 17 battle survivors and
+identical replay results through tick 835 (`docs/10`, 2026-09-13).
 
 ### The AI — M5
 
@@ -393,7 +402,7 @@ one with a `REQ: <id>` marker. `scripts/check-traceability.sh` pairs them up.
 
 As of this acceptance chunk: **127 declared, 83 claimed by tests, 0 gaps in
 landed work.** Run the script for current counts. A claim can cover only part
-of a requirement: `RM-M4-01` still needs its manual readability check, and
+of a requirement: `RM-M4-01` has a separately recorded native readability approval, and
 `TA-PATH-06` still owes player-versus-AI priority in M5.
 
 The check fails on three things, each verified by breaking it deliberately: a
@@ -571,8 +580,9 @@ the corpus *inputs* is a much larger claim than rewriting the expected
 
 Stated rather than left to be discovered.
 
-- **M4 live combat acceptance** remains pending on the Mac. The earlier
-  economy/window pass succeeded; it did not exercise the later combat work.
+- **M4 native acceptance passed for the recorded scenarios.** The 2026-09-13
+  owner readability approval and combat/siege results are in `docs/10`; PRs
+  #9 and #10 still need review/merge before milestone closure.
 - **Player-before-AI path priority** (`TA-PATH-06`) waits for M5; the original
   twelve M1/M2 test gaps are closed (§7).
 - **No resource-conservation invariant.** The strongest economy check
@@ -588,8 +598,9 @@ Stated rather than left to be discovered.
 - **No nightly job.** The long soak, deep property runs, Miri over the
   hand-rolled entity store, and the mapgen seed sweep all belong there.
 - **GPU/window coverage remains bounded.** The real-device render test may
-  skip if no adapter exists; the successful Mac economy playtest and software
-  golden images do not establish the feel or readability of combat.
+  skip if no adapter exists. The recorded Mac economy, siege and 40-versus-40
+  checks cover those scenarios on one hardware setup; they do not replace
+  broader feel review or future hardware checks.
 - **The perf gate is coarse**, on purpose — see §8. It will not catch a 20%
   regression.
 - **`clippy::indexing_slicing` is not denied** in `crates/sim`. The entity

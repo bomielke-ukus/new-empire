@@ -155,6 +155,7 @@ fn run() -> Result<(), String> {
     // This is the front door a setup screen would use, so it runs the
     // setup screen's check.
     config.validate().map_err(|e| format!("match setup: {e}"))?;
+    let mut feedback = view::feedback::CombatFeedback::default();
     let (sim, seed) = if let Some(path) = &a.replay {
         if a.scenario.is_some() {
             return Err("--replay and --scenario are mutually exclusive".into());
@@ -174,7 +175,7 @@ fn run() -> Result<(), String> {
             replay.commands.retain(|(tick, _)| *tick <= a.ticks);
         }
         let seed = replay.seed;
-        (replay.run(|_, _| {}).map_err(|e| e.to_string())?, seed)
+        (feedback.replay(&replay).map_err(|e| e.to_string())?, seed)
     } else {
         let mut sim = sim::Simulation::new(a.seed, config);
         if let Some(name) = &a.scenario {
@@ -182,6 +183,7 @@ fn run() -> Result<(), String> {
         }
         for _ in 0..a.ticks {
             sim.step();
+            feedback.observe(&sim);
         }
         (sim, a.seed)
     };
@@ -285,8 +287,9 @@ fn run() -> Result<(), String> {
     let banner = a
         .sweep
         .and_then(|_| sim.player(0))
-        .map(|p| p.age.name().to_uppercase());
+        .map(|p| view::hud::Banner::AgeUp(p.age));
     let mut scene = Scene::build_full(&sim, &atlas, None, 0.0, &selected, ghost, sweep);
+    feedback.decorate(&mut scene, &sim, &atlas);
     let mut cam = Camera::new(map.width(), map.height(), (a.width as f32, a.height as f32));
     cam.set_zoom_index(a.zoom);
     cam.dpi = a.dpi;
@@ -314,7 +317,7 @@ fn run() -> Result<(), String> {
                 speed: 1.0,
                 status: &format!("TICK {}", sim.tick()),
                 hover: a.hover,
-                banner: banner.as_deref(),
+                banner,
                 ui_scale: a.dpi * a.ui_scale,
                 help: a.controls,
                 targeting: false,

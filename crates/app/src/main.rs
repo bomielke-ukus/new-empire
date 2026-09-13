@@ -139,6 +139,7 @@ struct App {
     atlas: Atlas,
     sim: Simulation,
     prev_pos: Vec<Vec2Fx>,
+    feedback: view::feedback::CombatFeedback,
     clock: FixedClock,
     camera: Camera,
     input: Input,
@@ -208,6 +209,7 @@ impl App {
             atlas,
             sim,
             prev_pos,
+            feedback: view::feedback::CombatFeedback::default(),
             clock: FixedClock::new(TICK_MS),
             camera,
             input: Input::new(),
@@ -327,6 +329,7 @@ impl App {
         for _ in 0..ticks {
             self.prev_pos.clone_from(&self.sim.world().pos);
             self.sim.step();
+            self.feedback.observe(&self.sim);
             if self
                 .sim
                 .events()
@@ -351,11 +354,11 @@ impl App {
             elapsed_ms: ms as u32,
         });
         let banner = match (self.age_up, since) {
-            (Some((_, a)), Some(ms)) if ms < BANNER_MS => Some(a.name().to_uppercase()),
+            (Some((_, a)), Some(ms)) if ms < BANNER_MS => Some(view::hud::Banner::AgeUp(a)),
             _ => match self.alarm_at {
                 // The villagers' alarm ([GD-STANCE-02]): the side is told.
                 Some(t) if t.elapsed().as_millis() < ALARM_BANNER_MS => {
-                    Some("UNDER ATTACK".to_string())
+                    Some(view::hud::Banner::UnderAttack)
                 }
                 _ => None,
             },
@@ -371,6 +374,7 @@ impl App {
             self.ghost(),
             sweep,
         );
+        self.feedback.decorate(&mut scene, &self.sim, &self.atlas);
         // Band-box outline.
         if let (Some(from), Some(to)) = (self.selection.drag_from, self.input.cursor) {
             let thr = DRAG_THRESHOLD * self.camera.dpi;
@@ -397,7 +401,7 @@ impl App {
                 speed: self.clock.speed,
                 status: &status,
                 hover: self.input.cursor,
-                banner: banner.as_deref(),
+                banner,
                 targeting: self.targeting.is_some(),
                 defences: self.defences,
                 ui_scale: self.ui_scale(),

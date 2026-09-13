@@ -1,6 +1,6 @@
 # 10 — Status and next steps
 
-**As of 2026-09-12.** The living summary of where the project is and what
+**As of 2026-09-13.** The living summary of where the project is and what
 comes next, for anyone joining or checking in. The roadmap (`docs/06`) holds
 the milestone definitions and their acceptance tests; this document says
 which of them are done, what was learned, and what the next steps are. Update
@@ -22,7 +22,7 @@ Four milestones landed; the vertical slice is at its halfway point.
 | M1 — A world you can look at | Landed | A map from a seed, scrolled and zoomed, rendered by the GPU path and the software rasteriser alike |
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
-| M4 — Combat | **In progress** (steps 1–5 landed; step 6 automation added in PR #9; Mac functional smoke passed, readability needs work) | Two forces of 40 fight; counters work; nothing gets stuck |
+| M4 — Combat | **In progress** (steps 1–5 landed; step 6 automation added in PR #9; Mac functional smoke passed; native readability and code CI passed; PRs #9 and #10 await review/merge) | Two forces of 40 fight; counters work; nothing gets stuck |
 | M5 — An opponent | Not started | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
@@ -32,8 +32,9 @@ The Mac checks of 2026-09-12 exercised the economy and age progression
 (§3, row 4), then the native combat/siege window (work record below).
 The second pass confirmed garrison/ungarrison, dragged walls, gate replacement
 and passage, attacks, rubble and a completed 40-versus-40 fight. The owner
-reported that the fighting needs clearer visuals: arrows were visible but
-looked quite random. M4 remains open for that readability work and recheck.
+initially reported that arrows looked random. After the readability changes,
+the owner approved the 2026-09-13 native rerun as clear enough to proceed.
+M4 awaits review/merge of PRs #9 and #10; the native readability gate has passed.
 The software rasteriser (`docs/07` D13) remains the source of the repository's
 golden images; native observations are recorded separately below.
 
@@ -521,19 +522,71 @@ what was done:
   Metal rendering and no startup panic was found. This is not recorded as a
   demonstrated game startup defect.
 
+### Work record: combat readability follow-up (2026-09-12–13)
+
+- **Problem:** the owner could see arrows but found the fighting random-looking.
+  Infantry shared nearly identical bodies with tiny weapons; every projectile
+  was a short horizontal mark irrespective of its flight direction.
+- **Presentation changes on `codex/combat-readability`, stacked on PR #9:**
+  procedural infantry now carry larger, outlined clubs, axe heads, long spears
+  with shields, raised slings and curved bows with quivers. A short strike or
+  release pose follows the actual reload counter rather than a free-running
+  animation. Rendered sprite sheets still take precedence over placeholders.
+- Arrows point along their current aim in all eight facings and have team-colour
+  fletching. A 200 ms impact spark marks the position of actual damage events;
+  repeated hits on one target coalesce, and pause/speed controls apply to the
+  effect. Both the native app and replay image renderer collect the same
+  per-tick presentation history. Combat rules, costs, targeting, replay inputs
+  and simulation hashes are unchanged. Projectiles remain the shared arrow
+  placeholder for now; separate sling-stone artwork is not part of this chunk.
+- **Attack warning fixed:** typed age-up and attack notifications replace the
+  shared text-only banner. Only an age-up displays the buildings/technologies
+  subtitle. A HUD regression covers the distinction.
+- **Validated locally:** 357 workspace tests passed, including all replay
+  digests. New checks cover all eight arrowhead directions and team-colour
+  tails, impact expiry/idempotence and replay equivalence. Formatting, Clippy
+  with warnings denied, art conformance, generated files, purity and
+  traceability passed. The normal release app and an isolated native test app
+  built successfully. Four intentionally changed golden images were inspected
+  and updated: `army-hud`, `battle-hud`, `siege-hud`, `battle-40v40`; the other
+  nine are unchanged. Full code CI passed for `0179152` in run
+  `34727546332`: all seven jobs, including macOS, supplemental Windows/Linux
+  checks, performance, the 300-match soak and cross-platform hash agreement.
+  This acceptance-record update changes documentation only and triggers its
+  normal CI rerun.
+- **Native recheck passed (2026-09-13):** after the earlier app-control
+  timeout, selecting `uk.newempire.codex.readability` resumed the native window
+  at tick 6. On the same Apple M4 MacBook Air/macOS 27.0, the same 40-versus-40
+  replay ran at 1x with no tactical intervention. The window showed distinct
+  weapons, direction-facing projectiles, attack poses and impact cues at about
+  60 fps. The owner answered: **“Yes, this is clear enough to proceed.”**
+- The battle was paused at tick 835 after player 0's last soldier died.
+  The saved world held 17 living player-1 soldiers and 53 corpses (70 entities
+  in the title); it matches the automated outcome. Production `simrunner verify`
+  reproduced all 835 ticks twice, final hash `9875adee3ccba0d9`, 82 commands.
+  The accepted recording is retained locally as
+  `work/mac-readability-battle-accepted-played.ron`, with its matching
+  `mac-readability-battle-accepted-result.txt` world summary.
+- A second short native run specifically verified the **UNDER ATTACK banner
+  without the age-up subtitle**, visible near tick 176. It was closed at tick
+  366 and its 82-command replay also verified (`91d2af9d6414d07e`). Both windows
+  were closed normally. No production code changed during this acceptance pass.
+- The isolated app's setup bootstrap remains local in `work/mac-readability-app`
+  and `work/mac-playtest/New Empire Readability.app`; production startup and
+  Cargo manifests were never replaced. The earlier control timeout is resolved.
+  The owner's readability approval is recorded, but the PRs remain unmerged;
+  M4 is not yet marked landed and M5 has not started.
+
 ### Resume here next session
 
 M4 chunks 1 to 4 are landed. PR #9 adds step 6's acceptance automation and
-balance harness; its native functional smoke checks are now recorded above.
-The next small chunk is **combat readability**: distinguish infantry roles
-with clearer silhouettes/weapons, make firing and hit feedback easier to
-follow, and remove the age-up subtitle from the attack warning. Preserve the
-existing palette/art direction and combat rules. Re-run the same 40-versus-40
-native battle at 1x and ask the owner whether the two sides, unit roles and
-attacks are now understandable; follow `docs/09` for regression checks.
-Automatic wall-breach coverage remains automated rather than a claimed native
-pass. Review/merge PR #9 and pass the readability recheck before closing M4
-or beginning M5. Art stays on the `docs/08` schedule.
+balance harness; PR #10 adds the readability improvements. Native functional
+smoke checks and owner readability approval are recorded above. Both PRs are ready for review. Check the documentation rerun, then
+review/merge #9 first, then retarget #10 from `codex/combat-acceptance` to the
+default branch and review/merge it. After both land, update milestone status
+and traceability enforcement before beginning a small M5 opponent chunk.
+Automatic breach selection against a fully closed wall retains automated
+coverage rather than a claimed native pass. Art stays on the `docs/08` schedule.
 
 ## 4. What comes next: M4 — Combat
 
@@ -565,8 +618,8 @@ shippable on its own and has a headless test before it has a sprite.
 6. **The 40-versus-40 acceptance match** (`RM-M4-01`). Automated coverage
    added in the current review chunk: bounded fight, replay corpus, golden
    image and equal-budget counter trials. See the record below and
-   `docs/09`. The native functional smoke pass is recorded above; the owner’s readability
-   recheck remains outstanding.
+   `docs/09`. The native functional smoke pass and owner readability approval
+   are recorded above; the acceptance/review chunks still need to land.
 
 Alongside, not blocking: the resource-conservation invariant (`docs/09`
 §11), rebuilding the fuzz targets for the current command set, and the
