@@ -26,6 +26,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: sim purity (no floats, no clock, dependency allowlist)
         run: scripts/check-sim-purity.sh
+      - name: AI dependency boundary
+        run: scripts/check-ai-boundary.sh
       - name: art conformance (palette, placeholders, atlas gate)
         run: scripts/check-art.sh
       - name: generated files match their generators

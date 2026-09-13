@@ -23,7 +23,7 @@ Five milestones landed; the vertical slice is beyond its halfway point.
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
-| M5 — An opponent | Not started | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
+| M5 — An opponent | First chunk in review | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
@@ -37,6 +37,42 @@ the owner approved the 2026-09-13 native rerun as clear enough to proceed.
 PRs #9 and #10 are merged; M4 is landed with the native readability gate passed.
 The software rasteriser (`docs/07` D13) remains the source of the repository's
 golden images; native observations are recorded separately below.
+
+### M5 chunk 1 — AI visibility boundary (2026-09-13, in review)
+
+The `codex/ai-visibility-boundary` branch introduces a data-only `ai-api`
+crate and an `ai` crate that depends only on it. The host-side `view::fog`
+builds each player's filtered observation: incremental vision stamps,
+explored terrain, visible entities and last-seen building identity. Enemy
+orders, stockpiles and hidden entities are absent. Vision counts use `u32`
+instead of bytes to support more than 255 overlapping sources safely.
+Elevation above zero adds one tile of sight; integer rays stop at terrain
+more than one level above their source.
+
+The initial deterministic policy orders one idle Scout toward a known,
+walkable exploration frontier, at most once per 20 ticks. The host translates
+its intent into the ordinary player `Move` command; ownership, generational
+IDs and the normal two-tick queue remain enforced. No simulation state,
+replay format or existing combat behavior changes.
+
+Evidence and exact checks are in `docs/09` §AI. The 500-tick headless scout
+fixture issues five moves, explores 549 tiles and replays without running
+AI to hash `e80d429eb73b3192`. The dependency gate plus `trybuild` compile-fail
+fixtures mechanically reject raw `World` access. Hidden enemy changes leave
+observations and decisions identical.
+
+Local validation: **367 workspace tests passed**, including the new boundary
+and fog/scouting tests. Formatting, Clippy, simulation purity, the AI dependency
+gate, art/generated-file checks and landed-requirement traceability passed.
+GitHub CI remains the final check for this review branch.
+
+**Still owed:** wiring the same fog into the Mac scene/minimap/selection,
+fog and AI history through save/load, economy/build orders, military and
+scouting recovery, difficulty, victory/defeat and player-before-AI order
+priority. This policy is a smoke-test entry point; it can retry an unreachable
+frontier and does not provide an opponent in the game window yet. M5 and
+full `TA-AI-01` acceptance remain open. No new native visual acceptance is
+claimed for this headless chunk.
 
 ### What you can do in the game today
 
@@ -600,13 +636,14 @@ what was done:
 
 ### Resume here next session
 
-**M4 is landed.** Both PRs are merged and the native readability check is
-approved. The next manageable chunk is M5's AI boundary: introduce an enforced
-`FoggedView` interface and a minimal deterministic AI entry point, with tests
-proving the AI cannot read hidden world state. Follow with economy/build orders,
-then military behaviour and difficulty acceptance in separate chunks. M5 has
-not started in this merge session. Check the closure CI before beginning work;
-keep the art pipeline on the `docs/08` schedule.
+**M4 is landed. M5 chunk 1 is in review** on
+`codex/ai-visibility-boundary`; see §1 and the AI section of `docs/09`.
+The closure CI passed before this work began. Review this bounded boundary
+and scouting change first. Next, connect the same visibility data to the
+Mac scene/minimap/selection and verify reveal/hide behavior natively; then
+add economy/build orders, military behavior and difficulty in separate
+chunks. Keep M5 open until its full match acceptance passes, and keep the
+art pipeline on the `docs/08` schedule.
 
 ## 4. What M4 completed — Combat
 

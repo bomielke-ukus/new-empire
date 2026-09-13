@@ -336,11 +336,41 @@ identical replay results through tick 835 (`docs/10`, 2026-09-13).
 
 ### The AI — M5
 
-Twenty headless AI-vs-AI matches: no panics, no unit idle over 60 s with work
-available, Hard beats Easy at least 18 times in 20. `FoggedView` enforced
-**mechanically** by a `trybuild` compile-fail test proving the `ai` crate
-cannot name `World` (`TA-AI-01`). `docs/07` D7 calls this architectural, and
-review is not an architecture.
+**Chunk 1, in review (2026-09-13):**
+
+- `cargo test -p ai --test boundary`: `trybuild` rejects imports of `sim::World`
+  / `Simulation` and a `FoggedView::world()` call; a positive fixture consumes
+  the filtered view successfully. Run normally, without `TRYBUILD=overwrite`.
+- `scripts/check-ai-boundary.sh`: the AI's entire normal dependency tree is
+  restricted to `ai` and `ai-api`, preventing an indirect dependency from
+  reopening the boundary. This gate also runs in CI.
+- `cargo test -p view --test fog_ai`: hidden enemy movement and construction
+  cannot change observations or decisions; revealed enemies expose no orders;
+  vision follows moving/despawned/reused entities; explored terrain and
+  remembered buildings persist, then refresh when seen again. The adapter
+  rejects foreign/stale identities and invalid targets and uses the ordinary
+  two-tick command queue.
+- `cargo test -p view fog::tests`: overlapping vision (including 300 sources),
+  map edges, cliff occlusion and garrison/ungarrison source lifetime.
+- The 500-tick scouting integration fixture discovers terrain, respects
+  cadence and idle-unit ownership, produces identical commands on repeated
+  runs and replays without AI. Its pinned hash is `e80d429eb73b3192` (five
+  movement commands, 549 explored tiles). CI runs this on macOS and the
+  existing portability platforms. Full workspace tests remain required.
+
+**Later M5 acceptance, still open:** Twenty headless AI-vs-AI matches: no
+panics, no unit idle over 60 s with work available, Hard beats Easy at least
+18 times in 20. Add economy/build-order, scouting recovery, military,
+difficulty, victory/defeat and player-before-AI priority coverage as those
+chunks land. Save/load must preserve or reconstruct explored/building memory
+and AI cadence; a fresh `Fog` is currently required for a new match/load.
+
+For full `TA-AI-01`, the Mac renderer, minimap and selection/targeting must
+consume the same visibility data, with a native reveal/hide/remembered-building
+playtest. The compile-fail boundary is necessary but does not complete this
+shared-view acceptance. `docs/07` D7 calls this architectural; review alone
+is not enforcement. Keep this requirement and `RM-M5-01` outside the landed
+traceability prefixes until their full acceptance is satisfied.
 
 ### Interface — M2–M6
 

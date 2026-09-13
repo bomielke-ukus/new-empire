@@ -207,8 +207,9 @@ first-class treatment.
 
 ## 6. Fog of war
 
-- Three grids per player, one byte per tile: `visibility` (count of units seeing
-  it), `explored` (bitset), and `remembered` (last-seen building ID per tile).
+- Three layers per player: `visibility` (a `u32` count of sources seeing each
+  tile, so 256 overlapping units cannot overflow), `explored` (known terrain),
+  and `remembered` (last-seen building identity per tile).
 - Vision updates incrementally: when a unit moves between tiles, decrement the
   circle it left and increment the one it entered. Circles are precomputed
   stamps per line-of-sight radius. No full-map recompute, ever.
