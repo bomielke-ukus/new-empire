@@ -323,7 +323,7 @@ pass; its automated coverage remains above. The owner found the combat visuals
 unclear on the first pass: arrows were visible but looked quite random.
 After PR #10's presentation changes, the same native battle ran at 1x and the
 owner approved it: “Yes, this is clear enough to proceed.” The readability
-half of `RM-M4-01` has passed; milestone closure still awaits PR review/merge.
+half of `RM-M4-01` has passed; PRs #9 and #10 merged and M4 landed on 2026-09-13.
 Automated acceptance alone does not close the milestone.
 
 The readability follow-up adds regression checks for all eight arrowhead
@@ -401,7 +401,8 @@ stable ID, written next to the requirement so it is diffed with it. Tests claim
 one with a `REQ: <id>` marker. `scripts/check-traceability.sh` pairs them up.
 
 As of this acceptance chunk: **127 declared, 83 claimed by tests, 0 gaps in
-landed work.** Run the script for current counts. A claim can cover only part
+landed work.** M4 closure enables `RM-M4`, `GD-COMBAT` and `GD-STANCE`
+enforcement. Run the script for current counts. A claim can cover only part
 of a requirement: `RM-M4-01` has a separately recorded native readability approval, and
 `TA-PATH-06` still owes player-versus-AI priority in M5.
 
@@ -582,7 +583,7 @@ Stated rather than left to be discovered.
 
 - **M4 native acceptance passed for the recorded scenarios.** The 2026-09-13
   owner readability approval and combat/siege results are in `docs/10`; PRs
-  #9 and #10 still need review/merge before milestone closure.
+  #9 and #10 are merged and M4 is landed.
 - **Player-before-AI path priority** (`TA-PATH-06`) waits for M5; the original
   twelve M1/M2 test gaps are closed (§7).
 - **No resource-conservation invariant.** The strongest economy check

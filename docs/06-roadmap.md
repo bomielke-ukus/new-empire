@@ -144,6 +144,11 @@ have them; the villager sheet does not).
 
 ## M4 — Combat
 
+**Status: landed 2026-09-13.** PRs #9 and #10 completed the bounded 40-versus-40
+acceptance, equal-budget counter trials and combat readability pass. The owner
+approved the native Apple M4 Mac playtest; its replay reproduced identically.
+Results, CI evidence and retained scope limits are recorded in `docs/10`.
+
 - Military units, training buildings, unit stats from data
 - Attack orders, projectiles, the damage model with armour, bonuses and elevation
 - Stances, attack-move, patrol, formations

@@ -14,7 +14,7 @@ portability and determinism checks, without a shipping commitment.
 
 ## 1. Where we are
 
-Four milestones landed; the vertical slice is at its halfway point.
+Five milestones landed; the vertical slice is beyond its halfway point.
 
 | Milestone | Status | Acceptance |
 |---|---|---|
@@ -22,7 +22,7 @@ Four milestones landed; the vertical slice is at its halfway point.
 | M1 — A world you can look at | Landed | A map from a seed, scrolled and zoomed, rendered by the GPU path and the software rasteriser alike |
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
-| M4 — Combat | **In progress** (steps 1–5 landed; step 6 automation added in PR #9; Mac functional smoke passed; native readability and code CI passed; PRs #9 and #10 await review/merge) | Two forces of 40 fight; counters work; nothing gets stuck |
+| M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | Not started | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
@@ -34,7 +34,7 @@ The second pass confirmed garrison/ungarrison, dragged walls, gate replacement
 and passage, attacks, rubble and a completed 40-versus-40 fight. The owner
 initially reported that arrows looked random. After the readability changes,
 the owner approved the 2026-09-13 native rerun as clear enough to proceed.
-M4 awaits review/merge of PRs #9 and #10; the native readability gate has passed.
+PRs #9 and #10 are merged; M4 is landed with the native readability gate passed.
 The software rasteriser (`docs/07` D13) remains the source of the repository's
 golden images; native observations are recorded separately below.
 
@@ -410,7 +410,7 @@ what was done:
   are art (M7); rubble appears at once. The Town Center stays off the
   build panel until Q3 is answered (§6). Hunting still waits.
 
-### Work record: M4 acceptance automation (2026-09-12, current review chunk)
+### Work record: M4 acceptance automation (2026-09-12)
 
 - Added a command-driven 40-versus-40 mixed-army fixture, with a 6,000-tick
   deadline and a per-unit 400-tick inactivity check. Invariants run every
@@ -451,8 +451,8 @@ what was done:
   macOS and additional Linux/Windows tests, release combat/balance trials
   with invariants, performance, the 300-match soak and cross-platform hash
   agreement. This result entry was added afterward with no executable changes.
-  [PR #9](https://github.com/bomielke-ukus/new-empire/pull/9) is awaiting review
-  and merge. No live Mac combat playtest has been performed in this chunk.
+  [PR #9](https://github.com/bomielke-ukus/new-empire/pull/9) awaited review
+  and merge at this checkpoint; its merge is recorded below. No live Mac combat playtest has been performed in this chunk.
 
 ### Work record: live Mac combat check (2026-09-12)
 
@@ -516,7 +516,7 @@ what was done:
 - Both native sessions were closed normally and their recordings verified.
   Production sources remain unchanged. PR #9 checkpoint `79ca7e4` passed both
   CI runs (`34704682171`, `34704679626`); the documentation update below will
-  trigger its normal rerun. PR #9 remains draft and unmerged. M4 stays open.
+  trigger its normal rerun. At that checkpoint PR #9 was draft/unmerged; the later closure is recorded below.
 - The initial app-control timeouts were traced to a temporary shell launcher;
   a fresh native app bundle was controllable. A process sample showed active
   Metal rendering and no startup panic was found. This is not recorded as a
@@ -574,21 +574,41 @@ what was done:
 - The isolated app's setup bootstrap remains local in `work/mac-readability-app`
   and `work/mac-playtest/New Empire Readability.app`; production startup and
   Cargo manifests were never replaced. The earlier control timeout is resolved.
-  The owner's readability approval is recorded, but the PRs remain unmerged;
-  M4 is not yet marked landed and M5 has not started.
+  The owner's readability approval completed the native gate. The following
+  merge record closes M4; M5 has not started.
+
+### Work record: M4 merged and closed (2026-09-13)
+
+- Merged [PR #9](https://github.com/bomielke-ukus/new-empire/pull/9) as
+  `155c98391ba9cacd3526a8d8b7432692783b4dc9`, preserving its ancestry so the
+  stacked readability PR could follow cleanly. Its final head `38aba74`
+  passed the full PR workflow (`34706310971`).
+- Retargeted [PR #10](https://github.com/bomielke-ukus/new-empire/pull/10)
+  to the default branch. Verified the new base tree exactly matched its prior
+  tested base and the change remained the expected 13 files. Its final head
+  `b303d5d` passed the full PR workflow (`34727917977`), then merged as
+  `78620a549af067ab4d7669f95641c801a3639f53`. Both merges were guarded by the
+  expected head SHA. The merged tree matches the accepted local tree.
+- Updated the roadmap and status to mark **M4 landed**, and enabled
+  `RM-M4`, `GD-COMBAT` and `GD-STANCE` enforcement in the traceability gate.
+  The gate passes with no missing landed requirements. Existing automated
+  wall-breach coverage and the documented native smoke scope remain unchanged.
+- All 357 local workspace tests and full code CI had passed before merging;
+  the owner approved the native battle and both native recordings verified.
+  This closure commit changes documentation and traceability enforcement only;
+  normal post-merge/closure CI runs remain separate from those completed checks.
 
 ### Resume here next session
 
-M4 chunks 1 to 4 are landed. PR #9 adds step 6's acceptance automation and
-balance harness; PR #10 adds the readability improvements. Native functional
-smoke checks and owner readability approval are recorded above. Both PRs are ready for review. Check the documentation rerun, then
-review/merge #9 first, then retarget #10 from `codex/combat-acceptance` to the
-default branch and review/merge it. After both land, update milestone status
-and traceability enforcement before beginning a small M5 opponent chunk.
-Automatic breach selection against a fully closed wall retains automated
-coverage rather than a claimed native pass. Art stays on the `docs/08` schedule.
+**M4 is landed.** Both PRs are merged and the native readability check is
+approved. The next manageable chunk is M5's AI boundary: introduce an enforced
+`FoggedView` interface and a minimal deterministic AI entry point, with tests
+proving the AI cannot read hidden world state. Follow with economy/build orders,
+then military behaviour and difficulty acceptance in separate chunks. M5 has
+not started in this merge session. Check the closure CI before beginning work;
+keep the art pipeline on the `docs/08` schedule.
 
-## 4. What comes next: M4 — Combat
+## 4. What M4 completed — Combat
 
 The roadmap's list, in the order we intend to build it. Each step is
 shippable on its own and has a headless test before it has a sprite.
@@ -619,7 +639,7 @@ shippable on its own and has a headless test before it has a sprite.
    added in the current review chunk: bounded fight, replay corpus, golden
    image and equal-budget counter trials. See the record below and
    `docs/09`. The native functional smoke pass and owner readability approval
-   are recorded above; the acceptance/review chunks still need to land.
+   are recorded above; the acceptance and readability PRs are now merged.
 
 Alongside, not blocking: the resource-conservation invariant (`docs/09`
 §11), rebuilding the fuzz targets for the current command set, and the
