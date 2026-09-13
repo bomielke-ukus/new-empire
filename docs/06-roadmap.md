@@ -165,6 +165,12 @@ work as designed, and no unit gets stuck during combat.
 
 ## M5 — An opponent
 
+**Status (2026-09-13): first chunk in review.** A mechanically isolated
+`FoggedView` API, incremental visibility and a deterministic scouting entry
+point have headless coverage. The Mac view, economy/military managers,
+difficulty and match acceptance below are still owed. See `docs/10` §1 and
+`docs/09` §AI for the bounded implementation and validation record.
+
 - AI: build-order planner, economy manager, military manager, scouting
 - `FoggedView` enforcement — the AI physically cannot read hidden state
 - Four difficulty levels

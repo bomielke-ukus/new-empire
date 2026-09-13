@@ -1,0 +1,5 @@
+error[E0599]: no method named `world` found for struct `FoggedView<'a>` in the current scope
+ --> tests/ui/view_world.rs:3:18
+  |
+3 |     let _ = view.world();
+  |                  ^^^^^ method not found in `FoggedView<'_>`

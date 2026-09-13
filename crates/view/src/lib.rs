@@ -10,6 +10,7 @@
 pub mod camera;
 pub mod combat_view;
 pub mod feedback;
+pub mod fog;
 pub mod font;
 pub mod hud;
 pub mod iso;

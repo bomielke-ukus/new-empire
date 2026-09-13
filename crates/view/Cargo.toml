@@ -14,3 +14,8 @@ bytemuck = { workspace = true }
 png = { workspace = true }
 ron = { workspace = true }
 serde = { workspace = true }
+
+ai-api = { path = "../ai-api" }
+
+[dev-dependencies]
+ai = { path = "../ai" }
