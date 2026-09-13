@@ -22,7 +22,7 @@ Four milestones landed; the vertical slice is at its halfway point.
 | M1 — A world you can look at | Landed | A map from a seed, scrolled and zoomed, rendered by the GPU path and the software rasteriser alike |
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
-| M4 — Combat | **In progress** (steps 1–5 landed; step 6 automation added in PR #9; Mac functional smoke passed; readability changes implemented, native recheck pending) | Two forces of 40 fight; counters work; nothing gets stuck |
+| M4 — Combat | **In progress** (steps 1–5 landed; step 6 automation added in PR #9; Mac functional smoke passed; native readability and code CI passed; PRs #9 and #10 await review/merge) | Two forces of 40 fight; counters work; nothing gets stuck |
 | M5 — An opponent | Not started | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
@@ -32,8 +32,9 @@ The Mac checks of 2026-09-12 exercised the economy and age progression
 (§3, row 4), then the native combat/siege window (work record below).
 The second pass confirmed garrison/ungarrison, dragged walls, gate replacement
 and passage, attacks, rubble and a completed 40-versus-40 fight. The owner
-reported that the fighting needs clearer visuals: arrows were visible but
-looked quite random. M4 remains open for that readability work and recheck.
+initially reported that arrows looked random. After the readability changes,
+the owner approved the 2026-09-13 native rerun as clear enough to proceed.
+M4 awaits review/merge of PRs #9 and #10; the native readability gate has passed.
 The software rasteriser (`docs/07` D13) remains the source of the repository's
 golden images; native observations are recorded separately below.
 
@@ -548,30 +549,44 @@ what was done:
   traceability passed. The normal release app and an isolated native test app
   built successfully. Four intentionally changed golden images were inspected
   and updated: `army-hud`, `battle-hud`, `siege-hud`, `battle-40v40`; the other
-  nine are unchanged. CI will run on the review branch.
-- **Native recheck pending:** app control timed out opening the isolated
-  `New Empire Readability.app`; no updated native screenshot or owner verdict
-  was obtained. This is a control timeout, not a demonstrated game defect.
-  The test app loads the same 40-versus-40 replay paused at tick 6 and uses the
-  production gameplay/render/input code with a local-only setup bootstrap.
-  Its files live in the task's `work/mac-readability-app` and `work/mac-playtest`
-  directories; production startup and Cargo manifests were never replaced.
-  Before resuming, inspect whether the app is running. Start/resume at 1x,
-  inspect attack/release/impact cues and the corrected warning, and record the
-  owner's readability verdict. M4 remains open and M5 has not started.
+  nine are unchanged. Full code CI passed for `0179152` in run
+  `34727546332`: all seven jobs, including macOS, supplemental Windows/Linux
+  checks, performance, the 300-match soak and cross-platform hash agreement.
+  This acceptance-record update changes documentation only and triggers its
+  normal CI rerun.
+- **Native recheck passed (2026-09-13):** after the earlier app-control
+  timeout, selecting `uk.newempire.codex.readability` resumed the native window
+  at tick 6. On the same Apple M4 MacBook Air/macOS 27.0, the same 40-versus-40
+  replay ran at 1x with no tactical intervention. The window showed distinct
+  weapons, direction-facing projectiles, attack poses and impact cues at about
+  60 fps. The owner answered: **“Yes, this is clear enough to proceed.”**
+- The battle was paused at tick 835 after player 0's last soldier died.
+  The saved world held 17 living player-1 soldiers and 53 corpses (70 entities
+  in the title); it matches the automated outcome. Production `simrunner verify`
+  reproduced all 835 ticks twice, final hash `9875adee3ccba0d9`, 82 commands.
+  The accepted recording is retained locally as
+  `work/mac-readability-battle-accepted-played.ron`, with its matching
+  `mac-readability-battle-accepted-result.txt` world summary.
+- A second short native run specifically verified the **UNDER ATTACK banner
+  without the age-up subtitle**, visible near tick 176. It was closed at tick
+  366 and its 82-command replay also verified (`91d2af9d6414d07e`). Both windows
+  were closed normally. No production code changed during this acceptance pass.
+- The isolated app's setup bootstrap remains local in `work/mac-readability-app`
+  and `work/mac-playtest/New Empire Readability.app`; production startup and
+  Cargo manifests were never replaced. The earlier control timeout is resolved.
+  The owner's readability approval is recorded, but the PRs remain unmerged;
+  M4 is not yet marked landed and M5 has not started.
 
 ### Resume here next session
 
 M4 chunks 1 to 4 are landed. PR #9 adds step 6's acceptance automation and
-balance harness; its native functional smoke checks are recorded above.
-The combat-readability follow-up is implemented on `codex/combat-readability`
-and ready for native review after the app-control timeout. Resume the same
-40-versus-40 battle at 1x, verify the attack warning and ask the owner whether
-unit roles and attacks are now easier to follow. Record the result here before
-closing the readability check. Review/merge PR #9 and the separate readability
-chunk before closing M4 or beginning M5. Automatic breach selection against a
-fully closed wall retains automated coverage rather than a claimed native pass.
-Art stays on the `docs/08` schedule.
+balance harness; PR #10 adds the readability improvements. Native functional
+smoke checks and owner readability approval are recorded above. Both PRs are ready for review. Check the documentation rerun, then
+review/merge #9 first, then retarget #10 from `codex/combat-acceptance` to the
+default branch and review/merge it. After both land, update milestone status
+and traceability enforcement before beginning a small M5 opponent chunk.
+Automatic breach selection against a fully closed wall retains automated
+coverage rather than a claimed native pass. Art stays on the `docs/08` schedule.
 
 ## 4. What comes next: M4 — Combat
 
@@ -603,8 +618,8 @@ shippable on its own and has a headless test before it has a sprite.
 6. **The 40-versus-40 acceptance match** (`RM-M4-01`). Automated coverage
    added in the current review chunk: bounded fight, replay corpus, golden
    image and equal-budget counter trials. See the record below and
-   `docs/09`. The native functional smoke pass is recorded above; the owner’s readability
-   recheck remains outstanding.
+   `docs/09`. The native functional smoke pass and owner readability approval
+   are recorded above; the acceptance/review chunks still need to land.
 
 Alongside, not blocking: the resource-conservation invariant (`docs/09`
 §11), rebuilding the fuzz targets for the current command set, and the
