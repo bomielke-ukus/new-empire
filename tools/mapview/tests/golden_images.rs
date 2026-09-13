@@ -33,6 +33,28 @@ struct Scene {
 
 const SCENES: &[Scene] = &[
     Scene {
+        // The actual acceptance replay, during contact between the two armies.
+        name: "battle-40v40",
+        args: &[
+            "--replay",
+            "crates/sim/tests/corpus/battle-40v40.ron",
+            "--ticks",
+            "200",
+            "--at",
+            "32,34",
+            "--zoom",
+            "1",
+            "--select-kind",
+            "bowman",
+            "--hud",
+            "1",
+            "--width",
+            "1280",
+            "--height",
+            "720",
+        ],
+    },
+    Scene {
         // Terrain, elevation shading and scenery, with no units acting.
         name: "inland-start",
         args: &[
@@ -315,6 +337,7 @@ fn updating() -> bool {
 
 fn render(scene: &Scene, out: &Path) {
     let status = Command::new(env!("CARGO_BIN_EXE_mapview"))
+        .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .args(scene.args)
         .arg("--out")
         .arg(out)

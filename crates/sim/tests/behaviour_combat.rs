@@ -49,7 +49,6 @@ fn stance(sim: &mut Simulation, player: u8, ids: Vec<sim::EntityId>, stance: Sta
     sim.issue(cmd(player, CommandKind::SetStance { ids, stance }));
 }
 
-/// REQ: RM-M4-01
 #[test]
 fn an_attack_order_closes_hits_on_the_reload_and_kills() {
     let mut sim = arena();

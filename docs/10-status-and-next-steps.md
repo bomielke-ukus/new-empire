@@ -22,20 +22,20 @@ Four milestones landed; the vertical slice is at its halfway point.
 | M1 — A world you can look at | Landed | A map from a seed, scrolled and zoomed, rendered by the GPU path and the software rasteriser alike |
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
-| M4 — Combat | **In progress** (steps 1–5 of 6 landed 2026-09-12) | Two forces of 40 fight; counters work; nothing gets stuck |
+| M4 — Combat | **In progress** (steps 1–5 landed; step 6 automation added in PR #9; Mac functional smoke passed, readability needs work) | Two forces of 40 fight; counters work; nothing gets stuck |
 | M5 — An opponent | Not started | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
-The GPU window has run on a real display once: the Mac check of
-2026-09-12 (§3, row 4) walked through selection, gathering, building,
-training, cancellation and age advancement, and its feedback is recorded
-below. Everything M4 has added since, fighting, towers, walls, gates,
-garrison and rubble, has been seen only through the software rasteriser
-(`docs/07` D13), which is the reference renderer and the source of every
-golden image and screenshot in this repository, and through CI. A second
-Mac pass through a fight and a siege is the next real-window check.
+The Mac checks of 2026-09-12 exercised the economy and age progression
+(§3, row 4), then the native combat/siege window (work record below).
+The second pass confirmed garrison/ungarrison, dragged walls, gate replacement
+and passage, attacks, rubble and a completed 40-versus-40 fight. The owner
+reported that the fighting needs clearer visuals: arrows were visible but
+looked quite random. M4 remains open for that readability work and recheck.
+The software rasteriser (`docs/07` D13) remains the source of the repository's
+golden images; native observations are recorded separately below.
 
 ### What you can do in the game today
 
@@ -400,10 +400,8 @@ what was done:
   a building placed and a move ordered in the same tick left the grid
   dirty for the move's connectivity query. Fixed the same day by
   relabelling the grid between commands, with the seed kept in the
-  regression file and a unit test for the pair. Not yet seen on a Mac: the
-  next live check should train soldiers, right-click an enemy, attack-move
-  a column into a walled base, drag a wall, set a gate, garrison a tower
-  and knock a building down.
+  regression file and a unit test for the pair. The subsequent native Mac
+  combat/siege checks and remaining readability issue are recorded below.
 - **Not done, deliberately.** Repair (`docs/03` §3's cursor table) is not
   in the plan's step and waits; a damaged building stays damaged. The
   Guard Tower is not a slice item. "Automatic gate suggestion at road
@@ -411,11 +409,131 @@ what was done:
   are art (M7); rubble appears at once. The Town Center stays off the
   build panel until Q3 is answered (§6). Hunting still waits.
 
+### Work record: M4 acceptance automation (2026-09-12, current review chunk)
+
+- Added a command-driven 40-versus-40 mixed-army fixture, with a 6,000-tick
+  deadline and a per-unit 400-tick inactivity check. Invariants run every
+  tick. Both armies converge on the centre of a flat arena; the fixture
+  covers a controlled fight, not all terrain or formation combinations.
+- The reference battle ends at tick 699 (about 35 seconds), with 17 units
+  surviving on side 1 and a longest individual inactivity span of 148 ticks.
+  Its test checks 80 spawns, a decisive outcome, recipe/corpus agreement and
+  per-tick replay determinism. The `RM-M4-01` marker moved from the old
+  one-on-one test to this automated acceptance test; readability stays manual.
+- Added only `battle-40v40.ron`, its digest and its golden image. The new
+  `mapview --replay` option renders the actual corpus at tick 200. Inspected
+  the frame: both armies, ranged fire and the selected unit's HUD are visible.
+  Existing replay inputs, digests and reference images remain unchanged.
+- Added `simrunner battle` and `simrunner balance`. Both specified counters
+  win 10/10 trials on each side: 12 Spearmen versus 9 Light Cavalry, and
+  14 Slingers versus 10 Axemen, at equal total resource budgets. Seeds vary
+  deployment and each is repeated with owners/sides exchanged. The gate
+  requires at least 90% wins separately on each side and no stalled trials.
+  CI also runs balance in release with invariant checks on every platform.
+- Proved the inactivity detector rejects passive, stopped armies. Temporarily
+  removing the Spearman's cavalry bonus made its balance check fail with
+  zero wins. Removing the Slinger bonus did not change its win rate in this
+  arena; its existing damage-model test remains the check for that exact
+  bonus. Restored the original data afterward. No gameplay stats changed.
+- Cleaned up the testing plan's stale corpus/image/coverage counts, closed
+  M1/M2 backlog, GPU claims and old command-count wording, and documented
+  what the new acceptance checks establish and what remains manual.
+- Incorporated the concurrent navigation fix `83c9f24` from the default
+  branch before completing review; its regression adds one workspace test.
+- Local macOS verification: all 355 workspace tests pass, plus all four
+  acceptance/CLI tests in release with debug invariant checks. Formatting,
+  Clippy with warnings denied, purity, traceability, generated-file freshness
+  and art conformance pass.
+- Full GitHub CI passed for combined code commit `ecf6cd6` in
+  [run 34702500527](https://github.com/bomielke-ukus/new-empire/actions/runs/34702500527):
+  lint/purity and preliminary gates (including CLI callers and workflows),
+  macOS and additional Linux/Windows tests, release combat/balance trials
+  with invariants, performance, the 300-match soak and cross-platform hash
+  agreement. This result entry was added afterward with no executable changes.
+  [PR #9](https://github.com/bomielke-ukus/new-empire/pull/9) is awaiting review
+  and merge. No live Mac combat playtest has been performed in this chunk.
+
+### Work record: live Mac combat check (2026-09-12)
+
+- Tested PR #9 head `70df19f`, still awaiting merge. Hardware: MacBook Air
+  (Mac16,13), Apple M4, 16 GB, macOS 27.0 (26A428). The native Metal window
+  visibly rendered, with the title reporting roughly 60 fps during these
+  observations; this is a smoke check, not a performance benchmark.
+- **Normal-start checks passed:** launch, readable HUD at the displayed
+  window size, Space pause/resume, speed adjustment to 8x, F1 controls and
+  Escape dismissal, villager selection, barracks placement/construction,
+  and Clubman training. The visible food/population changes confirmed the
+  unit was produced.
+- **Controlled siege setup:** a local-only bootstrap prepared a Bronze-age
+  arena through Spawn/Research commands, with units, buildings and an enemy
+  wall/gate. It starts paused and records a replay on normal exit; game
+  input, simulation and rendering handlers are unchanged. The temporary
+  bootstrap edits were restored afterward, and the production binary rebuilt.
+  This distinguishes controlled-fixture evidence from the normal-start pass.
+- **Garrison passed:** drag-selected three Bowmen, right-clicked the Watch
+  Tower and resumed. At tick 3315, the tower's live panel showed INSIDE 3/5,
+  HP 250/250 and population unchanged at 9/35.
+- **Resumed after manual unlock. Ungarrison passed:** ALL OUT (`T`)
+  returned all three Bowmen to the world; the panel changed to INSIDE 0/5
+  and population remained 9/35.
+- **Defences passed:** one villager completed a six-segment dragged palisade
+  and a four-segment dragged stone wall. Replacing an own palisade segment
+  with a gate refunded 5 wood and charged 30 stone. Its doors visibly opened
+  during friendly villager passage. The final gate had 350/350 HP and each
+  stone wall 400/400 HP.
+- **Combat and destruction passed:** three Axemen right-click attacked the
+  enemy gate and reduced it to visible rubble. After switching them to
+  Aggressive, attack-move sent them through that breach, killed the enemy
+  Clubman and destroyed the house; its rubble was visible at tick 12494.
+  All three Axemen survived and finished their orders. This native sequence
+  used an explicit gate attack before attack-move; automatic breach selection
+  against a fully closed wall retains its separate automated test coverage.
+- **Native 40-versus-40 run passed functionally:** loaded the committed
+  `battle-40v40.ron` at tick 6 and ran at 1x with no tactical intervention.
+  The live view showed both armies approaching, projectiles, casualties and
+  the surviving orange army. At the final pause, tick 1178, player 0 had no
+  living soldiers and player 1 had 17, matching the automated arena outcome;
+  the 25 entities still counted by the title included eight remaining corpses.
+  The window reported about 60 fps during combat. The captured game content
+  was 1280×720 logical pixels; physical display resolution was not independently
+  re-measured in this pass. GPU: Apple M4, 10 cores, Metal supported.
+- **Replay evidence passed:** the local siege recording contains 94 commands
+  and 15275 ticks; production `simrunner verify` reproduced every tick twice
+  (final hash `350ffd7c33a118ba`). The native battle recording contains 82
+  commands and 1178 ticks and likewise verified (`3780a6da33f68800`). Recordings
+  and final-world summaries are retained locally as `mac-siege-played.ron`,
+  `mac-battle-played.ron` and matching `mac-*-result.txt` files in the task's
+  `work` directory. They are local evidence, not new committed golden fixtures.
+- **Readability did not pass.** The owner selected “It needs clearer visuals”
+  and added: “I could see arrows flying, but it was quite random.” The observer
+  also found infantry roles difficult to distinguish in the clustered fight.
+  This is a presentation issue to investigate, not evidence that simulation
+  targeting is random. The UNDER ATTACK banner incorrectly displayed the
+  age-up subtitle “NEW BUILDINGS AND TECHNOLOGIES AVAILABLE”; confirmed in
+  `crates/view/src/hud.rs`, which applies that subtitle to every banner.
+  Both findings remain open; no gameplay or presentation fix is claimed here.
+- Both native sessions were closed normally and their recordings verified.
+  Production sources remain unchanged. PR #9 checkpoint `79ca7e4` passed both
+  CI runs (`34704682171`, `34704679626`); the documentation update below will
+  trigger its normal rerun. PR #9 remains draft and unmerged. M4 stays open.
+- The initial app-control timeouts were traced to a temporary shell launcher;
+  a fresh native app bundle was controllable. A process sample showed active
+  Metal rendering and no startup panic was found. This is not recorded as a
+  demonstrated game startup defect.
+
 ### Resume here next session
 
-M4 chunks 1 to 4 are landed. Next is step 6 below: the 40-versus-40
-acceptance match and the balance harness. Art continues on the `docs/08`
-schedule.
+M4 chunks 1 to 4 are landed. PR #9 adds step 6's acceptance automation and
+balance harness; its native functional smoke checks are now recorded above.
+The next small chunk is **combat readability**: distinguish infantry roles
+with clearer silhouettes/weapons, make firing and hit feedback easier to
+follow, and remove the age-up subtitle from the attack warning. Preserve the
+existing palette/art direction and combat rules. Re-run the same 40-versus-40
+native battle at 1x and ask the owner whether the two sides, unit roles and
+attacks are now understandable; follow `docs/09` for regression checks.
+Automatic wall-breach coverage remains automated rather than a claimed native
+pass. Review/merge PR #9 and pass the readability recheck before closing M4
+or beginning M5. Art stays on the `docs/08` schedule.
 
 ## 4. What comes next: M4 — Combat
 
@@ -444,9 +562,11 @@ shippable on its own and has a headless test before it has a sprite.
    building armour, towers and the Town Center shooting, walls in runs,
    gates that shut on an enemy, garrison (`UX-CMD-09`). The Town Center as
    a buildable still waits on Q3.
-6. **The 40-versus-40 acceptance match** (`RM-M4-01`) as a corpus entry and
-   a golden image, plus the balance harness `docs/09` describes: counters
-   win as designed over N trials, headless.
+6. **The 40-versus-40 acceptance match** (`RM-M4-01`). Automated coverage
+   added in the current review chunk: bounded fight, replay corpus, golden
+   image and equal-budget counter trials. See the record below and
+   `docs/09`. The native functional smoke pass is recorded above; the owner’s readability
+   recheck remains outstanding.
 
 Alongside, not blocking: the resource-conservation invariant (`docs/09`
 §11), rebuilding the fuzz targets for the current command set, and the

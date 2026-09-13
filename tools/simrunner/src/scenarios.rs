@@ -33,6 +33,8 @@ pub struct Scenario {
 /// How the scripted players behave.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Style {
+    /// Bounded, mixed-army combat acceptance fixture.
+    Battle,
     /// Nobody issues anything. Isolates map generation and idle behaviour —
     /// with `wander` on, the animals still move and the RNG still turns.
     Idle,
@@ -80,6 +82,14 @@ fn flat(size: u16, players: u8) -> SimConfig {
 /// one a bug is least likely to hide in.
 pub fn corpus() -> Vec<Scenario> {
     vec![
+        Scenario {
+            name: "battle-40v40",
+            purpose: "eighty fighters: decisive combat without stranded units",
+            seed: 1,
+            ticks: simrunner::arena::BATTLE_LIMIT,
+            config: simrunner::arena::config(),
+            style: Style::Battle,
+        },
         Scenario {
             name: "economy-2p",
             purpose: "the everyday case: two players gathering, building and training",
@@ -223,6 +233,12 @@ impl Scenario {
     /// The recorded replay is a flat command list either way, so verifying it
     /// is not circular.
     pub fn synthesise(&self) -> Replay {
+        if self.style == Style::Battle {
+            let battle = simrunner::arena::battle_40();
+            assert!(battle.failure.is_none(), "{:?}", battle.failure);
+            assert!(battle.winner().is_some(), "battle must finish decisively");
+            return battle.replay;
+        }
         let mut sim = Simulation::new(self.seed, self.config.clone());
         let mut bot = Rng::new(self.seed ^ 0xD1CE);
         let players = self.config.map.players.clamp(1, 8);

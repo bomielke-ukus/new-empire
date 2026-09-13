@@ -4,6 +4,7 @@
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
 //!         [--scenario gather|build|ages|army|battle|siege] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
+//!         [--replay FILE] (render at --ticks, or at the end if omitted)
 //!         [--dpi N] [--ui-scale N] [--controls 1]
 //! ```
 //!
@@ -20,6 +21,8 @@ struct Args {
     size: u16,
     players: u8,
     ticks: u64,
+    replay: Option<String>,
+    ticks_set: bool,
     zoom: usize,
     width: u32,
     height: u32,
@@ -49,6 +52,8 @@ fn parse() -> Result<Args, String> {
         size: 128,
         players: 2,
         ticks: 0,
+        replay: None,
+        ticks_set: false,
         zoom: view::camera::DEFAULT_ZOOM_INDEX,
         width: 1280,
         height: 720,
@@ -83,7 +88,11 @@ fn parse() -> Result<Args, String> {
             "--seed" => a.seed = val.parse().map_err(|e| format!("{key}: {e}"))?,
             "--size" => a.size = val.parse().map_err(|e| format!("{key}: {e}"))?,
             "--players" => a.players = val.parse().map_err(|e| format!("{key}: {e}"))?,
-            "--ticks" => a.ticks = val.parse().map_err(|e| format!("{key}: {e}"))?,
+            "--ticks" => {
+                a.ticks = val.parse().map_err(|e| format!("{key}: {e}"))?;
+                a.ticks_set = true;
+            }
+            "--replay" => a.replay = Some(val.clone()),
             "--zoom" => {
                 let z = num(val)?;
                 a.zoom = ZOOM_LEVELS
@@ -146,20 +155,43 @@ fn run() -> Result<(), String> {
     // This is the front door a setup screen would use, so it runs the
     // setup screen's check.
     config.validate().map_err(|e| format!("match setup: {e}"))?;
-    let mut sim = sim::Simulation::new(a.seed, config);
-    if let Some(name) = &a.scenario {
-        scenario(&mut sim, name)?;
-    }
-    for _ in 0..a.ticks {
-        sim.step();
-    }
+    let (sim, seed) = if let Some(path) = &a.replay {
+        if a.scenario.is_some() {
+            return Err("--replay and --scenario are mutually exclusive".into());
+        }
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+        let mut replay: sim::Replay = ron::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
+        replay.validate().map_err(|e| format!("{path}: {e}"))?;
+        replay
+            .config
+            .validate()
+            .map_err(|e| format!("{path}: {e}"))?;
+        if a.ticks_set {
+            if a.ticks > replay.ticks {
+                return Err("--ticks exceeds the replay's end".into());
+            }
+            replay.ticks = a.ticks;
+            replay.commands.retain(|(tick, _)| *tick <= a.ticks);
+        }
+        let seed = replay.seed;
+        (replay.run(|_, _| {}).map_err(|e| e.to_string())?, seed)
+    } else {
+        let mut sim = sim::Simulation::new(a.seed, config);
+        if let Some(name) = &a.scenario {
+            scenario(&mut sim, name)?;
+        }
+        for _ in 0..a.ticks {
+            sim.step();
+        }
+        (sim, a.seed)
+    };
     let map = sim.map();
     let hist = map.terrain_histogram();
     println!(
         "seed {} size {} players {}: {} entities, terrain {:?}, starts {:?}",
-        a.seed,
+        seed,
         map.width(),
-        a.players,
+        sim.players().len(),
         sim.world().len(),
         hist,
         sim.starts()
@@ -216,7 +248,11 @@ fn run() -> Result<(), String> {
         .take(take)
         .map(|s| s.index() as u32)
         .collect();
-    let (gx, gy) = sim.starts()[0];
+    let (gx, gy) = sim
+        .starts()
+        .first()
+        .copied()
+        .unwrap_or((map.width() / 2, map.height() / 2));
     let age = sim.player(0).map_or(0, |p| p.age.index() as u8);
     let ghost = match a.ghost.as_deref() {
         None => None,
@@ -257,7 +293,11 @@ fn run() -> Result<(), String> {
     if let Some((x, y)) = a.at {
         cam.look_at_tile(x, y);
     } else if let Some(p) = a.start {
-        let (sx, sy) = *sim.starts().get(p).ok_or(format!("no start {p}"))?;
+        let (sx, sy) = if sim.starts().is_empty() && p == 0 {
+            (map.width() / 2, map.height() / 2)
+        } else {
+            *sim.starts().get(p).ok_or(format!("no start {p}"))?
+        };
         cam.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
     }
     if a.hud {

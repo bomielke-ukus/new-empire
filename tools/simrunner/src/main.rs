@@ -9,6 +9,8 @@
 //! simrunner soak   [--matches N] [--seed N] [--ticks N] [--timeout SECS] [--dump DIR]
 //! simrunner bench  [--seed N] [--ticks N] [--size N] [--json] [--repeats N] [--stats]
 //! simrunner matrix [--out FILE]
+//! simrunner battle [--save FILE]
+//! simrunner balance [--matches N] [--seed N] [--dump DIR]
 //! ```
 //!
 //! `golden` is the one CI leans on hardest: it replays the committed corpus
@@ -710,6 +712,84 @@ fn matrix(f: &Flags) -> ExitCode {
     }
 }
 
+/// The single replay shared by acceptance tests, the corpus and the frame.
+fn battle(f: &Flags) -> ExitCode {
+    let b = simrunner::arena::battle_40();
+    if let Some(path) = &f.save {
+        if let Err(e) = write_replay(Path::new(path), &b.replay) {
+            return fail(&e);
+        }
+    }
+    println!(
+        "40v40: {} ticks, survivors {:?}, longest inactivity {} ticks",
+        b.replay.ticks, b.survivors, b.longest_inactivity
+    );
+    match b.failure {
+        Some(e) => fail(&e),
+        None if b.survivors == [0, 0] => fail("mutual destruction; expected a surviving force"),
+        None => ExitCode::SUCCESS,
+    }
+}
+
+/// Regression gate for the two explicit counter bonuses in the slice.
+fn balance(f: &Flags) -> ExitCode {
+    use simrunner::arena;
+    let trials = f.matches.unwrap_or(arena::DEFAULT_TRIALS);
+    if trials == 0 || trials > 1000 {
+        return usage("--matches must be 1..=1000 seed pairs");
+    }
+    let first = f.seed.unwrap_or(1);
+    if first.checked_add(u64::from(trials) - 1).is_none() {
+        return usage("seed range overflows");
+    }
+    let mut failed = false;
+    for &(name, counter, target, budget) in arena::MATCHUPS {
+        let rosters = [
+            arena::roster_for_budget(counter, budget),
+            arena::roster_for_budget(target, budget),
+        ];
+        let mut wins = [0u32; 2];
+        for n in 0..trials {
+            let seed = first + u64::from(n);
+            for swapped in [false, true] {
+                let b = arena::finish(arena::setup(&rosters, seed, swapped));
+                let won = b.failure.is_none() && b.winner() == Some(u8::from(swapped));
+                if won {
+                    wins[usize::from(swapped)] += 1;
+                } else {
+                    eprintln!(
+                        "{name}: seed {seed}, swapped {swapped}, survivors {:?}: {}",
+                        b.survivors,
+                        b.failure.as_deref().unwrap_or("counter did not win")
+                    );
+                    if let Some(dir) = &f.dump {
+                        let path = Path::new(dir).join(format!("{name}-{seed}-{swapped}.ron"));
+                        if let Err(e) = std::fs::create_dir_all(dir)
+                            .map_err(|e| e.to_string())
+                            .and_then(|_| write_replay(&path, &b.replay))
+                        {
+                            return fail(&e);
+                        }
+                    }
+                }
+                if b.failure.is_some() {
+                    failed = true;
+                }
+            }
+        }
+        println!("{name}: {} vs {} units, {budget} resources each; wins {}/{} left, {}/{} right (need 90% each)",
+            rosters[0].len(), rosters[1].len(), wins[0], trials, wins[1], trials);
+        if wins.iter().any(|&n| n * 10 < trials * 9) {
+            failed = true;
+        }
+    }
+    if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
 fn usage(err: &str) -> ExitCode {
     eprintln!("error: {err}\n");
     eprintln!("usage:");
@@ -725,6 +805,8 @@ fn usage(err: &str) -> ExitCode {
         "  simrunner bench  [--seed N] [--ticks N] [--size N] [--json] [--repeats N] [--stats]"
     );
     eprintln!("  simrunner matrix [--out FILE]");
+    eprintln!("  simrunner battle [--save FILE]");
+    eprintln!("  simrunner balance [--matches N] [--seed N] [--dump DIR]");
     ExitCode::from(2)
 }
 
@@ -751,6 +833,8 @@ fn main() -> ExitCode {
         "soak" => soak(&flags),
         "bench" => bench(&flags),
         "matrix" => matrix(&flags),
+        "battle" => battle(&flags),
+        "balance" => balance(&flags),
         other => usage(&format!("unknown subcommand {other}")),
     }
 }
