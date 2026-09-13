@@ -75,8 +75,8 @@ pub const SOLIDS: &[u8] = &[
     P_DARK,
 ];
 
-/// Animations a kind may have. Placeholders have only `Idle`; rendered sets
-/// map their named animations onto these.
+/// Animations a kind may have. Military placeholders include a brief strike
+/// and all mobile placeholders have corpses; rendered sets supply their own.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Anim {
     /// Standing.
@@ -355,6 +355,28 @@ impl Atlas {
             if k.mobile {
                 for f in AUTHORED {
                     canvases.push(still(k.id, f, draw_kind(k.id, f)));
+                    if is_military_foot(k.id) {
+                        for index in 0..2 {
+                            canvases.push(Entry {
+                                kind: k.id,
+                                facing: f,
+                                anim: Anim::Work,
+                                index,
+                                scale: 1,
+                                canvas: military_foot(k.id, f, 0, index == 0),
+                            });
+                        }
+                    }
+                }
+                if is_military_foot(k.id) {
+                    anims.insert(
+                        (k.id, Anim::Work),
+                        AnimInfo {
+                            frames: 2,
+                            frame_ms: 150,
+                            loops: false,
+                        },
+                    );
                 }
                 fallen(k.id, k.id, 0, &mut canvases, &mut anims);
             } else {
@@ -389,6 +411,28 @@ impl Atlas {
                 if k.mobile {
                     for f in AUTHORED {
                         canvases.push(still(id, f, draw_kind_aged(k.id, f, age)));
+                        if is_military_foot(k.id) {
+                            for index in 0..2 {
+                                canvases.push(Entry {
+                                    kind: id,
+                                    facing: f,
+                                    anim: Anim::Work,
+                                    index,
+                                    scale: 1,
+                                    canvas: military_foot(k.id, f, age, index == 0),
+                                });
+                            }
+                        }
+                    }
+                    if is_military_foot(k.id) {
+                        anims.insert(
+                            (id, Anim::Work),
+                            AnimInfo {
+                                frames: 2,
+                                frame_ms: 150,
+                                loops: false,
+                            },
+                        );
                     }
                     fallen(id, k.id, age, &mut canvases, &mut anims);
                 } else {
@@ -402,13 +446,14 @@ impl Atlas {
             c.rect(0, 0, 4, 4, idx);
             canvases.push(still(UI_SOLID + idx as KindId, 0, c));
         }
-        {
-            // An arrow: a dark shaft with a light head, drawn level; the
-            // scene lifts it off the ground.
-            let mut c = Canvas::new(10, 4, (5, 2));
-            c.rect(0, 1, 8, 2, BROWN_DARK);
-            c.rect(7, 0, 3, 4, GREY_LIGHT);
-            canvases.push(still(UI_ARROW, 0, c));
+        for facing in AUTHORED {
+            let (dx, dy) = facing_dir(facing);
+            let mut c = Canvas::new(32, 32, (16, 16));
+            let hand = (16.0 - dx * 9.0, 16.0 - dy * 9.0);
+            shaft(&mut c, hand, (dx, dy), weapon(18.0, 4.0, BLACK, BLACK));
+            shaft(&mut c, hand, (dx, dy), weapon(17.0, 2.0, LINEN, WHITE));
+            c.circle(hand.0, hand.1, 3.0, P_BASE);
+            canvases.push(still(UI_ARROW, facing, c));
         }
         for fp in 0..=3u32 {
             canvases.push(still(UI_RING + fp as KindId, 0, ring(fp)));
@@ -441,8 +486,8 @@ impl Atlas {
     }
 
     /// The arrow drawn for a projectile in flight.
-    pub fn arrow(&self) -> Option<&Frame> {
-        self.frame(UI_ARROW, 0).map(|(f, _)| f)
+    pub fn arrow(&self, facing: u8) -> Option<(&Frame, bool)> {
+        self.frame(UI_ARROW, facing)
     }
 
     /// A 4×4 fill of a palette index, for stretching into rectangles.
@@ -730,6 +775,14 @@ impl Canvas {
         }
     }
 
+    fn line(&mut self, a: (f32, f32), b: (f32, f32), width: f32, idx: u8) {
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len > 0.0 {
+            shaft(self, a, (dx / len, dy / len), weapon(len, width, idx, idx));
+        }
+    }
+
     fn diamond(&mut self, cx: f32, cy: f32, hw: f32, hh: f32, idx: u8) {
         self.convex(
             &[(cx, cy - hh), (cx + hw, cy), (cx, cy + hh), (cx - hw, cy)],
@@ -912,6 +965,106 @@ fn draw_fallen(kind: KindId, age: u8) -> Canvas {
     c
 }
 
+/// Keep recognisable weapons outside the body silhouette at normal play zoom.
+fn is_military_foot(kind: KindId) -> bool {
+    matches!(
+        kind,
+        kinds::CLUBMAN | kinds::AXEMAN | kinds::SPEARMAN | kinds::SLINGER | kinds::BOWMAN
+    )
+}
+
+fn military_foot(kind: KindId, facing: u8, age: u8, striking: bool) -> Canvas {
+    let (dx, dy) = facing_dir(facing);
+    let mut c = Canvas::new(64, 64, (32, 56));
+    let mut body = Canvas::new(40, 48, (20, 42));
+    foot_body(&mut body, dx, dy, age);
+    for y in 0..48 {
+        for x in 0..40 {
+            c.set(x + 12, y + 14, body.px[(y * 40 + x) as usize]);
+        }
+    }
+    let side = if dx < -0.1 { -1.0 } else { 1.0 };
+    let (hx, hy) = (32.0 + side * 10.0, 40.0);
+    // Idle weapons are held clear of the head. A strike/release extends toward
+    // the actual facing for 150 ms, then returns, timed by the reload counter.
+    let dir = if striking {
+        (dx, dy)
+    } else {
+        (side * 0.45, -0.89)
+    };
+    match kind {
+        kinds::CLUBMAN | kinds::AXEMAN => {
+            // Broad hide shoulders and a club or unmistakable axe blade.
+            c.ellipse(32.0, 37.0, 10.0, 4.0, BROWN_DARK);
+            c.ellipse(32.0, 37.0, 8.0, 2.0, HIDE);
+            shaft(&mut c, (hx, hy), dir, weapon(16.0, 4.0, BLACK, BLACK));
+            shaft(&mut c, (hx, hy), dir, weapon(15.0, 2.0, BROWN, BROWN));
+            let (ex, ey) = (hx + dir.0 * 15.0, hy + dir.1 * 15.0);
+            if kind == kinds::AXEMAN {
+                c.ellipse(ex, ey, 6.0, 5.0, BLACK);
+                c.ellipse(ex, ey, 5.0, 4.0, GREY_LIGHT);
+                c.rect(ex as i32, ey as i32 - 3, 2, 6, WHITE);
+            } else {
+                c.ellipse(ex, ey, 4.0, 6.0, BLACK);
+                c.ellipse(ex, ey, 3.0, 5.0, BROWN);
+            }
+        }
+        kinds::SPEARMAN => {
+            shaft(
+                &mut c,
+                (if striking { 32.0 } else { hx }, hy + 4.0),
+                dir,
+                weapon(28.0, 4.0, BLACK, BLACK),
+            );
+            shaft(
+                &mut c,
+                (if striking { 32.0 } else { hx }, hy + 4.0),
+                dir,
+                weapon(27.0, 2.0, BROWN, GREY_LIGHT),
+            );
+            // A small shield on the opposite arm, still carrying team colour.
+            c.ellipse(32.0 - side * 9.0, 44.0, 5.0, 8.0, BLACK);
+            c.ellipse(32.0 - side * 9.0, 44.0, 4.0, 7.0, P_DARK);
+            c.circle(32.0 - side * 9.0, 44.0, 2.0, GREY_LIGHT);
+        }
+        kinds::SLINGER => {
+            c.rect(26, 25, 12, 3, P_DARK);
+            c.ellipse(32.0 - side * 8.0, 48.0, 4.0, 5.0, BROWN_DARK);
+            let (ex, ey) = if striking {
+                (hx + dx * 15.0, hy + dy * 15.0)
+            } else {
+                (hx, 18.0)
+            };
+            c.line((hx, hy), (ex, ey), 3.0, BLACK);
+            c.line((hx, hy), (ex, ey), 1.0, LINEN);
+            c.circle(ex, ey, 4.0, BLACK);
+            c.circle(ex, ey, 3.0, GREY_LIGHT);
+        }
+        kinds::BOWMAN => {
+            // A tall curved stave and separate string, plus a quiver.
+            c.line(
+                (32.0 - side * 7.0, 35.0),
+                (32.0 - side * 10.0, 23.0),
+                5.0,
+                BROWN_DARK,
+            );
+            let bx = hx + if striking { side * 5.0 } else { 0.0 };
+            let top = (bx, hy - 16.0);
+            let mid = (bx + side * 7.0, hy);
+            let bottom = (bx, hy + 14.0);
+            c.line(top, mid, 4.0, BLACK);
+            c.line(mid, bottom, 4.0, BLACK);
+            c.line(top, mid, 2.0, BROWN);
+            c.line(mid, bottom, 2.0, BROWN);
+            let string = (bx - if striking { side * 4.0 } else { 0.0 }, hy);
+            c.line(top, string, 1.0, LINEN);
+            c.line(string, bottom, 1.0, LINEN);
+        }
+        _ => unreachable!(),
+    }
+    c
+}
+
 /// A kind's placeholder as its owner's age (0 Stone .. 3 Iron) draws it.
 fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
     let (dx, dy) = facing_dir(facing);
@@ -923,67 +1076,7 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
             foot_body(&mut c, dx, dy, age);
             c
         }
-        kinds::CLUBMAN => {
-            // A short, thick club held low.
-            let mut c = Canvas::new(40, 48, (20, 42));
-            foot_body(&mut c, dx, dy, age);
-            shaft(
-                &mut c,
-                (20.0 + dx * 6.0, 30.0 + dy * 4.0),
-                (dx, dy),
-                weapon(9.0, 3.0, BROWN_DARK, BROWN_DARK),
-            );
-            c
-        }
-        kinds::AXEMAN => {
-            // The club with a bright head: the same silhouette, one step on.
-            let mut c = Canvas::new(40, 48, (20, 42));
-            foot_body(&mut c, dx, dy, age);
-            shaft(
-                &mut c,
-                (20.0 + dx * 6.0, 30.0 + dy * 4.0),
-                (dx, dy),
-                weapon(9.0, 2.0, BROWN_DARK, GREY_LIGHT),
-            );
-            c
-        }
-        kinds::SPEARMAN => {
-            // A long thin spear, held high, tip forward.
-            let mut c = Canvas::new(40, 48, (20, 42));
-            foot_body(&mut c, dx, dy, age);
-            shaft(
-                &mut c,
-                (20.0 + dx * 2.0, 26.0 + dy * 2.0),
-                (dx, dy),
-                weapon(16.0, 1.5, BROWN, GREY_LIGHT),
-            );
-            c
-        }
-        kinds::SLINGER => {
-            // A sling: a cord and a stone, low at the side.
-            let mut c = Canvas::new(40, 48, (20, 42));
-            foot_body(&mut c, dx, dy, age);
-            shaft(
-                &mut c,
-                (20.0 + dx * 5.0, 32.0 + dy * 3.0),
-                (dx, dy),
-                weapon(5.0, 1.0, BROWN_DARK, GREY_DARK),
-            );
-            c
-        }
-        kinds::BOWMAN => {
-            // A bow: a stave across the facing, string side toward the body.
-            let mut c = Canvas::new(40, 48, (20, 42));
-            foot_body(&mut c, dx, dy, age);
-            let (hx, hy) = (20.0 + dx * 7.0, 28.0 + dy * 4.0);
-            shaft(
-                &mut c,
-                (hx - dy * 6.0, hy + dx * 6.0),
-                (dy, -dx),
-                weapon(12.0, 1.5, BROWN, BROWN),
-            );
-            c
-        }
+        k if is_military_foot(k) => military_foot(k, facing, age, false),
         kinds::LIGHT_CAVALRY => {
             // The scout's horse with a rider in the player colour and a
             // lance: the same silhouette as the scout, armed.
@@ -1777,6 +1870,42 @@ mod tests {
         // A kind with only placeholders falls back to its single frame for any anim.
         let (g, _) = a.frame_at(kinds::GAZELLE, 1, Anim::Walk, 500).unwrap();
         assert_eq!((g.anim, g.index), (Anim::Idle, 0));
+    }
+
+    #[test]
+    fn arrow_heads_point_forward_in_all_eight_facings() {
+        let atlas = Atlas::placeholder();
+        for facing in 0..8 {
+            let (frame, flip) = atlas.arrow(facing).unwrap();
+            let (dx, dy) = facing_dir(facing);
+            let mut heads = Vec::new();
+            let mut tails = Vec::new();
+            for y in 0..frame.h as u32 {
+                for x in 0..frame.w as u32 {
+                    let index = atlas.index_at(frame.x as u32 + x, frame.y as u32 + y);
+                    let sx = if flip {
+                        frame.w as f32 - 1.0 - x as f32
+                    } else {
+                        x as f32
+                    };
+                    let along = (sx - 15.5) * dx + (y as f32 - 15.5) * dy;
+                    if index == WHITE {
+                        heads.push(along);
+                    }
+                    if index == P_BASE {
+                        tails.push(along);
+                    }
+                }
+            }
+            assert!(
+                !heads.is_empty() && heads.iter().all(|x| *x > 0.0),
+                "head {facing}"
+            );
+            assert!(
+                !tails.is_empty() && tails.iter().all(|x| *x < 0.0),
+                "tail {facing}"
+            );
+        }
     }
 
     #[test]

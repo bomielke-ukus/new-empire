@@ -325,6 +325,14 @@ unclear: arrows were visible but looked quite random. The readability half of
 presentation improvements, with owner feedback on unit roles and attacks.
 Automated acceptance does not close the milestone by itself.
 
+The readability follow-up adds regression checks for all eight arrowhead
+orientations, owner-colour fletching, impact cue expiry and replay equivalence,
+and the distinction between age-up and attack banner subtitles. Four combat
+reference images are intentionally updated; replay inputs and digests remain
+unchanged. The updated native app built, but its launch/control attempt timed
+out, so the owner readability recheck remains pending (`docs/10`, 2026-09-13).
+
+
 ### The AI — M5
 
 Twenty headless AI-vs-AI matches: no panics, no unit idle over 60 s with work

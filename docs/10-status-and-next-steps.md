@@ -1,6 +1,6 @@
 # 10 — Status and next steps
 
-**As of 2026-09-12.** The living summary of where the project is and what
+**As of 2026-09-13.** The living summary of where the project is and what
 comes next, for anyone joining or checking in. The roadmap (`docs/06`) holds
 the milestone definitions and their acceptance tests; this document says
 which of them are done, what was learned, and what the next steps are. Update
@@ -22,7 +22,7 @@ Four milestones landed; the vertical slice is at its halfway point.
 | M1 — A world you can look at | Landed | A map from a seed, scrolled and zoomed, rendered by the GPU path and the software rasteriser alike |
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
-| M4 — Combat | **In progress** (steps 1–5 landed; step 6 automation added in PR #9; Mac functional smoke passed, readability needs work) | Two forces of 40 fight; counters work; nothing gets stuck |
+| M4 — Combat | **In progress** (steps 1–5 landed; step 6 automation added in PR #9; Mac functional smoke passed; readability changes implemented, native recheck pending) | Two forces of 40 fight; counters work; nothing gets stuck |
 | M5 — An opponent | Not started | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
@@ -521,19 +521,57 @@ what was done:
   Metal rendering and no startup panic was found. This is not recorded as a
   demonstrated game startup defect.
 
+### Work record: combat readability follow-up (2026-09-12–13)
+
+- **Problem:** the owner could see arrows but found the fighting random-looking.
+  Infantry shared nearly identical bodies with tiny weapons; every projectile
+  was a short horizontal mark irrespective of its flight direction.
+- **Presentation changes on `codex/combat-readability`, stacked on PR #9:**
+  procedural infantry now carry larger, outlined clubs, axe heads, long spears
+  with shields, raised slings and curved bows with quivers. A short strike or
+  release pose follows the actual reload counter rather than a free-running
+  animation. Rendered sprite sheets still take precedence over placeholders.
+- Arrows point along their current aim in all eight facings and have team-colour
+  fletching. A 200 ms impact spark marks the position of actual damage events;
+  repeated hits on one target coalesce, and pause/speed controls apply to the
+  effect. Both the native app and replay image renderer collect the same
+  per-tick presentation history. Combat rules, costs, targeting, replay inputs
+  and simulation hashes are unchanged. Projectiles remain the shared arrow
+  placeholder for now; separate sling-stone artwork is not part of this chunk.
+- **Attack warning fixed:** typed age-up and attack notifications replace the
+  shared text-only banner. Only an age-up displays the buildings/technologies
+  subtitle. A HUD regression covers the distinction.
+- **Validated locally:** 357 workspace tests passed, including all replay
+  digests. New checks cover all eight arrowhead directions and team-colour
+  tails, impact expiry/idempotence and replay equivalence. Formatting, Clippy
+  with warnings denied, art conformance, generated files, purity and
+  traceability passed. The normal release app and an isolated native test app
+  built successfully. Four intentionally changed golden images were inspected
+  and updated: `army-hud`, `battle-hud`, `siege-hud`, `battle-40v40`; the other
+  nine are unchanged. CI will run on the review branch.
+- **Native recheck pending:** app control timed out opening the isolated
+  `New Empire Readability.app`; no updated native screenshot or owner verdict
+  was obtained. This is a control timeout, not a demonstrated game defect.
+  The test app loads the same 40-versus-40 replay paused at tick 6 and uses the
+  production gameplay/render/input code with a local-only setup bootstrap.
+  Its files live in the task's `work/mac-readability-app` and `work/mac-playtest`
+  directories; production startup and Cargo manifests were never replaced.
+  Before resuming, inspect whether the app is running. Start/resume at 1x,
+  inspect attack/release/impact cues and the corrected warning, and record the
+  owner's readability verdict. M4 remains open and M5 has not started.
+
 ### Resume here next session
 
 M4 chunks 1 to 4 are landed. PR #9 adds step 6's acceptance automation and
-balance harness; its native functional smoke checks are now recorded above.
-The next small chunk is **combat readability**: distinguish infantry roles
-with clearer silhouettes/weapons, make firing and hit feedback easier to
-follow, and remove the age-up subtitle from the attack warning. Preserve the
-existing palette/art direction and combat rules. Re-run the same 40-versus-40
-native battle at 1x and ask the owner whether the two sides, unit roles and
-attacks are now understandable; follow `docs/09` for regression checks.
-Automatic wall-breach coverage remains automated rather than a claimed native
-pass. Review/merge PR #9 and pass the readability recheck before closing M4
-or beginning M5. Art stays on the `docs/08` schedule.
+balance harness; its native functional smoke checks are recorded above.
+The combat-readability follow-up is implemented on `codex/combat-readability`
+and ready for native review after the app-control timeout. Resume the same
+40-versus-40 battle at 1x, verify the attack warning and ask the owner whether
+unit roles and attacks are now easier to follow. Record the result here before
+closing the readability check. Review/merge PR #9 and the separate readability
+chunk before closing M4 or beginning M5. Automatic breach selection against a
+fully closed wall retains automated coverage rather than a claimed native pass.
+Art stays on the `docs/08` schedule.
 
 ## 4. What comes next: M4 — Combat
 

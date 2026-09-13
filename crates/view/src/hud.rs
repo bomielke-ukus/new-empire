@@ -97,6 +97,31 @@ impl Button {
     }
 }
 
+/// A notification with its own meaning and optional supporting text.
+#[derive(Clone, Copy, Debug)]
+pub enum Banner {
+    /// An age advance unlocks buildings and technologies.
+    AgeUp(sim::Age),
+    /// Combat needs attention; it does not unlock anything.
+    UnderAttack,
+}
+
+impl Banner {
+    fn title(self) -> String {
+        match self {
+            Self::AgeUp(age) => age.name().to_uppercase(),
+            Self::UnderAttack => "UNDER ATTACK".into(),
+        }
+    }
+
+    fn subtitle(self) -> Option<&'static str> {
+        match self {
+            Self::AgeUp(_) => Some("NEW BUILDINGS AND TECHNOLOGIES AVAILABLE"),
+            Self::UnderAttack => None,
+        }
+    }
+}
+
 /// Everything the HUD needs to draw a frame.
 pub struct HudInput<'a> {
     /// The match.
@@ -120,8 +145,8 @@ pub struct HudInput<'a> {
     /// Cursor position in window (device) pixels, for button hover and the
     /// tooltip line.
     pub hover: Option<(f32, f32)>,
-    /// A line to celebrate across the top of the world, if any.
-    pub banner: Option<&'a str>,
+    /// An age celebration or combat warning across the top of the world.
+    pub banner: Option<Banner>,
     /// Device pixels per HUD pixel: the display scale times the player's
     /// UI scale. The HUD is laid out in its own pixels and scaled up on
     /// the way out, so text is the same size on any display.
@@ -1399,20 +1424,22 @@ impl Hud {
             p.rect(sx - w / 2.0, sy - lift, w * frac, 4.0, colour, 0);
         }
 
-        // The age banner ([GD-AGE-02]): the moment gets the middle of the screen.
-        if let Some(text) = input.banner {
+        // Notifications share a frame; only an age-up announces unlocks ([GD-AGE-02]).
+        if let Some(banner) = input.banner {
+            let text = banner.title();
             let scale = 3.0;
-            let w = font::width(text) as f32 * scale + 32.0;
+            let w = font::width(&text) as f32 * scale + 32.0;
             let x = ((vw - w) / 2.0).round();
             let y = TOP_BAR + 28.0;
             p.rect(x, y, w, 40.0, BLACK, 0);
             p.rect(x + 2.0, y + 2.0, w - 4.0, 36.0, BROWN_DARK, 0);
             p.rect(x + 2.0, y + 2.0, w - 4.0, 2.0, GOLD, 0);
             p.rect(x + 2.0, y + 36.0, w - 4.0, 2.0, GOLD, 0);
-            p.text_in(x + 16.0, y + 10.0, text, Ink::Gold, scale);
-            let sub = "NEW BUILDINGS AND TECHNOLOGIES AVAILABLE";
-            let sw = font::width(sub) as f32;
-            p.text(((vw - sw) / 2.0).round(), y + 46.0, sub, false, 1.0);
+            p.text_in(x + 16.0, y + 10.0, &text, Ink::Gold, scale);
+            if let Some(sub) = banner.subtitle() {
+                let sw = font::width(sub) as f32;
+                p.text(((vw - sw) / 2.0).round(), y + 46.0, sub, false, 1.0);
+            }
         }
 
         // The controls overlay, over everything but the panels.
@@ -1691,11 +1718,28 @@ mod tests {
         let banner = Hud::build(
             &atlas,
             &HudInput {
-                banner: Some("TOOL AGE"),
+                banner: Some(Banner::AgeUp(sim::Age::Tool)),
                 ..base
             },
         );
         assert!(banner.sprites.len() > none.sprites.len() + 8);
+        let alarm = Hud::build(
+            &atlas,
+            &HudInput {
+                banner: Some(Banner::UnderAttack),
+                ..base
+            },
+        );
+        let subtitle_y = TOP_BAR + 28.0 + 46.0;
+        assert!(banner.sprites[none.sprites.len()..]
+            .iter()
+            .any(|s| s.y >= subtitle_y));
+        assert!(
+            alarm.sprites[none.sprites.len()..]
+                .iter()
+                .all(|s| s.y < subtitle_y),
+            "an attack warning must not announce age-up unlocks"
+        );
     }
 
     /// On a 2× display the same window is twice the device pixels; the HUD
