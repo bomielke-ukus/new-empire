@@ -233,6 +233,16 @@ come out when told to or when the building falls, unhurt. Capacities: Town
 Center fifteen, Watch Tower five. Rubble lies for sixty seconds with the
 footprint open from the first tick, so a breach is a breach.
 
+### D22 — The Government Centre stays; a second Town Center needs one
+**Date:** 2026-09-18
+
+Q3 is answered: the Government Centre keeps its own building, placeholder and
+Bronze Age price. It is a real investment and a real target, and folding its
+upgrades into the Town Center would save less than it costs in legibility.
+With that settled the Town Center goes onto the villager's build panel, and
+as in the original a second one needs a finished Government Centre standing,
+which gives that building a purpose before its civic technologies arrive.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?
@@ -244,13 +254,10 @@ Carryable relics create better fights over specific objects; static ruins are
 simpler and match the original. **Recommendation:** carryable, held in the
 Temple, generating gold — it gives priests a second job and creates map tension.
 
-### Q3 — Does the Government Centre earn its own building?
+### Q3 — Does the Government Centre earn its own building? — **answered, see D22**
 Its upgrades could fold into the Town Center, saving a building and a data
 table. Counter-argument: a separate building is a real strategic investment and
-a target. **Undecided.** M3 gives it a placeholder and a Bronze Age price so
-the roster is complete, and hides the Town Center from the villager's build
-panel until this is settled — in the original a second Town Center needed
-the Government Centre.
+a target. **Decided 2026-09-18: it stays its own building.**
 
 ### Q4 — Campaign fiction: written by us, or straight history?
 Straight history is free, accurate and evocative. Original fiction gives us

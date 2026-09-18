@@ -598,15 +598,23 @@ what was done:
   This closure commit changes documentation and traceability enforcement only;
   normal post-merge/closure CI runs remain separate from those completed checks.
 
+### Work record: the Town Center on the build panel (2026-09-18)
+
+- Q3 answered (`docs/07` D22): the Government Centre stays its own
+  building. The Town Center is on the villager's build panel, and a second
+  one needs a finished Government Centre standing, as in the original;
+  `Simulation::can_build` is the non-positional half of `can_place` and
+  the panel greys the button with its words ("NEEDS A GOVERNMENT CENTRE").
+  The Town Center's button has no key: every letter is taken (`docs/04`
+  §23), so it is placed by clicking, and the controls overlay says so.
+- The plan below is rewritten for M5, and the three `docs/09` §11 items
+  are a parallel track for a second agent.
+
 ### Resume here next session
 
-**M4 is landed.** Both PRs are merged and the native readability check is
-approved. The next manageable chunk is M5's AI boundary: introduce an enforced
-`FoggedView` interface and a minimal deterministic AI entry point, with tests
-proving the AI cannot read hidden world state. Follow with economy/build orders,
-then military behaviour and difficulty acceptance in separate chunks. M5 has
-not started in this merge session. Check the closure CI before beginning work;
-keep the art pipeline on the `docs/08` schedule.
+**M4 is landed; M5 begins.** The next chunk is M5 step 1 below: fog of war
+in the simulation and the AI boundary. The parallel track (§4) runs on its
+own branch. Keep the art pipeline on the `docs/08` schedule.
 
 ## 4. What M4 completed — Combat
 
@@ -634,16 +642,62 @@ shippable on its own and has a headless test before it has a sprite.
 5. **Buildings in combat.** **Done 2026-09-12**, record above: rubble,
    building armour, towers and the Town Center shooting, walls in runs,
    gates that shut on an enemy, garrison (`UX-CMD-09`). The Town Center as
-   a buildable still waits on Q3.
+   a buildable followed on 2026-09-18 once Q3 was answered.
 6. **The 40-versus-40 acceptance match** (`RM-M4-01`). Automated coverage
    added in the current review chunk: bounded fight, replay corpus, golden
    image and equal-budget counter trials. See the record below and
    `docs/09`. The native functional smoke pass and owner readability approval
    are recorded above; the acceptance and readability PRs are now merged.
 
-Alongside, not blocking: the resource-conservation invariant (`docs/09`
-§11), rebuilding the fuzz targets for the current command set, and the
-nightly job.
+## 4b. What comes next: M5 — An opponent
+
+`docs/06` M5: an AI that plays through the same command interface a human
+uses and sees only what a human sees (`GD-AI-01`, `TA-AI-01`, `docs/07`
+D7), four difficulties, and victory and defeat. Done when `RM-M5-01` holds:
+twenty headless AI-versus-AI matches, no crashes, no stuck units, Hard
+beats Easy at least eighteen times. In the order we intend to build it,
+each step shippable and tested headless before it has a sprite:
+
+1. **Fog of war in the simulation and the AI boundary.** Per-player
+   visibility grids (`docs/04` §6: visibility count and explored, one byte
+   per tile) kept by a `fog_of_war_update` pass from every unit's and
+   building's line of sight; `FoggedView`, the only view of the match the
+   `ai` crate receives, with the `trybuild` compile-fail test that proves
+   the crate cannot name `World` (`TA-AI-01`); a null AI that issues
+   nothing, driven by a `simrunner ai` subcommand that runs N matches
+   headless with invariants on; and the priority half of `TA-PATH-06`,
+   player-issued orders served before AI-issued ones in a tick.
+2. **Fog in the presentation** (`GD-FOG-01`). The rasteriser and the GPU
+   fog pass over the smoothed visibility texture, buildings drawn from
+   last-known state where explored but not visible, the minimap fogged,
+   with golden images for the three states.
+3. **The economy manager and build orders.** Villagers to resources by a
+   target ratio, houses ahead of the cap, farms when the bushes are gone,
+   the age gate met and taken, a scripted opening per difficulty.
+4. **The military manager and scouting.** The scout explores; the
+   Barracks, Range and Stable train to a composition; defence answers
+   the alarm; raids and attacks go out as attack-moves in formation;
+   walls and towers by difficulty.
+5. **Difficulty, victory and defeat.** Four levels, elimination and
+   resign, and the acceptance run: `RM-M5-01` as a CI job, the twenty
+   matches recorded so a regression is a diff.
+
+### The parallel track
+
+Three items from `docs/09` §11 are independent of M5 and are being done
+alongside it by a second agent (Codex), on its own branch, merged by pull
+request. The fence that keeps the two from colliding:
+
+| Item | Touches | Order and rule |
+|---|---|---|
+| **The nightly job.** A workflow on a schedule: the soak runner at depth, the property tests with a case count in the thousands, a mapgen sweep over 1,000 seeds (`docs/09` §5), the fuzz targets for a bounded time. | `.github/workflows/nightly.yml`, `scripts/check-workflows.sh` | First: nothing in M5 touches these files. |
+| **The fuzz targets.** `cargo-fuzz` targets for the replay reader and the command interface, rebuilt for the nineteen command variants of today (`Command::validate` and `Simulation::issue` must survive any bytes). | A `fuzz/` crate, `Cargo.toml` workspace excludes, the README | Second: also disjoint from M5. |
+| **The resource-conservation invariant** (`docs/09` §5): map remaining + carried + stockpiled + spent is constant per tick, with a reseed converting 60 wood into a farm's food at seeding and a destroyed site's unbuilt cost gone for good. | `Simulation::check` and its `Violation`, the corpus and soak runners that call it, a behaviour test | Last, and as a check and a test only. If it fails on an existing corpus match, the pull request reports the failure; it does not change simulation behaviour or re-record digests, since M5's fog pass will be re-recording the corpus and two sets of digest edits do not merge. |
+
+Neither track edits the other's files. The parallel track does not edit
+the status rows in §1, the plans in §4 and §4b or the landed list in
+`scripts/check-traceability.sh`; it appends its own work record to §3 and
+the merge reconciles. M5 stays out of the three files above.
 
 ---
 
@@ -667,10 +721,8 @@ Stated so they are not rediscovered.
   variants yet; `Atlas::variant` answers with the base kind for them. The
   sprite manifest needs a per-age entry when the art stream models the
   slice (`docs/08` §9 step 3).
-- **The Town Center is hidden from the build panel** until Q3 (Government
-  Centre) is decided; the simulation still accepts placing one.
 - **No resource-conservation invariant, no fuzzing, no nightly job**
-  (`docs/09` §11).
+  (`docs/09` §11): the parallel track in §4b.
 
 ---
 
@@ -681,7 +733,6 @@ in the order they bite:
 
 | Question | Blocks | Recommendation |
 |---|---|---|
-| Q3 — Does the Government Centre earn its own building? | The buildable Town Center (M4 step 5 landed without it), the Bronze roster | Keep it as its own building; it is already placed and priced, and folding its upgrades into the Town Center saves less than it costs in legibility |
 | Q9 — A second ownership cue besides colour | M4 (readability of a fight), M7 | Decide before combat art is commissioned; a banner glyph per player is the cheapest candidate |
 | Q1 — Naval in the vertical slice? | M4 scope | Leave it out of the slice; the map generator has water but nothing sails |
 | Q8 — Four ages or five? | Content tables | Four, as `docs/02` stands; M3 shipped the four-age structure |

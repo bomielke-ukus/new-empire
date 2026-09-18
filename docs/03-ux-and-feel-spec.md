@@ -85,7 +85,9 @@ M (Market), N (Archery Range), L (Stable), P (Temple), Y (Academy),
 G (Siege Workshop), and C (Government Centre), subject to age and resource
 gates. J opens the defences page, which stands in for the grid: J (Watch
 Tower), P (Palisade Wall), N (Stone Wall), G (Gate), X back. A wall is
-dragged as a run; a gate goes onto a wall of yours. Right-click a Town
+dragged as a run; a gate goes onto a wall of yours. The Town Center has no
+key, every letter being taken: click its button; a second one needs a
+finished Government Centre. Right-click a Town
 Center or tower of yours with units selected to garrison them; T on the
 building alone lets them all out. Technologies use Q, E, I, K, Z in displayed order;
 the HUD is authoritative as researched technologies leave the list.

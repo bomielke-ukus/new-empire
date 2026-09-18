@@ -253,6 +253,9 @@ pub enum PlaceError {
     Unaffordable,
     /// A gate goes onto one of the player's own finished wall segments.
     NeedsWall,
+    /// A second Town Center needs a finished Government Centre standing
+    /// (`docs/07` D22).
+    NeedsGovernmentCentre,
 }
 
 impl core::fmt::Display for PlaceError {
@@ -263,6 +266,7 @@ impl core::fmt::Display for PlaceError {
             PlaceError::Blocked => write!(f, "cannot build there"),
             PlaceError::Unaffordable => write!(f, "not enough resources"),
             PlaceError::NeedsWall => write!(f, "goes onto a wall of yours"),
+            PlaceError::NeedsGovernmentCentre => write!(f, "needs a Government Centre"),
         }
     }
 }
@@ -537,8 +541,10 @@ impl Simulation {
             .collect()
     }
 
-    /// Whether `p` could place `kind` anchored at `(x, y)` right now.
-    pub fn can_place(&self, p: PlayerId, kind: KindId, x: i32, y: i32) -> Result<(), PlaceError> {
+    /// Whether `p` could build a `kind` at all right now, wherever it went:
+    /// the age, what it needs standing, and the cost. The panel greys a
+    /// button with these words; [`Simulation::can_place`] adds the ground.
+    pub fn can_build(&self, p: PlayerId, kind: KindId) -> Result<(), PlaceError> {
         let info = kinds::info(kind);
         if !info.buildable {
             return Err(PlaceError::NotBuildable);
@@ -549,6 +555,32 @@ impl Simulation {
         if pl.age < info.age {
             return Err(PlaceError::AgeLocked { needs: info.age });
         }
+        // As in the original, a second Town Center needs the Government
+        // Centre (`docs/07` D22).
+        if kind == kinds::TOWN_CENTER && !self.has_standing(p, kinds::GOVERNMENT_CENTRE) {
+            return Err(PlaceError::NeedsGovernmentCentre);
+        }
+        if !pl.can_afford(&info.cost) {
+            return Err(PlaceError::Unaffordable);
+        }
+        Ok(())
+    }
+
+    /// True if `p` has a finished, standing building of `kind`.
+    fn has_standing(&self, p: PlayerId, kind: KindId) -> bool {
+        self.world.slots().any(|s| {
+            let i = s.index();
+            self.world.owner[i] == p
+                && self.world.kind[i] == kind
+                && self.world.construction[i].is_none()
+                && self.world.dying[i] == 0
+        })
+    }
+
+    /// Whether `p` could place `kind` anchored at `(x, y)` right now.
+    pub fn can_place(&self, p: PlayerId, kind: KindId, x: i32, y: i32) -> Result<(), PlaceError> {
+        self.can_build(p, kind)?;
+        let info = kinds::info(kind);
         if kind == kinds::GATE {
             // A gate is set into a wall: onto one of the player's finished
             // segments, which it replaces, or onto clear ground.
@@ -563,9 +595,6 @@ impl Simulation {
             }
         } else if !self.nav.footprint_clear(x, y, info.footprint as i32) {
             return Err(PlaceError::Blocked);
-        }
-        if !pl.can_afford(&info.cost) {
-            return Err(PlaceError::Unaffordable);
         }
         Ok(())
     }
@@ -3307,6 +3336,36 @@ mod tests {
         assert!(
             sim.nav().passable(t.0, t.1),
             "the goal was moved off the new footprint: {t:?}"
+        );
+    }
+
+    /// A second Town Center needs a finished Government Centre standing
+    /// (`docs/07` D22); rubble does not count.
+    #[test]
+    fn a_town_center_needs_a_government_centre() {
+        let mut sim = Simulation::new(4, flat(48, 2));
+        sim.issue(spawn_cmd(0, kinds::VILLAGER, 10, 10));
+        run(&mut sim, 3);
+        assert_eq!(
+            sim.can_build(0, kinds::TOWN_CENTER),
+            Err(PlaceError::NeedsGovernmentCentre)
+        );
+        assert_eq!(
+            sim.can_place(0, kinds::TOWN_CENTER, 30, 30),
+            Err(PlaceError::NeedsGovernmentCentre)
+        );
+        sim.issue(spawn_cmd(0, kinds::GOVERNMENT_CENTRE, 20, 20));
+        run(&mut sim, 3);
+        assert_eq!(sim.can_place(0, kinds::TOWN_CENTER, 30, 30), Ok(()));
+        assert_eq!(
+            sim.can_place(0, kinds::TOWN_CENTER, 20, 20),
+            Err(PlaceError::Blocked),
+            "the ground is still checked"
+        );
+        // Another player's Government Centre is no help.
+        assert_eq!(
+            sim.can_build(1, kinds::TOWN_CENTER),
+            Err(PlaceError::NeedsGovernmentCentre)
         );
     }
 

@@ -225,6 +225,7 @@ pub fn controls() -> [Vec<(String, String)>; 2] {
             )
         })
         .collect();
+    orders.push(s("CLICK", "TOWN CENTER 200W, NEEDS A GOVERNMENT CENTRE"));
     orders.push(s(&DEFENCES_KEY.to_string(), "DEFENCES PAGE, THEN ONE OF:"));
     for k in build.iter().filter(|k| in_defences(k.id)) {
         orders.push((
@@ -345,11 +346,18 @@ impl<'a> Painter<'a> {
         self.outline(b.x, b.y, b.w, b.h, BLACK);
         let label = fit(&b.label, b.w - 8.0);
         self.text_in(b.x + 4.0, b.y + 5.0, &label, ink, 1.0);
-        let key = format!("({})", b.hotkey);
+        // A button without a key (the Town Center) shows none.
+        let key = if b.hotkey == ' ' {
+            String::new()
+        } else {
+            format!("({})", b.hotkey)
+        };
         let kw = font::width(&key) as f32;
         let cost = fit(&b.cost, b.w - kw - 10.0);
         self.text_in(b.x + 4.0, b.y + b.h - 11.0, &cost, ink, 1.0);
-        self.text_in(b.x + b.w - kw - 4.0, b.y + b.h - 11.0, &key, ink, 1.0);
+        if !key.is_empty() {
+            self.text_in(b.x + b.w - kw - 4.0, b.y + b.h - 11.0, &key, ink, 1.0);
+        }
     }
 }
 
@@ -424,6 +432,7 @@ fn short_name(kind: KindId) -> &'static str {
         kinds::ACADEMY => "ACADEMY",
         kinds::SIEGE_WORKSHOP => "SIEGE",
         kinds::GOVERNMENT_CENTRE => "GOVT",
+        kinds::TOWN_CENTER => "TOWN CTR",
         other => kinds::info(other).name,
     }
 }
@@ -432,6 +441,9 @@ fn short_name(kind: KindId) -> &'static str {
 /// so its keys need only be distinct from each other and the general keys.
 fn build_hotkey(kind: KindId) -> char {
     match kind {
+        // Every letter is spoken for (`docs/04` §23): the Town Center is
+        // placed by clicking its button.
+        kinds::TOWN_CENTER => ' ',
         kinds::PALISADE_WALL => 'P',
         kinds::STONE_WALL => 'N',
         kinds::GATE => 'G',
@@ -722,13 +734,9 @@ fn commands(
             if k.age > next {
                 continue;
             }
-            let check = if k.age > pl.age {
-                Err(format!("NEEDS THE {}", k.age.name().to_uppercase()))
-            } else if !pl.can_afford(&k.cost) {
-                Err("NOT ENOUGH RESOURCES".to_string())
-            } else {
-                Ok(())
-            };
+            let check = sim
+                .can_build(me, k.id)
+                .map_err(|e| e.to_string().to_uppercase());
             let how = if kinds::is_wall(k.id) {
                 ". DRAG A RUN"
             } else if k.id == kinds::GATE {
@@ -751,28 +759,19 @@ fn commands(
     }
     if any_villager {
         let next = pl.age.next().unwrap_or(pl.age);
-        // The Town Center is buildable in the table but not from a villager's
-        // panel: in the design it comes with the Government Centre (M4+).
-        // The defences share one button: the grid has no room for four more.
+        // Every building the age offers or the next one will, the Town
+        // Center among them (a second needs a Government Centre, `docs/07`
+        // D22). The defences share one button: the grid has no room for
+        // four more.
         let mut kinds_: Vec<&KindInfo> = kinds::all()
             .iter()
-            .filter(|k| {
-                k.buildable
-                    && !k.mobile
-                    && k.id != kinds::TOWN_CENTER
-                    && !in_defences(k.id)
-                    && k.age <= next
-            })
+            .filter(|k| k.buildable && !k.mobile && !in_defences(k.id) && k.age <= next)
             .collect();
         kinds_.sort_by_key(|k| (k.age, k.id));
         for k in kinds_ {
-            let check = if k.age > pl.age {
-                Err(format!("NEEDS THE {}", k.age.name().to_uppercase()))
-            } else if !pl.can_afford(&k.cost) {
-                Err("NOT ENOUGH RESOURCES".to_string())
-            } else {
-                Ok(())
-            };
+            let check = sim
+                .can_build(me, k.id)
+                .map_err(|e| e.to_string().to_uppercase());
             defs.push(
                 Def::on(
                     Action::Build(k.id),
@@ -1656,10 +1655,10 @@ mod tests {
             (house.label.as_str(), house.cost.as_str()),
             ("HOUSE", "30W")
         );
-        assert!(
-            find(&v, Action::Build(kinds::TOWN_CENTER)).is_none(),
-            "a villager's panel does not offer a Town Center"
-        );
+        let tc_button = find(&v, Action::Build(kinds::TOWN_CENTER)).expect("offered");
+        assert!(!tc_button.enabled, "a second one needs a Government Centre");
+        assert_eq!(tc_button.reason, "NEEDS A GOVERNMENT CENTRE");
+        assert_eq!(tc_button.hotkey, ' ', "no letter is left for it");
         assert!(house.contains(house.x + 1.0, house.y + 1.0));
         assert!(find(&v, Action::Build(kinds::STOREHOUSE)).unwrap().enabled);
         let market = find(&v, Action::Build(kinds::MARKET)).expect("market is listed");
@@ -1838,6 +1837,12 @@ mod tests {
             );
         }
         assert!(keys.contains(&DEFENCES_KEY.to_string()));
+        assert!(
+            orders
+                .iter()
+                .any(|(k, what)| k == "CLICK" && what.contains("TOWN CENTER")),
+            "the Town Center, which has no key, is placed by clicking"
+        );
         for key in ["V", "U", "R", "X"] {
             assert!(keys.iter().any(|k| k == key), "{key} missing");
         }
