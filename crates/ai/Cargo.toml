@@ -10,6 +10,3 @@ rust-version.workspace = true
 # exist to refuse (TA-AI-01).
 [dependencies]
 fogged = { path = "../fogged" }
-
-[dev-dependencies]
-trybuild = "1"
