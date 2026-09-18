@@ -66,10 +66,16 @@ impl CombatFeedback {
     }
 
     /// Add a small expanding spark, outlined for contrast against any terrain.
-    pub fn decorate(&self, scene: &mut Scene, sim: &Simulation, atlas: &Atlas) {
+    /// With a `viewer`, only where that player can see: a hit in the fog
+    /// is not shown (`GD-FOG-01`).
+    pub fn decorate(&self, scene: &mut Scene, sim: &Simulation, atlas: &Atlas, viewer: Option<u8>) {
+        let fog = viewer.and_then(|p| sim.fog(p));
         for hit in &self.impacts {
             let age = sim.tick().saturating_sub(hit.tick);
             if age >= HIT_TICKS {
+                continue;
+            }
+            if fog.is_some_and(|f| !f.visible(hit.pos.x.floor(), hit.pos.y.floor())) {
                 continue;
             }
             let (x, y) = (fx_to_f32(hit.pos.x), fx_to_f32(hit.pos.y));

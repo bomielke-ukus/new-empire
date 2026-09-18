@@ -10,7 +10,7 @@
 use render::Renderer;
 use sim::{SimConfig, Simulation};
 use view::minimap::{Minimap, MinimapRect};
-use view::{Atlas, Camera, Scene};
+use view::{Atlas, Camera, FogLights, Scene, SceneOptions};
 
 const W: u32 = 640;
 const H: u32 = 360;
@@ -52,7 +52,8 @@ fn a_frame_renders_on_a_real_device() {
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let mut renderer = Renderer::new(&device, &queue, format, &atlas);
     renderer.upload_terrain(&device, &view::terrain::build_all(sim.map()));
-    renderer.upload_minimap(&device, &queue, &Minimap::render(&sim));
+    renderer.upload_minimap(&device, &queue, &Minimap::render_for(&sim, Some(0)));
+    renderer.upload_fog(&device, &queue, &FogLights::from_fog(sim.fog(0).unwrap()));
 
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("frame"),
@@ -72,7 +73,16 @@ fn a_frame_renders_on_a_real_device() {
     let mut camera = Camera::new(sim.map().width(), sim.map().height(), (W as f32, H as f32));
     let (sx, sy) = sim.starts()[0];
     camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
-    let scene = Scene::build(&sim, &atlas, None, 0.0);
+    let scene = Scene::build_full(
+        &sim,
+        &atlas,
+        None,
+        0.0,
+        &SceneOptions {
+            viewer: Some(0),
+            ..SceneOptions::default()
+        },
+    );
     let rect = MinimapRect::bottom_right((W as f32, H as f32), 128.0, 8.0);
     renderer.render(&device, &queue, &view, &camera, &scene, Some(rect));
 

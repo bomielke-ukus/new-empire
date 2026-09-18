@@ -4,6 +4,8 @@
 //! renderer has a reference to match.
 
 use crate::camera::Camera;
+use crate::fog::FogLights;
+use crate::minimap::{Minimap, MinimapRect};
 use crate::palette::{self, SHADOW};
 use crate::scene::SpriteInstance;
 use crate::sprites::Atlas;
@@ -70,8 +72,10 @@ impl Image {
     }
 }
 
-/// Draws terrain chunks through the camera.
-pub fn draw_terrain(img: &mut Image, cam: &Camera, chunks: &[ChunkMesh]) {
+/// Draws terrain chunks through the camera, each vertex in the fog light
+/// of its corner (`None` draws everything lit), exactly as the terrain
+/// shader does.
+pub fn draw_terrain(img: &mut Image, cam: &Camera, chunks: &[ChunkMesh], fog: Option<&FogLights>) {
     let visible = cam.visible_rect();
     for chunk in chunks.iter().filter(|c| c.overlaps(visible)) {
         // `as_chunks::<3>().0` rather than `chunks_exact(3)`: same triangles,
@@ -85,9 +89,23 @@ pub fn draw_terrain(img: &mut Image, cam: &Camera, chunks: &[ChunkMesh]) {
                 chunk.vertices[tri[2] as usize],
             ];
             let p = v.map(|v| cam.to_window(v.pos[0], v.pos[1]));
-            triangle(img, p, v.map(|v| v.colour));
+            let c = v.map(|v| match fog {
+                Some(f) => lit(v.colour, f.at(v.corner[0] as i32, v.corner[1] as i32)),
+                None => v.colour,
+            });
+            triangle(img, p, c);
         }
     }
+}
+
+/// `c` scaled by `light / 255`, the alpha untouched.
+fn lit(c: [u8; 4], light: u8) -> [u8; 4] {
+    if light == 255 {
+        return c;
+    }
+    let l = u32::from(light);
+    let scale = |v: u8| ((u32::from(v) * l + 127) / 255) as u8;
+    [scale(c[0]), scale(c[1]), scale(c[2]), c[3]]
 }
 
 /// Gouraud-shaded triangle with a top-left fill rule.
@@ -191,8 +209,31 @@ pub fn draw_sprites(
                 } else {
                     palette_tex[row + idx as usize]
                 };
-                img.blend(x0 + dx, y0 + dy, c);
+                img.blend(x0 + dx, y0 + dy, lit(c, s.light));
             }
+        }
+    }
+}
+
+/// Draws the minimap in its diamond, nearest-neighbour, as the UI pass
+/// does: the map's `(0, 0)` corner at the top point.
+pub fn draw_minimap(img: &mut Image, m: &Minimap, rect: MinimapRect) {
+    if m.width == 0 || m.height == 0 {
+        return;
+    }
+    let (hw, hh) = (rect.w * 0.5, rect.h * 0.5);
+    let x0 = (rect.cx - hw).floor().max(0.0) as i32;
+    let x1 = (rect.cx + hw).ceil().min(img.width as f32) as i32;
+    let y0 = (rect.cy - hh).floor().max(0.0) as i32;
+    let y1 = (rect.cy + hh).ceil().min(img.height as f32) as i32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let Some((u, v)) = rect.to_uv(x as f32 + 0.5, y as f32 + 0.5) else {
+                continue;
+            };
+            let tx = ((u * m.width as f32) as u32).min(m.width - 1);
+            let ty = ((v * m.height as f32) as u32).min(m.height - 1);
+            img.put(x, y, m.pixels[(ty * m.width + tx) as usize]);
         }
     }
 }
@@ -227,7 +268,7 @@ mod tests {
         let (sx, sy) = sim.starts()[0];
         cam.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
         let mut img = Image::new(640, 480, [0, 0, 0, 255]);
-        draw_terrain(&mut img, &cam, &chunks);
+        draw_terrain(&mut img, &cam, &chunks, None);
         let black = img.pixels.iter().filter(|p| **p == [0, 0, 0, 255]).count();
         assert!(
             black < 640 * 480 / 20,
@@ -245,6 +286,78 @@ mod tests {
         assert!(
             near_centre > 100,
             "expected the TC roof near the centre, found {near_centre} blue px"
+        );
+    }
+
+    /// The three states on the ground: black where never seen, dimmed
+    /// where seen once, live in sight; and a sprite's light scales it.
+    ///
+    /// REQ: GD-FOG-01
+    #[test]
+    fn fog_darkens_the_ground_and_the_minimap_draws_in_its_diamond() {
+        let sim = Simulation::new(3, SimConfig::default());
+        let chunks = terrain::build_all(sim.map());
+        let mut cam = Camera::new(sim.map().width(), sim.map().height(), (640.0, 480.0));
+        let (sx, sy) = sim.starts()[0];
+        cam.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
+        let mut lit_img = Image::new(640, 480, [0, 0, 0, 255]);
+        draw_terrain(&mut lit_img, &cam, &chunks, None);
+        let mut fogged = Image::new(640, 480, [0, 0, 0, 255]);
+        let lights = FogLights::from_fog(sim.fog(0).unwrap());
+        draw_terrain(&mut fogged, &cam, &chunks, Some(&lights));
+        // At the start the Town Center sees its surroundings: the centre
+        // pixel is drawn as it would be with no fog.
+        assert_eq!(fogged.get(320, 240), lit_img.get(320, 240));
+        // Nothing has seen the far corner of the window: black.
+        let corner = fogged.get(2, 2);
+        assert_eq!(corner, [0, 0, 0, 255], "{corner:?}");
+        assert_ne!(lit_img.get(2, 2), [0, 0, 0, 255]);
+        // Seen once: a corner far from any unit but inside the map.
+        let mut fog = sim.fog(0).unwrap().clone();
+        for y in 0..sim.map().height() {
+            for x in 0..sim.map().width() {
+                fog.see(x, y);
+            }
+        }
+        fog.clear_visible();
+        let mut explored = Image::new(640, 480, [0, 0, 0, 255]);
+        draw_terrain(
+            &mut explored,
+            &cam,
+            &chunks,
+            Some(&FogLights::from_fog(&fog)),
+        );
+        let (a, b) = (explored.get(320, 240), lit_img.get(320, 240));
+        assert!(
+            a[0] < b[0] && a[1] < b[1] && a[0] > 0,
+            "seen once is dimmed, not black: {a:?} vs {b:?}"
+        );
+        assert_eq!(lit([200, 100, 50, 255], 128), [100, 50, 25, 255]);
+        assert_eq!(lit([200, 100, 50, 7], 255), [200, 100, 50, 7]);
+
+        let m = Minimap::render(&sim);
+        let rect = MinimapRect::bottom_right((640.0, 480.0), 128.0, 8.0);
+        let before = fogged.clone();
+        draw_minimap(&mut fogged, &m, rect);
+        assert_ne!(fogged, before);
+        let centre = fogged.get(rect.cx as i32, rect.cy as i32);
+        let (mx, my) = (m.width / 2, m.height / 2);
+        assert!(
+            [(mx - 1, my - 1), (mx, my - 1), (mx - 1, my), (mx, my)]
+                .iter()
+                .any(|&(x, y)| m.pixels[(y * m.width + x) as usize] == centre),
+            "the diamond's centre is the map's centre: {centre:?}"
+        );
+        assert_eq!(
+            fogged.get(
+                (rect.cx - rect.w * 0.5) as i32 + 1,
+                (rect.cy - rect.h * 0.5) as i32 + 1
+            ),
+            before.get(
+                (rect.cx - rect.w * 0.5) as i32 + 1,
+                (rect.cy - rect.h * 0.5) as i32 + 1
+            ),
+            "outside the diamond nothing is drawn"
         );
     }
 }

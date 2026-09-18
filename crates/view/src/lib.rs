@@ -10,6 +10,7 @@
 pub mod camera;
 pub mod combat_view;
 pub mod feedback;
+pub mod fog;
 pub mod font;
 pub mod hud;
 pub mod iso;
@@ -23,8 +24,9 @@ pub mod sprites;
 pub mod terrain;
 
 pub use camera::Camera;
+pub use fog::FogLights;
 pub use hud::{Action, Button, Hud, HudInput};
-pub use scene::{Ghost, Scene, SpriteInstance, Sweep, SWEEP_MS};
+pub use scene::{Ghost, Scene, SceneOptions, SpriteInstance, Sweep, SWEEP_MS};
 pub use sprites::{Anim, Atlas, Frame, Ink};
 pub use terrain::{ChunkMesh, TerrainVertex, CHUNK_TILES};
 

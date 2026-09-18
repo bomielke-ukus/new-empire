@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use view::hud::{Action, BOTTOM_PANEL, TOP_BAR};
 use view::minimap::{Minimap, MinimapRect};
-use view::{Atlas, Camera, Ghost, Hud, HudInput, Scene, Sweep, SWEEP_MS};
+use view::{Atlas, Camera, FogLights, Ghost, Hud, HudInput, Scene, SceneOptions, Sweep, SWEEP_MS};
 
 /// How long the age banner stays up, in ms.
 const BANNER_MS: u128 = 4000;
@@ -172,6 +172,8 @@ struct App {
     last_frame: Instant,
     last_title: Instant,
     last_minimap: Instant,
+    /// The tick whose fog lights the GPU has.
+    last_fog_tick: Option<u64>,
     frames: u32,
     fps: f32,
 }
@@ -230,6 +232,7 @@ impl App {
             last_frame: Instant::now(),
             last_title: Instant::now(),
             last_minimap: Instant::now() - Duration::from_secs(10),
+            last_fog_tick: None,
             frames: 0,
             fps: 0.0,
         }
@@ -289,6 +292,13 @@ impl App {
         Some((wx.floor() as i32, wy.floor() as i32))
     }
 
+    /// Whether the player can put `kind` on a tile: the simulation's rules,
+    /// and only on ground they have seen (`GD-FOG-01`).
+    fn placeable(&self, kind: sim::KindId, x: i32, y: i32) -> bool {
+        self.sim.fog(ME).is_some_and(|f| f.explored(x, y))
+            && self.sim.can_place(ME, kind, x, y).is_ok()
+    }
+
     fn ghost(&self) -> Option<Ghost> {
         let kind = self.build_mode?;
         let (x, y) = self.hover_tile()?;
@@ -296,7 +306,7 @@ impl App {
             kind,
             x,
             y,
-            ok: self.sim.can_place(ME, kind, x, y).is_ok(),
+            ok: self.placeable(kind, x, y),
             row: view::palette::row_for_owner(ME),
             player: ME,
             age: self.sim.player(ME).map_or(0, |p| p.age.index() as u8),
@@ -370,11 +380,15 @@ impl App {
             &self.atlas,
             Some(&self.prev_pos),
             self.clock.alpha(),
-            &selected,
-            self.ghost(),
-            sweep,
+            &SceneOptions {
+                selected: &selected,
+                ghost: self.ghost(),
+                sweep,
+                viewer: Some(ME),
+            },
         );
-        self.feedback.decorate(&mut scene, &self.sim, &self.atlas);
+        self.feedback
+            .decorate(&mut scene, &self.sim, &self.atlas, Some(ME));
         // Band-box outline.
         if let (Some(from), Some(to)) = (self.selection.drag_from, self.input.cursor) {
             let thr = DRAG_THRESHOLD * self.camera.dpi;
@@ -422,9 +436,17 @@ impl App {
         let rect = self.minimap_rect();
         if let Some(gpu) = &mut self.gpu {
             if self.last_minimap.elapsed().as_millis() >= 500 {
-                let m = Minimap::render(&self.sim);
+                let m = Minimap::render_for(&self.sim, Some(ME));
                 gpu.renderer.upload_minimap(&gpu.device, &gpu.queue, &m);
                 self.last_minimap = now;
+            }
+            // The fog changes only with the tick.
+            if self.last_fog_tick != Some(self.sim.tick()) {
+                if let Some(fog) = self.sim.fog(ME) {
+                    let lights = FogLights::from_fog(fog);
+                    gpu.renderer.upload_fog(&gpu.device, &gpu.queue, &lights);
+                    self.last_fog_tick = Some(self.sim.tick());
+                }
             }
             gpu.render(&self.camera, &scene, rect);
         }
@@ -483,7 +505,7 @@ impl App {
         let info = kinds::info(kind);
         let n = sim::nav::line_tiles(from, to)
             .into_iter()
-            .filter(|(x, y)| self.sim.can_place(ME, kind, *x, *y).is_ok())
+            .filter(|(x, y)| self.placeable(kind, *x, *y))
             .count() as i32;
         let cost: Vec<String> = info
             .cost
@@ -510,7 +532,7 @@ impl App {
         };
         let mut ids = self.selection.own_villagers(&self.sim, ME);
         for (x, y) in sim::nav::line_tiles(from, to) {
-            if self.sim.can_place(ME, kind, x, y).is_ok() {
+            if self.placeable(kind, x, y) {
                 self.issue(CommandKind::Build {
                     kind,
                     x,
@@ -548,7 +570,7 @@ impl App {
                 if kinds::is_wall(kind) {
                     // A wall is dragged: the run is placed on release.
                     self.wall_from = Some((x, y));
-                } else if self.sim.can_place(ME, kind, x, y).is_ok() {
+                } else if self.placeable(kind, x, y) {
                     let ids = self.selection.own_villagers(&self.sim, ME);
                     self.issue(CommandKind::Build { kind, x, y, ids });
                     if !self.modifiers.shift_key() {

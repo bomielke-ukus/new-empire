@@ -19,8 +19,9 @@ use std::collections::BTreeMap;
 /// The furthest anything sees, in tiles. Bounds the stamp table.
 pub const MAX_SIGHT: i32 = 16;
 
-/// What a player knows of a tile.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// What a player knows of a tile. Ordered: seeing a tile now is knowing
+/// more than having seen it once.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Visibility {
     /// Never seen: nothing known.
     Unexplored,
@@ -37,6 +38,11 @@ pub struct Memory {
     pub kind: KindId,
     /// Whose it was.
     pub owner: PlayerId,
+    /// The owner's age when it was last seen (by [`crate::Age::index`]), so
+    /// it is drawn as it was and an advance out of sight is not given away.
+    pub age: u8,
+    /// Still under construction when last seen.
+    pub site: bool,
 }
 
 /// One player's knowledge of the map.
@@ -149,13 +155,13 @@ impl Fog {
     }
 
     /// Nobody sees anything until the next stamp.
-    pub(crate) fn clear_visible(&mut self) {
+    pub fn clear_visible(&mut self) {
         self.visibility.fill(0);
     }
 
     /// One more observer of the tile: it is seen now, so it is explored,
     /// and what was remembered there is superseded by what is there.
-    pub(crate) fn see(&mut self, x: i32, y: i32) {
+    pub fn see(&mut self, x: i32, y: i32) {
         if let Some(i) = self.idx(x, y) {
             self.visibility[i] = self.visibility[i].saturating_add(1);
             let (word, bit) = (i / 64, 1u64 << (i % 64));
@@ -168,7 +174,7 @@ impl Fog {
     }
 
     /// Something static stands on a seen tile: remember it.
-    pub(crate) fn remember(&mut self, x: i32, y: i32, m: Memory) {
+    pub fn remember(&mut self, x: i32, y: i32, m: Memory) {
         if let Some(i) = self.idx(x, y) {
             self.marked[i / 64] |= 1u64 << (i % 64);
             self.remembered.insert(i as u32, m);
@@ -186,6 +192,8 @@ impl HashState for Fog {
             h.write_u32(i);
             h.write_u16(m.kind);
             h.write_u8(m.owner);
+            h.write_u8(m.age);
+            h.write_u8(m.site as u8);
         }
     }
 }
@@ -227,7 +235,16 @@ mod tests {
     fn seeing_explores_and_forgets_what_was_remembered() {
         let mut f = Fog::new(8, 4);
         assert_eq!(f.state(3, 2), Visibility::Unexplored);
-        f.remember(3, 2, Memory { kind: 11, owner: 1 });
+        f.remember(
+            3,
+            2,
+            Memory {
+                kind: 11,
+                owner: 1,
+                age: 0,
+                site: false,
+            },
+        );
         assert_eq!(f.remembered(3, 2).map(|m| m.kind), Some(11));
         f.see(3, 2);
         assert_eq!(f.state(3, 2), Visibility::Visible);

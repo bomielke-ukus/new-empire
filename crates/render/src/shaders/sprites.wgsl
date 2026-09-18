@@ -9,7 +9,7 @@ struct Inst {
     @location(0) rect: vec4<f32>,
     // u, v, uw, vh in atlas px
     @location(1) uv: vec4<f32>,
-    // palette row, flip, screen-space flag, unused
+    // palette row, flip, screen-space flag, light out of 255
     @location(2) misc: vec4<u32>,
 };
 
@@ -17,6 +17,7 @@ struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) @interpolate(flat) row: u32,
+    @location(2) @interpolate(flat) light: u32,
 };
 
 @vertex
@@ -39,6 +40,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
     }
     out.uv = inst.uv.xy + vec2<f32>(u, c.y) * inst.uv.zw;
     out.row = inst.misc.x;
+    out.light = inst.misc.w;
     return out;
 }
 
@@ -56,5 +58,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (idx == 239u) {
         row = 0;
     }
-    return textureLoad(palette, vec2<i32>(i32(idx), row), 0);
+    // Drawn from memory: dimmed to the explored light (`GD-FOG-01`).
+    let c = textureLoad(palette, vec2<i32>(i32(idx), row), 0);
+    return vec4<f32>(c.rgb * (f32(in.light) / 255.0), c.a);
 }

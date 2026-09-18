@@ -22,6 +22,8 @@ pub struct TerrainVertex {
     pub pos: [f32; 2],
     /// Colour, RGBA8.
     pub colour: [u8; 4],
+    /// The tile corner this is, for the fog light (`crate::fog`).
+    pub corner: [u16; 2],
 }
 
 /// The geometry for one chunk.
@@ -163,6 +165,7 @@ pub fn build_chunk(map: &TileMap, cx: i32, cy: i32) -> ChunkMesh {
                 vertices.push(TerrainVertex {
                     pos: [sx, sy],
                     colour: to_rgba(colour),
+                    corner: [cxi as u16, cyi as u16],
                 });
                 bounds.0 = bounds.0.min(sx);
                 bounds.1 = bounds.1.min(sy);
@@ -223,6 +226,8 @@ mod tests {
         let (_, flat_y) = iso::project(1.0, 1.0, 0.0);
         assert_eq!(m.vertices[2].pos[1], flat_y - 2.0 * iso::ELEV_PX);
         assert_eq!(m.vertices[0].pos, [0.0, 0.0]);
+        assert_eq!(m.vertices[2].corner, [1, 1]);
+        assert_eq!(m.vertices[0].corner, [0, 0]);
     }
 
     #[test]

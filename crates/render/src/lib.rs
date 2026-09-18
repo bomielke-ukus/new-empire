@@ -1,14 +1,16 @@
 //! The wgpu renderer.
 //!
 //! Three pipelines, in draw order: terrain (Gouraud diamonds, chunked and
-//! culled), sprites (one instanced draw, palette-indexed, depth-sorted on the
-//! CPU by `view::Scene`), and UI quads (the minimap). All coordinate maths
-//! comes from `view`, so what this draws is what `view::raster` draws.
+//! culled, each vertex in the fog light of its corner), sprites (one
+//! instanced draw, palette-indexed, depth-sorted on the CPU by
+//! `view::Scene`, each in its own light), and UI quads (the minimap). All
+//! coordinate maths comes from `view`, so what this draws is what
+//! `view::raster` draws.
 
 use bytemuck::{Pod, Zeroable};
 use std::collections::HashMap;
 use view::minimap::{Minimap, MinimapRect};
-use view::{Atlas, Camera, ChunkMesh, Scene, TerrainVertex};
+use view::{Atlas, Camera, ChunkMesh, FogLights, Scene, TerrainVertex};
 use wgpu::util::DeviceExt;
 
 const COMMON: &str = include_str!("shaders/common.wgsl");
@@ -63,6 +65,10 @@ pub struct Renderer {
     instance_capacity: usize,
     ui_vertices: wgpu::Buffer,
     minimap: Option<(wgpu::Texture, wgpu::BindGroup, u32, u32)>,
+    fog_bgl: wgpu::BindGroupLayout,
+    /// The fog light per tile corner (`view::fog`): a single lit texel
+    /// until a map's lights are uploaded.
+    fog: (wgpu::Texture, wgpu::BindGroup, u32, u32),
     /// Clear colour.
     pub clear: wgpu::Color,
 }
@@ -235,6 +241,23 @@ impl Renderer {
             ],
         });
 
+        // Fog lights (R8Unorm, one texel per tile corner): group 1 for the
+        // terrain pipeline, read in the vertex shader.
+        let fog_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fog"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            }],
+        });
+        let fog = fog_texture(device, queue, &fog_bgl, &FogLights::lit(0, 0));
+
         let blend = Some(wgpu::BlendState::ALPHA_BLENDING);
         let target = |blend| {
             [Some(wgpu::ColorTargetState {
@@ -251,7 +274,7 @@ impl Renderer {
 
         let terrain_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("terrain"),
-            bind_group_layouts: &[&camera_bgl],
+            bind_group_layouts: &[&camera_bgl, &fog_bgl],
             push_constant_ranges: &[],
         });
         let terrain_targets = target(None);
@@ -264,7 +287,7 @@ impl Renderer {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<TerrainVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Unorm8x4],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Unorm8x4, 2 => Uint16x2],
                 }],
                 compilation_options: Default::default(),
             },
@@ -373,6 +396,8 @@ impl Renderer {
             instance_capacity,
             ui_vertices,
             minimap: None,
+            fog_bgl,
+            fog,
             clear: wgpu::Color {
                 r: 0.05,
                 g: 0.04,
@@ -403,6 +428,22 @@ impl Renderer {
                     indices,
                     index_count: c.indices.len() as u32,
                 },
+            );
+        }
+    }
+
+    /// Uploads the fog light per tile corner for the frames that follow.
+    pub fn upload_fog(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, lights: &FogLights) {
+        if self.fog.2 != lights.width || self.fog.3 != lights.height {
+            self.fog = fog_texture(device, queue, &self.fog_bgl, lights);
+        } else {
+            write_texture(
+                queue,
+                &self.fog.0,
+                &lights.lights,
+                lights.width,
+                lights.height,
+                1,
             );
         }
     }
@@ -469,7 +510,7 @@ impl Renderer {
         let to_gpu = |s: &view::SpriteInstance| SpriteGpu {
             rect: [s.x, s.y, s.w, s.h],
             uv: [s.u as f32, s.v as f32, s.uw as f32, s.vh as f32],
-            misc: [s.row as u32, s.flip as u32, s.screen as u32, 0],
+            misc: [s.row as u32, s.flip as u32, s.screen as u32, s.light as u32],
         };
         let gpu: Vec<SpriteGpu> = scene
             .sprites
@@ -533,6 +574,7 @@ impl Renderer {
             pass.set_bind_group(0, &self.camera_bg, &[]);
 
             pass.set_pipeline(&self.terrain_pipeline);
+            pass.set_bind_group(1, &self.fog.1, &[]);
             for chunk in self.chunks.values() {
                 let (l, t, r, b) = chunk.bounds;
                 if r < visible.0 || l > visible.2 || b < visible.1 || t > visible.3 {
@@ -561,6 +603,43 @@ impl Renderer {
         }
         queue.submit(Some(encoder.finish()));
     }
+}
+
+/// A fog light texture the size of `lights`, filled from it, with its
+/// bind group.
+fn fog_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    lights: &FogLights,
+) -> (wgpu::Texture, wgpu::BindGroup, u32, u32) {
+    let (w, h) = (lights.width.max(1), lights.height.max(1));
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("fog"),
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    if lights.lights.len() == (w * h) as usize {
+        write_texture(queue, &tex, &lights.lights, w, h, 1);
+    }
+    let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("fog"),
+        layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::TextureView(&tex.create_view(&Default::default())),
+        }],
+    });
+    (tex, bg, w, h)
 }
 
 fn write_texture(
@@ -627,6 +706,6 @@ mod tests {
     fn gpu_structs_match_vertex_layouts() {
         assert_eq!(std::mem::size_of::<SpriteGpu>(), 48);
         assert_eq!(std::mem::size_of::<UiVertex>(), 16);
-        assert_eq!(std::mem::size_of::<TerrainVertex>(), 12);
+        assert_eq!(std::mem::size_of::<TerrainVertex>(), 16);
     }
 }

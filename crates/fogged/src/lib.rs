@@ -54,6 +54,10 @@ pub struct Remembered {
     pub kind: KindId,
     /// Whose it was.
     pub owner: PlayerId,
+    /// The owner's age when it was last seen (by [`Age::index`]).
+    pub age: u8,
+    /// Still under construction when last seen.
+    pub site: bool,
 }
 
 impl<'a> FoggedView<'a> {
@@ -179,6 +183,8 @@ impl<'a> FoggedView<'a> {
                     tile,
                     kind: m.kind,
                     owner: m.owner,
+                    age: m.age,
+                    site: m.site,
                 })
                 .collect()
         })

@@ -55,7 +55,8 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
-        // Terrain, elevation shading and scenery, with no units acting.
+        // Terrain, elevation shading and scenery, with no units acting and
+        // no fog: the map as generated.
         name: "inland-start",
         args: &[
             "--seed",
@@ -68,6 +69,37 @@ const SCENES: &[Scene] = &[
             "0",
             "--start",
             "0",
+            "--fog",
+            "0",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // The three states of the fog (`GD-FOG-01`), zoomed out: the
+        // settlement in sight, the scout's trail seen once and dimmed with
+        // their house remembered on it, the scout at its end in its own
+        // circle of sight, and black beyond; the minimap fogged the same.
+        name: "fog-scout",
+        args: &[
+            "--seed",
+            "1",
+            "--size",
+            "96",
+            "--players",
+            "2",
+            "--scenario",
+            "scout",
+            "--ticks",
+            "400",
+            "--zoom",
+            "0.5",
+            "--at",
+            "48,19",
+            "--hud",
+            "1",
             "--width",
             "960",
             "--height",

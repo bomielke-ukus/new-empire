@@ -18,6 +18,7 @@ pub struct Sweep {
     pub elapsed_ms: u32,
 }
 
+use crate::fog;
 use crate::fx_to_f32;
 use crate::iso;
 use crate::palette;
@@ -52,6 +53,9 @@ pub struct SpriteInstance {
     pub slot: u32,
     /// Positioned in window pixels rather than world-screen space.
     pub screen: bool,
+    /// Light out of 255: full for what is in sight, [`fog::EXPLORED`] for
+    /// what is drawn from memory.
+    pub light: u8,
 }
 
 /// A building the player is about to place.
@@ -75,6 +79,22 @@ pub struct Ghost {
     /// then covers every tile of the straight run from there to `(x, y)`,
     /// each hatched for whether it can be placed (`UX-PLACE-03`).
     pub run: Option<(i32, i32)>,
+}
+
+/// What a frame shows besides the world: the selection, a placement
+/// ghost, the age-up sweep, and whose eyes it is seen through.
+#[derive(Clone, Copy, Default, Debug)]
+pub struct SceneOptions<'a> {
+    /// Slots drawn with selection rings.
+    pub selected: &'a [u32],
+    /// The building being placed.
+    pub ghost: Option<Ghost>,
+    /// The age-up light sweep in progress.
+    pub sweep: Option<Sweep>,
+    /// The player whose fog applies (`GD-FOG-01`): others' units and
+    /// buildings only where in sight, buildings and nodes remembered where
+    /// seen once, drawn dimmed. `None` shows everything, for tools.
+    pub viewer: Option<u8>,
 }
 
 /// A frame's worth of sprites, sorted back to front.
@@ -103,22 +123,38 @@ impl Scene {
         selected: &[u32],
         ghost: Option<Ghost>,
     ) -> Scene {
-        Scene::build_full(sim, atlas, prev, alpha, selected, ghost, None)
+        Scene::build_full(
+            sim,
+            atlas,
+            prev,
+            alpha,
+            &SceneOptions {
+                selected,
+                ghost,
+                ..SceneOptions::default()
+            },
+        )
     }
 
-    /// Builds the scene with everything: selection rings, a placement ghost
-    /// and, while an age-up is being celebrated, the light sweep.
+    /// Builds the scene with everything: selection rings, a placement
+    /// ghost, the light sweep while an age-up is being celebrated, and the
+    /// viewer's fog.
     pub fn build_full(
         sim: &Simulation,
         atlas: &Atlas,
         prev: Option<&[Vec2Fx]>,
         alpha: f32,
-        selected: &[u32],
-        ghost: Option<Ghost>,
-        sweep: Option<Sweep>,
+        opts: &SceneOptions,
     ) -> Scene {
+        let SceneOptions {
+            selected,
+            ghost,
+            sweep,
+            viewer,
+        } = *opts;
         let world = sim.world();
         let map = sim.map();
+        let fog = viewer.and_then(|p| sim.fog(p));
         let mut sprites = Vec::with_capacity(world.len() + selected.len() + 2);
         // The sweep crosses the player's buildings left to right in screen
         // space, so it needs their extent before any of them is placed.
@@ -139,6 +175,14 @@ impl Scene {
             }
             let kind = world.kind[i];
             let info = kinds::info(kind);
+            if let Some(f) = fog {
+                // Someone else's is drawn only with a tile of it in sight;
+                // the viewer's own are always in sight of themselves.
+                let (ax, ay) = sim::nav::anchor_tile(world.pos[i], info.footprint as i32);
+                if Some(world.owner[i]) != viewer && !f.in_sight(kind, ax, ay) {
+                    continue;
+                }
+            }
             // A site shows pegs until half built, then the building itself.
             let half_built =
                 world.construction[i].is_some_and(|done| done * 2 < info.build_work().max(1));
@@ -273,10 +317,48 @@ impl Scene {
                 depth,
                 slot: i as u32,
                 screen: false,
+                light: fog::VISIBLE,
             });
+        }
+        // What was seen once and is out of sight now, as it was then, in the
+        // explored light: buildings and nodes only, never a unit, and not
+        // pickable (`GD-FOG-01`).
+        if let Some(f) = fog {
+            for ((x, y), m) in f.memories() {
+                let info = kinds::info(m.kind);
+                let fp = info.footprint.max(1) as i32;
+                let frame = if m.site {
+                    atlas.site(info.footprint)
+                } else {
+                    atlas
+                        .frame(atlas.variant(m.kind, m.age), 0)
+                        .map(|(frame, _)| frame)
+                };
+                let Some(frame) = frame else {
+                    continue;
+                };
+                let centre = sim::nav::building_centre(x, y, fp);
+                let (cx, cy) = (fx_to_f32(centre.x), fx_to_f32(centre.y));
+                let h = iso::ground_height(map, cx, cy);
+                let (gx, gy) = iso::project(cx, cy, h);
+                let depth = cx + cy + (fp as f32 - 1.0) * 0.5;
+                let mut s = overlay(
+                    frame,
+                    gx,
+                    gy,
+                    palette::row_for_owner(m.owner),
+                    depth,
+                    u32::MAX,
+                );
+                s.light = fog::EXPLORED;
+                sprites.push(s);
+            }
         }
         // Direction and team-coloured fletching connect flight to its source.
         for p in sim.projectiles() {
+            if fog.is_some_and(|f| !f.visible(p.pos.x.floor(), p.pos.y.floor())) {
+                continue;
+            }
             let facing = (p.aim - p.pos).angle().facing8();
             if let Some((arrow, flip)) = atlas.arrow(facing) {
                 let (x, y) = (fx_to_f32(p.pos.x), fx_to_f32(p.pos.y));
@@ -298,12 +380,19 @@ impl Scene {
             let fp = kinds::info(g.kind).footprint.max(1);
             // One tile, or the run being dragged: every tile of it, each
             // checked on its own.
+            // Ground never seen cannot be built on: nothing is known of it.
+            let known = |t: (i32, i32)| fog.is_none_or(|f| f.explored(t.0, t.1));
             let tiles: Vec<((i32, i32), bool)> = match g.run {
                 Some(from) => sim::nav::line_tiles(from, (g.x, g.y))
                     .into_iter()
-                    .map(|t| (t, sim.can_place(g.player, g.kind, t.0, t.1).is_ok()))
+                    .map(|t| {
+                        (
+                            t,
+                            known(t) && sim.can_place(g.player, g.kind, t.0, t.1).is_ok(),
+                        )
+                    })
                     .collect(),
-                None => vec![((g.x, g.y), g.ok)],
+                None => vec![((g.x, g.y), g.ok && known((g.x, g.y)))],
             };
             for ((x, y), ok) in tiles {
                 let centre = sim::nav::building_centre(x, y, fp as i32);
@@ -352,6 +441,7 @@ pub(crate) fn overlay(
         depth,
         slot,
         screen: false,
+        light: fog::VISIBLE,
     }
 }
 
@@ -492,7 +582,16 @@ mod tests {
             player: 0,
             elapsed_ms: 10,
         });
-        let lit = Scene::build_full(&sim, &atlas, None, 0.0, &[], None, sweep);
+        let lit = Scene::build_full(
+            &sim,
+            &atlas,
+            None,
+            0.0,
+            &SceneOptions {
+                sweep,
+                ..SceneOptions::default()
+            },
+        );
         let glow = *atlas
             .glow(kinds::info(kinds::TOWN_CENTER).footprint)
             .unwrap();
@@ -510,18 +609,144 @@ mod tests {
             &atlas,
             None,
             0.0,
-            &[],
-            None,
-            Some(Sweep {
-                player: 0,
-                elapsed_ms: SWEEP_MS + 1,
-            }),
+            &SceneOptions {
+                sweep: Some(Sweep {
+                    player: 0,
+                    elapsed_ms: SWEEP_MS + 1,
+                }),
+                ..SceneOptions::default()
+            },
         );
         assert_eq!(
             done.sprites.len(),
             lit.sprites.len() - glows,
             "and then it is over"
         );
+    }
+
+    /// Through a player's eyes: someone else's unit out of sight is not
+    /// drawn, their building in sight is drawn live, and once out of sight
+    /// it is drawn from memory, dimmed, in the age it was seen, and not
+    /// pickable. Without a viewer everything is drawn.
+    ///
+    /// REQ: GD-FOG-01
+    #[test]
+    fn a_fogged_scene_draws_what_is_in_sight_and_remembers_the_rest_dimmed() {
+        let mut sim = Simulation::new(
+            3,
+            SimConfig {
+                map: MapSpec {
+                    kind: MapKind::Flat,
+                    size: 64,
+                    players: 2,
+                },
+                wander: false,
+                ..SimConfig::default()
+            },
+        );
+        let spawn = |sim: &mut Simulation, player: u8, kind, pos: Vec2Fx| {
+            sim.issue(sim::Command {
+                player,
+                kind: sim::CommandKind::Spawn { kind, pos },
+            });
+        };
+        spawn(&mut sim, 0, kinds::CLUBMAN, sim::nav::centre((10, 10)));
+        spawn(&mut sim, 1, kinds::CLUBMAN, sim::nav::centre((40, 40)));
+        let fp = kinds::info(kinds::HOUSE).footprint as i32;
+        spawn(
+            &mut sim,
+            1,
+            kinds::HOUSE,
+            sim::nav::building_centre(12, 12, fp),
+        );
+        for _ in 0..3 {
+            sim.step();
+        }
+        let atlas = Atlas::placeholder();
+        let kind_of = |sim: &Simulation, s: &SpriteInstance| {
+            (s.slot != u32::MAX).then(|| sim.world().kind[s.slot as usize])
+        };
+        let all = Scene::build(&sim, &atlas, None, 0.0);
+        assert_eq!(all.sprites.len(), 3, "no viewer: everything");
+        let mine = Scene::build_full(
+            &sim,
+            &atlas,
+            None,
+            0.0,
+            &SceneOptions {
+                viewer: Some(0),
+                ..SceneOptions::default()
+            },
+        );
+        let kinds_seen: Vec<_> = mine.sprites.iter().map(|s| kind_of(&sim, s)).collect();
+        assert_eq!(kinds_seen.len(), 2, "{kinds_seen:?}");
+        assert!(kinds_seen.contains(&Some(kinds::HOUSE)), "in sight: live");
+        assert!(mine.sprites.iter().all(|s| s.light == fog::VISIBLE));
+        let house_live = mine
+            .sprites
+            .iter()
+            .find(|s| kind_of(&sim, s) == Some(kinds::HOUSE))
+            .copied()
+            .unwrap();
+
+        // Walk away: the house is a memory, their clubman still unseen.
+        let me = sim
+            .world()
+            .slots()
+            .find(|s| sim.world().owner[s.index()] == 0)
+            .map(|s| sim.world().id_at(s))
+            .unwrap();
+        sim.issue(sim::Command {
+            player: 0,
+            kind: sim::CommandKind::Move {
+                ids: vec![me],
+                target: sim::nav::centre((30, 10)),
+            },
+        });
+        for _ in 0..300 {
+            sim.step();
+        }
+        let later = Scene::build_full(
+            &sim,
+            &atlas,
+            None,
+            0.0,
+            &SceneOptions {
+                viewer: Some(0),
+                ..SceneOptions::default()
+            },
+        );
+        assert_eq!(later.sprites.len(), 2, "{:?}", later.sprites);
+        let remembered = later.sprites.iter().find(|s| s.slot == u32::MAX).unwrap();
+        assert_eq!(remembered.light, fog::EXPLORED, "drawn from memory: dimmed");
+        assert_eq!(
+            (remembered.u, remembered.v, remembered.x, remembered.y),
+            (house_live.u, house_live.v, house_live.x, house_live.y),
+            "the same frame where it stood"
+        );
+        assert_eq!(remembered.row, palette::row_for_owner(1));
+        assert!(
+            later
+                .sprites
+                .iter()
+                .all(|s| kind_of(&sim, s) != Some(kinds::HOUSE)),
+            "not the live building"
+        );
+        // Their side sees none of mine, and remembers nothing of mine.
+        let theirs = Scene::build_full(
+            &sim,
+            &atlas,
+            None,
+            0.0,
+            &SceneOptions {
+                viewer: Some(1),
+                ..SceneOptions::default()
+            },
+        );
+        assert!(theirs
+            .sprites
+            .iter()
+            .all(|s| s.slot != u32::MAX && sim.world().owner[s.slot as usize] == 1));
     }
 
     #[test]

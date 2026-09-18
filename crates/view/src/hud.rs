@@ -288,6 +288,7 @@ impl<'a> Painter<'a> {
             depth: 0.0,
             slot: u32::MAX,
             screen: true,
+            light: 255,
         });
     }
 

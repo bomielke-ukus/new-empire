@@ -2,19 +2,21 @@
 //! mapview [--seed N] [--size N] [--players N] [--ticks N] [--stockpile N]
 //!         [--zoom 0.5|1|1.5|2] [--width W] [--height H]
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
-//!         [--scenario gather|build|ages|army|battle|siege] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1]
+//!         [--scenario gather|build|ages|army|battle|siege|scout] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
-//!         [--dpi N] [--ui-scale N] [--controls 1]
+//!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0]
 //! ```
 //!
 //! Generates a map, runs it for `--ticks`, and writes a frame rendered by the
-//! same code path the game uses, minus the GPU.
+//! same code path the game uses, minus the GPU. The frame is player 0's:
+//! their fog applies (`GD-FOG-01`) unless `--fog 0` shows the whole map.
 
 use sim::kinds;
 use std::process::ExitCode;
 use view::camera::ZOOM_LEVELS;
-use view::{raster, Atlas, Camera, Ghost, Hud, HudInput, Scene, Sweep};
+use view::minimap::{Minimap, MinimapRect};
+use view::{raster, Atlas, Camera, FogLights, Ghost, Hud, HudInput, Scene, SceneOptions, Sweep};
 
 struct Args {
     seed: u64,
@@ -44,6 +46,7 @@ struct Args {
     dpi: f32,
     ui_scale: f32,
     controls: bool,
+    fog: bool,
 }
 
 fn parse() -> Result<Args, String> {
@@ -75,6 +78,7 @@ fn parse() -> Result<Args, String> {
         dpi: 1.0,
         ui_scale: 1.0,
         controls: false,
+        fog: true,
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -129,6 +133,7 @@ fn parse() -> Result<Args, String> {
             "--dpi" => a.dpi = num(val)?,
             "--ui-scale" => a.ui_scale = num(val)?,
             "--controls" => a.controls = val == "1" || val == "true",
+            "--fog" => a.fog = val == "1" || val == "true",
             _ => return Err(format!("unknown flag {key}")),
         }
         i += 2;
@@ -288,8 +293,20 @@ fn run() -> Result<(), String> {
         .sweep
         .and_then(|_| sim.player(0))
         .map(|p| view::hud::Banner::AgeUp(p.age));
-    let mut scene = Scene::build_full(&sim, &atlas, None, 0.0, &selected, ghost, sweep);
-    feedback.decorate(&mut scene, &sim, &atlas);
+    let viewer = a.fog.then_some(0);
+    let mut scene = Scene::build_full(
+        &sim,
+        &atlas,
+        None,
+        0.0,
+        &SceneOptions {
+            selected: &selected,
+            ghost,
+            sweep,
+            viewer,
+        },
+    );
+    feedback.decorate(&mut scene, &sim, &atlas, viewer);
     let mut cam = Camera::new(map.width(), map.height(), (a.width as f32, a.height as f32));
     cam.set_zoom_index(a.zoom);
     cam.dpi = a.dpi;
@@ -327,10 +344,18 @@ fn run() -> Result<(), String> {
         scene.ui = hud.sprites;
     }
     let mut img = raster::Image::new(a.width, a.height, [12, 10, 14, 255]);
-    raster::draw_terrain(&mut img, &cam, &chunks);
+    let lights = viewer.and_then(|p| sim.fog(p)).map(FogLights::from_fog);
+    raster::draw_terrain(&mut img, &cam, &chunks, lights.as_ref());
     let palette = view::palette::texture();
     raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.sprites);
     raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.ui);
+    if a.hud {
+        // In the panel's reserved corner, as the game draws it.
+        let s = a.dpi * a.ui_scale;
+        let rect =
+            MinimapRect::bottom_right((a.width as f32, a.height as f32), 256.0 * s, 16.0 * s);
+        raster::draw_minimap(&mut img, &Minimap::render_for(&sim, viewer), rect);
+    }
     save(&a.out, img.width, img.height, &img.to_bytes())?;
     println!(
         "wrote {} ({}x{} at {}x, {} sprites)",
@@ -342,7 +367,7 @@ fn run() -> Result<(), String> {
     );
 
     if let Some(path) = &a.minimap {
-        let m = view::minimap::Minimap::render(&sim);
+        let m = Minimap::render_for(&sim, viewer);
         let scale = 4;
         let mut big = Vec::with_capacity((m.width * m.height * scale * scale * 4) as usize);
         for y in 0..m.height * scale {
@@ -688,6 +713,47 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
                 },
             });
             let _ = tc;
+        }
+        "scout" => {
+            // The scout rides away from the settlement past a house of
+            // theirs into ground nobody has seen (`GD-FOG-01`): behind it
+            // the trail is seen once and the house is remembered, dimmed;
+            // around it the ground is in sight; ahead of it nothing is
+            // known. Run `--ticks 400` from here and look at it zoomed out
+            // from between the settlement and the scout.
+            let dir = if sx < sim.map().width() / 2 { 1 } else { -1 };
+            let house = kinds::HOUSE;
+            let spot = (12..=20)
+                .flat_map(|dx| [0, -2, 2, -4, 4].map(|dy| (sx + dir * dx, sy + dy)))
+                .find(|&(x, y)| sim.can_place(0, house, x, y).is_ok())
+                .ok_or("no room for their house")?;
+            let fp = kinds::info(house).footprint as i32;
+            sim.issue(Command {
+                player: 1,
+                kind: CommandKind::Spawn {
+                    kind: house,
+                    pos: sim::nav::building_centre(spot.0, spot.1, fp),
+                },
+            });
+            sim.issue(cmd(CommandKind::Spawn {
+                kind: kinds::SCOUT,
+                pos: sim::nav::centre((sx + dir * 2, sy)),
+            }));
+            for _ in 0..3 {
+                sim.step();
+            }
+            let scout = sim
+                .world()
+                .slots()
+                .find(|s| {
+                    sim.world().owner[s.index()] == 0 && sim.world().kind[s.index()] == kinds::SCOUT
+                })
+                .map(|s| sim.world().id_at(s))
+                .ok_or("no scout")?;
+            sim.issue(cmd(CommandKind::Move {
+                ids: vec![scout],
+                target: sim::nav::centre((sx + dir * 28, sy)),
+            }));
         }
         other => return Err(format!("unknown scenario {other}")),
     }

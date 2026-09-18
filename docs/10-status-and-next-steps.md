@@ -23,7 +23,7 @@ Five milestones landed; the vertical slice is beyond its halfway point.
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
-| M5 — An opponent | Not started | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
+| M5 — An opponent | **In progress** (fog of war landed 2026-09-18, in the simulation and on screen; the opponent itself not yet) | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
@@ -622,8 +622,9 @@ what was done:
   opponent needs and nothing that reaches the world; and `ai`, which
   depends on `fogged` and not on `sim`, holds `Difficulty` and an
   `Opponent` seeded from the match whose `think` returns commands (none
-  yet), and whose three `trybuild` compile-fail cases prove the world is
-  unnameable from there (`TA-AI-01`). Who issued a command
+  yet), and whose three compile-fail cases prove the world is unnameable
+  from there (`TA-AI-01`); they check the error code, not the message,
+  after CI's newer compiler reworded it and the first version went red. Who issued a command
   (`Source::{Player, Ai}`) is recorded in the queue and the replay log
   without changing the file format; the last source to name a unit is its
   path priority, and `plan_paths` serves the player's requests first
@@ -652,12 +653,45 @@ what was done:
   minimap and remembered buildings is step 2. `GD-AI-01` is claimed only
   when an opponent issues a command (step 3).
 
+### Work record: M5 chunk 2 — fog in the presentation (2026-09-18)
+
+- **What landed.** `GD-FOG-01` on screen. `crates/view/src/fog.rs` turns a
+  player's fog into a light per tile corner, black beside ground never
+  seen and the mean of seen-once and in-sight tiles otherwise; terrain
+  vertices carry their corner and both renderers shade each tile from it,
+  the GPU reading the corner texture in the terrain vertex shader. The
+  scene is built for a viewer: their own things anywhere, others' only in
+  sight, projectiles only in sight, and every memory drawn as the building
+  or node it was, in the age it was seen, dimmed, not pickable; `Memory`
+  gained the owner's age and whether it was a site, so a remembered
+  building does not give away an advance made out of sight. The minimap is
+  fogged the same way and is now drawn by the rasteriser in the panel's
+  corner, so `mapview --hud 1` shows the whole window the game shows. The
+  app sees through the player's eyes, uploads the lights once per tick, and
+  refuses to place on ground never seen. `mapview --fog 0` shows the whole
+  map. `docs/04` §6 and §7 are rewritten to what was built, §25 has the
+  notes.
+- **What changed for the player.** The map starts black beyond the
+  settlement's sight, ground seen once stays dimmed with what was there
+  when it was seen, and enemy units are seen only where someone of yours
+  is looking. Impact sparks in the fog are not shown.
+- **Measured.** The lights are a pass over the map's tiles, once per tick,
+  a fraction of a millisecond at Giant size, and not in the simulation's
+  budget at all. The corpus digests are re-recorded for the two new memory
+  fields in the hash. Every golden image is re-baselined for the fog and
+  the minimap; `fog-scout` is new and pins the three states in one frame.
+- **Not done, deliberately.** A remembered building cannot be right-clicked
+  as a target: it has no entity behind it. Sound in the fog is `docs/05`'s
+  rule for when there is sound. Cliffs still neither block nor extend
+  sight.
+
 ### Resume here next session
 
-**M5 is under way.** Chunk 1 (fog in the simulation, the AI boundary) is
-landed; next is step 2 below: fog in the presentation. The parallel track
-(§4b) runs on its own branch. Keep the art pipeline on the `docs/08`
-schedule.
+**M5 is under way.** Chunks 1 and 2 (fog in the simulation and on screen,
+the AI boundary) are landed; next is step 3 below: the economy manager and
+build orders, the first commands an opponent issues, which is when
+`GD-AI-01` is first claimed. The parallel track (§4b) runs on its own
+branch. Keep the art pipeline on the `docs/08` schedule.
 
 ## 4. What M4 completed — Combat
 
@@ -707,10 +741,11 @@ each step shippable and tested headless before it has a sprite:
    crate; the `ai` crate that cannot name the world (`TA-AI-01`), with an
    opponent that issues nothing yet, driven by `simrunner ai`; the
    priority half of `TA-PATH-06`.
-2. **Fog in the presentation** (`GD-FOG-01`). The rasteriser and the GPU
-   fog pass over the smoothed visibility texture, buildings drawn from
-   last-known state where explored but not visible, the minimap fogged,
-   with golden images for the three states.
+2. **Fog in the presentation** (`GD-FOG-01`). **Done 2026-09-18**, record
+   above: a light per tile corner shading the terrain in both renderers,
+   buildings and nodes drawn from memory where seen once, units only in
+   sight, the minimap fogged and now in every golden image, `fog-scout`
+   pinning the three states in one frame.
 3. **The economy manager and build orders.** Villagers to resources by a
    target ratio, houses ahead of the cap, farms when the bushes are gone,
    the age gate met and taken, a scripted opening per difficulty.

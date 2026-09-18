@@ -208,15 +208,23 @@ first-class treatment.
 
 ## 6. Fog of war
 
-- Three grids per player, one byte per tile: `visibility` (count of units seeing
-  it), `explored` (bitset), and `remembered` (last-seen building ID per tile).
-- Vision updates incrementally: when a unit moves between tiles, decrement the
-  circle it left and increment the one it entered. Circles are precomputed
-  stamps per line-of-sight radius. No full-map recompute, ever.
-- Elevation grants +1 line of sight and lets a unit see over one cliff level.
-- The renderer reads the visibility grid into a low-resolution texture and
-  smooths it in the shader, so the fog edge is soft while the simulation stays
-  tile-exact.
+- A `Fog` per player (`sim::fog`): `visibility` (count of the player's
+  things seeing each tile now), `explored` (a bitset), and the static things
+  last seen, by anchor tile, with the kind, owner, the owner's age and
+  whether it was a construction site when seen. The explored bitset and the
+  memories are history and are hashed; the visibility counts are derived
+  each tick and are not.
+- Vision is recomputed every tick, not incrementally (`docs/07` D23, §24):
+  every standing, living, un-garrisoned thing stamps a precomputed disc for
+  its line of sight, and every static thing on a seen tile is remembered.
+- Elevation grants +1 line of sight. Cliffs neither block nor extend sight
+  yet.
+- The renderers draw it as a light per tile *corner* (`view::fog`, §25):
+  black where any tile at the corner was never seen, the mean of the
+  explored and visible tiles around it otherwise. Terrain vertices carry
+  their corner and the light shades across each tile, so the edge is soft
+  over a tile, the simulation stays tile-exact, and elevation is exact
+  because the vertex already has its height. Sprites carry one light each.
 - **[TA-AI-01] The AI queries the same fogged view a player sees.** No exceptions, enforced
   by the `ai` crate having no access to raw `World` state — only to a
   `FoggedView<'_>` wrapper.
@@ -237,7 +245,9 @@ first-class treatment.
 3. **Sprites** — a single instanced draw per atlas. One instance = position,
    atlas rect, player-colour index, tint, flip flag.
 4. **Projectiles and effects** — same pipeline, later depth.
-5. **Fog of war** — full-screen multiply using the smoothed visibility texture.
+5. **Fog of war** — not a pass of its own: the terrain vertex shader reads
+   the corner-light texture and the sprite shader its instance's light
+   (§6, §25).
 6. **UI** — separate orthographic pass, no depth.
 
 **Sprite specifics:**
@@ -823,8 +833,12 @@ anticipate:
 - **The `ai` crate depends on `fogged` and not on `sim`.** That is the
   whole enforcement of `TA-AI-01`: `sim::World` is unnameable there
   because `sim` is not a dependency, and `fogged` re-exports no path to
-  it. Three `trybuild` compile-fail cases pin it, so a re-export or a new
-  dependency that opened the world would fail the build. The crate holds
+  it. Three compile-fail cases pin it, so a re-export or a new dependency
+  that opened the world would fail the build. Each is built as a crate of
+  its own on `fogged` alone and must be rejected with an unresolved-path or
+  private-item error code; the message's wording is not compared, because
+  it changes between compiler releases (it did, between the toolchain here
+  and CI's, and `trybuild`'s exact-text comparison went red). The crate holds
   `Difficulty`, and an `Opponent` seeded from the match and its player
   number whose `think` returns the commands to issue; for now, none.
 - **Who issued a command travels with it.** `Source::{Player, Ai}` is
@@ -836,4 +850,42 @@ anticipate:
   the destination budget binds the player's requests are served first
   (`TA-PATH-06`, now whole). `simrunner ai` runs opponents on every side
   headless, invariants on, and verifies the recording.
+
+## 25. Implementation notes from M5, chunk 2: fog in the presentation
+
+- **Light per corner, not a full-screen pass.** §7 planned a full-screen
+  multiply over a smoothed visibility texture. A full-screen pass has to
+  find the ground under each pixel, and with elevation it cannot without a
+  height buffer, so the fog edge would drift up a hillside. Instead
+  `view::fog::FogLights` turns a player's `Fog` into one byte per tile
+  corner, `(width + 1) × (height + 1)`: black if any tile at the corner was
+  never seen, the mean of the tiles' lights (half for seen once, full for
+  in sight) otherwise. `TerrainVertex` gained its corner; the terrain
+  shader reads the corner's light from an `R8Unorm` texture in the vertex
+  stage and scales the colour, and the rasteriser scales the vertex colour
+  before its Gouraud fill, so the two agree to rounding. The rule that a
+  corner beside unseen ground is black means the soft edge eats into the
+  seen side and never shows a sliver of ground the player has not seen.
+- **What is drawn.** With a viewer, `Scene::build_full` (its options now
+  a struct, `SceneOptions`) draws the viewer's own things anywhere, anyone
+  else's only with a tile of it in sight, projectiles only on a tile in
+  sight, and every memory as the building or node it was: the idle frame
+  of the kind in the owner's age when seen, or the site pegs, at the
+  explored light, with no slot, so it is not pickable. A remembered
+  building outlives its destruction until the tile is seen again, which is
+  the asymmetry `GD-FOG-01` asks for. A placement ghost is refused on
+  ground never seen, and the app's `placeable` checks the same before it
+  issues a `Build`. Impact sparks are not shown in the fog.
+- **The minimap** (`Minimap::render_for`) is black where never seen, the
+  terrain at half light where seen once with the remembered things on it in
+  their owner's colour, and live where in sight. The rasteriser now draws
+  it in the panel's corner as the UI pass does (`raster::draw_minimap`),
+  so a `mapview --hud 1` frame shows the whole window the game shows and
+  the golden images pin the minimap too.
+- **The fog changes only with the tick,** so the app uploads the lights
+  once per tick, not per frame; the sprite's light rides in the instance
+  word that was spare.
+- **Tools see everything by default only when asked.** `mapview` renders
+  player 0's view; `--fog 0` shows the whole map for looking at a
+  generated map, and `inland-start` is the one golden image that uses it.
 

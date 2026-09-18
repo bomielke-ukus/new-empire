@@ -2692,6 +2692,7 @@ impl Simulation {
             world,
             map,
             scratch,
+            players: sides,
             ..
         } = self;
         for f in fog.iter_mut() {
@@ -2728,6 +2729,10 @@ impl Simulation {
             let m = Memory {
                 kind: world.kind[i],
                 owner: world.owner[i],
+                age: sides
+                    .get(world.owner[i] as usize)
+                    .map_or(0, |p| p.age.index() as u8),
+                site: world.construction[i].is_some(),
             };
             for f in fog.iter_mut() {
                 if tiles.iter().any(|t| f.visible(t.0, t.1)) {

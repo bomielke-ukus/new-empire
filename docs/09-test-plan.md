@@ -346,12 +346,33 @@ dropped, and the replay records who issued what (`TA-PATH-06`, whose
 priority half this closes; §7). `crates/fogged`'s test reads a view: own
 things anywhere, others only in sight, memories, placement refused on
 ground never seen. `crates/ai/tests/compile_fail.rs` is the boundary:
-three `trybuild` cases that try to name the world from the `ai` crate and
-must fail to compile (`TA-AI-01`), which they do because `sim` is not a
-dependency of that crate and `fogged` re-exports no path to it. `docs/07`
+three programs that try to name the world from the `ai` crate, each built
+as its own crate on `fogged` alone, and each must be rejected with an
+unresolved-path or private-item error code (`TA-AI-01`), which they are
+because `sim` is not a dependency of that crate and `fogged` re-exports no
+path to it. The error's wording is not compared: it changed between the
+local toolchain and CI's, so an exact-text check was a toolchain check. `docs/07`
 D7 calls this architectural, and review is not an architecture.
 `tools/simrunner/tests/ai_cli.rs` runs `simrunner ai` for two short
 matches with three opponents each and checks the recordings verify.
+
+**Landed in chunk 2:** fog in the presentation (`GD-FOG-01`). In
+`crates/view`: the corner lights are black beside ground never seen and
+the mean between ground seen once and ground in sight (`fog.rs`); a scene
+built for a viewer leaves out someone else's unit out of sight, draws
+their building in sight live, and once it is out of sight draws it from
+memory at the explored light, in the same frame where it stood, with no
+slot to pick, while the other side's view holds none of it (`scene.rs`);
+the minimap is black, dimmed with the remembered house marked, or live
+tile by tile (`minimap.rs`); and the rasteriser darkens the ground by
+state, scales a sprite by its light, and draws the minimap in its diamond
+and nowhere outside it (`raster.rs`). Every golden image is re-baselined
+for the player's fog and the minimap in the panel; `fog-scout` pins the
+three states in one frame: the settlement in sight, the scout's trail seen
+once with their house remembered on it, the scout in its own circle of
+sight, black beyond, and the minimap fogged the same. The headless render
+test uploads the fog lights and draws a fogged scene on a real device
+where one exists.
 
 **Still to come:** twenty headless AI-vs-AI matches: no panics, no unit
 idle over 60 s with work available, Hard beats Easy at least 18 times in
