@@ -13,9 +13,11 @@
 #![warn(missing_docs)]
 
 pub mod economy;
+pub mod military;
 
 use economy::{BuildOrder, Economy};
 use fogged::{Command, FoggedView, PlayerId, Rng};
+use military::Military;
 
 /// How hard the opponent tries (`docs/02` §12). Only Hardest is allowed
 /// anything a player is not, and it says so in the UI.
@@ -41,6 +43,13 @@ impl Difficulty {
         Difficulty::Hardest,
     ];
 
+    /// The level called `name`, case aside.
+    pub fn from_name(name: &str) -> Option<Difficulty> {
+        Difficulty::ALL
+            .into_iter()
+            .find(|d| d.name().eq_ignore_ascii_case(name.trim()))
+    }
+
     /// Display name.
     pub const fn name(self) -> &'static str {
         match self {
@@ -65,6 +74,8 @@ pub struct Opponent {
     order: BuildOrder,
     /// The economy manager.
     economy: Economy,
+    /// The military manager.
+    military: Military,
 }
 
 impl Opponent {
@@ -79,6 +90,7 @@ impl Opponent {
             thoughts: 0,
             order: BuildOrder::for_difficulty(difficulty),
             economy: Economy::default(),
+            military: Military::default(),
         }
     }
 
@@ -102,20 +114,34 @@ impl Opponent {
         &mut self.rng
     }
 
-    /// One tick: the commands to issue this tick, in order. It thinks
-    /// every `cadence` ticks of its order, on a tick of its own so two
-    /// opponents do not think together, and answers with nothing between.
+    /// One tick: the commands to issue this tick, in order. It listens
+    /// every tick, thinks every `cadence` ticks of its order, on a tick of
+    /// its own so two opponents do not think together, and answers with
+    /// nothing between. The economy spends first; the military gets what
+    /// is left.
     pub fn think(&mut self, view: &FoggedView<'_>) -> Vec<Command> {
         debug_assert_eq!(view.player(), self.player, "a view of someone else's side");
+        self.military.observe(view);
         if !(view.tick() + u64::from(self.player)).is_multiple_of(self.order.cadence) {
             return Vec::new();
         }
         self.thoughts += 1;
-        self.economy
-            .think(view, &self.order, &mut self.rng)
-            .into_iter()
-            .map(|kind| view.command(kind))
-            .collect()
+        let Some(me) = view.me() else {
+            return Vec::new();
+        };
+        let mut stock = me.stockpile;
+        let mut kinds = self
+            .economy
+            .think(view, &self.order, &mut self.rng, &mut stock);
+        // What the economy is saving for the next age is not the army's.
+        for (have, saved) in stock.iter_mut().zip(self.economy.saving()) {
+            *have = (*have - saved).max(0);
+        }
+        kinds.extend(
+            self.military
+                .think(view, &self.order, &mut self.rng, &mut stock),
+        );
+        kinds.into_iter().map(|kind| view.command(kind)).collect()
     }
 
     /// How many times it has thought.
@@ -141,5 +167,8 @@ mod tests {
         assert_eq!(a.difficulty().name(), "Standard");
         assert_eq!(Difficulty::ALL.len(), 4);
         assert_eq!(Difficulty::default(), Difficulty::Standard);
+        assert_eq!(Difficulty::from_name(" hard "), Some(Difficulty::Hard));
+        assert_eq!(Difficulty::from_name("HARDEST"), Some(Difficulty::Hardest));
+        assert_eq!(Difficulty::from_name("medium"), None);
     }
 }

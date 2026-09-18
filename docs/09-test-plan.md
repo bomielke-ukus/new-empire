@@ -390,6 +390,17 @@ head-on case the opponent's first builders found: two walkers ordered
 past each other along one row must step aside and both arrive
 (`TA-PATH-05`); it fails without the separation change.
 
+**Landed in chunk 4:** the military manager and scouting.
+`tools/simrunner/tests/ai_military.rs`: Hard against Easy for twenty
+minutes, Hard's scout has seen at least 40% of the map and Easy's under
+15%, Hard has raised an army and its raids have cost Easy something, Hard
+is ahead in age or villagers, and the match replays; and a Standard
+opponent with three clubmen by its Town Center, raided by two enemy
+clubmen sent at a house, answers the alarm and the raiders die with a
+defender left standing. `crates/ai`'s unit tests pin the compositions and
+the scout's compass. `simrunner ai --difficulty hard,easy` runs mixed
+matches and `--stats` shows each side's soldiers.
+
 **Still to come:** twenty headless AI-vs-AI matches: no panics, no unit
 idle over 60 s with work available, Hard beats Easy at least 18 times in
 20 (`RM-M5-01`).

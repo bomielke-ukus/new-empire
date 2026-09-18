@@ -32,6 +32,17 @@ pub struct BuildOrder {
     /// Whether one gatherer a thought is moved from the resource most over
     /// its share to the one most under it.
     pub rebalances: bool,
+    /// Soldiers to keep, by age.
+    pub army: [u32; 4],
+    /// Soldiers idle at home before a raid goes out; twice this before
+    /// the army walks into the Town Center's arrows.
+    pub attack_size: u32,
+    /// Not before this many ticks does a raid go out.
+    pub attack_by: u64,
+    /// Whether the scout rides the map.
+    pub scouts: bool,
+    /// Watch Towers wanted by the Town Center.
+    pub towers: u32,
 }
 
 /// The buildings that count toward the next age, in the order they are
@@ -63,6 +74,11 @@ impl BuildOrder {
                 headroom: 1,
                 last_age: Age::Tool,
                 rebalances: false,
+                army: [3, 5, 6, 6],
+                attack_size: 4,
+                attack_by: 18_000,
+                scouts: false,
+                towers: 0,
             },
             Difficulty::Standard => BuildOrder {
                 villagers: [8, 16, 22, 26],
@@ -76,6 +92,11 @@ impl BuildOrder {
                 headroom: 3,
                 last_age: Age::Bronze,
                 rebalances: true,
+                army: [4, 10, 16, 20],
+                attack_size: 6,
+                attack_by: 12_000,
+                scouts: true,
+                towers: 0,
             },
             Difficulty::Hard | Difficulty::Hardest => BuildOrder {
                 villagers: [10, 20, 28, 32],
@@ -89,6 +110,11 @@ impl BuildOrder {
                 headroom: 4,
                 last_age: Age::Iron,
                 rebalances: true,
+                army: [6, 14, 24, 30],
+                attack_size: 8,
+                attack_by: 9_000,
+                scouts: true,
+                towers: 1,
             },
         }
     }
@@ -104,6 +130,9 @@ pub struct Economy {
     /// Buildings ordered and not yet seen as sites, with the tick ordered,
     /// so one is not ordered twice while the first is walking to its site.
     ordered: Vec<(KindId, u64)>,
+    /// What is being saved for: the Tool Age's cost while only the cost
+    /// stands in its way. The military keeps its hands off it.
+    saving: Cost,
 }
 
 /// A resource node the manager knows of: in sight, with what is left of
@@ -121,23 +150,31 @@ fn tile(p: Vec2Fx) -> (i32, i32) {
     (p.x.floor(), p.y.floor())
 }
 
-fn afford(stock: &Cost, cost: &Cost) -> bool {
+pub(crate) fn afford(stock: &Cost, cost: &Cost) -> bool {
     stock.iter().zip(cost).all(|(have, need)| have >= need)
 }
 
-fn spend(stock: &mut Cost, cost: &Cost) {
+pub(crate) fn spend(stock: &mut Cost, cost: &Cost) {
     for (have, need) in stock.iter_mut().zip(cost) {
         *have -= need;
     }
 }
 
 impl Economy {
-    /// One thought: the orders for this tick, in order.
+    /// What the Tool Age still needs, while only its cost stands in the
+    /// way; nothing otherwise.
+    pub fn saving(&self) -> Cost {
+        self.saving
+    }
+
+    /// One thought: the orders for this tick, in order. `stock` is what
+    /// there is to spend; what this leaves in it is the military's.
     pub fn think(
         &mut self,
         view: &FoggedView<'_>,
         order: &BuildOrder,
         rng: &mut Rng,
+        stock: &mut Cost,
     ) -> Vec<CommandKind> {
         let mut out = Vec::new();
         let Some(me) = view.me() else {
@@ -160,9 +197,11 @@ impl Economy {
             .filter(|s| s.kind == kinds::VILLAGER && !s.inside)
             .copied()
             .collect();
-        // Spent as orders go out, so two orders in one thought do not both
-        // count the same wood.
-        let mut stock = me.stockpile;
+        // Those sheltering count toward the target too: a raid is not a
+        // reason to train a second workforce.
+        let villagers_all = mine.iter().filter(|s| s.kind == kinds::VILLAGER).count() as u32;
+        // `stock` is spent as orders go out, so two orders in one thought
+        // do not both count the same wood.
         let queued = view.queue(tc.id);
         let queued_villagers = queued
             .iter()
@@ -289,7 +328,7 @@ impl Economy {
             && !pending(&self.ordered, kinds::HOUSE)
         {
             let cost = kinds::info(kinds::HOUSE).cost;
-            if afford(&stock, &cost) {
+            if afford(stock, &cost) {
                 if let Some((x, y)) = place(view, kinds::HOUSE, tc_tile, 3, 9, rng) {
                     if let Some(b) = builder(&villagers, fogged::nav::centre((x, y)), None, &taken)
                     {
@@ -299,7 +338,7 @@ impl Economy {
                             y,
                             ids: vec![b],
                         });
-                        spend(&mut stock, &cost);
+                        spend(stock, &cost);
                         self.ordered.push((kinds::HOUSE, tick));
                         taken.push(b);
                     }
@@ -333,7 +372,7 @@ impl Economy {
             let cost = kinds::info(kinds::FARM).cost;
             if farms_short
                 && farm_sites < 2
-                && afford(&stock, &cost)
+                && afford(stock, &cost)
                 && view.can_build(kinds::FARM).is_ok()
             {
                 if let Some((x, y)) = place(view, kinds::FARM, tc_tile, 2, 7, rng) {
@@ -349,7 +388,7 @@ impl Economy {
                             y,
                             ids: vec![b],
                         });
-                        spend(&mut stock, &cost);
+                        spend(stock, &cost);
                         self.ordered.push((kinds::FARM, tick));
                         taken.push(b);
                     }
@@ -359,16 +398,26 @@ impl Economy {
 
         // ----- The age gate: the buildings the next age needs, then the
         // advance itself.
+        self.saving = [0; 4];
         if me.age.index() < order.last_age.index() {
             if let Some(next) = tech::age_advance(me.age) {
-                if !queued.contains(&Item::Tech(next.id))
-                    && view.can_research(tc.id, next.id).is_ok()
-                {
-                    out.push(CommandKind::Research {
-                        building: tc.id,
-                        tech: next.id,
-                    });
-                    spend(&mut stock, &next.cost);
+                if !queued.contains(&Item::Tech(next.id)) {
+                    match view.can_research(tc.id, next.id) {
+                        Ok(()) => {
+                            out.push(CommandKind::Research {
+                                building: tc.id,
+                                tech: next.id,
+                            });
+                            spend(stock, &next.cost);
+                        }
+                        // Saved for only while the food engine is not
+                        // built: the Tool Age brings the farms. Later
+                        // ages compete with the army for what comes in.
+                        Err(fogged::ResearchError::Unaffordable) if me.age == Age::Stone => {
+                            self.saving = next.cost;
+                        }
+                        Err(_) => {}
+                    }
                 }
             }
             for &kind in AGE_BUILDINGS[age] {
@@ -382,7 +431,7 @@ impl Economy {
                 let cost = kinds::info(kind).cost;
                 let mut with_reserve = cost;
                 with_reserve[Resource::Wood.index()] += HOUSE_RESERVE;
-                if !afford(&stock, &with_reserve) {
+                if !afford(stock, &with_reserve) {
                     break;
                 }
                 // The Storehouse goes by the wood it will take in; the rest
@@ -400,7 +449,7 @@ impl Economy {
                             y,
                             ids: vec![b],
                         });
-                        spend(&mut stock, &cost);
+                        spend(stock, &cost);
                         self.ordered.push((kind, tick));
                         taken.push(b);
                     }
@@ -411,16 +460,16 @@ impl Economy {
 
         // ----- Villagers, while under the target and the queue is short.
         let cost = kinds::info(kinds::VILLAGER).cost;
-        if n + queued_villagers < order.villagers[age]
+        if villagers_all + queued_villagers < order.villagers[age]
             && queued_villagers < 2
-            && afford(&stock, &cost)
+            && afford(stock, &cost)
             && view.can_train(tc.id, kinds::VILLAGER).is_ok()
         {
             out.push(CommandKind::Train {
                 building: tc.id,
                 kind: kinds::VILLAGER,
             });
-            spend(&mut stock, &cost);
+            spend(stock, &cost);
         }
 
         // ----- Idle villagers to the resource furthest below its share.
@@ -500,7 +549,7 @@ impl Economy {
 /// A villager to send to a site near `to`: an idle one, else one gathering
 /// `prefer` (or wood), the nearest first. A villager on a site is left to
 /// finish it, and one in `taken` already has an order this thought.
-fn builder(
+pub(crate) fn builder(
     villagers: &[&Sighting],
     to: Vec2Fx,
     prefer: Option<Resource>,
@@ -524,7 +573,7 @@ fn builder(
 /// A tile to put `kind` on: the first the view accepts on the rings
 /// `min..=max` tiles around `around`, scanned from a corner the dice pick
 /// so two towns are not laid out alike.
-fn place(
+pub(crate) fn place(
     view: &FoggedView<'_>,
     kind: KindId,
     around: (i32, i32),

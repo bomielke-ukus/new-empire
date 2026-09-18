@@ -931,3 +931,43 @@ anticipate:
   buildings, queue and food in sight, and keeps the recording for
   `mapview --replay`, which is how the stall above was found.
 
+## 27. Implementation notes from M5, chunk 4: the military manager and scouting
+
+- **The military spends what the economy leaves.** One thought runs the
+  economy manager first and hands the military the stock it did not
+  spend, less what the economy is saving for the Tool Age (the farms
+  behind it are the food engine; later ages compete with the army for
+  what comes in). A reserve of food and wood stays untouched for the
+  next villager and house. The first version let soldiers eat the Tool
+  Age's 400 food and one Hard opponent sat in the Stone Age for twenty
+  minutes with fifteen hundred wood; the saving rule is the fix.
+- **The scout rides rings** of 14, 22, 30, 40 and 50 tiles round the
+  Town Center, eight compass points each, to the first point on them the
+  view has not yet seen, clamped to the map, and starts over when every
+  point is seen. Passive stance, so it runs when hit. Hard and Standard
+  scout; Easy does not (`docs/02` §12's table). A Hard opponent sees
+  70–80% of a 96-tile map in twenty minutes; Easy sees 5%.
+- **The bell.** `FoggedView::events` passes on the player's own alarms and
+  losses and nothing of anyone else's. `Opponent::think` listens every
+  tick, so an alarm between thoughts is not missed, and answers one at
+  home (within thirty tiles of the Town Center) with every soldier at
+  home, once per alarm.
+- **Composition and targets.** Soldiers are trained to the army target of
+  the age, the kind furthest below its share first, among what a
+  finished building of the side can train now (`roster`), so the Stone
+  Age is clubmen and the Tool Age axemen, bowmen and slingers as their
+  buildings stand. A raid goes out with `attack_size` soldiers idle at
+  home once the order's hour has come, at the nearest enemy building
+  that does not shoot back, in sight or remembered; the army walks into
+  the Town Center's arrows only at twice that. Soldiers idle away from
+  home carry on to the next such target or come home. The first raids
+  went out four at a time at the Town Center and died to it; the sizes
+  above are what stopped that.
+- **A Watch Tower** by the Town Center for Hard, in the Tool Age, when the
+  stone is there; stone is gathered only once food and wood are stocked,
+  so it is late. Walls are not built yet (owed).
+- **Sheltering villagers count.** The economy counted only villagers
+  outside, so a raid that sent them into the Town Center made it train a
+  second workforce (one Easy side reached eighteen villagers against a
+  target of ten). They count wherever they are.
+

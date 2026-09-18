@@ -12,6 +12,7 @@
 //! simrunner battle [--save FILE]
 //! simrunner balance [--matches N] [--seed N] [--dump DIR]
 //! simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--stats] [--save FILE]
+//!                  [--difficulty easy,standard,hard,hardest] (one per player, repeating)
 //! ```
 //!
 //! `golden` is the one CI leans on hardest: it replays the committed corpus
@@ -47,6 +48,7 @@ struct Flags {
     stats: bool,
     timeout: Option<u64>,
     save: Option<String>,
+    difficulty: Option<String>,
     out: Option<String>,
     dir: Option<String>,
     dump: Option<String>,
@@ -100,6 +102,7 @@ fn parse(args: &[String]) -> Result<Flags, String> {
                 f.timeout = Some(v.parse().map_err(|e| format!("--timeout: {e}"))?);
             }
             "--save" => f.save = Some(value(&mut f)?),
+            "--difficulty" => f.difficulty = Some(value(&mut f)?),
             "--out" => f.out = Some(value(&mut f)?),
             "--dir" => f.dir = Some(value(&mut f)?),
             "--dump" => f.dump = Some(value(&mut f)?),
@@ -810,6 +813,9 @@ fn usage(err: &str) -> ExitCode {
     eprintln!("  simrunner battle [--save FILE]");
     eprintln!("  simrunner balance [--matches N] [--seed N] [--dump DIR]");
     eprintln!("  simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--stats] [--save FILE]");
+    eprintln!(
+        "                   [--difficulty easy,standard,hard,hardest] (one per player, repeating)"
+    );
     ExitCode::from(2)
 }
 
@@ -831,6 +837,19 @@ fn ai(f: &Flags) -> ExitCode {
     }
     let players = f.players.unwrap_or(2).clamp(1, sim::MAX_PLAYERS as u8);
     let size = f.size.unwrap_or(96);
+    let difficulties: Vec<ai::Difficulty> = match &f.difficulty {
+        None => vec![ai::Difficulty::Standard],
+        Some(list) => {
+            let mut out = Vec::new();
+            for name in list.split(',') {
+                match ai::Difficulty::from_name(name) {
+                    Some(d) => out.push(d),
+                    None => return usage(&format!("--difficulty: no level called {name}")),
+                }
+            }
+            out
+        }
+    };
     let first = f.seed.unwrap_or(1);
     if first.checked_add(u64::from(matches) - 1).is_none() {
         return usage("seed range overflows");
@@ -848,7 +867,10 @@ fn ai(f: &Flags) -> ExitCode {
         };
         let mut sim = sim::Simulation::new(seed, config);
         let mut opponents: Vec<ai::Opponent> = (0..players)
-            .map(|p| ai::Opponent::new(p, ai::Difficulty::Standard, seed))
+            .map(|p| {
+                let d = difficulties[p as usize % difficulties.len()];
+                ai::Opponent::new(p, d, seed)
+            })
             .collect();
         let mut issued = 0usize;
         while sim.tick() < ticks {
@@ -889,8 +911,22 @@ fn ai(f: &Flags) -> ExitCode {
                     })
                     .count();
                 let me = sim.player(p).expect("a player per side");
+                let soldiers = world
+                    .slots()
+                    .filter(|s| {
+                        let i = s.index();
+                        let k = kinds::info(world.kind[i]);
+                        world.owner[i] == p
+                            && k.mobile
+                            && k.combat.attack > 0
+                            && world.kind[i] != kinds::VILLAGER
+                            && world.kind[i] != kinds::SCOUT
+                            && world.dying[i] == 0
+                    })
+                    .count();
                 let mut line = format!(
-                    "p{p} {:?} {villagers}v {}/{} {:?} explored {}%",
+                    "p{p} {} {:?} {villagers}v {soldiers}s {}/{} {:?} explored {}%",
+                    opponents[p as usize].difficulty().name(),
                     me.age,
                     me.pop,
                     me.pop_cap,

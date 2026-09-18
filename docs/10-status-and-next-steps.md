@@ -23,7 +23,7 @@ Five milestones landed; the vertical slice is beyond its halfway point.
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
-| M5 — An opponent | **In progress** (fog of war and the economy manager landed 2026-09-18; the military manager and the acceptance run not yet) | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
+| M5 — An opponent | **In progress** (fog of war, the economy and military managers landed 2026-09-18; victory, defeat and the acceptance run not yet) | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
@@ -716,12 +716,41 @@ what was done:
   step 4. Hunting is still owed, and would be the biggest single gain to
   the opening.
 
+### Work record: M5 chunk 4 — the military manager and scouting (2026-09-18)
+
+- **What landed.** `crates/ai/src/military.rs`: the scout rides widening
+  rings to ground not yet seen; soldiers are trained to a composition by
+  age from what the side's buildings can train; an alarm at home is
+  answered by every soldier at home; a raid goes out at the order's hour
+  with `attack_size` soldiers to the nearest enemy building that does not
+  shoot back, in sight or remembered, and the army walks into the Town
+  Center's arrows only at twice that; Hard builds a Watch Tower. The
+  military spends what the economy leaves, less what is saved for the
+  Tool Age. `FoggedView::events` passes on the player's own alarms and
+  losses. `simrunner ai --difficulty` runs mixed matches. `docs/04` §27
+  has the notes, including the two things the first version got wrong.
+- **What changed for the player.** Nothing on screen: no opponent is in
+  the app yet (M6's setup screen). Under `simrunner ai`, a Hard opponent
+  now scouts, raids and defends.
+- **Measured.** Hard against Easy on Inland 96 for twenty minutes: Hard
+  sees 70–80% of the map, Easy 5%; Hard ends with 20 villagers, 7–8
+  soldiers standing and the Tool Age; Easy with 10 villagers and 1–2
+  soldiers, having lost houses and villagers to raids. Neither eliminates
+  the other in twenty minutes: the armies are small and raids trade
+  soldiers for houses. Four-player mixed matches run and replay.
+- **Not done, deliberately.** No walls. No counters to what the enemy
+  fields (the composition is fixed by age). No victory or defeat: step 5,
+  which also decides what "beats" means at a time limit, since twenty
+  minutes ends with both Town Centers standing.
+
 ### Resume here next session
 
-**M5 is under way.** Chunks 1–3 (fog, the AI boundary, the economy
-manager) are landed; next is step 4 below: the military manager and
-scouting. The parallel track (§4b) runs on its own branch. Keep the art
-pipeline on the `docs/08` schedule.
+**M5 is under way.** Chunks 1–4 (fog, the AI boundary, the economy and
+military managers) are landed; next is step 5 below: difficulty, victory
+and defeat, and the `RM-M5-01` acceptance run as a CI job, with the
+tuning it will take for Hard to beat Easy eighteen times in twenty. The
+parallel track (§4b) runs on its own branch. Keep the art pipeline on the
+`docs/08` schedule.
 
 ## 4. What M4 completed — Combat
 
@@ -780,10 +809,11 @@ each step shippable and tested headless before it has a sprite:
    above: villagers to resources by share, houses ahead of the cap, farms
    once the food in sight is short, the age gate met and taken, a build
    order per difficulty; and the head-on walking stall it found, fixed.
-4. **The military manager and scouting.** The scout explores; the
-   Barracks, Range and Stable train to a composition; defence answers
-   the alarm; raids and attacks go out as attack-moves in formation;
-   walls and towers by difficulty.
+4. **The military manager and scouting.** **Done 2026-09-18**, record
+   above: the scout rides rings to unseen ground; soldiers to a
+   composition by age; the alarm answered at home; raids at soft targets
+   and the army at the Town Center by size; a tower for Hard. Walls are
+   owed.
 5. **Difficulty, victory and defeat.** Four levels, elimination and
    resign, and the acceptance run: `RM-M5-01` as a CI job, the twenty
    matches recorded so a regression is a diff.

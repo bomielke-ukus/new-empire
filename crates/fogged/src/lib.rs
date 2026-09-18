@@ -41,6 +41,25 @@ pub enum Job {
     Unknown,
 }
 
+/// Something that happened to the player's own side this tick, as the
+/// bell and the minimap tell a player. Nothing of anyone else's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Event {
+    /// One of the player's things was hit and the side had not been told
+    /// lately.
+    Alarm {
+        /// Where.
+        pos: Vec2Fx,
+    },
+    /// One of the player's things died or fell.
+    Loss {
+        /// What.
+        kind: KindId,
+        /// Where.
+        pos: Vec2Fx,
+    },
+}
+
 /// A unit or building in sight, or one of the player's own anywhere.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Sighting {
@@ -230,6 +249,23 @@ impl<'a> FoggedView<'a> {
     /// The player's villagers with nothing to do.
     pub fn idle_villagers(&self) -> Vec<EntityId> {
         self.sim.idle_villagers(self.player)
+    }
+
+    /// What happened to the player's own side during the last tick.
+    pub fn events(&self) -> Vec<Event> {
+        self.sim
+            .events()
+            .iter()
+            .filter_map(|e| match *e {
+                sim::Event::Alarm { player, pos } if player == self.player => {
+                    Some(Event::Alarm { pos })
+                }
+                sim::Event::Death { kind, owner, pos } if owner == self.player => {
+                    Some(Event::Loss { kind, pos })
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// What one of the player's own buildings has queued, head first;
