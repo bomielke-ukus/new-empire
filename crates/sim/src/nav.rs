@@ -22,6 +22,7 @@ use crate::map::TileMap;
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
+use std::collections::BTreeMap;
 use std::collections::{BinaryHeap, VecDeque};
 
 /// A tile coordinate.
@@ -260,6 +261,48 @@ impl NavGrid {
                     }
                     let (tx, ty) = (x + dx, y + dy);
                     if ok(tx, ty) {
+                        let d = (dx as i64) * (dx as i64) + (dy as i64) * (dy as i64);
+                        if best.is_none_or(|(bd, _)| d < bd) {
+                            best = Some((d, (tx, ty)));
+                        }
+                    }
+                }
+            }
+            if let Some((_, t)) = best {
+                return Some(t);
+            }
+        }
+        None
+    }
+
+    /// The nearest passable tile to `(x, y)` within `radius` that is in the
+    /// roomiest component there: the one with the most passable tiles
+    /// inside the radius. A unit re-seated by a building going up must not
+    /// be dropped into a one-tile pocket between farms when open ground is
+    /// a tile further. Deterministic: ties go to the lowest label.
+    pub fn nearest_open(&self, x: i32, y: i32, radius: i32) -> Option<Tile> {
+        let mut sizes: BTreeMap<u16, u32> = BTreeMap::new();
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let (tx, ty) = (x + dx, y + dy);
+                if self.passable(tx, ty) {
+                    *sizes.entry(self.component(tx, ty)).or_insert(0) += 1;
+                }
+            }
+        }
+        let want = sizes
+            .iter()
+            .max_by_key(|(label, n)| (**n, core::cmp::Reverse(**label)))
+            .map(|(label, _)| *label)?;
+        for r in 0..=radius {
+            let mut best: Option<(i64, Tile)> = None;
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs().max(dy.abs()) != r {
+                        continue;
+                    }
+                    let (tx, ty) = (x + dx, y + dy);
+                    if self.passable(tx, ty) && self.component(tx, ty) == want {
                         let d = (dx as i64) * (dx as i64) + (dy as i64) * (dy as i64);
                         if best.is_none_or(|(bd, _)| d < bd) {
                             best = Some((d, (tx, ty)));

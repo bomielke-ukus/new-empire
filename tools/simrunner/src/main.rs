@@ -13,6 +13,8 @@
 //! simrunner balance [--matches N] [--seed N] [--dump DIR]
 //! simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--stats] [--save FILE]
 //!                  [--difficulty easy,standard,hard,hardest] (one per player, repeating)
+//! simrunner versus [--matches N] [--seed N] [--ticks N] [--size N] [--difficulty hard,easy]
+//!                  [--expect FILE] [--update] [--min-wins N] (the RM-M5-01 acceptance)
 //! ```
 //!
 //! `golden` is the one CI leans on hardest: it replays the committed corpus
@@ -49,6 +51,8 @@ struct Flags {
     timeout: Option<u64>,
     save: Option<String>,
     difficulty: Option<String>,
+    expect: Option<String>,
+    min_wins: Option<u32>,
     out: Option<String>,
     dir: Option<String>,
     dump: Option<String>,
@@ -103,6 +107,11 @@ fn parse(args: &[String]) -> Result<Flags, String> {
             }
             "--save" => f.save = Some(value(&mut f)?),
             "--difficulty" => f.difficulty = Some(value(&mut f)?),
+            "--expect" => f.expect = Some(value(&mut f)?),
+            "--min-wins" => {
+                let v = value(&mut f)?;
+                f.min_wins = Some(v.parse().map_err(|e| format!("--min-wins: {e}"))?);
+            }
             "--out" => f.out = Some(value(&mut f)?),
             "--dir" => f.dir = Some(value(&mut f)?),
             "--dump" => f.dump = Some(value(&mut f)?),
@@ -486,6 +495,13 @@ fn randomised_scenario(seed: u64, ticks: u64) -> Scenario {
                 1 => [5000; 4],
                 _ => sim::DEFAULT_STOCKPILE,
             },
+            // Now and then a side with the Hardest bonus, and once in a
+            // while the most the setup screen allows.
+            gather_bonus_pct: match r.below(4) {
+                0 => vec![0, sim::HARDEST_GATHER_BONUS_PCT],
+                1 => vec![sim::MAX_GATHER_BONUS_PCT; 8],
+                _ => Vec::new(),
+            },
         },
         style,
     }
@@ -816,6 +832,10 @@ fn usage(err: &str) -> ExitCode {
     eprintln!(
         "                   [--difficulty easy,standard,hard,hardest] (one per player, repeating)"
     );
+    eprintln!("  simrunner versus [--matches N] [--seed N] [--ticks N] [--size N] [--difficulty hard,easy]");
+    eprintln!(
+        "                   [--expect FILE] [--update] [--min-wins N] (the RM-M5-01 acceptance)"
+    );
     ExitCode::from(2)
 }
 
@@ -1001,6 +1021,113 @@ fn ai(f: &Flags) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The M5 acceptance (`RM-M5-01`): `--matches` between the sides of
+/// `--difficulty` (Hard against Easy by default), each to elimination or
+/// the time limit, invariants checked every tick, no villager left idle
+/// with work in sight. The first side must win at least `--min-wins`
+/// (eighteen of twenty by default). With `--expect FILE` every outcome
+/// line must match the record; `--update` rewrites it.
+fn versus(f: &Flags) -> ExitCode {
+    use simrunner::versus::{self, Setup};
+    let matches = f.matches.unwrap_or(20);
+    if matches == 0 || matches > 1000 {
+        return usage("--matches must be 1..=1000");
+    }
+    let ticks = f.ticks.unwrap_or(36_000);
+    if ticks == 0 || ticks > sim::Replay::MAX_TICKS {
+        return usage("--ticks must be 1..=MAX_TICKS");
+    }
+    let first = f.seed.unwrap_or(1);
+    if first.checked_add(u64::from(matches) - 1).is_none() {
+        return usage("seed range overflows");
+    }
+    let difficulties: Vec<ai::Difficulty> = match &f.difficulty {
+        None => vec![ai::Difficulty::Hard, ai::Difficulty::Easy],
+        Some(list) => {
+            let mut out = Vec::new();
+            for name in list.split(',') {
+                match ai::Difficulty::from_name(name) {
+                    Some(d) => out.push(d),
+                    None => return usage(&format!("--difficulty: no level called {name}")),
+                }
+            }
+            out
+        }
+    };
+    if difficulties.len() < 2 {
+        return usage("--difficulty needs at least two sides");
+    }
+    let min_wins = f.min_wins.unwrap_or(matches * 18 / 20);
+    let expected: Vec<String> = match (&f.expect, f.update) {
+        (Some(path), false) => match std::fs::read_to_string(path) {
+            Ok(text) => text
+                .lines()
+                .filter(|l| l.starts_with("seed "))
+                .map(str::to_string)
+                .collect(),
+            Err(e) => return fail(&format!("{path}: {e}")),
+        },
+        _ => Vec::new(),
+    };
+    let start = Instant::now();
+    let mut lines = Vec::new();
+    let mut wins = 0u32;
+    let mut mismatches = 0u32;
+    for n in 0..matches {
+        let setup = Setup {
+            seed: first + u64::from(n),
+            ticks,
+            size: f.size.unwrap_or(96),
+            difficulties: difficulties.clone(),
+        };
+        let outcome = match versus::run(&setup) {
+            Ok(o) => o,
+            Err(e) => return fail(&e),
+        };
+        if outcome.winner == Some(0) {
+            wins += 1;
+        }
+        let line = outcome.line();
+        match expected.get(n as usize) {
+            Some(want) if *want != line => {
+                mismatches += 1;
+                println!("{line}\n  expected: {want}");
+            }
+            _ => println!("{line}"),
+        }
+        lines.push(line);
+    }
+    let names: Vec<&str> = difficulties.iter().map(|d| d.name()).collect();
+    println!(
+        "{} wins {wins}/{matches} against {} (need {min_wins}) in {:.1}s",
+        names[0],
+        names[1..].join(", "),
+        start.elapsed().as_secs_f64()
+    );
+    if let (Some(path), true) = (&f.expect, f.update) {
+        let text = format!(
+            "# `simrunner versus`: {matches} matches, {ticks} ticks, {} against {}, one line each.\n# Rewrite with --update; a changed line is a changed opponent or simulation.\n{}\n",
+            names[0],
+            names[1..].join(", "),
+            lines.join("\n")
+        );
+        if let Err(e) = std::fs::write(path, text) {
+            return fail(&format!("{path}: {e}"));
+        }
+        println!("wrote {path}");
+    }
+    if mismatches > 0 {
+        return fail(&format!("{mismatches} outcome(s) differ from the record"));
+    }
+    if wins < min_wins {
+        return fail(&format!(
+            "{} won {wins} of {matches}; {min_wins} needed",
+            names[0]
+        ));
+    }
+    ExitCode::SUCCESS
+}
+
 fn fail(msg: &str) -> ExitCode {
     eprintln!("{msg}");
     ExitCode::FAILURE
@@ -1027,6 +1154,7 @@ fn main() -> ExitCode {
         "battle" => battle(&flags),
         "balance" => balance(&flags),
         "ai" => ai(&flags),
+        "versus" => versus(&flags),
         other => usage(&format!("unknown subcommand {other}")),
     }
 }

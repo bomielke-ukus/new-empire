@@ -104,6 +104,10 @@ pub enum Banner {
     AgeUp(sim::Age),
     /// Combat needs attention; it does not unlock anything.
     UnderAttack,
+    /// The last side standing (`docs/02` §10).
+    Victory,
+    /// Out of the match: nothing left to fight with, or resigned.
+    Defeat,
 }
 
 impl Banner {
@@ -111,6 +115,8 @@ impl Banner {
         match self {
             Self::AgeUp(age) => age.name().to_uppercase(),
             Self::UnderAttack => "UNDER ATTACK".into(),
+            Self::Victory => "VICTORY".into(),
+            Self::Defeat => "DEFEAT".into(),
         }
     }
 
@@ -118,6 +124,8 @@ impl Banner {
         match self {
             Self::AgeUp(_) => Some("NEW BUILDINGS AND TECHNOLOGIES AVAILABLE"),
             Self::UnderAttack => None,
+            Self::Victory => Some("EVERY OTHER SIDE IS OUT"),
+            Self::Defeat => Some("NOTHING LEFT TO FIGHT WITH"),
         }
     }
 }
@@ -1734,6 +1742,21 @@ mod tests {
         assert!(banner.sprites[none.sprites.len()..]
             .iter()
             .any(|s| s.y >= subtitle_y));
+        for outcome in [Banner::Victory, Banner::Defeat] {
+            let decided = Hud::build(
+                &atlas,
+                &HudInput {
+                    banner: Some(outcome),
+                    ..base
+                },
+            );
+            assert!(
+                decided.sprites[none.sprites.len()..]
+                    .iter()
+                    .any(|s| s.y >= subtitle_y),
+                "{outcome:?} has a subtitle"
+            );
+        }
         assert!(
             alarm.sprites[none.sprites.len()..]
                 .iter()

@@ -268,6 +268,25 @@ handle was learned by looking, and a stale one does nothing. What the
 handle cannot tell is whether the thing is still there, so the opponent
 walks to a memory before gathering from it.
 
+### D25 — At a time limit the higher score wins, and the score is what was gathered plus what stands
+**Date:** 2026-09-18
+
+`docs/02` §10 says a match with a time limit goes to the highest score
+and does not say what the score is. It is now: everything a side has
+gathered, plus the cost of every unit and finished building it has
+standing. Gathering counts once; what was built with it counts again for
+as long as it stands, so a side that lost its houses to a raid is behind
+one that kept them. Kills are not counted, because the simulation does
+not record who dealt a blow and the presentation should not have to. The
+M5 acceptance run decides its matches this way when thirty minutes end
+with both Town Centers up, which in the first twenty is every match; the
+same rule will decide a skirmish with a time limit in M6. A draw is
+possible and is recorded as one.
+
+The Hardest difficulty's declared advantage is a 25% gather bonus, set on
+the match by whoever sets it up (`SimConfig::gather_bonus_pct`) and shown
+in M6's setup screen, never taken by the opponent's code.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?

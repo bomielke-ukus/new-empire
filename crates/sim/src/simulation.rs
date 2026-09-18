@@ -85,7 +85,17 @@ pub struct SimConfig {
     /// What every player starts with, indexed by [`Resource::index`].
     #[serde(default = "default_stockpile")]
     pub starting_stockpile: Cost,
+    /// A gather-rate bonus per player, in percent, for the difficulty that
+    /// is allowed one (`docs/02` §12, Hardest) and declares it. Players
+    /// past the end of the list get none.
+    #[serde(default)]
+    pub gather_bonus_pct: Vec<i32>,
 }
+
+/// The bonus a Hardest opponent is set up with, declared in the UI.
+pub const HARDEST_GATHER_BONUS_PCT: i32 = 25;
+/// The most a gather bonus may be.
+pub const MAX_GATHER_BONUS_PCT: i32 = 100;
 
 /// The standard opening stockpile: food, wood, stone, gold.
 pub const DEFAULT_STOCKPILE: Cost = [200, 200, 100, 100];
@@ -105,6 +115,7 @@ impl Default for SimConfig {
             wander: true,
             pop_cap_max: 75,
             starting_stockpile: DEFAULT_STOCKPILE,
+            gather_bonus_pct: Vec::new(),
         }
     }
 }
@@ -128,6 +139,11 @@ impl SimConfig {
                 return Err(ConfigError::NegativeStockpile { resource, amount });
             }
         }
+        for (player, &percent) in self.gather_bonus_pct.iter().enumerate() {
+            if !(0..=MAX_GATHER_BONUS_PCT).contains(&percent) {
+                return Err(ConfigError::BonusOutOfRange { player, percent });
+            }
+        }
         Ok(())
     }
 }
@@ -147,6 +163,13 @@ pub enum ConfigError {
         /// The value offered.
         amount: i32,
     },
+    /// A gather bonus is below zero or above [`MAX_GATHER_BONUS_PCT`].
+    BonusOutOfRange {
+        /// Which player.
+        player: usize,
+        /// The value offered.
+        percent: i32,
+    },
 }
 
 impl core::fmt::Display for ConfigError {
@@ -161,6 +184,10 @@ impl core::fmt::Display for ConfigError {
             ConfigError::NegativeStockpile { resource, amount } => {
                 write!(f, "starting stockpile entry {resource} is {amount}")
             }
+            ConfigError::BonusOutOfRange { player, percent } => write!(
+                f,
+                "player {player}'s gather bonus {percent}% is outside 0..={MAX_GATHER_BONUS_PCT}"
+            ),
         }
     }
 }
@@ -173,6 +200,9 @@ impl HashState for SimConfig {
         h.write_u16(self.map.size);
         h.write_u8(self.map.players);
         h.write_u32(self.max_entities);
+        for &b in &self.gather_bonus_pct {
+            h.write_i32(b);
+        }
         h.write_bool(self.wander);
         h.write_u32(self.pop_cap_max);
         for v in self.starting_stockpile {
@@ -841,9 +871,89 @@ impl Simulation {
     /// A player's technology modifiers; the defaults for an owner the match
     /// does not have (Gaia, or a scenario's spare player).
     pub fn modifiers(&self, p: PlayerId) -> Modifiers {
-        self.players
+        let mut m = self
+            .players
             .get(p as usize)
-            .map_or_else(Modifiers::default, |pl| pl.modifiers)
+            .map_or_else(Modifiers::default, |pl| pl.modifiers);
+        if let Some(&bonus) = self.config.gather_bonus_pct.get(p as usize) {
+            for r in m.gather_rate_pct.iter_mut() {
+                *r += bonus;
+            }
+        }
+        m
+    }
+
+    // ----- victory and defeat ----------------------------------------------
+
+    /// True while a player is in the match (`docs/02` §10 `GD-WIN-01`):
+    /// not resigned, and with a living unit or a finished building that
+    /// can make one.
+    pub fn standing(&self, p: PlayerId) -> bool {
+        let Some(player) = self.players.get(p as usize) else {
+            return false;
+        };
+        if player.resigned {
+            return false;
+        }
+        self.world.slots().any(|s| {
+            let i = s.index();
+            if self.world.owner[i] != p || self.world.dying[i] > 0 {
+                return false;
+            }
+            let k = self.world.kind[i];
+            let info = kinds::info(k);
+            info.mobile
+                || (self.world.construction[i].is_none()
+                    && (info.trains || k == kinds::TOWN_CENTER))
+        })
+    }
+
+    /// The last side standing, once every other side is out. `None` while
+    /// two or more stand, and in a match with one side.
+    pub fn winner(&self) -> Option<PlayerId> {
+        if self.players.len() < 2 {
+            return None;
+        }
+        let mut standing = (0..self.players.len() as PlayerId).filter(|&p| self.standing(p));
+        let first = standing.next()?;
+        standing.next().is_none().then_some(first)
+    }
+
+    /// True once the match is decided: a winner, or nobody left.
+    pub fn over(&self) -> bool {
+        self.players.len() >= 2
+            && (0..self.players.len() as PlayerId)
+                .filter(|&p| self.standing(p))
+                .count()
+                <= 1
+    }
+
+    /// A side's score (`docs/02` §10): everything it has gathered plus
+    /// the cost of everything it has standing, units and finished
+    /// buildings. Decides a match at a time limit.
+    pub fn score(&self, p: PlayerId) -> u64 {
+        let Some(player) = self.players.get(p as usize) else {
+            return 0;
+        };
+        let gathered: i64 = player.gathered.iter().map(|&v| i64::from(v)).sum();
+        let standing: i64 = self
+            .world
+            .slots()
+            .map(|s| s.index())
+            .filter(|&i| {
+                self.world.owner[i] == p
+                    && self.world.dying[i] == 0
+                    && self.world.construction[i].is_none()
+            })
+            .map(|i| {
+                kinds::info(self.world.kind[i])
+                    .cost
+                    .iter()
+                    .map(|&c| i64::from(c))
+                    .sum::<i64>()
+            })
+            .sum();
+        (gathered + standing).max(0) as u64
     }
 
     // ----- input -----------------------------------------------------------
@@ -1154,7 +1264,16 @@ impl Simulation {
 
     fn apply(&mut self, cmd: Command) {
         let p = cmd.player;
+        // A side that has given up gives no more orders.
+        if self.players.get(p as usize).is_some_and(|pl| pl.resigned) {
+            return;
+        }
         match cmd.kind {
+            CommandKind::Resign => {
+                if let Some(pl) = self.players.get_mut(p as usize) {
+                    pl.resigned = true;
+                }
+            }
             CommandKind::Spawn { kind, pos } => {
                 if let Some(id) = self.spawn(kind, p, pos) {
                     if kind == kinds::GATE {
@@ -2406,6 +2525,8 @@ impl Simulation {
 
     /// Anything standing where it cannot stand steps to the nearest open tile.
     fn keep_off_blocked(&mut self) {
+        // Labels must be current: a site went up this tick.
+        self.nav.refresh();
         for slot in self.world.slots().collect::<Vec<_>>() {
             let i = slot.index();
             if !kinds::info(self.world.kind[i]).mobile
@@ -2420,7 +2541,7 @@ impl Simulation {
                 self.world.pos[i] = pos;
                 continue;
             }
-            if let Some(free) = self.nav.nearest_passable(t.0, t.1, 6, None) {
+            if let Some(free) = self.nav.nearest_open(t.0, t.1, 6) {
                 self.world.pos[i] = nav::centre(free);
                 if let Some(n) = self.world.nav[i].as_mut() {
                     if n.state == NavState::Walking {

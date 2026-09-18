@@ -133,6 +133,11 @@ pub struct Economy {
     /// What is being saved for: the Tool Age's cost while only the cost
     /// stands in its way. The military keeps its hands off it.
     saving: Cost,
+    /// Villagers sent to a node last thought, so a villager still idle now
+    /// tells us the node cannot be gathered from.
+    sent: Vec<(EntityId, EntityId)>,
+    /// Nodes not to send anyone to, and until when.
+    avoid: Vec<(EntityId, u64)>,
 }
 
 /// A resource node the manager knows of: in sight, with what is left of
@@ -221,6 +226,24 @@ impl Economy {
             ordered.iter().any(|(k, _)| *k == kind) || mine.iter().any(|s| s.kind == kind && s.site)
         };
 
+        // A villager sent to a node last thought and idle now could not
+        // gather from it: nobody is sent there again for a while.
+        self.avoid.retain(|(_, until)| *until > tick);
+        for (v, node) in std::mem::take(&mut self.sent) {
+            if villagers.iter().any(|s| s.id == v && s.job == Job::Idle) {
+                self.avoid.push((node, tick + 2400));
+            }
+        }
+        let avoided = |id: EntityId| self.avoid.iter().any(|(n, _)| *n == id);
+        // A node can be gathered from only if there is ground to stand on
+        // beside it: a tree inside a forest is not one to send anyone to.
+        let approachable = |pos: Vec2Fx| {
+            let (x, y) = tile(pos);
+            (-1..=1).any(|dx| {
+                (-1..=1)
+                    .any(|dy| (dx != 0 || dy != 0) && view.passable(x + dx, y + dy) == Some(true))
+            })
+        };
         // What is known to gather from: nodes in sight, own finished farms,
         // and nodes remembered out of sight. Animals are food on the hoof,
         // and there is no hunting yet.
@@ -231,7 +254,9 @@ impl Economy {
                 let (resource, left) = s.resource?;
                 let gatherable = !info.mobile
                     && left > 0
-                    && (s.owner == kinds::GAIA || (s.owner == view.player() && !s.site));
+                    && (s.owner == kinds::GAIA || (s.owner == view.player() && !s.site))
+                    && !avoided(s.id)
+                    && approachable(s.pos);
                 gatherable.then_some(Node {
                     id: s.id,
                     resource,
@@ -242,11 +267,16 @@ impl Economy {
             .collect();
         for r in view.remembered() {
             if let Some((resource, _)) = kinds::info(r.kind).resource {
-                if r.owner == kinds::GAIA && !nodes.iter().any(|n| n.id == r.id) {
+                let pos = fogged::nav::centre(r.tile);
+                if r.owner == kinds::GAIA
+                    && !nodes.iter().any(|n| n.id == r.id)
+                    && !avoided(r.id)
+                    && approachable(pos)
+                {
                     nodes.push(Node {
                         id: r.id,
                         resource,
-                        pos: fogged::nav::centre(r.tile),
+                        pos,
                         left: None,
                     });
                 }
@@ -493,6 +523,7 @@ impl Economy {
             };
             if let Some(node) = nearest(r, v.pos) {
                 out.push(go(v.id, &node));
+                self.sent.push((v.id, node.id));
                 have[r.index()] += 1;
             }
         }
@@ -596,12 +627,64 @@ pub(crate) fn place(
         for k in 0..ring.len() {
             let (dx, dy) = ring[(start + k) % ring.len()];
             let (x, y) = (around.0 + dx, around.1 + dy);
-            if view.can_place(kind, x, y).is_ok() {
+            if view.can_place(kind, x, y).is_ok() && !seals_a_pocket(view, kind, x, y) {
                 return Some((x, y));
             }
         }
     }
     None
+}
+
+/// Open ground smaller than this beside a new building is a pocket.
+const POCKET_TILES: usize = 48;
+
+/// True if `kind` on `(x, y)` would shut some open ground beside it into a
+/// pocket of fewer than [`POCKET_TILES`] tiles. Farms packed round a Town
+/// Center did that to villagers standing between them, who then stood
+/// idle for the rest of the match with every order failing at once. Each
+/// open tile touching the footprint is flooded, four ways, as if the
+/// building stood; a flood that runs out before the limit is a pocket.
+fn seals_a_pocket(view: &FoggedView<'_>, kind: KindId, x: i32, y: i32) -> bool {
+    let fp = kinds::info(kind).footprint.max(1) as i32;
+    let footprint = fogged::nav::footprint_tiles(x, y, fp);
+    let open = |t: (i32, i32)| !footprint.contains(&t) && view.passable(t.0, t.1) == Some(true);
+    let mut checked: Vec<(i32, i32)> = Vec::new();
+    for &(fx, fy) in &footprint {
+        for (dx, dy) in [
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
+        ] {
+            let start = (fx + dx, fy + dy);
+            if !open(start) || checked.contains(&start) {
+                continue;
+            }
+            let mut seen = vec![start];
+            let mut queue = vec![start];
+            while let Some((cx, cy)) = queue.pop() {
+                if seen.len() >= POCKET_TILES {
+                    break;
+                }
+                for (ex, ey) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                    let n = (cx + ex, cy + ey);
+                    if open(n) && !seen.contains(&n) {
+                        seen.push(n);
+                        queue.push(n);
+                    }
+                }
+            }
+            if seen.len() < POCKET_TILES {
+                return true;
+            }
+            checked.extend(seen);
+        }
+    }
+    false
 }
 
 #[cfg(test)]

@@ -41,6 +41,7 @@ fn any_config() -> impl Strategy<Value = SimConfig> {
                     wander,
                     pop_cap_max,
                     starting_stockpile,
+                    gather_bonus_pct: Vec::new(),
                 }
             },
         )

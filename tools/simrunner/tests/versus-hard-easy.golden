@@ -1,0 +1,22 @@
+# `simrunner versus`: 20 matches, 36000 ticks, Hard against Easy, one line each.
+# Rewrite with --update; a changed line is a changed opponent or simulation.
+seed 1 ticks 36000 winner p0 by Score scores 13151,4675 hash 658c3e6f45258f62
+seed 2 ticks 36000 winner p0 by Score scores 10907,4313 hash 455dface93a9f2b0
+seed 3 ticks 36000 winner p0 by Score scores 12352,4619 hash 813539d61322f289
+seed 4 ticks 36000 winner p0 by Score scores 11409,4307 hash 19e9d71f06ab7d65
+seed 5 ticks 36000 winner p0 by Score scores 12461,4778 hash 71dbb7d25fef135b
+seed 6 ticks 36000 winner p0 by Score scores 10907,4828 hash 6966afb99c85522b
+seed 7 ticks 36000 winner p0 by Score scores 11777,4885 hash d21bcd9614967abf
+seed 8 ticks 36000 winner p0 by Score scores 12768,5851 hash b0763349b0d44354
+seed 9 ticks 36000 winner p0 by Score scores 13478,6545 hash 3d1f5ecf702dd762
+seed 10 ticks 36000 winner p0 by Score scores 9536,3986 hash 30e02522731b0464
+seed 11 ticks 36000 winner p0 by Score scores 13009,5522 hash fa25ffdd50d404cd
+seed 12 ticks 36000 winner p0 by Score scores 13525,5025 hash 7390b896fac5f414
+seed 13 ticks 36000 winner p0 by Score scores 13231,5703 hash 48ee65f1b7dbe124
+seed 14 ticks 36000 winner p0 by Score scores 12194,4923 hash 230e95c0b73415e2
+seed 15 ticks 36000 winner p0 by Score scores 9858,4939 hash f599fd8a0eeab2c9
+seed 16 ticks 36000 winner p0 by Score scores 10712,4861 hash 20e67c0c7163cec0
+seed 17 ticks 36000 winner p0 by Score scores 11656,5113 hash 6c56d8f42dcca60c
+seed 18 ticks 36000 winner p0 by Score scores 13385,7075 hash 07705a549388733c
+seed 19 ticks 36000 winner p0 by Score scores 10832,2684 hash 2989efeaf7785468
+seed 20 ticks 36000 winner p0 by Score scores 14269,4680 hash bb0807e9d574ea4e

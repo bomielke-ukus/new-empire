@@ -401,9 +401,21 @@ defender left standing. `crates/ai`'s unit tests pin the compositions and
 the scout's compass. `simrunner ai --difficulty hard,easy` runs mixed
 matches and `--stats` shows each side's soldiers.
 
-**Still to come:** twenty headless AI-vs-AI matches: no panics, no unit
-idle over 60 s with work available, Hard beats Easy at least 18 times in
-20 (`RM-M5-01`).
+**Landed in chunk 5:** victory, defeat and the acceptance run.
+`crates/sim/tests/behaviour_victory.rs` (`GD-WIN-01`): a side with a house
+and nothing else is out and the other has won; a lone villager or a lone
+Town Center keeps a side in; resigning is defeat, silences the side and
+replays; the score counts what was gathered and what stands; the gather
+bonus is a match setting the setup screen bounds. `simrunner versus` is
+the `RM-M5-01` run: twenty matches, Hard against Easy, thirty minutes
+each, invariants every tick, a villager idle for sixty seconds with a
+resource in sight counted as stuck, one line per match recorded in
+`tools/simrunner/tests/versus-hard-easy.golden`; the `acceptance` CI job
+plays all twenty against the record and needs eighteen Hard wins.
+`tools/simrunner/tests/ai_versus.rs` plays the first recorded match in
+full and requires the recorded line, and shows a short match decided on
+score and the same setup playing the same match. The first record: Hard
+20 of 20, all on score.
 
 ### Interface — M2–M6
 

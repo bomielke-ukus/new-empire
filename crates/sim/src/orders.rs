@@ -577,6 +577,10 @@ pub struct Player {
     pub researched: Vec<TechId>,
     /// Whether exhausted farms are reseeded automatically.
     pub auto_reseed: bool,
+    /// Has given up: out of the match, and its orders are ignored
+    /// (`docs/02` §10).
+    #[serde(default)]
+    pub resigned: bool,
 }
 
 impl Player {
@@ -596,6 +600,7 @@ impl Player {
             modifiers: Modifiers::default(),
             researched: Vec::new(),
             auto_reseed: true,
+            resigned: false,
         }
     }
 
@@ -664,6 +669,7 @@ impl HashState for Player {
             h.write_u16(*t);
         }
         h.write_bool(self.auto_reseed);
+        h.write_bool(self.resigned);
     }
 }
 

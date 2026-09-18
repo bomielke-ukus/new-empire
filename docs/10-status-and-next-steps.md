@@ -23,7 +23,7 @@ Five milestones landed; the vertical slice is beyond its halfway point.
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
-| M5 — An opponent | **In progress** (fog of war, the economy and military managers landed 2026-09-18; victory, defeat and the acceptance run not yet) | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
+| M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, on score, in CI |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
@@ -743,13 +743,41 @@ what was done:
   which also decides what "beats" means at a time limit, since twenty
   minutes ends with both Town Centers standing.
 
+### Work record: M5 chunk 5 — victory, defeat and the acceptance run (2026-09-18)
+
+- **What landed.** Conquest (`GD-WIN-01`): `Simulation::standing`,
+  `winner`, `over` and `score`, `CommandKind::Resign`, the victory and
+  defeat banners in the app. The fourth difficulty: Hardest is Hard with
+  a declared 25% gather bonus set on the match (`docs/07` D25). The
+  acceptance run: `simrunner versus`, its record
+  `tools/simrunner/tests/versus-hard-easy.golden`, the `acceptance` CI
+  job (`RM-M5-01`), and the test that plays the first recorded match.
+  Two stalls the run found, fixed: a villager sent to a tree with no
+  ground beside it, and villagers shut into pockets between farms (the
+  simulation re-seats a displaced unit into open ground and the manager
+  refuses a placement that seals a pocket). `docs/04` §28 has the notes.
+- **What changed for the player.** The match ends: VICTORY when every
+  other side is out, DEFEAT when yours is. Two units walking through a
+  site going up are no longer dropped into a pocket between buildings.
+- **Measured.** Twenty matches, Hard against Easy, thirty minutes each,
+  in 86 s of release time: Hard wins 20 of 20, every one on score, none
+  by elimination. Scores run 9,500–14,300 to 2,700–7,100. No invariant
+  broke and no villager stood idle with work in sight.
+- **Not done, deliberately.** No match is won by taking the Town Center:
+  the armies are too small and raids trade soldiers for houses. The
+  opponent we want ends a match; the one we have wins on points. No
+  counters to what the enemy fields, no walls, no hunting, no resign
+  key in the app (M6's menu). The nightly job could run more seeds and
+  longer limits than CI's twenty.
+
 ### Resume here next session
 
-**M5 is under way.** Chunks 1–4 (fog, the AI boundary, the economy and
-military managers) are landed; next is step 5 below: difficulty, victory
-and defeat, and the `RM-M5-01` acceptance run as a CI job, with the
-tuning it will take for Hard to beat Easy eighteen times in twenty. The
-parallel track (§4b) runs on its own branch. Keep the art pipeline on the
+**M5 is landed; M6 (the game shell) is next**, per `docs/06`: a setup
+screen with difficulty and the declared Hardest bonus, victory and defeat
+on a results screen, save and load, replay playback. Before it, one
+tuning pass on the opponent is worth a chunk of its own: an army that can
+end a match, so the acceptance record shows eliminations. The parallel
+track (§4b) runs on its own branch. Keep the art pipeline on the
 `docs/08` schedule.
 
 ## 4. What M4 completed — Combat
@@ -814,9 +842,10 @@ each step shippable and tested headless before it has a sprite:
    composition by age; the alarm answered at home; raids at soft targets
    and the army at the Town Center by size; a tower for Hard. Walls are
    owed.
-5. **Difficulty, victory and defeat.** Four levels, elimination and
-   resign, and the acceptance run: `RM-M5-01` as a CI job, the twenty
-   matches recorded so a regression is a diff.
+5. **Difficulty, victory and defeat.** **Done 2026-09-18**, record
+   above: conquest, resign, the score at a time limit, Hardest's declared
+   bonus, `simrunner versus` with its record and the `acceptance` CI job;
+   Hard 20 of 20 on score.
 
 ### The parallel track
 

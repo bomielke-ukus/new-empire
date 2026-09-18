@@ -363,7 +363,15 @@ impl App {
             player: ME,
             elapsed_ms: ms as u32,
         });
-        let banner = match (self.age_up, since) {
+        // The match decided outranks everything else ([GD-WIN-01]), and
+        // stays up.
+        let decided = match self.sim.winner() {
+            Some(w) if w == ME => Some(view::hud::Banner::Victory),
+            Some(_) => Some(view::hud::Banner::Defeat),
+            None if !self.sim.standing(ME) => Some(view::hud::Banner::Defeat),
+            None => None,
+        };
+        let banner = decided.or(match (self.age_up, since) {
             (Some((_, a)), Some(ms)) if ms < BANNER_MS => Some(view::hud::Banner::AgeUp(a)),
             _ => match self.alarm_at {
                 // The villagers' alarm ([GD-STANCE-02]): the side is told.
@@ -372,7 +380,7 @@ impl App {
                 }
                 _ => None,
             },
-        };
+        });
 
         let selected = self.selection.slots(&self.sim);
         let mut scene = Scene::build_full(

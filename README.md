@@ -41,6 +41,8 @@ cargo run --release -p simrunner -- determinism --ticks 10000
                                              # match twice, compare every tick
 cargo run --release -p simrunner -- bench            # per-tick timings
 cargo run --release -p simrunner -- golden           # replay the corpus, compare digests
+cargo run --release -p simrunner -- ai --matches 3 --difficulty hard,easy --stats   # computer opponents, headless
+cargo run --release -p simrunner -- versus --matches 20 --expect tools/simrunner/tests/versus-hard-easy.golden   # the M5 acceptance
 cargo run -p simrunner -- matrix                     # the damage matrix, from the kinds table
 cargo run --release -p new-empire [SEED]     # open the game window on a generated map
 cargo run --release -p mapview -- --seed 1 --out frame.png --minimap mini.png

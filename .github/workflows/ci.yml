@@ -104,6 +104,23 @@ jobs:
           name: hash-${{ matrix.os }}
           path: hash-${{ matrix.os }}.txt
 
+  # M5's acceptance: twenty headless matches, Hard against Easy, each to
+  # elimination or the time limit with every invariant checked and no
+  # villager left idle with work in sight; Hard must win eighteen, and
+  # every outcome must match the committed record, so a change in the
+  # opponents or the simulation shows up as a diff.
+  # REQ: RM-M5-01
+  acceptance:
+    name: AI acceptance (RM-M5-01)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: twenty matches, Hard against Easy, against the record
+        run: cargo run --release -p simrunner --features sim/debug-checks -- versus --matches 20 --ticks 36000 --difficulty hard,easy --expect tools/simrunner/tests/versus-hard-easy.golden
+
   # A cliff detector, not a precision instrument — see perf/budgets.ron for
   # why the ceilings are as loose as they are.
   perf:

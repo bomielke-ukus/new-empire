@@ -971,3 +971,45 @@ anticipate:
   second workforce (one Easy side reached eighteen villagers against a
   target of ten). They count wherever they are.
 
+## 28. Implementation notes from M5, chunk 5: victory, defeat and the acceptance run
+
+- **Standing, winner, score.** `Simulation::standing(p)` is `docs/02` §10's
+  conquest rule: not resigned, and a living unit or a finished building
+  that trains (the Town Center included). `winner()` is the one side
+  standing once every other is out, `over()` whether the match is
+  decided, and `score(p)` what a side gathered plus the cost of everything
+  it has standing, which decides a match at a time limit (`docs/07` D25).
+  `CommandKind::Resign` takes a side out at once and its later commands
+  are ignored. None of this is new state beyond the `resigned` flag; the
+  rest is derived from the world every time it is asked.
+- **The declared bonus.** `SimConfig::gather_bonus_pct`, one entry per
+  player, bounded by the setup screen's `validate`, is folded into
+  `modifiers(p)` and hashed with the config. A Hardest opponent is set up
+  with 25%. The opponent itself is the same code as Hard: the bonus is
+  the match's, not the AI's, which is what "declared honestly" means.
+- **`simrunner versus`** is the `RM-M5-01` harness: matches between the
+  sides of `--difficulty`, each to elimination or the time limit, the
+  invariants checked every tick, and a villager idle for sixty seconds
+  with a resource in sight counted as stuck. One line per match (seed,
+  ticks, winner, how, scores, hash) goes to the record at
+  `tools/simrunner/tests/versus-hard-easy.golden`; CI runs the twenty and
+  fails on a changed line or fewer than eighteen Hard wins. The first
+  recorded match is also played in full by a test, so the record moves in
+  a test before it moves in the job.
+- **Two pockets the harness found.** The stuck-villager rule caught, in
+  one seed, a villager sent again and again to a tree inside a forest
+  with no ground beside it (the manager now sends nobody to a node it
+  cannot stand next to, and stops sending anyone to a node a villager
+  came back idle from), and then villagers shut into pockets of one and
+  three tiles between the farms packed round the Town Center. Two fixes:
+  `NavGrid::nearest_open` re-seats a unit displaced by a site into the
+  roomiest ground within reach rather than the nearest tile, which can be
+  the pocket; and the manager's `place` floods the open ground beside a
+  proposed footprint four ways and refuses a spot that would leave fewer
+  than 48 tiles connected. The first changed every corpus digest.
+- **What the twenty matches say.** Hard beats Easy 20 of 20, every one
+  on score at thirty minutes; none by elimination. Armies stay small and
+  raids trade soldiers for houses, so a Town Center is never taken. That
+  is within the acceptance as written and short of the opponent we want;
+  the next step in `docs/10` says what to do about it.
+

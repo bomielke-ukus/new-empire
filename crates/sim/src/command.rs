@@ -166,6 +166,9 @@ pub enum CommandKind {
         /// The building.
         building: EntityId,
     },
+    /// Give up: the side is out of the match and gives no more orders
+    /// (`docs/02` §10). Always available.
+    Resign,
 }
 
 /// Who issued a command: the player at the keyboard, or a computer
@@ -275,7 +278,8 @@ impl Command {
             | CommandKind::CancelTrain { .. }
             | CommandKind::SetRally { .. }
             | CommandKind::Research { .. }
-            | CommandKind::SetAutoReseed { .. } => 0,
+            | CommandKind::SetAutoReseed { .. }
+            | CommandKind::Resign => 0,
         };
         if named > MAX_COMMAND_IDS {
             return Err(CommandError::TooManyIds { len: named });
@@ -382,6 +386,7 @@ impl HashState for CommandKind {
                 h.write_u8(11);
                 h.write_u8(*enabled as u8);
             }
+            CommandKind::Resign => h.write_u8(19),
         }
     }
 }
