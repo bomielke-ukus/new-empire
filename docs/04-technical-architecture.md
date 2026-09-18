@@ -889,3 +889,45 @@ anticipate:
   player 0's view; `--fog 0` shows the whole map for looking at a
   generated map, and `inland-start` is the one golden image that uses it.
 
+## 26. Implementation notes from M5, chunk 3: the economy manager
+
+- **A thought every few ticks, from the view alone.** `Opponent::think`
+  runs on every tick of its build order's cadence (40 for Easy, 20 for
+  Standard, 10 for Hard), offset by its player number so two opponents do
+  not think together, and answers with nothing in between. A thought reads
+  one `FoggedView` and returns `CommandKind`s that the caller issues as
+  `Source::Ai`; the manager keeps almost nothing between thoughts (the
+  rally it last set, whether auto-reseed is on, the buildings it ordered
+  and has not yet seen as sites). Everything else is re-derived from the
+  view, so a lost villager or a refused order costs one thought, not a
+  stale plan.
+- **The build order is a table** (`BuildOrder::for_difficulty`): villager
+  targets and gather shares by age, the cadence, the population headroom a
+  house is started at, the last age aimed for, and whether one gatherer a
+  thought is moved from the resource most over its share to the one most
+  under it. Until food and wood are stocked, the stone and gold shares go
+  to them. Farms come before the next age's buildings when the food in
+  sight is short, because a settlement with no food coming in buys
+  nothing. Without hunting (owed), the Stone Age's food is the berries,
+  so the Stone Age villager target is small enough to leave 400 food for
+  the Tool Age, and farms feed the growth after it.
+- **The view grew what a player sees by looking.** A `Sighting` says
+  what one of the player's own villagers is doing (`Job`: idle, gathering
+  which resource, building which site) and what a node has left; a
+  building's queue and the match's population limit are readable. A
+  `Memory` carries the entity's handle (`docs/07` D24), so a remembered
+  tree or building can be ordered at as a player clicks on one; the
+  manager sends a villager to *walk* to a remembered node rather than
+  gather from it, since a memory may be of something gone, and the walk
+  settles it either way.
+- **Head-on walkers now step aside.** The first opponents' first two
+  villagers, sent past each other along one row, stood where they met
+  for twenty seconds until they gave up: separation pushed them apart
+  along the line they walked, undoing each step. `separation` now detects
+  a pair walking toward each other and pushes them to opposite sides of
+  their line instead, and `behaviour_pathfinding` pins it. This changed
+  every corpus digest.
+- **`simrunner ai --stats --save FILE`** prints each side's jobs,
+  buildings, queue and food in sight, and keeps the recording for
+  `mapview --replay`, which is how the stall above was found.
+

@@ -11,7 +11,7 @@
 //! simrunner matrix [--out FILE]
 //! simrunner battle [--save FILE]
 //! simrunner balance [--matches N] [--seed N] [--dump DIR]
-//! simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N]
+//! simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--stats] [--save FILE]
 //! ```
 //!
 //! `golden` is the one CI leans on hardest: it replays the committed corpus
@@ -23,6 +23,7 @@
 mod scenarios;
 
 use scenarios::{Scenario, Style};
+use sim::kinds;
 use sim::{Replay, SimConfig, Trace};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -808,7 +809,7 @@ fn usage(err: &str) -> ExitCode {
     eprintln!("  simrunner matrix [--out FILE]");
     eprintln!("  simrunner battle [--save FILE]");
     eprintln!("  simrunner balance [--matches N] [--seed N] [--dump DIR]");
-    eprintln!("  simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N]");
+    eprintln!("  simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--stats] [--save FILE]");
     ExitCode::from(2)
 }
 
@@ -874,11 +875,67 @@ fn ai(f: &Flags) -> ExitCode {
                 ));
             }
         }
-        let explored: Vec<String> = (0..players)
+        let sides: Vec<String> = (0..players)
             .map(|p| {
                 let fog = sim.fog(p).expect("a fog per player");
                 let total = (fog.width() * fog.height()).max(1) as usize;
-                format!("{}%", fog.explored_count() * 100 / total)
+                let world = sim.world();
+                let villagers = world
+                    .slots()
+                    .filter(|s| {
+                        world.owner[s.index()] == p
+                            && world.kind[s.index()] == kinds::VILLAGER
+                            && world.dying[s.index()] == 0
+                    })
+                    .count();
+                let me = sim.player(p).expect("a player per side");
+                let mut line = format!(
+                    "p{p} {:?} {villagers}v {}/{} {:?} explored {}%",
+                    me.age,
+                    me.pop,
+                    me.pop_cap,
+                    me.stockpile,
+                    fog.explored_count() * 100 / total
+                );
+                if f.stats {
+                    // What the opponent sees of its own side: jobs, buildings,
+                    // the Town Center's queue, for tuning the build order.
+                    let view = FoggedView::new(&sim, p);
+                    let mut jobs = std::collections::BTreeMap::new();
+                    let mut buildings = std::collections::BTreeMap::new();
+                    let mut tc = None;
+                    for s in view.sightings().iter().filter(|s| s.owner == p) {
+                        let info = kinds::info(s.kind);
+                        if s.kind == kinds::VILLAGER {
+                            *jobs.entry(format!("{:?}", s.job)).or_insert(0) += 1;
+                        } else if info.footprint > 0 {
+                            let name = format!("{}{}", info.name, if s.site { " (site)" } else { "" });
+                            *buildings.entry(name).or_insert(0) += 1;
+                        }
+                        if s.kind == kinds::TOWN_CENTER && !s.site {
+                            tc = Some(s.id);
+                        }
+                    }
+                    let food: Vec<i32> = view
+                        .sightings()
+                        .iter()
+                        .filter_map(|s| match s.resource {
+                            Some((kinds::Resource::Food, left)) if left > 0 => Some(left),
+                            _ => None,
+                        })
+                        .collect();
+                    let queue = tc.map(|id| view.queue(id)).unwrap_or_default();
+                    let train = tc.map(|id| {
+                        view.can_train(id, kinds::VILLAGER)
+                            .map_or_else(|e| e.to_string(), |_| "ok".into())
+                    });
+                    line.push_str(&format!(
+                        "\n     jobs {jobs:?}\n     buildings {buildings:?}\n     queue {queue:?}, train villager: {train:?}\n     food in sight: {} nodes, {} left",
+                        food.len(),
+                        food.iter().sum::<i32>()
+                    ));
+                }
+                line
             })
             .collect();
         let replay = sim.replay();
@@ -886,10 +943,19 @@ fn ai(f: &Flags) -> ExitCode {
             Ok(h) => h,
             Err(e) => return fail(&format!("seed {seed}: {e}")),
         };
+        // `--save FILE` keeps the last match's recording, so `mapview
+        // --replay` can show what the opponents did.
+        if let Some(path) = &f.save {
+            let text = ron::ser::to_string_pretty(&replay, ron::ser::PrettyConfig::default())
+                .expect("a replay serialises");
+            if let Err(e) = std::fs::write(path, text) {
+                return fail(&format!("{path}: {e}"));
+            }
+        }
         println!(
-            "seed {seed}: {ticks} ticks, {players} opponents, {issued} commands, explored {}, {} entities, hash {hash:016x}",
-            explored.join(" "),
-            sim.world().len()
+            "seed {seed}: {ticks} ticks, {players} opponents, {issued} commands, {} entities, hash {hash:016x}\n  {}",
+            sim.world().len(),
+            sides.join("\n  ")
         );
     }
     println!(

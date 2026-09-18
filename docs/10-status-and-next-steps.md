@@ -23,7 +23,7 @@ Five milestones landed; the vertical slice is beyond its halfway point.
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
-| M5 — An opponent | **In progress** (fog of war landed 2026-09-18, in the simulation and on screen; the opponent itself not yet) | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
+| M5 — An opponent | **In progress** (fog of war and the economy manager landed 2026-09-18; the military manager and the acceptance run not yet) | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20 |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
@@ -685,13 +685,43 @@ what was done:
   rule for when there is sound. Cliffs still neither block nor extend
   sight.
 
+### Work record: M5 chunk 3 — the economy manager (2026-09-18)
+
+- **What landed.** The opponent issues commands (`GD-AI-01` claimed):
+  `crates/ai/src/economy.rs` is the build-order planner and the economy
+  manager. A thought every few ticks (by difficulty) reads the view and
+  orders villagers to the resource furthest below its share, a house ahead
+  of the cap, a villager while under the target, the Storehouse by the
+  wood and the Barracks for the age gate, the Tool Age when the
+  simulation allows it, farms once the food in sight is short, and adopts
+  any site nobody is building. `BuildOrder::for_difficulty` is the table
+  behind it. The view grew a villager's job, a node's remaining amount, a
+  building's queue and the population limit; a memory carries its handle
+  (`docs/07` D24). `simrunner ai --stats --save` shows each side and
+  keeps the recording. `docs/04` §26 has the notes.
+- **What changed for the player.** Two units walking toward each other
+  along one line no longer stand where they meet until they give up: they
+  step aside and pass (`separation`, `TA-PATH-05` test). Every corpus
+  digest is re-recorded for it, and the 40v40 battle and the balance
+  trials still pass.
+- **Measured.** A Standard opponent on Inland 96: 8 villagers and two
+  houses by four minutes, the Tool Age between six and eight minutes, and
+  by twelve minutes 16 villagers, four houses, three to five farms, the
+  Storehouse, Barracks, Archery Range and Market, on every seed tried.
+  Slower than a good player of the original by about a third, mostly for
+  want of hunting. Stone and gold stay untouched until food and wood are
+  stocked, so the Bronze Age is not reached in twelve minutes.
+- **Not done, deliberately.** No scouting: the opponent explores 3–4% of
+  the map, what its start kit sees. No soldiers, no reaction to attack;
+  step 4. Hunting is still owed, and would be the biggest single gain to
+  the opening.
+
 ### Resume here next session
 
-**M5 is under way.** Chunks 1 and 2 (fog in the simulation and on screen,
-the AI boundary) are landed; next is step 3 below: the economy manager and
-build orders, the first commands an opponent issues, which is when
-`GD-AI-01` is first claimed. The parallel track (§4b) runs on its own
-branch. Keep the art pipeline on the `docs/08` schedule.
+**M5 is under way.** Chunks 1–3 (fog, the AI boundary, the economy
+manager) are landed; next is step 4 below: the military manager and
+scouting. The parallel track (§4b) runs on its own branch. Keep the art
+pipeline on the `docs/08` schedule.
 
 ## 4. What M4 completed — Combat
 
@@ -746,9 +776,10 @@ each step shippable and tested headless before it has a sprite:
    buildings and nodes drawn from memory where seen once, units only in
    sight, the minimap fogged and now in every golden image, `fog-scout`
    pinning the three states in one frame.
-3. **The economy manager and build orders.** Villagers to resources by a
-   target ratio, houses ahead of the cap, farms when the bushes are gone,
-   the age gate met and taken, a scripted opening per difficulty.
+3. **The economy manager and build orders.** **Done 2026-09-18**, record
+   above: villagers to resources by share, houses ahead of the cap, farms
+   once the food in sight is short, the age gate met and taken, a build
+   order per difficulty; and the head-on walking stall it found, fixed.
 4. **The military manager and scouting.** The scout explores; the
    Barracks, Range and Stable train to a composition; defence answers
    the alarm; raids and attacks go out as attack-moves in formation;

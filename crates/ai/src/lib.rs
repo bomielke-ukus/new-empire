@@ -7,11 +7,14 @@
 //! compile-fail tests in `tests/` prove the world is unnameable from here
 //! (`TA-AI-01`).
 //!
-//! This is the boundary and an opponent that does nothing. Build orders,
-//! the economy and the military managers follow in M5's later steps.
+//! The economy manager and the build orders are in [`economy`]; the
+//! military manager follows in M5's later steps.
 
 #![warn(missing_docs)]
 
+pub mod economy;
+
+use economy::{BuildOrder, Economy};
 use fogged::{Command, FoggedView, PlayerId, Rng};
 
 /// How hard the opponent tries (`docs/02` §12). Only Hardest is allowed
@@ -56,8 +59,12 @@ pub struct Opponent {
     difficulty: Difficulty,
     /// Its own dice, seeded from the match so a match replays identically.
     rng: Rng,
-    /// Ticks thought so far.
+    /// Thoughts so far.
     thoughts: u64,
+    /// What it aims for.
+    order: BuildOrder,
+    /// The economy manager.
+    economy: Economy,
 }
 
 impl Opponent {
@@ -70,7 +77,14 @@ impl Opponent {
             difficulty,
             rng: Rng::new(seed ^ (0xA1 + u64::from(player)).wrapping_mul(0x9E37_79B9_7F4A_7C15)),
             thoughts: 0,
+            order: BuildOrder::for_difficulty(difficulty),
+            economy: Economy::default(),
         }
+    }
+
+    /// What it aims for.
+    pub fn order(&self) -> &BuildOrder {
+        &self.order
     }
 
     /// Whose side it plays.
@@ -88,15 +102,23 @@ impl Opponent {
         &mut self.rng
     }
 
-    /// One tick of thought: the commands to issue this tick, in order.
-    /// Nothing yet: the boundary is in place before the behaviour behind it.
+    /// One tick: the commands to issue this tick, in order. It thinks
+    /// every `cadence` ticks of its order, on a tick of its own so two
+    /// opponents do not think together, and answers with nothing between.
     pub fn think(&mut self, view: &FoggedView<'_>) -> Vec<Command> {
         debug_assert_eq!(view.player(), self.player, "a view of someone else's side");
+        if !(view.tick() + u64::from(self.player)).is_multiple_of(self.order.cadence) {
+            return Vec::new();
+        }
         self.thoughts += 1;
-        Vec::new()
+        self.economy
+            .think(view, &self.order, &mut self.rng)
+            .into_iter()
+            .map(|kind| view.command(kind))
+            .collect()
     }
 
-    /// How many ticks it has thought.
+    /// How many times it has thought.
     pub fn thoughts(&self) -> u64 {
         self.thoughts
     }

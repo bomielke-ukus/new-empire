@@ -2354,8 +2354,24 @@ impl Simulation {
                                         }
                                     }
                                 };
-                                let ni = pi - dir * (overlap * wi);
-                                let nj = pj + dir * (overlap * wj);
+                                // Two walkers meeting head-on would push
+                                // each other straight back along the line
+                                // they walk and stand there for ever, each
+                                // step undone by the push. They step aside
+                                // instead, to opposite sides of their line,
+                                // and pass.
+                                let head_on = match (self.heading(i), self.heading(ju)) {
+                                    (Some(hi), Some(hj)) => {
+                                        hi.dot(delta) > Fx::ZERO && hj.dot(delta) < Fx::ZERO
+                                    }
+                                    _ => false,
+                                };
+                                let (ni, nj) = if head_on {
+                                    let perp = Vec2Fx::new(Fx::ZERO - dir.y, dir.x);
+                                    (pi + perp * (overlap * wi), pj - perp * (overlap * wj))
+                                } else {
+                                    (pi - dir * (overlap * wi), pj + dir * (overlap * wj))
+                                };
                                 if self.nav.passable(ni.x.floor(), ni.y.floor()) {
                                     self.world.pos[i] = ni;
                                 }
@@ -2374,6 +2390,18 @@ impl Simulation {
     fn is_walking(&self, i: usize) -> bool {
         self.world.move_target[i].is_some()
             || matches!(&self.world.nav[i], Some(n) if n.state == NavState::Walking)
+    }
+
+    /// Where a walker is heading this tick, as the vector to its next
+    /// waypoint; `None` for anything standing or waiting for a path.
+    fn heading(&self, i: usize) -> Option<Vec2Fx> {
+        let n = self.world.nav[i].as_ref()?;
+        if n.state != NavState::Walking {
+            return None;
+        }
+        let w = *n.waypoints.first()?;
+        let h = w - self.world.pos[i];
+        (h.x != Fx::ZERO || h.y != Fx::ZERO).then_some(h)
     }
 
     /// Anything standing where it cannot stand steps to the nearest open tile.
@@ -2727,6 +2755,7 @@ impl Simulation {
             let (ax, ay) = nav::anchor_tile(world.pos[i], fp);
             let tiles = nav::footprint_tiles(ax, ay, fp);
             let m = Memory {
+                id: world.id_at(s),
                 kind: world.kind[i],
                 owner: world.owner[i],
                 age: sides

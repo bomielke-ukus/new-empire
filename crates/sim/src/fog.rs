@@ -9,7 +9,7 @@
 //! again, which is the information asymmetry the design asks for.
 
 use crate::command::PlayerId;
-use crate::entity::KindId;
+use crate::entity::{EntityId, KindId};
 use crate::hash::{HashState, StateHasher};
 use crate::kinds;
 use crate::nav;
@@ -34,6 +34,11 @@ pub enum Visibility {
 /// A building or node as it was last seen, at its anchor tile.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Memory {
+    /// Its handle, so what was seen can be ordered at: a villager sent to
+    /// a remembered tree, an army to a remembered building. Stale once the
+    /// thing is gone, and a stale handle is ignored, as a player's click
+    /// on a memory of something destroyed does nothing.
+    pub id: EntityId,
     /// What stood there.
     pub kind: KindId,
     /// Whose it was.
@@ -190,6 +195,8 @@ impl HashState for Fog {
         h.write_u64(self.remembered.len() as u64);
         for (&i, m) in &self.remembered {
             h.write_u32(i);
+            h.write_u32(m.id.index() as u32);
+            h.write_u32(m.id.generation());
             h.write_u16(m.kind);
             h.write_u8(m.owner);
             h.write_u8(m.age);
@@ -239,6 +246,7 @@ mod tests {
             3,
             2,
             Memory {
+                id: EntityId::from_parts(0, 0),
                 kind: 11,
                 owner: 1,
                 age: 0,

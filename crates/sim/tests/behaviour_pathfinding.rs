@@ -265,6 +265,46 @@ fn two_exactly_coincident_units_separate() {
     assert_ne!(a, b, "coincident units stayed welded together");
 }
 
+/// Two villagers on one row, each ordered to where the other stands, meet
+/// head-on. Pushing them apart along the line they walk would undo each
+/// step and leave both standing where they met, for ever (the computer
+/// opponent's first builders did exactly this). They must step aside and
+/// pass, and both must arrive.
+///
+/// REQ: TA-PATH-05
+#[test]
+fn two_walkers_meeting_head_on_pass_each_other() {
+    let mut sim = Simulation::new(
+        4,
+        SimConfig {
+            map: sim::MapSpec {
+                kind: sim::MapKind::Flat,
+                size: 32,
+                players: 1,
+            },
+            wander: false,
+            ..SimConfig::default()
+        },
+    );
+    let west = sim::nav::centre((8, 16));
+    let east = sim::nav::centre((20, 16));
+    sim.issue(spawn(0, kinds::VILLAGER, west));
+    sim.issue(spawn(0, kinds::VILLAGER, east));
+    run(&mut sim, 3);
+    let ids = owned(&sim, 0, kinds::VILLAGER);
+    let a = *ids.iter().find(|&&id| pos_of(&sim, id) == west).unwrap();
+    let b = *ids.iter().find(|&&id| pos_of(&sim, id) == east).unwrap();
+    sim.issue(move_to(0, vec![a], east));
+    sim.issue(move_to(0, vec![b], west));
+    run(&mut sim, 400);
+    let (pa, pb) = (pos_of(&sim, a), pos_of(&sim, b));
+    assert!(
+        pa.distance(east) < Fx::from_int(2) && pb.distance(west) < Fx::from_int(2),
+        "both should have passed and arrived: a at {pa:?}, b at {pb:?}"
+    );
+    assert_eq!(sim.stats().path_failures, 0, "nobody gave up");
+}
+
 /// Resolution must be a function of the state, not of anything outside it.
 /// Two runs from the same seed must settle a crowd identically — otherwise
 /// "deterministically" in [TA-PATH-05] is not true and every replay is void.

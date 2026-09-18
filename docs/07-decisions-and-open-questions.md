@@ -256,6 +256,18 @@ memories are the only fog that is hashed. If a profile ever shows the
 stamp pass, the incremental scheme is the optimisation, behind the same
 `Fog` interface.
 
+### D24 — A memory carries the handle of what was seen
+**Date:** 2026-09-18
+
+A player can right-click a tree or a building drawn from memory and the
+order goes out; the simulation acts on it if the thing is still there and
+ignores it if not. `Fog`'s memories therefore keep the `EntityId` of what
+was seen, alongside its kind, owner, age and whether it was a site, and
+`FoggedView::remembered` hands it to the opponent. This is not a leak: the
+handle was learned by looking, and a stale one does nothing. What the
+handle cannot tell is whether the thing is still there, so the opponent
+walks to a memory before gathering from it.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?

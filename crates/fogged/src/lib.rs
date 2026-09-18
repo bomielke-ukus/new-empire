@@ -9,6 +9,7 @@
 //! a command are re-exported here; the simulation itself is not.
 
 pub use sim::kinds;
+pub use sim::nav;
 pub use sim::tech;
 pub use sim::{
     Age, Class, Command, CommandKind, EntityId, Formation, Fx, Item, KindId, Memory, Modifiers,
@@ -22,6 +23,22 @@ use sim::Simulation;
 pub struct FoggedView<'a> {
     sim: &'a Simulation,
     player: PlayerId,
+}
+
+/// What one of the player's own units is doing. Nothing is known of
+/// anyone else's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Job {
+    /// Standing idle.
+    Idle,
+    /// Gathering a resource.
+    Gathering(kinds::Resource),
+    /// Constructing a site: walking to it or working on it.
+    Building(EntityId),
+    /// Anything else: walking, fighting, sheltering.
+    Busy,
+    /// Someone else's: not known.
+    Unknown,
 }
 
 /// A unit or building in sight, or one of the player's own anywhere.
@@ -39,15 +56,21 @@ pub struct Sighting {
     pub health: Fx,
     /// Still under construction.
     pub site: bool,
-    /// Standing idle. Only ever true for the player's own.
-    pub idle: bool,
+    /// What it is doing; [`Job::Unknown`] for anyone else's.
+    pub job: Job,
     /// Sheltering inside a building. Only ever true for the player's own.
     pub inside: bool,
+    /// For a node or a farm: what it yields and how much is left, as a
+    /// player sees by clicking on it.
+    pub resource: Option<(kinds::Resource, i32)>,
 }
 
 /// A building or node seen once and now out of sight, as it was.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Remembered {
+    /// Its handle when it was seen, for orders; ignored by the simulation
+    /// if it is gone.
+    pub id: EntityId,
     /// The anchor tile.
     pub tile: (i32, i32),
     /// What stood there.
@@ -161,6 +184,16 @@ impl<'a> FoggedView<'a> {
                 if !mine && !fog.in_sight(kind, x, y) {
                     return None;
                 }
+                let job = if !mine {
+                    Job::Unknown
+                } else {
+                    match world.order[i] {
+                        sim::Order::Idle => Job::Idle,
+                        sim::Order::Gather { resource, .. } => Job::Gathering(resource),
+                        sim::Order::Build { site, .. } => Job::Building(site),
+                        _ => Job::Busy,
+                    }
+                };
                 Some(Sighting {
                     id: world.id_at(s),
                     kind: world.kind[i],
@@ -168,8 +201,11 @@ impl<'a> FoggedView<'a> {
                     pos: world.pos[i],
                     health: world.health[i],
                     site: world.construction[i].is_some(),
-                    idle: mine && world.order[i] == sim::Order::Idle,
+                    job,
                     inside: mine && world.inside[i].is_some(),
+                    resource: kinds::info(kind)
+                        .resource
+                        .map(|(r, _)| (r, world.resource[i])),
                 })
             })
             .collect()
@@ -180,6 +216,7 @@ impl<'a> FoggedView<'a> {
         self.fog().map_or_else(Vec::new, |f| {
             f.memories()
                 .map(|(tile, m)| Remembered {
+                    id: m.id,
                     tile,
                     kind: m.kind,
                     owner: m.owner,
@@ -193,6 +230,28 @@ impl<'a> FoggedView<'a> {
     /// The player's villagers with nothing to do.
     pub fn idle_villagers(&self) -> Vec<EntityId> {
         self.sim.idle_villagers(self.player)
+    }
+
+    /// What one of the player's own buildings has queued, head first;
+    /// empty for anyone else's or for a building that trains nothing.
+    pub fn queue(&self, building: EntityId) -> Vec<Item> {
+        let world = self.sim.world();
+        let Some(slot) = world.slot(building) else {
+            return Vec::new();
+        };
+        let i = slot.index();
+        if world.owner[i] != self.player {
+            return Vec::new();
+        }
+        world.production[i]
+            .as_ref()
+            .map_or_else(Vec::new, |p| p.queue.iter().map(|q| q.item).collect())
+    }
+
+    /// The match's population limit, which houses cannot raise the cap
+    /// past.
+    pub fn pop_cap_max(&self) -> u32 {
+        self.sim.config().pop_cap_max
     }
 
     /// Whether the player could build `kind` at all right now.
@@ -286,7 +345,10 @@ mod tests {
         assert!(view.terrain(40, 40).is_none() && view.terrain(10, 10).is_some());
         let seen = view.sightings();
         assert_eq!(seen.len(), 2, "my clubman and their house: {seen:?}");
-        assert!(seen.iter().any(|s| s.owner == 0 && s.idle && !s.inside));
+        assert!(seen
+            .iter()
+            .any(|s| s.owner == 0 && s.job == Job::Idle && !s.inside));
+        assert!(seen.iter().any(|s| s.owner == 1 && s.job == Job::Unknown));
         assert!(seen.iter().any(|s| s.owner == 1 && s.kind == kinds::HOUSE));
         assert!(
             !seen
@@ -321,6 +383,16 @@ mod tests {
             .iter()
             .find(|r| r.kind == kinds::HOUSE && r.owner == 1)
             .unwrap_or_else(|| panic!("{remembered:?}"));
+        assert_eq!(
+            house.id,
+            sim.world().id_at(
+                sim.world()
+                    .slots()
+                    .find(|s| sim.world().kind[s.index()] == kinds::HOUSE)
+                    .unwrap()
+            )
+        );
+        assert!(view.queue(house.id).is_empty(), "not mine: nothing known");
         assert_eq!(
             view.passable(house.tile.0, house.tile.1),
             Some(false),

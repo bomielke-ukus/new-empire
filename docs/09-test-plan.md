@@ -374,6 +374,22 @@ sight, black beyond, and the minimap fogged the same. The headless render
 test uploads the fog lights and draws a fogged scene on a real device
 where one exists.
 
+**Landed in chunk 3:** the economy manager, the first commands an opponent
+issues (`GD-AI-01`). `tools/simrunner/tests/ai_economy.rs` (there and not
+in `crates/ai`, which must not depend on `sim` even for tests): a Standard
+opponent left alone for eight minutes trains villagers to its target,
+houses them ahead of the cap, gathers food and wood, puts up the
+Storehouse and Barracks the Tool Age needs and takes the age, with no
+villager idle longer than twenty seconds, every command validated and
+issued as the AI, the other side untouched, and the match replaying
+identically; the same seed and difficulty think the same thoughts twice;
+Easy ends with fewer villagers than Standard and never leaves the Tool
+Age; two opponents share one match and it replays. `crates/ai`'s unit
+tests pin the build orders' shape. `behaviour_pathfinding` gained the
+head-on case the opponent's first builders found: two walkers ordered
+past each other along one row must step aside and both arrive
+(`TA-PATH-05`); it fails without the separation change.
+
 **Still to come:** twenty headless AI-vs-AI matches: no panics, no unit
 idle over 60 s with work available, Hard beats Easy at least 18 times in
 20 (`RM-M5-01`).
