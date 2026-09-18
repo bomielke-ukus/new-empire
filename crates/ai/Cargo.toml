@@ -1,0 +1,15 @@
+[package]
+name = "ai"
+description = "Computer opponents. They issue the same commands a player can and read only a FoggedView; this crate does not depend on the simulation crate at all, and a compile-fail test keeps it that way."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# `fogged` only. Adding `sim` here is the one change this crate's tests
+# exist to refuse (TA-AI-01).
+[dependencies]
+fogged = { path = "../fogged" }
+
+[dev-dependencies]
+trybuild = "1"

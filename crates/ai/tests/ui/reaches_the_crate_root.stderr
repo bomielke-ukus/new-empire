@@ -1,0 +1,5 @@
+error[E0433]: failed to resolve: could not find `sim` in `fogged`
+ --> tests/ui/reaches_the_crate_root.rs:3:21
+  |
+3 |     let _ = fogged::sim::Simulation::new(1, Default::default());
+  |                     ^^^ could not find `sim` in `fogged`

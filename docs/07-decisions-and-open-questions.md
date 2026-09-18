@@ -243,6 +243,19 @@ With that settled the Town Center goes onto the villager's build panel, and
 as in the original a second one needs a finished Government Centre standing,
 which gives that building a purpose before its civic technologies arrive.
 
+### D23 — Fog is recomputed every tick, not kept incrementally
+**Date:** 2026-09-18
+
+`docs/04` §6 planned incremental vision: decrement the circle a unit
+leaves, increment the one it enters. That needs per-entity bookkeeping of
+the last stamped tile and radius, scrubbed on death, garrison and removal,
+and it goes wrong quietly. Clearing every count and stamping every seeing
+entity afresh costs the sum of the sight discs, well under the 1 ms §8
+budgeted, and has no state to corrupt. The explored bitset and the
+memories are the only fog that is hashed. If a profile ever shows the
+stamp pass, the incremental scheme is the optimisation, behind the same
+`Fog` interface.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?

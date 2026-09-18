@@ -130,6 +130,11 @@ pub struct World {
     /// and moved by nothing, but still counts toward population.
     #[serde(default)]
     pub inside: Vec<Option<EntityId>>,
+    /// Whose orders this unit last took: 0 the player's, 1 a computer
+    /// opponent's. The path planner serves the player's first
+    /// (`TA-PATH-06`).
+    #[serde(default)]
+    pub priority: Vec<u8>,
 }
 
 /// A structural invariant of the entity store that does not hold.
@@ -284,6 +289,7 @@ impl World {
             self.reload[i] = 0;
             self.dying[i] = 0;
             self.inside[i] = None;
+            self.priority[i] = 0;
             EntityId {
                 index: i as u32,
                 generation: self.generation[i],
@@ -310,6 +316,7 @@ impl World {
             self.reload.push(0);
             self.dying.push(0);
             self.inside.push(None);
+            self.priority.push(0);
             EntityId {
                 index: i as u32,
                 generation: 0,
@@ -346,6 +353,7 @@ impl World {
         self.reload[i] = 0;
         self.dying[i] = 0;
         self.inside[i] = None;
+        self.priority[i] = 0;
         self.live -= 1;
         // Keep `free` sorted descending: insert at the position that
         // maintains order. Slot counts are small enough that the O(n) insert
@@ -388,7 +396,8 @@ impl World {
     /// tick that noticed.
     pub fn check(&self) -> Result<(), WorldViolation> {
         let n = self.alive.len();
-        let columns: [(&'static str, usize); 18] = [
+        let columns: [(&'static str, usize); 19] = [
+            ("priority", self.priority.len()),
             ("inside", self.inside.len()),
             ("stance", self.stance.len()),
             ("formation", self.formation.len()),
@@ -464,7 +473,8 @@ impl World {
             // Every column `despawn` scrubs is checked, so adding a component
             // without scrubbing it shows up here rather than as a hash that
             // depends on history.
-            let scrubbed: [(&'static str, bool); 18] = [
+            let scrubbed: [(&'static str, bool); 19] = [
+                ("priority", self.priority[i] == 0),
                 ("inside", self.inside[i].is_none()),
                 ("stance", self.stance[i] == Stance::default()),
                 ("formation", self.formation[i] == Formation::default()),
@@ -543,6 +553,7 @@ impl HashState for World {
                 h.write_u16(self.reload[i]);
                 h.write_u16(self.dying[i]);
                 h.write(&self.inside[i]);
+                h.write_u8(self.priority[i]);
             }
         }
     }

@@ -8,5 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 sim = { path = "../../crates/sim" }
+fogged = { path = "../../crates/fogged" }
+ai = { path = "../../crates/ai" }
 ron = { workspace = true }
 serde = { workspace = true }

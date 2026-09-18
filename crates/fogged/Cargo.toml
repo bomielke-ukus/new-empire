@@ -1,0 +1,10 @@
+[package]
+name = "fogged"
+description = "The only view of a match a computer opponent gets: what one player has seen and can see, and the commands they may issue. Re-exports the simulation's command and data types, never its world."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sim = { path = "../sim" }

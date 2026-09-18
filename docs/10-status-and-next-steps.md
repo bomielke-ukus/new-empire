@@ -610,11 +610,54 @@ what was done:
 - The plan below is rewritten for M5, and the three `docs/09` §11 items
   are a parallel track for a second agent.
 
+### Work record: M5 chunk 1 — fog of war and the AI boundary (2026-09-18)
+
+- **What landed.** `crates/sim/src/fog.rs`: a `Fog` per player with a
+  visibility count per tile, an explored bitset and the static things last
+  seen by anchor tile, recomputed every tick from every standing, living,
+  un-garrisoned entity's sight (`docs/07` D23 for why not incrementally);
+  the explored bitset and the memories are in the state hash. Two new
+  crates: `fogged`, whose `FoggedView` is one player's view of a match
+  over `sim`'s public API and re-exports the command and data types an
+  opponent needs and nothing that reaches the world; and `ai`, which
+  depends on `fogged` and not on `sim`, holds `Difficulty` and an
+  `Opponent` seeded from the match whose `think` returns commands (none
+  yet), and whose three `trybuild` compile-fail cases prove the world is
+  unnameable from there (`TA-AI-01`). Who issued a command
+  (`Source::{Player, Ai}`) is recorded in the queue and the replay log
+  without changing the file format; the last source to name a unit is its
+  path priority, and `plan_paths` serves the player's requests first
+  (`TA-PATH-06`, whole now). The Town Center gate on a Government Centre
+  from the same day is recorded above. `docs/04` §24 has the notes.
+- **What changed for the player.** Nothing visible: fog is computed and
+  not yet drawn (step 2). `simrunner ai` runs opponents on every side
+  headless with invariants on and verifies the recording; they explore
+  what their start kit sees and issue nothing.
+- **Measured.** The corpus test in debug went from 17 s to about 45 s
+  before the stamp was cheapened with a bitset test per tile, and every
+  corpus digest was re-recorded for the fog history now in the hash. The
+  per-tick fog pass, measured by running the release bench with and
+  without it: `marching-8p` p50 0.7 → 1.5 ms and p99 2.5 → 3.5 ms,
+  `crowded-map` p50 0.9 → 1.7 ms and p99 2.2 → 3.5 ms, `economy-2p` p50
+  0.15 → 0.18 ms and p99 0.18 → 0.23 ms. The gate stays inside its
+  ceilings (7.5 ms and 6 ms), so the cost is recorded and not yet paid
+  down; the candidates are the memory loop over every static entity per
+  player, the full visibility clear each tick and the disc stamp itself.
+  A recording with only player-issued commands serialises exactly as it
+  did before: `sources` is written only when an opponent issued
+  something, so `battle-40v40.ron` and the corpus files did not change
+  shape.
+- **Not done, deliberately.** Cliffs neither block nor extend sight beyond
+  the one-tile bonus for high ground. Rendering the three states, the
+  minimap and remembered buildings is step 2. `GD-AI-01` is claimed only
+  when an opponent issues a command (step 3).
+
 ### Resume here next session
 
-**M4 is landed; M5 begins.** The next chunk is M5 step 1 below: fog of war
-in the simulation and the AI boundary. The parallel track (§4) runs on its
-own branch. Keep the art pipeline on the `docs/08` schedule.
+**M5 is under way.** Chunk 1 (fog in the simulation, the AI boundary) is
+landed; next is step 2 below: fog in the presentation. The parallel track
+(§4b) runs on its own branch. Keep the art pipeline on the `docs/08`
+schedule.
 
 ## 4. What M4 completed — Combat
 
@@ -658,15 +701,12 @@ twenty headless AI-versus-AI matches, no crashes, no stuck units, Hard
 beats Easy at least eighteen times. In the order we intend to build it,
 each step shippable and tested headless before it has a sprite:
 
-1. **Fog of war in the simulation and the AI boundary.** Per-player
-   visibility grids (`docs/04` §6: visibility count and explored, one byte
-   per tile) kept by a `fog_of_war_update` pass from every unit's and
-   building's line of sight; `FoggedView`, the only view of the match the
-   `ai` crate receives, with the `trybuild` compile-fail test that proves
-   the crate cannot name `World` (`TA-AI-01`); a null AI that issues
-   nothing, driven by a `simrunner ai` subcommand that runs N matches
-   headless with invariants on; and the priority half of `TA-PATH-06`,
-   player-issued orders served before AI-issued ones in a tick.
+1. **Fog of war in the simulation and the AI boundary.** **Done
+   2026-09-18**, record above: per-player visibility, explored and
+   memories from a `fog_of_war_update` pass; `FoggedView` in its own
+   crate; the `ai` crate that cannot name the world (`TA-AI-01`), with an
+   opponent that issues nothing yet, driven by `simrunner ai`; the
+   priority half of `TA-PATH-06`.
 2. **Fog in the presentation** (`GD-FOG-01`). The rasteriser and the GPU
    fog pass over the smoothed visibility texture, buildings drawn from
    last-known state where explored but not visible, the minimap fogged,
@@ -705,8 +745,6 @@ the merge reconciles. M5 stays out of the three files above.
 
 Stated so they are not rediscovered.
 
-- The **priority** half of `TA-PATH-06` (player-issued orders before
-  AI-issued ones) is unimplemented until M5 supplies an AI.
 - **Hunting** (`docs/07` D15) waits for a carcass: animals cannot be
   attacked yet.
 - **Repair** (`docs/03` §3) is unimplemented: a damaged building stays

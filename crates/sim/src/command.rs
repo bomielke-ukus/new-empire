@@ -168,6 +168,40 @@ pub enum CommandKind {
     },
 }
 
+/// Who issued a command: the player at the keyboard, or a computer
+/// opponent. The simulation treats both alike except where `docs/04`
+/// `TA-PATH-06` says otherwise: player-issued path requests are served
+/// before AI-issued ones when the budget binds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum Source {
+    /// A human.
+    #[default]
+    Player = 0,
+    /// The `ai` crate.
+    Ai = 1,
+}
+
+impl CommandKind {
+    /// The entities the command names, for the variants that name any.
+    pub fn named(&self) -> &[EntityId] {
+        match self {
+            CommandKind::Move { ids, .. }
+            | CommandKind::Stop { ids }
+            | CommandKind::Gather { ids, .. }
+            | CommandKind::Build { ids, .. }
+            | CommandKind::Assist { ids, .. }
+            | CommandKind::Attack { ids, .. }
+            | CommandKind::AttackMove { ids, .. }
+            | CommandKind::Patrol { ids, .. }
+            | CommandKind::SetStance { ids, .. }
+            | CommandKind::SetFormation { ids, .. }
+            | CommandKind::Garrison { ids, .. } => ids,
+            _ => &[],
+        }
+    }
+}
+
 /// A command with its issuing player.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Command {
@@ -363,6 +397,8 @@ impl HashState for Command {
 struct Scheduled {
     seq: u32,
     command: Command,
+    #[serde(default)]
+    via: Source,
 }
 
 impl Scheduled {
@@ -376,6 +412,7 @@ impl HashState for Scheduled {
     fn hash_state(&self, h: &mut StateHasher) {
         h.write_u32(self.seq);
         h.write(&self.command);
+        h.write_u8(self.via as u8);
     }
 }
 
@@ -395,8 +432,13 @@ impl CommandQueue {
     /// Schedules `command`, issued at `issue_tick`, for execution
     /// `COMMAND_DELAY` ticks later. Returns the execution tick.
     pub fn schedule(&mut self, issue_tick: u64, command: Command) -> u64 {
+        self.schedule_from(issue_tick, command, Source::Player)
+    }
+
+    /// [`CommandQueue::schedule`], with who issued it.
+    pub fn schedule_from(&mut self, issue_tick: u64, command: Command, via: Source) -> u64 {
         let exec = issue_tick.saturating_add(COMMAND_DELAY);
-        self.schedule_at(exec, command);
+        self.schedule_at_from(exec, command, via);
         exec
     }
 
@@ -409,11 +451,16 @@ impl CommandQueue {
     /// hold *byte-identical* queues, so their state hashes agree before the
     /// commands have even executed.
     pub fn schedule_at(&mut self, exec_tick: u64, command: Command) {
+        self.schedule_at_from(exec_tick, command, Source::Player);
+    }
+
+    /// [`CommandQueue::schedule_at`], with who issued it.
+    pub fn schedule_at_from(&mut self, exec_tick: u64, command: Command, via: Source) {
         let p = command.player as usize;
         assert!(p < MAX_PLAYERS, "player id out of range");
         let seq = self.next_seq[p];
         self.next_seq[p] = seq.wrapping_add(1);
-        let entry = Scheduled { seq, command };
+        let entry = Scheduled { seq, command, via };
         let batch = self.pending.entry(exec_tick).or_default();
         let at = batch.partition_point(|s| s.key() < entry.key());
         batch.insert(at, entry);
@@ -422,6 +469,14 @@ impl CommandQueue {
     /// Removes and returns every command due at or before `tick`, in
     /// canonical `(tick, player, seq)` order.
     pub fn drain_due(&mut self, tick: u64) -> Vec<Command> {
+        self.drain_due_from(tick)
+            .into_iter()
+            .map(|(c, _)| c)
+            .collect()
+    }
+
+    /// [`CommandQueue::drain_due`], with who issued each.
+    pub fn drain_due_from(&mut self, tick: u64) -> Vec<(Command, Source)> {
         let mut out = Vec::new();
         // `split_off(&(tick + 1))` overflowed at `u64::MAX` — a panic in
         // debug and, in release, a wrap to 0 that silently drained *nothing*
@@ -440,7 +495,7 @@ impl CommandQueue {
                 batch.windows(2).all(|w| w[0].key() <= w[1].key()),
                 "queue batch left canonical order"
             );
-            out.extend(batch.into_iter().map(|s| s.command));
+            out.extend(batch.into_iter().map(|s| (s.command, s.via)));
         }
         out
     }

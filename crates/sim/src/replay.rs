@@ -1,7 +1,7 @@
 //! A replay is a seed plus a command log. Kilobytes for a whole match, and
 //! the primary bug-report format: if it reproduces from a replay, it is fixable.
 
-use crate::command::{Command, CommandError};
+use crate::command::{Command, CommandError, Source};
 use crate::hash::StateHasher;
 use crate::simulation::{SimConfig, Simulation};
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,12 @@ pub struct Replay {
     pub ticks: u64,
     /// `(issue_tick, command)` pairs, in issue order.
     pub commands: Vec<(u64, Command)>,
+    /// Who issued each command, parallel to `commands`. Left empty when
+    /// every command is a player's, so a match without computer opponents
+    /// records exactly as it did before there were any; a file without it
+    /// reads the same way.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<Source>,
 }
 
 /// Why a replay was rejected before it was run.
@@ -220,7 +226,8 @@ impl Replay {
                 if *tick != sim.tick() {
                     break;
                 }
-                sim.issue(command.clone());
+                let via = self.sources.get(next).copied().unwrap_or_default();
+                sim.issue_from(command.clone(), via);
                 next += 1;
             }
             sim.step();
@@ -353,6 +360,7 @@ mod tests {
             config: SimConfig::default(),
             ticks: 10,
             commands: vec![],
+            sources: vec![],
         };
         let stop = |p| Command {
             player: p,
@@ -424,6 +432,7 @@ mod tests {
             config: SimConfig::default(),
             ticks: 50,
             commands: vec![],
+            sources: vec![],
         };
         let mut hashes = vec![];
         a.run(|t, h| hashes.push((t, h))).unwrap();

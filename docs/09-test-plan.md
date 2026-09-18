@@ -336,11 +336,26 @@ identical replay results through tick 835 (`docs/10`, 2026-09-13).
 
 ### The AI — M5
 
-Twenty headless AI-vs-AI matches: no panics, no unit idle over 60 s with work
-available, Hard beats Easy at least 18 times in 20. `FoggedView` enforced
-**mechanically** by a `trybuild` compile-fail test proving the `ai` crate
-cannot name `World` (`TA-AI-01`). `docs/07` D7 calls this architectural, and
-review is not an architecture.
+**Landed in chunk 1:** fog of war in the simulation and the AI boundary.
+`crates/sim/tests/behaviour_fog.rs`: a tile is unexplored, then visible,
+then explored, a building out of sight is remembered until the tile is
+seen again and the memory outlives the building (`GD-FOG-01`); garrisoned
+units and corpses do not see; and the player's path requests are planned
+before a computer opponent's when the destination budget binds, nobody is
+dropped, and the replay records who issued what (`TA-PATH-06`, whose
+priority half this closes; §7). `crates/fogged`'s test reads a view: own
+things anywhere, others only in sight, memories, placement refused on
+ground never seen. `crates/ai/tests/compile_fail.rs` is the boundary:
+three `trybuild` cases that try to name the world from the `ai` crate and
+must fail to compile (`TA-AI-01`), which they do because `sim` is not a
+dependency of that crate and `fogged` re-exports no path to it. `docs/07`
+D7 calls this architectural, and review is not an architecture.
+`tools/simrunner/tests/ai_cli.rs` runs `simrunner ai` for two short
+matches with three opponents each and checks the recordings verify.
+
+**Still to come:** twenty headless AI-vs-AI matches: no panics, no unit
+idle over 60 s with work available, Hard beats Easy at least 18 times in
+20 (`RM-M5-01`).
 
 ### Interface — M2–M6
 
@@ -466,11 +481,13 @@ changed since the heading was chosen.
 The budget half is tested: a 300-villager crowd ordered across a 200-tile map
 on one tick drives `path_deferred` above zero, and every unit is then served
 rather than dropped — which is the requirement's actual content. The
-**priority** half ("player-issued orders before AI-issued ones") is not
-implemented: `plan_paths` iterates slots in index order with no priority
-queue, and there is no `ai` crate to issue a competing order. It is owed to
-M5, and is recorded here rather than in `DEFERRED` because the requirement as
-a whole is now partly covered.
+**priority** half ("player-issued orders before AI-issued ones") landed with
+M5 chunk 1: who issued a command is recorded, the last source to name a unit
+is its priority, and `plan_paths` serves the player's requests first.
+`behaviour_fog.rs` walls a map so no goal is in a straight line, sends twelve
+player-issued and twenty-four AI-issued trips in one tick against a budget of
+sixteen, and checks that every player trip has a heading that tick while some
+AI trips wait, and that all are served a few ticks on.
 
 ---
 
@@ -584,8 +601,8 @@ Stated rather than left to be discovered.
 - **M4 native acceptance passed for the recorded scenarios.** The 2026-09-13
   owner readability approval and combat/siege results are in `docs/10`; PRs
   #9 and #10 are merged and M4 is landed.
-- **Player-before-AI path priority** (`TA-PATH-06`) waits for M5; the original
-  twelve M1/M2 test gaps are closed (§7).
+- The original twelve M1/M2 test gaps are closed (§7), and `TA-PATH-06`'s
+  priority half with M5 chunk 1.
 - **No resource-conservation invariant.** The strongest economy check
   available and it is not written.
 - ~~**The HUD overlaps below ~960px.**~~ Fixed in M3: the resource bar

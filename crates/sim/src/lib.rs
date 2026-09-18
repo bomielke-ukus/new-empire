@@ -24,6 +24,7 @@ pub mod combat;
 pub mod command;
 pub mod entity;
 pub mod flow;
+pub mod fog;
 pub mod formation;
 pub mod fx;
 pub mod hash;
@@ -44,10 +45,11 @@ pub use angle::Angle;
 pub use battle::{Event, Projectile, DECAY_TICKS, RUBBLE_TICKS};
 pub use combat::{Armour, Elevation};
 pub use command::{
-    Command, CommandError, CommandKind, CommandQueue, PlayerId, COMMAND_DELAY, MAX_COMMAND_IDS,
-    MAX_PLAYERS,
+    Command, CommandError, CommandKind, CommandQueue, PlayerId, Source, COMMAND_DELAY,
+    MAX_COMMAND_IDS, MAX_PLAYERS,
 };
 pub use entity::{EntityId, KindId, Slot, World, WorldViolation};
+pub use fog::{Fog, Memory, Visibility, MAX_SIGHT};
 pub use fx::Fx;
 pub use hash::{HashState, StateHasher};
 pub use kinds::{Class, Combat, DamageType};

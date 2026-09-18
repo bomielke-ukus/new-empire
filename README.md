@@ -87,6 +87,8 @@ Workspace layout:
 | Path | What |
 |---|---|
 | `crates/sim` | Deterministic simulation: fixed-point maths, RNG, entity store, command queue, replay, tile map, map generation |
+| `crates/fogged` | One player's view of a match, and nothing else: the interface a computer opponent gets |
+| `crates/ai` | Computer opponents: they issue the same commands a player can and read only a `FoggedView`; depends on `fogged`, never on `sim` |
 | `crates/view` | Presentation maths: projection, camera, palette, placeholder atlas, terrain mesh, scene, minimap, software rasteriser |
 | `crates/render` | The wgpu renderer: terrain, palette-indexed sprites, minimap |
 | `crates/app` | The game binary: window, GPU surface, input, fixed-timestep clock |

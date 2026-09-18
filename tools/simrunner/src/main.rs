@@ -11,6 +11,7 @@
 //! simrunner matrix [--out FILE]
 //! simrunner battle [--save FILE]
 //! simrunner balance [--matches N] [--seed N] [--dump DIR]
+//! simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N]
 //! ```
 //!
 //! `golden` is the one CI leans on hardest: it replays the committed corpus
@@ -807,7 +808,95 @@ fn usage(err: &str) -> ExitCode {
     eprintln!("  simrunner matrix [--out FILE]");
     eprintln!("  simrunner battle [--save FILE]");
     eprintln!("  simrunner balance [--matches N] [--seed N] [--dump DIR]");
+    eprintln!("  simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N]");
     ExitCode::from(2)
+}
+
+/// Computer opponents on every side, headless (`docs/06` M5): each match
+/// runs `--ticks` with every player an `ai::Opponent` fed a `FoggedView`
+/// and nothing else, invariants checked every tick, and the recording
+/// verified to replay identically. The report is what the opponents saw
+/// and did; the acceptance numbers of `RM-M5-01` come once they do
+/// something.
+fn ai(f: &Flags) -> ExitCode {
+    use fogged::FoggedView;
+    let matches = f.matches.unwrap_or(1);
+    if matches == 0 || matches > 1000 {
+        return usage("--matches must be 1..=1000");
+    }
+    let ticks = f.ticks.unwrap_or(2000);
+    if ticks == 0 || ticks > sim::Replay::MAX_TICKS {
+        return usage("--ticks must be 1..=MAX_TICKS");
+    }
+    let players = f.players.unwrap_or(2).clamp(1, sim::MAX_PLAYERS as u8);
+    let size = f.size.unwrap_or(96);
+    let first = f.seed.unwrap_or(1);
+    if first.checked_add(u64::from(matches) - 1).is_none() {
+        return usage("seed range overflows");
+    }
+    let start = Instant::now();
+    for n in 0..matches {
+        let seed = first + u64::from(n);
+        let config = SimConfig {
+            map: sim::MapSpec {
+                kind: sim::MapKind::Inland,
+                size,
+                players,
+            },
+            ..SimConfig::default()
+        };
+        let mut sim = sim::Simulation::new(seed, config);
+        let mut opponents: Vec<ai::Opponent> = (0..players)
+            .map(|p| ai::Opponent::new(p, ai::Difficulty::Standard, seed))
+            .collect();
+        let mut issued = 0usize;
+        while sim.tick() < ticks {
+            for bot in &mut opponents {
+                let commands = {
+                    let view = FoggedView::new(&sim, bot.player());
+                    bot.think(&view)
+                };
+                for c in commands {
+                    if c.validate().is_err() {
+                        return fail(&format!(
+                            "seed {seed}: the opponent issued a malformed command"
+                        ));
+                    }
+                    sim.issue_from(c, sim::Source::Ai);
+                    issued += 1;
+                }
+            }
+            sim.step();
+            if let Err(e) = sim.check() {
+                return fail(&format!(
+                    "seed {seed}: invariant at tick {}: {e}",
+                    sim.tick()
+                ));
+            }
+        }
+        let explored: Vec<String> = (0..players)
+            .map(|p| {
+                let fog = sim.fog(p).expect("a fog per player");
+                let total = (fog.width() * fog.height()).max(1) as usize;
+                format!("{}%", fog.explored_count() * 100 / total)
+            })
+            .collect();
+        let replay = sim.replay();
+        let hash = match replay.verify() {
+            Ok(h) => h,
+            Err(e) => return fail(&format!("seed {seed}: {e}")),
+        };
+        println!(
+            "seed {seed}: {ticks} ticks, {players} opponents, {issued} commands, explored {}, {} entities, hash {hash:016x}",
+            explored.join(" "),
+            sim.world().len()
+        );
+    }
+    println!(
+        "{matches} match(es) in {:.2}s",
+        start.elapsed().as_secs_f64()
+    );
+    ExitCode::SUCCESS
 }
 
 fn fail(msg: &str) -> ExitCode {
@@ -835,6 +924,7 @@ fn main() -> ExitCode {
         "matrix" => matrix(&flags),
         "battle" => battle(&flags),
         "balance" => balance(&flags),
+        "ai" => ai(&flags),
         other => usage(&format!("unknown subcommand {other}")),
     }
 }

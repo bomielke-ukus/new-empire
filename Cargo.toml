@@ -2,6 +2,8 @@
 resolver = "2"
 members = [
     "crates/sim",
+    "crates/fogged",
+    "crates/ai",
     "crates/view",
     "crates/render",
     "crates/app",

@@ -26,6 +26,7 @@ the product; the web build is a convenience.
 new-empire/
 ├── crates/
 │   ├── sim/          Deterministic simulation. No rendering, no I/O, no floats.
+│   ├── fogged/       FoggedView: one player's view of a match, and nothing else
 │   ├── data/         Game data types + RON loading (units, buildings, techs, civs)
 │   ├── mapgen/       Seeded random map generation
 │   ├── ai/           Computer opponents. Emits Commands, reads only fogged state.
@@ -793,4 +794,46 @@ anticipate:
   keys are `J P N G`; the uniqueness rule is now "distinct within any panel
   that can be shown at once", and the test says so. `T` on a building alone
   is ALL OUT; with units also selected it is STOP, which comes first.
+
+## 24. Implementation notes from M5, chunk 1: fog of war and the AI boundary
+
+- **A `Fog` per player** (`fog.rs`), sized to the map: a `visibility`
+  count per tile, an `explored` bitset, and the static things last seen,
+  by anchor tile. `visibility` is recomputed every tick and is not hashed;
+  `explored` and the memories are history and are. A memory is kept until
+  the tile is seen again, and a tile in sight has no memory at all: what
+  is there is there. `Fog::remembered` and `memories` answer only for tiles
+  out of sight.
+- **Recomputed, not incremental** (`docs/07` D23). §6 planned to
+  increment and decrement circles as units move between tiles. The pass
+  `fog_of_war_update` instead clears every count and stamps every standing,
+  living, un-garrisoned entity's sight disc afresh, then remembers every
+  static thing on a seen tile. The cost is the sum of the discs, a few
+  hundred thousand byte operations a tick at full population, and no
+  per-entity bookkeeping to get wrong. The discs are cached by radius in
+  `Scratch`. A building sees its line of sight past its edge; high ground
+  sees a tile further; nothing yet sees over or is stopped by a cliff.
+- **`FoggedView` lives in its own crate,** `fogged`, over `sim`'s public
+  API: the tile's state, terrain and elevation where explored, passability
+  as last seen, the player's own state and modifiers, every own entity and
+  every other on a tile in sight, the memories, and the placement,
+  training and research queries for the player's own side. It re-exports
+  the command and data types an opponent needs and nothing that reaches
+  the world.
+- **The `ai` crate depends on `fogged` and not on `sim`.** That is the
+  whole enforcement of `TA-AI-01`: `sim::World` is unnameable there
+  because `sim` is not a dependency, and `fogged` re-exports no path to
+  it. Three `trybuild` compile-fail cases pin it, so a re-export or a new
+  dependency that opened the world would fail the build. The crate holds
+  `Difficulty`, and an `Opponent` seeded from the match and its player
+  number whose `think` returns the commands to issue; for now, none.
+- **Who issued a command travels with it.** `Source::{Player, Ai}` is
+  recorded in the queue and the replay log (`Replay::sources`, parallel
+  to the commands, defaulting to the player for files recorded before
+  there were opponents, so the format is unchanged). A command names
+  units; the last source to name a unit is written to `World::priority`,
+  and `plan_paths` sorts its requests by that before slot order, so when
+  the destination budget binds the player's requests are served first
+  (`TA-PATH-06`, now whole). `simrunner ai` runs opponents on every side
+  headless, invariants on, and verifies the recording.
 

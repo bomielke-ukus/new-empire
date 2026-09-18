@@ -18,9 +18,10 @@
 
 use crate::battle::{Event, Projectile};
 use crate::combat;
-use crate::command::{Command, CommandKind, CommandQueue, PlayerId};
+use crate::command::{Command, CommandKind, CommandQueue, PlayerId, Source};
 use crate::entity::{EntityId, KindId, Slot, World, WorldViolation};
 use crate::flow;
+use crate::fog::{self, Fog, Memory};
 use crate::formation;
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
@@ -218,6 +219,20 @@ pub(crate) struct Scratch {
     /// The tick each player's side was last told it was under attack; 0
     /// for never.
     pub(crate) last_alarm: Vec<u64>,
+    /// Sight discs by radius, built on first use.
+    stamps: Vec<Vec<(i32, i32)>>,
+}
+
+impl Scratch {
+    /// The disc of offsets a thing with `radius` tiles of sight covers.
+    fn stamp(&mut self, radius: i32) -> &[(i32, i32)] {
+        let r = radius.clamp(0, fog::MAX_SIGHT) as usize;
+        while self.stamps.len() <= r {
+            let next = self.stamps.len() as i32;
+            self.stamps.push(fog::stamp(next));
+        }
+        &self.stamps[r]
+    }
 }
 
 impl Clone for Scratch {
@@ -408,6 +423,13 @@ pub struct Simulation {
     queue: CommandQueue,
     /// Every command ever issued, with its issue tick. This *is* the replay.
     log: Vec<(u64, Command)>,
+    /// Who issued each, parallel to `log`.
+    #[serde(default)]
+    log_sources: Vec<Source>,
+    /// What each player has seen and can see (`docs/04` §6), one per
+    /// player. Derived visibility and hashed history; see [`Fog`].
+    #[serde(default)]
+    pub(crate) fog: Vec<Fog>,
     /// The grid generation walkers last checked their headings against.
     #[serde(default)]
     nav_seen: u32,
@@ -443,6 +465,8 @@ impl Simulation {
             world: World::new(),
             queue: CommandQueue::new(),
             log: Vec::new(),
+            log_sources: Vec::new(),
+            fog: Vec::new(),
             nav_seen: 0,
             projectiles: Vec::new(),
             events: Vec::new(),
@@ -454,6 +478,7 @@ impl Simulation {
         }
         sim.nav.refresh();
         sim.recount_population();
+        sim.fog_of_war_update();
         sim
     }
 
@@ -492,6 +517,17 @@ impl Simulation {
     /// Read access to entities.
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    /// What player `p` has seen and can see; `None` for an owner the match
+    /// does not have (Gaia, a scenario's spare player).
+    pub fn fog(&self, p: PlayerId) -> Option<&Fog> {
+        self.fog.get(p as usize)
+    }
+
+    /// Every player's fog, in player order.
+    pub fn fogs(&self) -> &[Fog] {
+        &self.fog
     }
 
     /// Every player's economy.
@@ -814,8 +850,17 @@ impl Simulation {
 
     /// Issues a command at the current tick. Returns the tick it will run on.
     pub fn issue(&mut self, command: Command) -> u64 {
+        self.issue_from(command, Source::Player)
+    }
+
+    /// [`Simulation::issue`], with who issued it. A computer opponent's
+    /// commands go through here, so the replay records the difference and
+    /// the path planner serves the player's requests first
+    /// (`TA-PATH-06`).
+    pub fn issue_from(&mut self, command: Command, via: Source) -> u64 {
         self.log.push((self.tick, command.clone()));
-        self.queue.schedule(self.tick, command)
+        self.log_sources.push(via);
+        self.queue.schedule_from(self.tick, command, via)
     }
 
     /// Advances the match by one tick. Fixed system order, no exceptions.
@@ -843,6 +888,7 @@ impl Simulation {
         self.construction();
         self.production();
         self.recount_population();
+        self.fog_of_war_update();
         self.tick += 1;
         #[cfg(feature = "debug-checks")]
         // Failing loudly is the whole point of this build configuration; the
@@ -868,6 +914,9 @@ impl Simulation {
         h.write(&self.world);
         h.write(&self.queue);
         h.write(&self.projectiles);
+        for f in &self.fog {
+            h.write(f);
+        }
         h.finish()
     }
 
@@ -955,6 +1004,17 @@ impl Simulation {
             }
         }
 
+        if self.fog.len() != self.players.len()
+            || self
+                .fog
+                .iter()
+                .any(|f| f.width() != self.map.width() || f.height() != self.map.height())
+        {
+            return Err(Violation::FogShape {
+                fogs: self.fog.len(),
+                players: self.players.len(),
+            });
+        }
         for (player, p) in self.players.iter().enumerate() {
             for (resource, &amount) in p.stockpile.iter().enumerate() {
                 if amount < 0 {
@@ -993,6 +1053,12 @@ impl Simulation {
             config: self.config.clone(),
             ticks: self.tick,
             commands: self.log.clone(),
+            // A match with no computer opponent records as it always has.
+            sources: if self.log_sources.iter().all(|s| *s == Source::Player) {
+                Vec::new()
+            } else {
+                self.log_sources.clone()
+            },
         }
     }
 
@@ -1069,12 +1135,19 @@ impl Simulation {
     // ----- commands ---------------------------------------------------------
 
     fn apply_commands(&mut self) {
-        for cmd in self.queue.drain_due(self.tick) {
+        for (cmd, via) in self.queue.drain_due_from(self.tick) {
             // A command that places or clears a building leaves the grid
             // dirty; the next one may ask it what is connected. Relabel
             // between them (free when nothing changed), so a move ordered
             // in the same tick as a placement sees the new footprint.
             self.nav.refresh();
+            // Who last named a unit decides whose path request it makes:
+            // the player's come first when the budget binds (`TA-PATH-06`).
+            for id in cmd.kind.named() {
+                if let Some(slot) = self.owned_slot(*id, cmd.player) {
+                    self.world.priority[slot.index()] = via as u8;
+                }
+            }
             self.apply(cmd);
         }
     }
@@ -1896,13 +1969,16 @@ impl Simulation {
     /// destination and shared, and a unit merely reads the way downhill from
     /// its tile and walks to the furthest point along it that it can see.
     fn plan_paths(&mut self) {
-        let slots: Vec<Slot> = self
+        let mut slots: Vec<Slot> = self
             .world
             .slots()
             .filter(
                 |s| matches!(&self.world.nav[s.index()], Some(n) if n.state == NavState::Planning),
             )
             .collect();
+        // The player's requests claim the destination budget before a
+        // computer opponent's (`TA-PATH-06`); within a source, slot order.
+        slots.sort_by_key(|s| (self.world.priority[s.index()], s.index()));
         let tick = self.tick;
         self.scratch.fields.flooded = 0;
         self.scratch.fields.built = 0;
@@ -2593,6 +2669,74 @@ impl Simulation {
         }
     }
 
+    /// Every player's sight, recomputed from where their units and
+    /// buildings stand (`docs/04` §6 `fog_of_war_update`): the visibility
+    /// counts are cleared and stamped afresh, which marks the tiles
+    /// explored and drops what was remembered on them; then every static
+    /// thing standing on a seen tile is remembered anew. Recomputing costs
+    /// the sum of the sight discs, not the map (`docs/07` D23).
+    fn fog_of_war_update(&mut self) {
+        let players = self.players.len();
+        if self.fog.len() != players
+            || self
+                .fog
+                .iter()
+                .any(|f| f.width() != self.map.width() || f.height() != self.map.height())
+        {
+            self.fog = (0..players)
+                .map(|_| Fog::new(self.map.width(), self.map.height()))
+                .collect();
+        }
+        let Simulation {
+            fog,
+            world,
+            map,
+            scratch,
+            ..
+        } = self;
+        for f in fog.iter_mut() {
+            f.clear_visible();
+        }
+        for s in world.slots() {
+            let i = s.index();
+            let owner = world.owner[i] as usize;
+            if owner >= players || world.dying[i] > 0 || world.inside[i].is_some() {
+                continue;
+            }
+            let k = kinds::info(world.kind[i]);
+            let (cx, cy) = nav::tile_of(world.pos[i]);
+            // A building sees from its edge; high ground sees a tile further.
+            let mut r = k.combat.line_of_sight + k.footprint as i32 / 2;
+            if map.elevation(cx, cy) > 0 {
+                r += 1;
+            }
+            for &(dx, dy) in scratch.stamp(r) {
+                fog[owner].see(cx + dx, cy + dy);
+            }
+        }
+        for s in world.slots() {
+            let i = s.index();
+            let k = kinds::info(world.kind[i]);
+            if k.mobile || world.dying[i] > 0 {
+                continue;
+            }
+            // Seeing any tile of it is seeing it; the memory sits at its
+            // anchor and is dropped when the anchor is seen again.
+            let fp = k.footprint as i32;
+            let (ax, ay) = nav::anchor_tile(world.pos[i], fp);
+            let tiles = nav::footprint_tiles(ax, ay, fp);
+            let m = Memory {
+                kind: world.kind[i],
+                owner: world.owner[i],
+            };
+            for f in fog.iter_mut() {
+                if tiles.iter().any(|t| f.visible(t.0, t.1)) {
+                    f.remember(ax, ay, m);
+                }
+            }
+        }
+    }
+
     fn recount_population(&mut self) {
         for p in &mut self.players {
             p.pop = 0;
@@ -2734,6 +2878,13 @@ pub enum Violation {
         /// Which slot.
         slot: u32,
     },
+    /// The fog grids do not match the players or the map.
+    FogShape {
+        /// How many fogs there are.
+        fogs: usize,
+        /// How many players.
+        players: usize,
+    },
 }
 
 impl core::fmt::Display for Violation {
@@ -2789,6 +2940,12 @@ impl core::fmt::Display for Violation {
             ),
             Violation::BadGarrison { slot } => {
                 write!(f, "slot {slot} is inside a building that cannot hold it")
+            }
+            Violation::FogShape { fogs, players } => {
+                write!(
+                    f,
+                    "{fogs} fog grids for {players} players, or the wrong size"
+                )
             }
         }
     }
