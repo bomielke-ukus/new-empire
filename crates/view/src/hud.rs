@@ -371,7 +371,7 @@ impl<'a> Painter<'a> {
 }
 
 /// Truncates text to what fits in `width` px at 1×.
-fn fit(text: &str, width: f32) -> String {
+pub(crate) fn fit(text: &str, width: f32) -> String {
     let max = (width / font::ADVANCE as f32).max(1.0) as usize;
     text.chars().take(max).collect()
 }

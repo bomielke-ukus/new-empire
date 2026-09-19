@@ -6,17 +6,24 @@
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
 //!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0]
+//!         [--screen title|setup] [--difficulty easy,standard,hard,hardest]
 //! ```
 //!
 //! Generates a map, runs it for `--ticks`, and writes a frame rendered by the
 //! same code path the game uses, minus the GPU. The frame is player 0's:
 //! their fog applies (`GD-FOG-01`) unless `--fog 0` shows the whole map.
+//! `--screen` renders one of the shell's screens instead, as the game
+//! shows it: the setup screen for `--seed`, `--size` and one opponent per
+//! `--difficulty` entry.
 
 use sim::kinds;
 use std::process::ExitCode;
 use view::camera::ZOOM_LEVELS;
 use view::minimap::{Minimap, MinimapRect};
-use view::{raster, Atlas, Camera, FogLights, Ghost, Hud, HudInput, Scene, SceneOptions, Sweep};
+use view::shell::{self, Difficulty, MapSize, ShellInput};
+use view::{
+    raster, Atlas, Camera, FogLights, Ghost, Hud, HudInput, Scene, SceneOptions, Setup, Sweep,
+};
 
 struct Args {
     seed: u64,
@@ -47,6 +54,8 @@ struct Args {
     ui_scale: f32,
     controls: bool,
     fog: bool,
+    screen: Option<String>,
+    difficulty: Option<String>,
 }
 
 fn parse() -> Result<Args, String> {
@@ -79,6 +88,8 @@ fn parse() -> Result<Args, String> {
         ui_scale: 1.0,
         controls: false,
         fog: true,
+        screen: None,
+        difficulty: None,
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -134,6 +145,8 @@ fn parse() -> Result<Args, String> {
             "--ui-scale" => a.ui_scale = num(val)?,
             "--controls" => a.controls = val == "1" || val == "true",
             "--fog" => a.fog = val == "1" || val == "true",
+            "--screen" => a.screen = Some(val.clone()),
+            "--difficulty" => a.difficulty = Some(val.clone()),
             _ => return Err(format!("unknown flag {key}")),
         }
         i += 2;
@@ -146,8 +159,62 @@ fn save(path: &str, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> 
         .map_err(|e| format!("{path}: {e}"))
 }
 
+/// Renders a shell screen (`--screen`) as the game shows it, with no
+/// match behind it: the title, or the setup screen with its preview.
+fn render_screen(a: &Args, name: &str) -> Result<(), String> {
+    let atlas = Atlas::placeholder();
+    let input = ShellInput {
+        viewport: (a.width as f32, a.height as f32),
+        ui_scale: a.dpi * a.ui_scale,
+        hover: a.hover,
+    };
+    let (screen, preview) = match name {
+        "title" => (shell::title(&atlas, &input), None),
+        "setup" => {
+            let mut setup = Setup::new(a.seed);
+            setup.size = MapSize::from_tiles(a.size)
+                .ok_or_else(|| format!("--size {}: not a size the setup screen offers", a.size))?;
+            if let Some(list) = &a.difficulty {
+                setup.opponents = list
+                    .split(',')
+                    .map(|n| {
+                        Difficulty::from_name(n)
+                            .ok_or_else(|| format!("--difficulty: no level called {n}"))
+                    })
+                    .collect::<Result<_, _>>()?;
+            }
+            let error = setup.validate().err().map(|e| e.to_string());
+            let sim = sim::Simulation::new(setup.seed, setup.config());
+            (
+                shell::setup(&atlas, &input, &setup, error.as_deref()),
+                Some(Minimap::render(&sim)),
+            )
+        }
+        other => return Err(format!("--screen {other}: title or setup")),
+    };
+    let mut img = raster::Image::new(a.width, a.height, [12, 10, 14, 255]);
+    let cam = Camera::new(1, 1, (a.width as f32, a.height as f32));
+    let palette = view::palette::texture();
+    raster::draw_sprites(&mut img, &cam, &atlas, &palette, &screen.sprites);
+    if let (Some(m), Some(rect)) = (preview, screen.preview) {
+        raster::draw_minimap(&mut img, &m, rect);
+    }
+    save(&a.out, img.width, img.height, &img.to_bytes())?;
+    println!(
+        "wrote {} ({}x{}, the {name} screen, {} buttons)",
+        a.out,
+        a.width,
+        a.height,
+        screen.buttons.len()
+    );
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let a = parse()?;
+    if let Some(name) = &a.screen {
+        return render_screen(&a, name);
+    }
     let config = sim::SimConfig {
         map: sim::MapSpec {
             kind: sim::MapKind::Inland,

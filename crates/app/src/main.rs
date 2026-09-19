@@ -1,9 +1,12 @@
 //! New Empire — the game binary.
 //!
-//! M2: villagers and the economy. Select with click, drag, double-click and
-//! control groups; right-click to move, gather or help build; place houses
-//! and storehouses; train villagers and set rally points. The HUD shows
-//! resources, population, idle villagers and the selection.
+//! The shell (`docs/06` M6) opens on a title screen; a skirmish is set up
+//! on the next one and played against computer opponents that think on
+//! their own view of the match every tick. In the match: select with
+//! click, drag, double-click and control groups; right-click to move,
+//! gather, build or attack; the HUD shows resources, population, idle
+//! villagers and the selection; Escape opens the pause menu, and the
+//! results come up when the match is decided.
 
 mod clock;
 mod input;
@@ -12,17 +15,23 @@ mod selection;
 #[cfg(test)]
 mod tests;
 
+use ai::Opponent;
 use clock::FixedClock;
+use fogged::FoggedView;
 use input::Input;
 use selection::Selection;
 use sim::kinds;
 use sim::tech;
-use sim::{Age, Command, CommandKind, EntityId, Rally, SimConfig, Simulation, Vec2Fx, TICK_MS};
+use sim::{Age, Command, CommandKind, EntityId, Rally, Simulation, Source, Vec2Fx, TICK_MS};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use view::hud::{Action, BOTTOM_PANEL, TOP_BAR};
 use view::minimap::{Minimap, MinimapRect};
-use view::{Atlas, Camera, FogLights, Ghost, Hud, HudInput, Scene, SceneOptions, Sweep, SWEEP_MS};
+use view::shell::{self, Results, Side};
+use view::{
+    Atlas, Camera, FogLights, Ghost, Hud, HudInput, Scene, SceneOptions, Screen, Setup,
+    ShellAction, ShellInput, Sweep, SWEEP_MS,
+};
 
 /// How long the age banner stays up, in ms.
 const BANNER_MS: u128 = 4000;
@@ -108,7 +117,7 @@ impl Gpu {
         self.surface.configure(&self.device, &self.config);
     }
 
-    fn render(&mut self, camera: &Camera, scene: &Scene, minimap: MinimapRect) {
+    fn render(&mut self, camera: &Camera, scene: &Scene, minimap: Option<MinimapRect>) {
         let frame = match self.surface.get_current_texture() {
             Ok(f) => f,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -121,14 +130,8 @@ impl Gpu {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        self.renderer.render(
-            &self.device,
-            &self.queue,
-            &view,
-            camera,
-            scene,
-            Some(minimap),
-        );
+        self.renderer
+            .render(&self.device, &self.queue, &view, camera, scene, minimap);
         frame.present();
     }
 }
@@ -176,19 +179,69 @@ struct App {
     last_fog_tick: Option<u64>,
     frames: u32,
     fps: f32,
+    /// Which screen the game is on.
+    shell: Shell,
+    /// The skirmish being set up, and the one the match was started from.
+    setup: Setup,
+    /// The computer opponents in the match, one per non-human player.
+    opponents: Vec<Opponent>,
+    /// The pause menu is open.
+    menu: bool,
+    /// Whether the clock was paused before the menu paused it.
+    paused_before_menu: bool,
+    /// A menu button that ends the match, awaiting its second click.
+    confirm: Option<ShellAction>,
+    /// Where the results screen is in its life.
+    results: ResultsState,
+    /// What the engine's check refused on the setup screen, if anything.
+    setup_error: Option<String>,
+    /// The last built shell screen or overlay, for button hit-testing.
+    screen: Screen,
+    /// The setup preview's minimap needs uploading.
+    minimap_dirty: bool,
+    /// The player asked to close the game.
+    quit: bool,
+}
+
+/// Which screen the game is on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Shell {
+    /// The title and the main menu.
+    Title,
+    /// The skirmish setup.
+    Setup,
+    /// A match, with the pause menu or the results over it or not.
+    Match,
+}
+
+/// The results screen comes up once, when the match is decided, and
+/// stays away once put away.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ResultsState {
+    Pending,
+    Shown,
+    Dismissed,
+}
+
+/// A seed nobody chose: the clock's low digits, short enough to read off
+/// the setup screen and type back.
+fn random_seed() -> u64 {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(1, |d| d.as_nanos() as u64);
+    nanos % 899_999 + 1
 }
 
 impl App {
     fn new() -> App {
+        // `new-empire [SEED]` pre-fills the setup screen's seed; without
+        // one the clock picks.
         let seed = std::env::args()
             .nth(1)
             .and_then(|s| s.parse().ok())
-            .unwrap_or(1);
-        let config = SimConfig::default();
-        if let Err(e) = config.validate() {
-            eprintln!("warning: match setup: {e}");
-        }
-        let sim = Simulation::new(seed, config);
+            .unwrap_or_else(random_seed);
+        let setup = Setup::new(seed);
+        let sim = Simulation::new(seed, setup.config());
         let map = sim.map();
         let mut camera = Camera::new(map.width(), map.height(), (1280.0, 720.0));
         let (sx, sy) = sim.starts()[ME as usize];
@@ -235,6 +288,17 @@ impl App {
             last_fog_tick: None,
             frames: 0,
             fps: 0.0,
+            shell: Shell::Title,
+            setup,
+            opponents: Vec::new(),
+            menu: false,
+            paused_before_menu: false,
+            confirm: None,
+            results: ResultsState::Pending,
+            setup_error: None,
+            screen: Screen::default(),
+            minimap_dirty: true,
+            quit: false,
         }
     }
 
@@ -250,6 +314,9 @@ impl App {
 
     /// Zooms by whole wheel steps about the cursor, or the centre without one.
     fn wheel(&mut self, lines: Option<f32>, pixels: Option<f32>) {
+        if self.shell != Shell::Match || self.overlay() {
+            return;
+        }
         let steps = self.input.wheel_steps(lines, pixels);
         if steps == 0 {
             return;
@@ -316,15 +383,21 @@ impl App {
 
     fn update_title(&mut self) {
         if let Some(w) = &self.window {
-            let paused = if self.clock.paused() { " [paused]" } else { "" };
-            w.set_title(&format!(
-                "New Empire — seed {} — tick {} — {} entities — {:.0} fps — {:.1}x{paused}",
-                self.sim.seed(),
-                self.sim.tick(),
-                self.sim.world().len(),
-                self.fps,
-                self.clock.speed
-            ));
+            let state = match self.shell {
+                Shell::Title => "title".to_string(),
+                Shell::Setup => format!("setup — seed {}", self.setup.seed),
+                Shell::Match => {
+                    let paused = if self.clock.paused() { " [paused]" } else { "" };
+                    format!(
+                        "seed {} — tick {} — {} entities — {:.1}x{paused}",
+                        self.sim.seed(),
+                        self.sim.tick(),
+                        self.sim.world().len(),
+                        self.clock.speed
+                    )
+                }
+            };
+            w.set_title(&format!("New Empire — {state} — {:.0} fps", self.fps));
         }
     }
 
@@ -332,22 +405,44 @@ impl App {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
+        match self.shell {
+            Shell::Match => self.frame_match(now, dt),
+            Shell::Title | Shell::Setup => self.frame_shell(now),
+        }
+    }
 
-        self.input.update_camera(&mut self.camera, dt);
+    /// One tick of the match: every opponent thinks on its own view of it
+    /// and issues as the AI (`GD-AI-01`), then the world moves.
+    fn tick_once(&mut self, now: Instant) {
+        self.prev_pos.clone_from(&self.sim.world().pos);
+        for bot in &mut self.opponents {
+            let commands = {
+                let view = FoggedView::new(&self.sim, bot.player());
+                bot.think(&view)
+            };
+            for c in commands {
+                self.sim.issue_from(c, Source::Ai);
+            }
+        }
+        self.sim.step();
+        self.feedback.observe(&self.sim);
+        if self
+            .sim
+            .events()
+            .iter()
+            .any(|e| matches!(e, sim::Event::Alarm { player, .. } if *player == ME))
+        {
+            self.alarm_at = Some(now);
+        }
+    }
 
+    fn frame_match(&mut self, now: Instant, dt: f32) {
+        if !self.overlay() {
+            self.input.update_camera(&mut self.camera, dt);
+        }
         let ticks = self.clock.advance(now);
         for _ in 0..ticks {
-            self.prev_pos.clone_from(&self.sim.world().pos);
-            self.sim.step();
-            self.feedback.observe(&self.sim);
-            if self
-                .sim
-                .events()
-                .iter()
-                .any(|e| matches!(e, sim::Event::Alarm { player, .. } if *player == ME))
-            {
-                self.alarm_at = Some(now);
-            }
+            self.tick_once(now);
         }
         self.selection.prune(&self.sim);
 
@@ -433,13 +528,33 @@ impl App {
         scene.ui.extend(hud.sprites.iter().cloned());
         self.hud = hud;
 
-        self.frames += 1;
-        if self.last_title.elapsed().as_secs_f32() >= 0.5 {
-            self.fps = self.frames as f32 / self.last_title.elapsed().as_secs_f32();
-            self.frames = 0;
-            self.last_title = now;
-            self.update_title();
+        // The match decided brings the results up once ([GD-WIN-01]);
+        // the pause menu and the results are the shell's, over the HUD.
+        if self.results == ResultsState::Pending && self.decided() {
+            self.results = ResultsState::Shown;
         }
+        let input = self.shell_input();
+        let overlay = if self.menu {
+            Some(shell::pause_menu(
+                &self.atlas,
+                &input,
+                self.decided(),
+                self.confirm,
+            ))
+        } else if self.results == ResultsState::Shown {
+            Some(shell::results(&self.atlas, &input, &self.results_now()))
+        } else {
+            None
+        };
+        self.screen = match overlay {
+            Some(o) => {
+                scene.ui.extend(o.sprites.iter().cloned());
+                o
+            }
+            None => Screen::default(),
+        };
+
+        self.count_frame(now);
         self.update_cursor();
         let rect = self.minimap_rect();
         if let Some(gpu) = &mut self.gpu {
@@ -456,9 +571,248 @@ impl App {
                     self.last_fog_tick = Some(self.sim.tick());
                 }
             }
-            gpu.render(&self.camera, &scene, rect);
+            gpu.render(&self.camera, &scene, Some(rect));
         }
         self.scene = scene;
+    }
+
+    /// The title and the setup screen: no world, a backdrop and buttons,
+    /// and on the setup screen the seed's map as the minimap will show it.
+    fn frame_shell(&mut self, now: Instant) {
+        let input = self.shell_input();
+        let screen = match self.shell {
+            Shell::Title => shell::title(&self.atlas, &input),
+            _ => shell::setup(
+                &self.atlas,
+                &input,
+                &self.setup,
+                self.setup_error.as_deref(),
+            ),
+        };
+        let scene = Scene {
+            sprites: Vec::new(),
+            ui: screen.sprites.clone(),
+        };
+        self.hud = Hud::default();
+        self.count_frame(now);
+        self.update_cursor();
+        if let Some(gpu) = &mut self.gpu {
+            if self.minimap_dirty {
+                let m = Minimap::render(&self.sim);
+                gpu.renderer.upload_minimap(&gpu.device, &gpu.queue, &m);
+                self.minimap_dirty = false;
+            }
+            gpu.render(&self.camera, &scene, screen.preview);
+        }
+        self.screen = screen;
+        self.scene = scene;
+    }
+
+    /// The frame counter and the window title, twice a second.
+    fn count_frame(&mut self, now: Instant) {
+        self.frames += 1;
+        if self.last_title.elapsed().as_secs_f32() >= 0.5 {
+            self.fps = self.frames as f32 / self.last_title.elapsed().as_secs_f32();
+            self.frames = 0;
+            self.last_title = now;
+            self.update_title();
+        }
+    }
+
+    /// Whether the shell has something over the world that takes the
+    /// input: the pause menu or the results.
+    fn overlay(&self) -> bool {
+        self.menu || self.results == ResultsState::Shown
+    }
+
+    /// The match is decided for the player: won, lost, or resigned.
+    fn decided(&self) -> bool {
+        self.sim.over() || !self.sim.standing(ME)
+    }
+
+    fn shell_input(&self) -> ShellInput {
+        ShellInput {
+            viewport: self.camera.viewport,
+            ui_scale: self.ui_scale(),
+            hover: self.input.cursor,
+        }
+    }
+
+    /// The results as they stand: who won, why, and every side's score.
+    fn results_now(&self) -> Results {
+        let won = self.sim.winner() == Some(ME);
+        let resigned = self.sim.player(ME).is_some_and(|p| p.resigned);
+        let why = if won {
+            "EVERY OTHER SIDE IS OUT"
+        } else if resigned {
+            "YOU RESIGNED"
+        } else if !self.sim.standing(ME) {
+            "NOTHING LEFT TO FIGHT WITH"
+        } else {
+            "ANOTHER SIDE WON"
+        };
+        let sides = (0..self.sim.players().len() as u8)
+            .map(|p| Side {
+                player: p,
+                name: if p == ME {
+                    "YOU".to_string()
+                } else {
+                    self.opponents
+                        .iter()
+                        .find(|o| o.player() == p)
+                        .map_or("PLAYER".to_string(), |o| {
+                            o.difficulty().name().to_uppercase()
+                        })
+                },
+                score: self.sim.score(p),
+                standing: self.sim.standing(p),
+            })
+            .collect();
+        Results {
+            won,
+            why: why.to_string(),
+            sides,
+        }
+    }
+
+    /// A click on a shell screen or overlay: the enabled button under it.
+    fn shell_click(&mut self, px: f32, py: f32) {
+        if let Some(b) = self
+            .screen
+            .buttons
+            .iter()
+            .find(|b| b.contains(px, py))
+            .cloned()
+        {
+            if b.enabled {
+                self.shell_action(b.action);
+            }
+        }
+    }
+
+    fn shell_action(&mut self, action: ShellAction) {
+        match action {
+            ShellAction::NewGame => {
+                self.shell = Shell::Setup;
+                self.preview();
+            }
+            ShellAction::LoadGame | ShellAction::WatchReplay | ShellAction::Settings => {}
+            ShellAction::Quit => self.quit = true,
+            ShellAction::Adjust(field, delta) => {
+                self.setup.adjust(field, delta);
+                self.preview();
+            }
+            ShellAction::Shuffle => {
+                self.setup.seed = random_seed();
+                self.preview();
+            }
+            ShellAction::Start => self.start_match(),
+            ShellAction::Back => self.shell = Shell::Title,
+            ShellAction::Resume => self.close_menu(),
+            // Ending a live match takes two clicks: the first arms the
+            // button, the second is the deed.
+            ShellAction::Resign => {
+                if self.confirm == Some(ShellAction::Resign) {
+                    self.issue(CommandKind::Resign);
+                    self.close_menu();
+                } else {
+                    self.confirm = Some(ShellAction::Resign);
+                }
+            }
+            ShellAction::QuitToTitle => {
+                if self.decided() || self.confirm == Some(ShellAction::QuitToTitle) {
+                    self.quit_to_title();
+                } else {
+                    self.confirm = Some(ShellAction::QuitToTitle);
+                }
+            }
+            ShellAction::KeepWatching => self.results = ResultsState::Dismissed,
+        }
+    }
+
+    /// Regenerates the setup screen's preview: the map the seed gives, as
+    /// the minimap will show it. The engine's check runs here too, so
+    /// START greys the moment a setup is refused.
+    fn preview(&mut self) {
+        self.setup_error = self.setup.validate().err().map(|e| e.to_string());
+        self.sim = Simulation::new(self.setup.seed, self.setup.config());
+        self.minimap_dirty = true;
+    }
+
+    /// Starts the match the setup describes: a fresh world, an opponent
+    /// per non-human player seeded from the match, the camera on the
+    /// player's start, and everything of the last match cleared.
+    fn start_match(&mut self) {
+        if let Err(e) = self.setup.validate() {
+            self.setup_error = Some(e.to_string());
+            return;
+        }
+        let seed = self.setup.seed;
+        self.sim = Simulation::new(seed, self.setup.config());
+        self.opponents = self
+            .setup
+            .opponents
+            .iter()
+            .enumerate()
+            .map(|(i, d)| Opponent::new(i as u8 + 1, *d, seed))
+            .collect();
+        let (viewport, dpi) = (self.camera.viewport, self.camera.dpi);
+        let map = self.sim.map();
+        self.camera = Camera::new(map.width(), map.height(), viewport);
+        self.camera.dpi = dpi;
+        let (sx, sy) = self.sim.starts()[ME as usize];
+        self.camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
+        self.prev_pos = self.sim.world().pos.clone();
+        self.feedback = view::feedback::CombatFeedback::default();
+        self.clock = FixedClock::new(TICK_MS);
+        self.selection = Selection::new();
+        self.build_mode = None;
+        self.targeting = None;
+        self.defences = false;
+        self.wall_from = None;
+        self.alarm_at = None;
+        self.show_help = false;
+        self.last_age = Age::Stone;
+        self.age_up = None;
+        self.last_click = None;
+        self.last_fog_tick = None;
+        self.last_minimap = Instant::now() - Duration::from_secs(10);
+        self.menu = false;
+        self.confirm = None;
+        self.results = ResultsState::Pending;
+        self.shell = Shell::Match;
+        if let Some(gpu) = &mut self.gpu {
+            let chunks = view::terrain::build_all(self.sim.map());
+            gpu.renderer.upload_terrain(&gpu.device, &chunks);
+        }
+    }
+
+    /// Leaves the match for the title. The world stays until the next
+    /// setup replaces it.
+    fn quit_to_title(&mut self) {
+        self.shell = Shell::Title;
+        self.opponents.clear();
+        self.menu = false;
+        self.confirm = None;
+        self.build_mode = None;
+        self.targeting = None;
+        self.defences = false;
+        self.wall_from = None;
+    }
+
+    /// Opens the pause menu. Menus pause (`docs/03` §1); a pause the
+    /// player set before stays set after.
+    fn open_menu(&mut self) {
+        self.paused_before_menu = self.clock.paused();
+        self.clock.set_paused(true);
+        self.menu = true;
+        self.confirm = None;
+    }
+
+    fn close_menu(&mut self) {
+        self.menu = false;
+        self.confirm = None;
+        self.clock.set_paused(self.paused_before_menu);
     }
 
     /// The cursor tells you what a right-click will do.
@@ -466,6 +820,10 @@ impl App {
         let Some(w) = &self.window else {
             return;
         };
+        if self.shell != Shell::Match || self.overlay() {
+            w.set_cursor(CursorIcon::Default);
+            return;
+        }
         let icon = match (self.build_mode, self.input.cursor) {
             (Some(_), _) => CursorIcon::Cell,
             (None, _) if self.targeting.is_some() => CursorIcon::Crosshair,
@@ -552,6 +910,11 @@ impl App {
     }
 
     fn left_press(&mut self, px: f32, py: f32) {
+        // A shell screen or overlay takes the click; the world gets none.
+        if self.shell != Shell::Match || self.overlay() {
+            self.shell_click(px, py);
+            return;
+        }
         // The minimap is drawn above the HUD. Its whole diamond must also
         // win hit-testing, including while placing a building.
         let (mm, map) = (self.minimap_rect(), self.map_size());
@@ -607,6 +970,10 @@ impl App {
 
     fn left_release(&mut self, px: f32, py: f32) {
         self.input.scrubbing = false;
+        if self.shell != Shell::Match || self.overlay() {
+            self.selection.drag_from = None;
+            return;
+        }
         if let (Some(kind), Some(from)) = (self.build_mode, self.wall_from.take()) {
             self.place_run(kind, from);
             if !self.modifiers.shift_key() {
@@ -661,6 +1028,9 @@ impl App {
     }
 
     fn right_press(&mut self, px: f32, py: f32) {
+        if self.shell != Shell::Match || self.overlay() {
+            return;
+        }
         if self.build_mode.is_some() || self.targeting.is_some() || self.defences {
             self.build_mode = None;
             self.wall_from = None;
@@ -862,6 +1232,40 @@ impl App {
     }
 
     fn key(&mut self, code: KeyCode) -> bool {
+        // The shell's screens take every key; the world gets none.
+        match self.shell {
+            Shell::Title => {
+                match code {
+                    KeyCode::Enter | KeyCode::NumpadEnter => {
+                        self.shell_action(ShellAction::NewGame)
+                    }
+                    KeyCode::Escape => self.shell_action(ShellAction::Quit),
+                    _ => {}
+                }
+                return self.quit;
+            }
+            Shell::Setup => {
+                match code {
+                    KeyCode::Enter | KeyCode::NumpadEnter => self.shell_action(ShellAction::Start),
+                    KeyCode::Escape => self.shell_action(ShellAction::Back),
+                    _ => {}
+                }
+                return false;
+            }
+            Shell::Match => {}
+        }
+        if self.menu {
+            if code == KeyCode::Escape {
+                self.close_menu();
+            }
+            return false;
+        }
+        if self.results == ResultsState::Shown {
+            if code == KeyCode::Escape {
+                self.results = ResultsState::Dismissed;
+            }
+            return false;
+        }
         // Camera movement is handled through held keys, regardless of the
         // selection. Never let WASD also dispatch a command.
         if matches!(
@@ -906,7 +1310,7 @@ impl App {
                 } else if !self.selection.ids.is_empty() {
                     self.selection.set(vec![]);
                 } else {
-                    return true;
+                    self.open_menu();
                 }
             }
             KeyCode::Space => {
@@ -1139,6 +1543,9 @@ impl ApplicationHandler for App {
             },
             WindowEvent::RedrawRequested => self.frame(),
             _ => {}
+        }
+        if self.quit {
+            event_loop.exit();
         }
     }
 

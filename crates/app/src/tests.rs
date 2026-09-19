@@ -3,7 +3,10 @@
 //! event loop is created; the live macOS smoke pass is still separate.
 
 use super::*;
-use sim::{Command, Formation, Item, MapKind, MapSpec, Order, Stance};
+use ai::Difficulty;
+use sim::{Command, Formation, Item, MapKind, MapSpec, Order, SimConfig, Stance};
+use view::shell::Field;
+use view::ShellButton;
 
 #[test]
 fn camera_keys_pan_without_building_or_spending_and_release_stops_panning() {
@@ -93,7 +96,10 @@ fn replacement_shortcuts_work_without_panning_or_key_repeat_orders() {
     assert!(app.sim.tech_queued(ME, tech::STONE_MINING));
     assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
     assert!(app.selection.ids.is_empty());
-    assert!(app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    // With nothing left to cancel, Escape opens the pause menu rather
+    // than closing the window.
+    assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    assert!(app.menu);
 }
 
 #[test]
@@ -205,7 +211,294 @@ fn app() -> App {
     app.camera = Camera::new(48, 48, (1280.0, 720.0));
     app.clock.set_paused(true);
     app.input.edge_scroll = false;
+    // Straight into a match, as the shell would after START. The world is
+    // empty until a test spawns into it, which the shell would call a
+    // decided match; the results panel is put away so the world takes
+    // input.
+    app.shell = Shell::Match;
+    app.results = ResultsState::Dismissed;
     app
+}
+
+/// Clicks the shell button for `action` on the screen as last drawn.
+fn press(app: &mut App, action: ShellAction) {
+    draw(app);
+    let b = app
+        .screen
+        .buttons
+        .iter()
+        .find(|b| b.action == action)
+        .cloned()
+        .unwrap_or_else(|| panic!("no button for {action:?}"));
+    assert!(b.enabled, "{action:?}: {}", b.reason);
+    app.left_press(b.x + b.w * 0.5, b.y + b.h * 0.5);
+    app.left_release(b.x + b.w * 0.5, b.y + b.h * 0.5);
+}
+
+/// The shell button for `action` on the screen as last drawn.
+fn shell_button(app: &App, action: ShellAction) -> ShellButton {
+    app.screen
+        .buttons
+        .iter()
+        .find(|b| b.action == action)
+        .cloned()
+        .unwrap_or_else(|| panic!("no button for {action:?}"))
+}
+
+/// A villager for each of two sides, so both stand and nothing is
+/// decided.
+fn two_sides(app: &mut App) {
+    spawn(app, kinds::VILLAGER, 8, 8);
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Spawn {
+            kind: kinds::VILLAGER,
+            pos: Vec2Fx::from_int(40, 40),
+        },
+    });
+    step(app, 3);
+    assert!(app.sim.standing(0) && app.sim.standing(1));
+    app.results = ResultsState::Pending;
+    app.clock.set_paused(false);
+}
+
+/// The game opens on the title; a skirmish is set up with the screen's
+/// buttons and started; the setup is the match, and the opponents play
+/// from the first tick as the AI while the human's queue stays theirs.
+///
+/// REQ: GD-AI-01
+#[test]
+fn a_skirmish_is_set_up_on_the_screens_and_the_opponents_play_as_the_ai() {
+    let mut app = App::new();
+    app.camera.viewport = (1280.0, 720.0);
+    app.input.edge_scroll = false;
+    assert_eq!(app.shell, Shell::Title);
+    draw(&mut app);
+    assert!(app.hud.buttons.is_empty(), "no HUD on the title");
+    assert_eq!(app.screen.buttons.len(), 5);
+    // Letters and clicks on the title reach no match.
+    let commands = app.sim.replay().commands.len();
+    assert!(!app.keyboard_input(KeyCode::KeyV, ElementState::Pressed, false));
+    app.left_press(640.0, 100.0);
+    app.left_release(640.0, 100.0);
+    app.right_press(640.0, 100.0);
+    assert_eq!(app.sim.replay().commands.len(), commands);
+    assert_eq!(app.shell, Shell::Title);
+    // Enter opens the setup; the arrows add an opponent and make it
+    // Hardest, and raise the population cap.
+    assert!(!app.keyboard_input(KeyCode::Enter, ElementState::Pressed, false));
+    assert_eq!(app.shell, Shell::Setup);
+    app.setup.seed = 3;
+    app.preview();
+    press(&mut app, ShellAction::Adjust(Field::Opponents, 1));
+    press(&mut app, ShellAction::Adjust(Field::Difficulty(1), -1));
+    press(&mut app, ShellAction::Adjust(Field::Difficulty(1), -1));
+    press(&mut app, ShellAction::Adjust(Field::PopCap, 1));
+    assert_eq!(
+        app.setup.opponents,
+        vec![Difficulty::Standard, Difficulty::Hardest]
+    );
+    assert_eq!(app.setup.pop_cap, 100);
+    assert_eq!(app.setup.seed, 3);
+    assert_eq!(
+        app.sim.config().map.players,
+        3,
+        "the preview follows the setup"
+    );
+    press(&mut app, ShellAction::Shuffle);
+    app.setup.seed = 3;
+    app.preview();
+    // START: the setup is the match.
+    press(&mut app, ShellAction::Start);
+    assert_eq!(app.shell, Shell::Match);
+    let config = app.sim.config().clone();
+    assert_eq!(config.map.players, 3);
+    assert_eq!(config.map.size, 128);
+    assert_eq!(config.pop_cap_max, 100);
+    assert_eq!(
+        config.gather_bonus_pct,
+        vec![0, 0, sim::HARDEST_GATHER_BONUS_PCT],
+        "only the Hardest opponent has the declared bonus"
+    );
+    assert_eq!(app.sim.seed(), 3);
+    assert_eq!(app.sim.tick(), 0);
+    assert_eq!(app.opponents.len(), 2);
+    assert_eq!(app.opponents[0].player(), 1);
+    assert_eq!(app.opponents[1].difficulty(), Difficulty::Hardest);
+    assert!(!app.clock.paused());
+    assert_eq!(app.results, ResultsState::Pending);
+    // The opponents issue as the AI within their first thoughts; nothing
+    // is issued in the human's name.
+    let now = Instant::now();
+    for _ in 0..200 {
+        app.tick_once(now);
+    }
+    let replay = app.sim.replay();
+    assert!(!replay.commands.is_empty());
+    assert!(replay.commands.iter().all(|(_, c)| c.player != ME));
+    assert!(replay.sources.iter().all(|s| *s == Source::Ai));
+    assert_eq!(replay.sources.len(), replay.commands.len());
+    draw(&mut app);
+    assert!(app.hud.sprites.len() > 40, "the HUD is back");
+    assert!(
+        app.screen.buttons.is_empty(),
+        "no overlay over a live match"
+    );
+    assert!(!app.decided());
+}
+
+/// The setup screen runs the engine's check (`docs/04` §19): a refused
+/// setup greys START and says why, and Enter will not start it.
+#[test]
+fn the_setup_screen_refuses_what_the_engine_refuses() {
+    let mut app = App::new();
+    app.camera.viewport = (1280.0, 720.0);
+    app.shell = Shell::Setup;
+    app.setup.pop_cap = 500;
+    app.preview();
+    assert!(app.setup_error.is_some());
+    draw(&mut app);
+    assert!(!shell_button(&app, ShellAction::Start).enabled);
+    assert!(!app.keyboard_input(KeyCode::Enter, ElementState::Pressed, false));
+    assert_eq!(app.shell, Shell::Setup);
+    app.setup.pop_cap = 75;
+    app.preview();
+    assert!(app.setup_error.is_none());
+    draw(&mut app);
+    assert!(shell_button(&app, ShellAction::Start).enabled);
+    assert!(!app.keyboard_input(KeyCode::Enter, ElementState::Pressed, false));
+    assert_eq!(app.shell, Shell::Match);
+    // Escape in the setup goes back; Escape on the title quits.
+    app.quit_to_title();
+    app.shell = Shell::Setup;
+    assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    assert_eq!(app.shell, Shell::Title);
+    assert!(app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    assert!(app.quit);
+}
+
+/// Escape opens the pause menu, which pauses and takes every key and
+/// click; RESIGN takes two clicks and ends the match on the results
+/// screen, which says why, and BACK TO TITLE leaves the match.
+///
+/// REQ: GD-WIN-01
+#[test]
+fn the_pause_menu_pauses_and_resigning_ends_the_match_on_the_results_screen() {
+    let mut app = app();
+    two_sides(&mut app);
+    draw(&mut app);
+    assert!(!app.decided());
+    assert!(app.screen.buttons.is_empty());
+    // Escape with nothing to cancel opens the menu and pauses.
+    assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    assert!(app.menu && app.clock.paused());
+    draw(&mut app);
+    assert!(shell_button(&app, ShellAction::Resign).enabled);
+    // The menu has the keys and the world: Space does not unpause, a
+    // click on the world selects nothing, a hotkey trains nothing.
+    let commands = app.sim.replay().commands.len();
+    assert!(!app.keyboard_input(KeyCode::Space, ElementState::Pressed, false));
+    assert!(app.clock.paused());
+    let (px, py) = on_screen(&app, 8.5, 8.5, 0.0);
+    app.left_press(px, py);
+    app.left_release(px, py);
+    assert!(app.selection.ids.is_empty());
+    assert!(!app.keyboard_input(KeyCode::KeyV, ElementState::Pressed, false));
+    assert_eq!(app.sim.replay().commands.len(), commands);
+    // Resume restores the clock; a pause the player set stays set.
+    press(&mut app, ShellAction::Resume);
+    assert!(!app.menu && !app.clock.paused());
+    app.clock.set_paused(true);
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    assert!(app.menu);
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    assert!(!app.menu && app.clock.paused(), "Escape resumes too");
+    app.clock.set_paused(false);
+    // Resign takes two clicks; the first arms the button.
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    press(&mut app, ShellAction::Resign);
+    assert!(app.menu && app.confirm == Some(ShellAction::Resign));
+    draw(&mut app);
+    assert_eq!(
+        shell_button(&app, ShellAction::Resign).label,
+        "CONFIRM RESIGN"
+    );
+    assert_eq!(app.sim.replay().commands.len(), commands);
+    press(&mut app, ShellAction::Resign);
+    assert!(!app.menu);
+    assert!(app
+        .sim
+        .replay()
+        .commands
+        .iter()
+        .any(|(_, c)| c.player == ME && c.kind == CommandKind::Resign));
+    step(&mut app, 3);
+    draw(&mut app);
+    assert!(!app.sim.standing(ME));
+    assert_eq!(app.results, ResultsState::Shown);
+    let r = app.results_now();
+    assert!(!r.won);
+    assert_eq!(r.why, "YOU RESIGNED");
+    assert_eq!(r.sides.len(), 2);
+    assert_eq!(r.sides[0].name, "YOU");
+    assert!(!r.sides[0].standing && r.sides[1].standing);
+    // KEEP WATCHING puts the panel away and it stays away.
+    press(&mut app, ShellAction::KeepWatching);
+    assert_eq!(app.results, ResultsState::Dismissed);
+    draw(&mut app);
+    assert!(app.screen.buttons.is_empty());
+    // The menu now greys RESIGN, and QUIT needs no second click.
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    draw(&mut app);
+    assert!(!shell_button(&app, ShellAction::Resign).enabled);
+    press(&mut app, ShellAction::QuitToTitle);
+    assert_eq!(app.shell, Shell::Title);
+    assert!(app.opponents.is_empty() && !app.menu);
+}
+
+/// The last side standing wins on the results screen; quitting a live
+/// match to the title takes two clicks, and Escape disarms the first.
+///
+/// REQ: GD-WIN-01
+#[test]
+fn victory_shows_the_results_and_quitting_a_live_match_takes_two_clicks() {
+    let mut app = app();
+    two_sides(&mut app);
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    press(&mut app, ShellAction::QuitToTitle);
+    assert!(app.menu && app.confirm == Some(ShellAction::QuitToTitle));
+    assert_eq!(app.shell, Shell::Match);
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    assert!(!app.menu && app.confirm.is_none());
+    // The other side falls.
+    let theirs: Vec<_> = {
+        let w = app.sim.world();
+        w.slots()
+            .filter(|s| w.owner[s.index()] == 1)
+            .map(|s| w.id_at(s))
+            .collect()
+    };
+    for id in theirs {
+        app.sim.issue(Command {
+            player: 1,
+            kind: CommandKind::Despawn { id },
+        });
+    }
+    step(&mut app, 3);
+    draw(&mut app);
+    assert_eq!(app.sim.winner(), Some(ME));
+    assert_eq!(app.results, ResultsState::Shown);
+    let r = app.results_now();
+    assert!(r.won);
+    assert_eq!(r.why, "EVERY OTHER SIDE IS OUT");
+    assert!(r.sides[0].standing && !r.sides[1].standing);
+    assert!(shell_button(&app, ShellAction::KeepWatching).enabled);
+    press(&mut app, ShellAction::QuitToTitle);
+    assert_eq!(
+        app.shell,
+        Shell::Title,
+        "a decided match needs no second click"
+    );
 }
 
 fn step(app: &mut App, ticks: u32) {

@@ -12,6 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 sim = { path = "../sim" }
+fogged = { path = "../fogged" }
+ai = { path = "../ai" }
 view = { path = "../view" }
 render = { path = "../render" }
 winit = "0.30"

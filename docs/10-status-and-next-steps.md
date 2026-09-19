@@ -14,7 +14,8 @@ portability and determinism checks, without a shipping commitment.
 
 ## 1. Where we are
 
-Five milestones landed; the vertical slice is beyond its halfway point.
+Five milestones landed and the sixth begun; the vertical slice is beyond
+its halfway point.
 
 | Milestone | Status | Acceptance |
 |---|---|---|
@@ -24,7 +25,7 @@ Five milestones landed; the vertical slice is beyond its halfway point.
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
-| M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
+| M6 — Game shell | **In progress**: 1 of 5 chunks landed 2026-09-19 | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
@@ -40,7 +41,9 @@ golden images; native observations are recorded separately below.
 
 ### What you can do in the game today
 
-Start a skirmish on a generated Inland map, select and command villagers,
+Open the game on its title screen, set up a skirmish (map size, one to
+seven computer opponents each at a difficulty, the population cap and the
+seed, with the map previewed) and play it: select and command villagers,
 gather food, wood, stone and gold, build Houses and Storehouses, train
 villagers from the Town Center with rally points onto resources, put up the
 ten M3 buildings as your age allows, research technologies at the Storehouse
@@ -48,8 +51,11 @@ and Market, advance Stone → Tool → Bronze → Iron behind the resource-and-
 buildings gate, and farm with auto-reseed. Train the six Tool Age soldiers,
 attack, attack-move and patrol with stances and formations; drag a palisade
 or stone wall, set a gate into it, put up a Watch Tower and garrison it or
-the Town Center; knock the other side's buildings down to rubble. There is
-no opponent yet: the other players sit still unless a scenario moves them.
+the Town Center; knock the other side's buildings down to rubble. The
+opponents play from the first tick, scouting, building, advancing and
+coming for the Town Center; Escape opens the pause menu (resume, resign,
+quit) and the results come up when the match is decided. Save, load,
+replay playback, settings and notifications are still to come in M6.
 
 ```sh
 cargo run --release -p new-empire           # the game window
@@ -790,13 +796,52 @@ what was done:
   human will find the assault predictable: it comes from the nearest
   side, at the Town Center, at about twenty minutes.
 
+### Work record: M6 chunk 1 — the shell, the setup screen and the opponent in the app (2026-09-19)
+
+- **What landed.** `crates/view/src/shell.rs`: the title, the setup
+  screen, the pause menu and the results, built like the HUD (sprites
+  and hit rectangles in HUD pixels, scaled on the way out), and the
+  `Setup` model whose `config()` is the one place the screen's choices
+  become match parameters. The app has a shell state (title, setup,
+  match) around the match it had; the opponents think in its tick loop
+  on their own `FoggedView` and issue as the AI; Escape opens the pause
+  menu instead of closing the window. `mapview --screen title|setup`
+  renders the screens for the golden images. `docs/04` §30 has the
+  notes.
+- **What changed for the player.** The game opens on a title screen.
+  NEW GAME (or Enter) opens the setup: the map (Inland; the rest with
+  M8), the size from Tiny 96 to Giant 240, one to seven opponents each
+  at Easy, Standard, Hard or Hardest, the population cap 50 to 200, the
+  seed with a SHUFFLE, and the seed's map previewed as the minimap will
+  show it. A Hardest opponent has "+25% GATHER RATE" beside it. START
+  (or Enter) begins the match against opponents that play from the
+  first tick. In the match, Escape with nothing to cancel opens the
+  pause menu, which pauses: RESUME, RESIGN and QUIT TO TITLE, the last
+  two taking a second click. When the match is decided the results come
+  up: VICTORY or DEFEAT, why, and each side's score; KEEP WATCHING puts
+  the panel away, BACK TO TITLE leaves. `new-empire [SEED]` pre-fills
+  the seed; without one the clock picks.
+- **Measured.** A Giant map with eight players generates and previews in
+  under 0.2 s, so every arrow press regenerates the preview. Four app
+  tests drive the flow through the window's own handlers, five unit
+  tests pin the screens and the setup model, two golden images pin the
+  title and the setup screen.
+- **Not done, deliberately.** LOAD GAME, WATCH REPLAY and SETTINGS are
+  on the title greyed NOT YET: chunks 2 to 4. The title shows the
+  placeholder name (`docs/07` Q5). Civilisation, teams, victory
+  conditions and starting age (`docs/02` §13) wait for the content they
+  need. A seed cannot be typed: the arrows and SHUFFLE are it. Nothing
+  has been clicked on the Mac yet; the screens are verified by the
+  handlers and the software rasteriser, as every milestone's first
+  chunk has been.
+
 ### Resume here next session
 
-**M5 is landed and tuned; M6 (the game shell) is next**, per `docs/06`:
-a setup screen with map, size, difficulty per opponent and the declared
-Hardest bonus; the opponent in the app; victory and defeat on a results
-screen; save and load; replay playback with speed controls; settings.
-The parallel track (§4b) runs on its own branch. Keep the art pipeline on
+**M6 chunk 1 is landed; chunk 2, save and load, is next** (§4c):
+`TA-SAVE-01` and `TA-DET-06`, a versioned save that is also a resumable
+replay, written from the pause menu and loaded from the title. Then
+replay playback, settings, notifications and the `RM-M6-01` run. The
+parallel track (§4b) runs on its own branch. Keep the art pipeline on
 the `docs/08` schedule.
 
 ## 4. What M4 completed — Combat
@@ -832,14 +877,14 @@ shippable on its own and has a headless test before it has a sprite.
    `docs/09`. The native functional smoke pass and owner readability approval
    are recorded above; the acceptance and readability PRs are now merged.
 
-## 4b. What comes next: M5 — An opponent
+## 4b. What M5 completed — An opponent
 
 `docs/06` M5: an AI that plays through the same command interface a human
 uses and sees only what a human sees (`GD-AI-01`, `TA-AI-01`, `docs/07`
-D7), four difficulties, and victory and defeat. Done when `RM-M5-01` holds:
+D7), four difficulties, and victory and defeat. `RM-M5-01` holds in CI:
 twenty headless AI-versus-AI matches, no crashes, no stuck units, Hard
-beats Easy at least eighteen times. In the order we intend to build it,
-each step shippable and tested headless before it has a sprite:
+beats Easy 20 of 20, 18 by elimination. In the order it was built, each
+step shipped and tested headless before it had a sprite:
 
 1. **Fog of war in the simulation and the AI boundary.** **Done
    2026-09-18**, record above: per-player visibility, explored and
@@ -885,6 +930,38 @@ the merge reconciles. M5 stays out of the three files above.
 
 ---
 
+## 4c. What comes next: M6 — The game shell
+
+`docs/06` M6: a player launches the game, configures and plays a full
+skirmish to a victory screen, saves mid-match, reloads, and watches the
+replay, without touching a terminal (`RM-M6-01`). In the order we intend
+to build it, each step shippable and driven headless through the app's
+own handlers before anyone clicks it:
+
+1. **The shell, the setup screen and the opponent in the app.** **Done
+   2026-09-19**, record above: a title screen; a setup screen with the
+   map size, one to seven opponents each at a difficulty, the population
+   cap and the seed, the map previewed, the Hardest bonus declared beside
+   the opponent that gets it; the opponents thinking in the app's tick
+   loop; the pause menu with resign and quit; the results screen.
+2. **Save and load** (`TA-SAVE-01`, `TA-DET-06`): a versioned save of
+   the match that is also a resumable replay, written from the pause
+   menu, listed and loaded from the title.
+3. **Replay playback with speed controls**: every match played in the
+   app is recorded; WATCH REPLAY lists them; playback from the command
+   log with pause and speed, seen through any side's eyes or none.
+4. **Settings**: a settings file; UI scale, edge scrolling, window mode,
+   and the key bindings (`GD-A11Y-02`) as far as one chunk allows.
+5. **Notifications with click-to-jump** (`docs/03` §6.3,
+   `UX-NOTIFY-01`), and the `RM-M6-01` run recorded: the whole path from
+   the title to the replay, driven headless through the app's handlers,
+   and once by hand on the Mac.
+
+The name (`docs/07` Q5) now bites: the title screen shows the
+placeholder.
+
+---
+
 ## 5. Owed items and known debt
 
 Stated so they are not rediscovered.
@@ -918,7 +995,7 @@ in the order they bite:
 | Q9 — A second ownership cue besides colour | M4 (readability of a fight), M7 | Decide before combat art is commissioned; a banner glyph per player is the cheapest candidate |
 | Q1 — Naval in the vertical slice? | M4 scope | Leave it out of the slice; the map generator has water but nothing sails |
 | Q8 — Four ages or five? | Content tables | Four, as `docs/02` stands; M3 shipped the four-age structure |
-| Q5 — The game's name | M6 (menus), M9 | Not urgent; needed before the shell has a title screen |
+| Q5 — The game's name | M6 (menus), M9 | Biting now: the title screen shows the placeholder, one constant (`view::shell::TITLE`) to change |
 
 ---
 

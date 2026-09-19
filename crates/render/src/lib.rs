@@ -407,8 +407,10 @@ impl Renderer {
         }
     }
 
-    /// Uploads (or replaces) terrain chunk geometry.
+    /// Uploads terrain chunk geometry, replacing whatever map was there:
+    /// a smaller map must not leave the old one's edges standing.
     pub fn upload_terrain(&mut self, device: &wgpu::Device, chunks: &[ChunkMesh]) {
+        self.chunks.clear();
         for c in chunks {
             let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("terrain vertices"),

@@ -1057,3 +1057,53 @@ What still ends on score: two seeds in twenty where the last villagers
 are never found in time. Counters to what the enemy fields, walls, and
 siege are still owed, and a human will find this opponent predictable.
 
+## 30. Implementation notes from M6, chunk 1: the shell
+
+- **The shell is three states around the match the app had.**
+  `Shell::{Title, Setup, Match}`: the match state is the app as it was
+  before M6, and the two others draw a screen and take only its buttons
+  and Enter and Escape. The match code path checks the state in one
+  place, the first line of each input handler.
+- **A screen is built like the HUD.** `view::shell` produces sprites and
+  hit rectangles in HUD pixels and scales them on the way out, as
+  `Hud::build` does, so `F2` and the display scale apply and the same
+  rasteriser previews it (`mapview --screen`). The app keeps the last
+  built screen for hit-testing, as it keeps the last HUD.
+- **`Setup::config` is the one place a choice becomes a parameter.** The
+  declared bonus (`GD-AI-01`): `Setup::declared_bonus` gives
+  `HARDEST_GATHER_BONUS_PCT` to a Hardest opponent and zero to everyone
+  else, the human included, and the screen prints it beside that
+  opponent. The `ai` crate never sees it; `simrunner versus` sets the
+  same thing its own way, and both are tested.
+- **The preview is a match.** The setup screen's minimap is
+  `Simulation::new` on the setup, regenerated on every change (a Giant
+  eight-player map in under 0.2 s). START generates once more so the
+  match begins at tick 0 from the config rather than from a preview.
+- **The opponents think in the app's tick loop**, each on
+  `FoggedView::new(&sim, player)` and issued through
+  `issue_from(.., Source::Ai)`, exactly as `simrunner versus` does. The
+  player's own commands are as they were; the replay records both.
+- **Menus pause** (`docs/03` §1): opening the menu remembers whether the
+  clock was paused and restores that on close, so a Space pause
+  survives a look at the menu.
+- **Ending a live match takes two clicks.** RESIGN and QUIT TO TITLE
+  arm on the first click (the label becomes CONFIRM ...) and act on the
+  second; Escape or RESUME disarms. Once the match is decided QUIT
+  needs no second click and RESIGN is greyed.
+- **The results come up once.** `ResultsState::{Pending, Shown,
+  Dismissed}`: shown when `Simulation::over` holds or the player is not
+  standing, put away by KEEP WATCHING or Escape and never back; the
+  pause menu's QUIT is the way out afterwards. The world keeps running
+  behind the panel.
+- **An empty world is a decided match.** A world with no standing side
+  is over by `docs/02` §10, which the app's tests met at once: their
+  worlds are empty until a test spawns into them. The test helper puts
+  the results away; a real match starts with every side standing.
+- **`view` depends on `ai`** for `Difficulty` and nothing else. The
+  dependency runs from the presentation to the opponent, never back;
+  `ai` still depends on `fogged` alone.
+- **`Renderer::upload_terrain` replaces the map.** It used to add
+  chunks; a Small map after a Giant one would have kept the Giant's
+  edges. `Gpu::render` takes the minimap rectangle as an option, since
+  the title has none and the setup's preview sits inside its panel.
+

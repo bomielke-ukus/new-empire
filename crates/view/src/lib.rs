@@ -20,6 +20,7 @@ pub mod palette_table;
 pub mod raster;
 pub mod scene;
 pub mod sheets;
+pub mod shell;
 pub mod sprites;
 pub mod terrain;
 
@@ -27,6 +28,7 @@ pub use camera::Camera;
 pub use fog::FogLights;
 pub use hud::{Action, Button, Hud, HudInput};
 pub use scene::{Ghost, Scene, SceneOptions, SpriteInstance, Sweep, SWEEP_MS};
+pub use shell::{Screen, Setup, ShellAction, ShellButton, ShellInput};
 pub use sprites::{Anim, Atlas, Frame, Ink};
 pub use terrain::{ChunkMesh, TerrainVertex, CHUNK_TILES};
 

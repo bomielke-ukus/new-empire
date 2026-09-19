@@ -4,11 +4,11 @@ A real-time strategy game about taking a civilization from hand-axes to iron in
 about half an hour — built to recapture what made *Age of Empires* (1997)
 engaging, without its 1997 frustrations.
 
-**Status: M3 (ages, production and technology) — advance Stone → Tool →
-Bronze → Iron from the Town Center behind a resource-and-buildings gate,
-research at the Storehouse and Market, farm with auto-reseed, and place the
-ten new buildings from a command grid that shows what each age unlocks.
-Playable as an economy sandbox; no combat or opponent yet. See the roadmap.**
+**Status: M6 (the game shell) in progress — the game opens on a title
+screen; a skirmish is set up against one to seven computer opponents at
+four difficulties and played to a results screen. The opponents scout,
+build, advance and attack, seeing only what they have scouted. Save,
+load, replay playback and settings are next. See the roadmap.**
 
 ---
 
@@ -57,7 +57,11 @@ cargo run -p atlas -- validate               # art conformance gate
 cargo run -p atlas -- rig                    # render rig, checked against the specs
 ```
 
-In the window: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
+The game opens on a title screen: `Enter` or NEW GAME opens the skirmish
+setup (map size, opponents and their difficulties, population cap, seed,
+with the map previewed); `Enter` or START begins the match.
+
+In the match: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
 `+`/`-` to zoom, from 0.5× to 3×, about the cursor; click the minimap to
 jump; `Space` pause; `[` `]` speed; `Shift`+`E` toggles edge scrolling;
 `F2` cycles the HUD size (1×, 1.5×, 2×); `F1` or `?` opens a controls
@@ -76,7 +80,8 @@ or vein, or helps build when over your own site. With villagers selected,
 `H` places a house, `O` a storehouse, `B` a barracks, `N` an archery range
 and `J` a watch tower (`Shift` keeps placing; age/resource gates apply); with the
 Town Center selected, `V` trains a villager, `X` unqueues, and right-click
-sets its rally point. `T` stops, `Delete` dismisses, `Esc` cancels or quits.
+sets its rally point. `T` stops, `Delete` dismisses, `Esc` cancels, or with nothing to cancel
+opens the pause menu (resume, resign, quit to title).
 Research buttons use `Q`, `E`, `I`, `K`, then `Z` in displayed order;
 the command grid shows the current key for each available technology.
 Completed training waits in its paid queue slot if the entity cap blocks

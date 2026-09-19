@@ -456,6 +456,28 @@ combined and never occupy WASD. The reference HUD PNGs are refreshed only
 where the displayed shortcut letters change; this does not replace a live
 Mac keyboard/GPU pass.
 
+**M6 chunk 1, the shell.** `crates/view/src/shell.rs` unit tests: the
+setup's choices become the match's parameters and only a Hardest opponent
+gets the declared bonus (`GD-AI-01`); every setup the arrows can reach
+passes the engine's check and the arrows stop at its bounds; the title
+offers NEW GAME and QUIT and greys the rest saying so; the setup screen
+has a step button either side of every setting, a preview at 1280 wide
+and none at 640, START greyed when refused, and the bonus line beside the
+Hardest opponent; the overlays scale with the HUD and the results list
+every side. `crates/app/src/tests.rs`: the game opens on the title,
+letters and clicks there reach no match, Enter opens the setup, the
+arrows add a Hardest opponent and raise the cap, START gives a match
+whose config carries exactly the declared bonus, and the opponents issue
+as the AI within two hundred ticks with nothing in the human's name; a
+refused setup greys START and Enter will not start it; Escape opens the
+pause menu, which pauses, takes every key and click, resumes to the pause
+the player had, arms RESIGN on one click and resigns on the second, and
+the results say YOU RESIGNED with every side's standing; the last side
+falling shows VICTORY, and quitting a live match takes two clicks where a
+decided one takes one. Two golden images pin the title and the setup
+screen. Six existing app tests met the shell at once: their empty worlds
+are decided matches by `docs/02` §10, which the helper now puts away.
+
 ### Data files — M3 onward
 
 The startup validator from `docs/04` §9 run as a test: every referenced ID

@@ -310,7 +310,9 @@ in the style of the original's campaign intros.
 
 ### Q5 — What is the game actually called?
 "New Empire" is the repository name and a placeholder. Worth deciding before
-there is a main menu (M6).
+there is a main menu (M6). **Biting as of M6 chunk 1 (2026-09-19):** the
+title screen shows the placeholder, `view::shell::TITLE`, one constant to
+change.
 
 ### Q6 — Where does the art come from in practice? — **answered, see D16**
 Modelled and rendered, with generative AI upstream of the frames and

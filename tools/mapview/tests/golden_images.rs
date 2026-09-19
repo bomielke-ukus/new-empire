@@ -33,6 +33,35 @@ struct Scene {
 
 const SCENES: &[Scene] = &[
     Scene {
+        // The title screen, the cursor on NEW GAME.
+        name: "title-screen",
+        args: &[
+            "--screen", "title", "--width", "960", "--height", "540", "--hover", "480,240",
+        ],
+    },
+    Scene {
+        // The setup screen with a Standard and a Hardest opponent, the
+        // declared bonus beside the second, the seed's map previewed,
+        // the cursor on START.
+        name: "setup-screen",
+        args: &[
+            "--screen",
+            "setup",
+            "--seed",
+            "1",
+            "--size",
+            "128",
+            "--difficulty",
+            "standard,hardest",
+            "--width",
+            "960",
+            "--height",
+            "540",
+            "--hover",
+            "794,373",
+        ],
+    },
+    Scene {
         // The actual acceptance replay, during contact between the two armies.
         name: "battle-40v40",
         args: &[
