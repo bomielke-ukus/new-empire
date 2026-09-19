@@ -532,6 +532,26 @@ names the new key; a missing file is nothing and a broken one reports
 and defaults; DEFAULTS restores everything. Golden images pin the
 settings screen and the overlay with its bound keys.
 
+**M6 chunk 5, notifications and the acceptance.**
+`crates/view/src/notify.rs` unit test: attacks in one area raise one
+notice in twenty seconds and another area or twenty seconds later raises
+its own, other kinds stack freely, the stack shows its newest five, a
+notice leaves after thirty seconds (`UX-NOTIFY-01`). The HUD test puts
+three notices on the stack above the panel on the left, newest at the
+bottom, and finds a button on each that has a place.
+`crates/app/src/tests.rs`: reaching the Tool Age, researching Stone
+Mining, an enemy clubman on a villager and the villager's death each put
+their line on the stack; the attack's line is clicked and the camera is
+where the villager was hit, with nothing selected; the fight's alarms
+raise one notice per twenty seconds. And the `RM-M6-01` run: from the
+title, NEW GAME, a Tiny map and an Easy opponent set with the arrows,
+START, half a minute of play, F5, an army raised the way a test can and
+sent at whatever of theirs still stands until the town is out, VICTORY on
+the results, QUIT, the save listed and loaded at its tick and hash with
+the opponent, quit again, the recording listed and watched to the won
+match's last tick and hash, REPLAY OVER; every step a button or a key
+through the window's handlers. The same run by hand on the Mac is owed.
+
 ### Data files — M3 onward
 
 The startup validator from `docs/04` §9 run as a test: every referenced ID
@@ -554,7 +574,8 @@ one with a `REQ: <id>` marker. `scripts/check-traceability.sh` pairs them up.
 
 As of this acceptance chunk: **127 declared, 83 claimed by tests, 0 gaps in
 landed work.** M4 closure enables `RM-M4`, `GD-COMBAT` and `GD-STANCE`
-enforcement. Run the script for current counts. A claim can cover only part
+enforcement; M5 added `GD-FOG`, `TA-AI`, `GD-AI` and `RM-M5`; M6 added
+`TA-SAVE`, `RM-M6` and `UX-NOTIFY`. Run the script for current counts. A claim can cover only part
 of a requirement: `RM-M4-01` has a separately recorded native readability approval, and
 `TA-PATH-06` still owes player-versus-AI priority in M5.
 

@@ -14,8 +14,7 @@ portability and determinism checks, without a shipping commitment.
 
 ## 1. Where we are
 
-Five milestones landed and the sixth begun; the vertical slice is beyond
-its halfway point.
+Six milestones landed; the vertical slice wants only the feel pass, M7.
 
 | Milestone | Status | Acceptance |
 |---|---|---|
@@ -25,7 +24,7 @@ its halfway point.
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
-| M6 — Game shell | **In progress**: 4 of 5 chunks landed 2026-09-19 | Configure, play, save, reload and watch a replay without a terminal |
+| M6 — Game shell | **Landed 2026-09-19** | Configure, play, save, reload and watch a replay without a terminal: the run in `crates/app/src/tests.rs`, the Mac pass owed |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
@@ -59,8 +58,8 @@ the menu saves the match; LOAD GAME on the title lists the saves and
 resumes one where it was. Every match played is recorded; WATCH REPLAY
 plays one back with pause and speed, through any side's eyes or
 everyone's. SETTINGS holds the HUD size, edge scrolling, the window mode
-and every general key, kept in a file. Notifications are still to come
-in M6.
+and every general key, kept in a file. A stack in the lower left names
+attacks, losses, research and ages, and a click on one looks there.
 
 ```sh
 cargo run --release -p new-empire           # the game window
@@ -934,15 +933,47 @@ what was done:
   setting, no key for a second binding per control, no mouse settings.
   Fullscreen has not been tried on the Mac.
 
+### Work record: M6 chunk 5 — notifications and the acceptance run (2026-09-19)
+
+- **What landed.** `crates/view/src/notify.rs`: `Notices`, a stack of
+  what happened to the side (an attack, a loss, a technology, an age),
+  each with a tile to look at where there is one, timed in match ticks
+  so it stands still with the match, leaving after thirty seconds, the
+  newest five shown; an attack within twelve tiles and twenty seconds of
+  an attack on the stack is not added (`UX-NOTIFY-01`). The HUD draws
+  the stack above the panel on the left with a mark per kind, and a
+  notice with a place is a `Jump` button; the app puts the camera there
+  on a click, before the world gets the click. The app raises notices
+  from the simulation's alarm and death events for the viewer's side,
+  from an age reached (at the Town Center) and from a technology
+  finishing (ages excepted). `docs/04` §34 has the notes. The
+  `RM-M6-01` run is an app test: title, setup, a skirmish played to
+  VICTORY, a save in the middle, the save reloaded, the recording
+  watched to its end, every step a button or a key through the window's
+  handlers.
+- **What changed for the player.** A stack of notices in the lower
+  left: UNDER ATTACK, VILLAGER LOST, HOUSE DESTROYED, STONE MINING
+  RESEARCHED, TOOL AGE; clicking one with a place looks there. The
+  UNDER ATTACK banner stays as it was.
+- **Measured.** The acceptance run, headless: a Tiny map, an Easy
+  opponent, forty clubmen take the town inside ten minutes of match
+  time; the test runs in under ten seconds of wall time with the rest
+  of the app's tests.
+- **Not done, deliberately.** No sound cues (M7), no minimap flash or
+  ping, no "cannot afford" or "population capped" notice (the panels
+  grey the button and say why), no notice for an idle unit at a rally.
+  The M6 run has not been done by hand on the Mac; `docs/06` says so.
+
 ### Resume here next session
 
-**M6 chunks 1 to 4 are landed; chunk 5, notifications and the
-acceptance run, is next** (§4c): the lower-left notification stack
-(`docs/03` §6.3, `UX-NOTIFY-01`) with click-to-jump, and the `RM-M6-01`
-run recorded: the whole path from the title to the replay, driven
-headless through the app's handlers, and once by hand on the Mac. The
-parallel track (§4b) runs on its own branch. Keep the art pipeline on
-the `docs/08` schedule.
+**M6 is landed; M7, the feel pass, is next**, per `docs/06`: audio,
+real sprite art for two civilisations across three ages, animations,
+hit reactions and death animations, construction stages, notification
+polish, tooltips and first-time hints, the performance pass, and the
+acceptance that someone who loved the original plays a match and does
+not want to stop. Before the sprites, the Mac pass of the M6 run and
+the name (`docs/07` Q5). Keep the art pipeline on the `docs/08`
+schedule; the parallel track (§4b) runs on its own branch.
 
 ## 4. What M4 completed — Combat
 
@@ -1057,10 +1088,11 @@ own handlers before anyone clicks it:
    every general key rebound on the settings screen with the panels'
    letters, Escape and the digits refused (`GD-A11Y-02` for the general
    keys; the panels' command letters are owed).
-5. **Notifications with click-to-jump** (`docs/03` §6.3,
-   `UX-NOTIFY-01`), and the `RM-M6-01` run recorded: the whole path from
-   the title to the replay, driven headless through the app's handlers,
-   and once by hand on the Mac.
+5. **Notifications with click-to-jump and the acceptance run.** **Done
+   2026-09-19**, record above: the stack in the lower left, attacks
+   rate-limited by area (`UX-NOTIFY-01`), a click looking where a
+   notice points; and the `RM-M6-01` run through the app's handlers,
+   title to victory to save to load to replay. The Mac pass is owed.
 
 The name (`docs/07` Q5) now bites: the title screen shows the
 placeholder.

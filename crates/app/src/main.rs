@@ -33,8 +33,8 @@ use view::hud::{Action, BOTTOM_PANEL, TOP_BAR};
 use view::minimap::{Minimap, MinimapRect};
 use view::shell::{self, Results, Side};
 use view::{
-    Atlas, Camera, Control, FogLights, Ghost, Hud, HudInput, LoadRow, Scene, SceneOptions, Screen,
-    Settings, Setup, ShellAction, ShellInput, Sweep, SWEEP_MS,
+    Atlas, Camera, Control, FogLights, Ghost, Hud, HudInput, LoadRow, Notice, NoticeKind, Notices,
+    Scene, SceneOptions, Screen, Settings, Setup, ShellAction, ShellInput, Sweep, SWEEP_MS,
 };
 
 /// How long "SAVED ..." stays up, in ms.
@@ -238,6 +238,16 @@ struct App {
     capturing: Option<Control>,
     /// Why the last key was refused, or the file could not be written.
     settings_error: Option<String>,
+    /// The notification stack (`docs/03` §6.3).
+    notices: Notices,
+    /// How many technologies the viewer had last frame, to notice a new
+    /// one.
+    last_researched: usize,
+}
+
+/// A world position as a tile for the camera and the notices.
+fn tile_of(pos: Vec2Fx) -> (f32, f32) {
+    (view::fx_to_f32(pos.x), view::fx_to_f32(pos.y))
 }
 
 /// A recording being watched: the log, and where playback is in it.
@@ -403,6 +413,8 @@ impl App {
             settings_path: data_dir("NEW_EMPIRE_SETTINGS", "settings.ron"),
             capturing: None,
             settings_error: None,
+            notices: Notices::default(),
+            last_researched: 0,
         }
     }
 
@@ -661,15 +673,35 @@ impl App {
         }
         self.sim.step();
         self.feedback.observe(&self.sim);
+        // What happened to the side goes on the stack (`docs/03` §6.3);
+        // an attack also raises the banner.
         let me = self.hud_player();
-        if self
-            .sim
-            .events()
-            .iter()
-            .any(|e| matches!(e, sim::Event::Alarm { player, .. } if *player == me))
-        {
-            self.alarm_at = Some(now);
+        let tick = self.sim.tick();
+        for e in self.sim.events() {
+            match *e {
+                sim::Event::Alarm { player, pos } if player == me => {
+                    self.alarm_at = Some(now);
+                    self.notices.push(Notice {
+                        kind: NoticeKind::Attack,
+                        text: "UNDER ATTACK".to_string(),
+                        tile: Some(tile_of(pos)),
+                        tick,
+                    });
+                }
+                sim::Event::Death { kind, owner, pos } if owner == me => {
+                    let info = kinds::info(kind);
+                    let what = if info.mobile { "LOST" } else { "DESTROYED" };
+                    self.notices.push(Notice {
+                        kind: NoticeKind::Loss,
+                        text: format!("{} {what}", info.name.to_uppercase()),
+                        tile: Some(tile_of(pos)),
+                        tick,
+                    });
+                }
+                _ => {}
+            }
         }
+        self.notices.expire(tick);
     }
 
     fn frame_match(&mut self, now: Instant, dt: f32) {
@@ -692,7 +724,38 @@ impl App {
         if age != self.last_age {
             self.age_up = Some((now, age));
             self.last_age = age;
+            let world = self.sim.world();
+            let town = world
+                .slots()
+                .find(|s| {
+                    world.owner[s.index()] == me
+                        && world.kind[s.index()] == kinds::TOWN_CENTER
+                        && world.construction[s.index()].is_none()
+                })
+                .map(|s| tile_of(world.pos[s.index()]));
+            self.notices.push(Notice {
+                kind: NoticeKind::Age,
+                text: age.name().to_uppercase(),
+                tile: town,
+                tick: self.sim.tick(),
+            });
         }
+        // A technology finishing is a notice; an age is announced above.
+        let researched: Vec<sim::TechId> = self
+            .sim
+            .player(me)
+            .map_or_else(Vec::new, |p| p.researched.clone());
+        for id in researched.iter().skip(self.last_researched) {
+            if let Some(t) = tech::info(*id).filter(|t| t.advances_age().is_none()) {
+                self.notices.push(Notice {
+                    kind: NoticeKind::Research,
+                    text: format!("{} RESEARCHED", t.name.to_uppercase()),
+                    tile: None,
+                    tick: self.sim.tick(),
+                });
+            }
+        }
+        self.last_researched = researched.len();
         let since = self.age_up.map(|(t, _)| t.elapsed().as_millis());
         let sweep = since.filter(|&ms| ms < SWEEP_MS as u128).map(|ms| Sweep {
             player: ME,
@@ -786,6 +849,7 @@ impl App {
                 ui_scale: self.ui_scale(),
                 help: self.show_help,
                 settings: &self.settings,
+                notices: self.notices.shown(),
             },
         );
         scene.ui.extend(hud.sprites.iter().cloned());
@@ -1237,6 +1301,8 @@ impl App {
         self.confirm = None;
         self.results = ResultsState::Pending;
         self.viewer = Some(ME);
+        self.notices.clear();
+        self.last_researched = self.sim.player(ME).map_or(0, |p| p.researched.len());
         self.match_started = now_secs();
         self.recording = None;
         self.shell = Shell::Match;
@@ -1381,6 +1447,17 @@ impl App {
         // win hit-testing, including while placing a building.
         let (mm, map) = (self.minimap_rect(), self.map_size());
         if self.input.left_pressed(&mut self.camera, mm, map, px, py) {
+            return;
+        }
+        // A notice on the stack is clicked to look where it points.
+        if let Some(b) = self
+            .hud
+            .buttons
+            .iter()
+            .find(|b| matches!(b.action, Action::Jump(_)) && b.contains(px, py))
+            .cloned()
+        {
+            self.do_action(b.action);
             return;
         }
         // HUD buttons first. A replay's panels are looked at, not used.
@@ -1588,6 +1665,11 @@ impl App {
 
     fn do_action(&mut self, action: Action) {
         match action {
+            Action::Jump(row) => {
+                if let Some((x, y)) = self.notices.shown().get(row).and_then(|n| n.tile) {
+                    self.camera.look_at_tile(x, y);
+                }
+            }
             Action::Build(kind) => {
                 if !self.selection.own_villagers(&self.sim, ME).is_empty() {
                     self.build_mode = Some(kind);
@@ -1834,6 +1916,12 @@ impl App {
                     Some(_) => None,
                     None => Some(ME),
                 };
+                // The new side's past is not news.
+                self.last_researched = self
+                    .sim
+                    .player(self.hud_player())
+                    .map_or(0, |p| p.researched.len());
+                self.notices.clear();
                 self.last_fog_tick = None;
                 self.last_minimap = Instant::now() - Duration::from_secs(10);
             }

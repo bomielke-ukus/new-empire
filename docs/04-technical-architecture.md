@@ -1242,3 +1242,33 @@ siege are still owed, and a human will find this opponent predictable.
   and on the change; nothing else about video is a setting yet, since
   the renderer has no options to expose.
 
+## 34. Implementation notes from M6, chunk 5: notifications
+
+- **A notice is a line, a kind, a tick and maybe a tile.** `Notices`
+  lives in `view` with no dependency on the app or the clock: time is
+  match ticks, so the stack stands still while the match is paused and
+  runs at the match's speed in a replay. The app raises notices from
+  what it already watched for the banner: the simulation's alarm and
+  death events for the viewer's side, an age change, and a longer
+  `researched` list (ages excepted, since the age is its own notice).
+- **One per area per twenty seconds** (`UX-NOTIFY-01`). The simulation
+  raises an alarm at most every ten seconds per player; the stack drops
+  an attack within twelve tiles and twenty seconds of an attack already
+  on it, and does not refresh the older one, so a siege is a notice
+  every twenty seconds rather than none at all once it starts. Other
+  kinds are not limited: two houses falling are two notices.
+- **A notice with a place is a HUD button.** `Action::Jump(row)` joins
+  the HUD's actions; the app checks the stack's buttons before the
+  world gets a click, since the stack sits in the world area rather
+  than on a panel, and `hotkey` never matches them, their key being a
+  space. The row index is into the shown slice, which the app passes
+  and reads back.
+- **The acceptance run is a test.** `RM-M6-01` asks for a skirmish to
+  a victory screen, a save, a reload and a replay without a terminal.
+  The test goes through the same buttons and key handlers the window
+  calls, with two liberties a test takes: the army is spawned rather
+  than trained, and the hunt for the last of the enemy reads the world
+  where a player would read the minimap. Everything the shell does is
+  exercised as the player does it; the sprites and the window are not,
+  which is what the Mac pass is for.
+

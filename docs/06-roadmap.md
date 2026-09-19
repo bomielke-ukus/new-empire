@@ -192,6 +192,28 @@ touching a terminal.
 
 **Size:** Medium.
 
+**Status: landed 2026-09-19**, with the same caveat as the milestones before
+it: the shell is verified by the app's own handlers and the software
+rasteriser, and the same run by hand on the Mac is owed. The game opens on
+a title screen; a skirmish is set up (map size, one to seven opponents each
+at a difficulty with the Hardest bonus declared beside it, population cap,
+seed, the map previewed) and played against opponents thinking in the
+app's tick loop, with a pause menu, resign, and a results screen; F5 or
+the menu saves the match and LOAD GAME resumes it, with the opponents'
+minds and the camera, refused by version from another build; every match
+is recorded and WATCH REPLAY plays it back with pause, speed and whose
+eyes; SETTINGS holds the HUD size, edge scrolling, the window mode and
+every general key; a notification stack in the lower left names attacks,
+losses, research and ages and jumps the camera on a click. The acceptance
+run is `crates/app/src/tests.rs`: title to setup to a skirmish played to
+VICTORY, a save in the middle, the save reloaded, the recording watched to
+its last tick, every step through the screens' buttons and the window's
+handlers. Deferred: civilisation, teams, victory conditions and starting
+age on the setup screen (the content they need is M8's); the panels'
+command letters are not rebindable (`GD-A11Y-02` is met for the general
+keys); no audio settings, there being no audio; no seeking in a replay;
+the game's name (`docs/07` Q5).
+
 ---
 
 ## M7 — The feel pass ← **vertical slice complete**

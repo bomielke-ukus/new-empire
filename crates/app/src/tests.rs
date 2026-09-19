@@ -5,8 +5,8 @@
 use super::*;
 use ai::Difficulty;
 use sim::{Command, Formation, Item, MapKind, MapSpec, Order, SimConfig, Stance};
-use view::shell::Field;
-use view::{Control, Settings, ShellButton};
+use view::shell::{Field, MapSize};
+use view::{Control, NoticeKind, Settings, ShellButton};
 
 #[test]
 fn camera_keys_pan_without_building_or_spending_and_release_stops_panning() {
@@ -590,6 +590,8 @@ fn a_match_is_recorded_and_watched_back_to_the_same_hash() {
     app.shell = Shell::Setup;
     app.preview();
     press(&mut app, ShellAction::Start);
+    // The ticks are compared below: no ticks from the wall clock.
+    app.clock.set_paused(true);
     let now = Instant::now();
     for _ in 0..200 {
         app.tick_once(now);
@@ -628,6 +630,7 @@ fn a_match_is_recorded_and_watched_back_to_the_same_hash() {
     assert_eq!(app.replays.len(), 1);
     press(&mut app, ShellAction::Watch(0));
     assert_eq!(app.shell, Shell::Match);
+    app.clock.set_paused(true);
     assert!(app.playback.is_some());
     assert_eq!(app.sim.tick(), 0);
     assert_eq!(app.sim.seed(), 5);
@@ -658,15 +661,15 @@ fn a_match_is_recorded_and_watched_back_to_the_same_hash() {
     draw(&mut app);
     app.keyboard_input(KeyCode::Tab, ElementState::Pressed, false);
     assert_eq!(app.viewer, Some(0));
-    // Speed goes to sixteen times in a replay; Space pauses.
+    // Speed goes to sixteen times in a replay; Space resumes and pauses.
     for _ in 0..5 {
         app.keyboard_input(KeyCode::BracketRight, ElementState::Pressed, false);
     }
     assert_eq!(app.clock.speed, 16.0);
     app.keyboard_input(KeyCode::Space, ElementState::Pressed, false);
-    assert!(app.clock.paused());
-    app.keyboard_input(KeyCode::Space, ElementState::Pressed, false);
     assert!(!app.clock.paused());
+    app.keyboard_input(KeyCode::Space, ElementState::Pressed, false);
+    assert!(app.clock.paused());
     // To the end: the world is the recorded match's, and the results say
     // where the recording ends.
     while !app.playback_over() {
@@ -809,6 +812,268 @@ fn settings_are_edited_on_their_screen_kept_at_once_and_read_back() {
     assert!(std::fs::read_to_string(&path).unwrap().contains("Space"));
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&app.replays_dir);
+}
+
+/// What happens to the side stacks up in the corner (`docs/03` §6.3):
+/// an age reached, a technology researched, an attack with its place,
+/// a loss; a notice with a place is clicked to put the camera there;
+/// attacks in one area are one notice in twenty seconds.
+///
+/// REQ: UX-NOTIFY-01
+#[test]
+fn notices_stack_in_the_corner_and_a_click_puts_the_camera_there() {
+    let mut app = app();
+    let (store, _, _) = research_settlement(&mut app);
+    draw(&mut app);
+    assert!(app
+        .notices
+        .shown()
+        .iter()
+        .any(|n| n.kind == NoticeKind::Age && n.text == "TOOL AGE"));
+    app.issue(CommandKind::Research {
+        building: store,
+        tech: tech::STONE_MINING,
+    });
+    step(
+        &mut app,
+        tech::info(tech::STONE_MINING).unwrap().ticks() + 3,
+    );
+    draw(&mut app);
+    assert!(app
+        .notices
+        .shown()
+        .iter()
+        .any(|n| n.kind == NoticeKind::Research && n.text == "STONE MINING RESEARCHED"));
+    // An enemy clubman on a villager of ours: the alarm, with its place.
+    let villager = spawn(&mut app, kinds::VILLAGER, 30, 30);
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Spawn {
+            kind: kinds::CLUBMAN,
+            pos: Vec2Fx::from_int(31, 30),
+        },
+    });
+    step(&mut app, 3);
+    let enemy = {
+        let w = app.sim.world();
+        w.slots()
+            .find(|s| w.owner[s.index()] == 1 && w.kind[s.index()] == kinds::CLUBMAN)
+            .map(|s| w.id_at(s))
+            .unwrap()
+    };
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Attack {
+            ids: vec![enemy],
+            target: villager,
+        },
+    });
+    let now = Instant::now();
+    let mut ticks = 0;
+    while ticks < 400
+        && !app
+            .notices
+            .shown()
+            .iter()
+            .any(|n| n.kind == NoticeKind::Attack)
+    {
+        app.tick_once(now);
+        ticks += 1;
+    }
+    let attack = app
+        .notices
+        .shown()
+        .iter()
+        .find(|n| n.kind == NoticeKind::Attack)
+        .cloned()
+        .expect("the alarm is on the stack");
+    let (x, y) = attack.tile.expect("with its place");
+    draw(&mut app);
+    let jump = app
+        .hud
+        .buttons
+        .iter()
+        .find(|b| matches!(b.action, Action::Jump(_)) && b.label == "UNDER ATTACK")
+        .cloned()
+        .expect("a notice to click");
+    assert!(jump.x < 20.0 && jump.y + jump.h <= 720.0 - BOTTOM_PANEL);
+    app.camera.look_at_tile(x, y);
+    let there = app.camera.focus;
+    app.camera.look_at_tile(5.0, 5.0);
+    assert_ne!(app.camera.focus, there);
+    app.left_press(jump.x + 4.0, jump.y + 4.0);
+    app.left_release(jump.x + 4.0, jump.y + 4.0);
+    assert_eq!(app.camera.focus, there, "the click looks where it happened");
+    assert!(app.selection.ids.is_empty(), "and selects nothing");
+    // The villager dies: a loss. Attacks in one area stay one notice
+    // per twenty seconds however many alarms the fight raises.
+    let mut ticks = 0;
+    while ticks < 2000
+        && !app
+            .notices
+            .shown()
+            .iter()
+            .any(|n| n.kind == NoticeKind::Loss)
+    {
+        app.tick_once(now);
+        ticks += 1;
+    }
+    assert!(app
+        .notices
+        .shown()
+        .iter()
+        .any(|n| n.kind == NoticeKind::Loss && n.text == "VILLAGER LOST"));
+    let attacks: Vec<u64> = app
+        .notices
+        .shown()
+        .iter()
+        .filter(|n| n.kind == NoticeKind::Attack)
+        .map(|n| n.tick)
+        .collect();
+    for w in attacks.windows(2) {
+        assert!(w[1] - w[0] >= view::notify::ATTACK_TICKS, "{attacks:?}");
+    }
+}
+
+/// The M6 acceptance (`docs/06`): from the title, a skirmish is set up
+/// and played to the victory screen, saved in the middle, reloaded, and
+/// watched back as a replay, every step through the screens' buttons and
+/// the window's handlers and none through a terminal. The native half,
+/// the same by hand on the Mac, is recorded in `docs/10` when it is done.
+///
+/// REQ: RM-M6-01
+#[test]
+fn a_full_skirmish_is_played_to_victory_saved_reloaded_and_watched_back() {
+    let saves = scratch("acceptance-saves");
+    let replays = scratch("acceptance-replays");
+    let _ = std::fs::remove_dir_all(&saves);
+    let _ = std::fs::remove_dir_all(&replays);
+    let mut app = App::new();
+    app.camera.viewport = (1280.0, 720.0);
+    app.settings.edge_scroll = false;
+    app.settings_path = scratch("acceptance-settings").join("settings.ron");
+    app.apply_settings();
+    app.saves_dir = saves.clone();
+    app.replays_dir = replays.clone();
+    assert_eq!(app.shell, Shell::Title);
+    // NEW GAME: one Easy opponent on a Tiny map, START.
+    press(&mut app, ShellAction::NewGame);
+    app.setup.seed = 8;
+    app.preview();
+    press(&mut app, ShellAction::Adjust(Field::Size, -1));
+    assert_eq!(app.setup.size, MapSize::Tiny);
+    press(&mut app, ShellAction::Adjust(Field::Difficulty(0), -1));
+    assert_eq!(app.setup.opponents, vec![Difficulty::Easy]);
+    press(&mut app, ShellAction::Start);
+    assert_eq!(app.shell, Shell::Match);
+    // The test drives every tick itself: a redraw must not add ticks of
+    // its own from the wall clock, since the ticks are compared below.
+    app.clock.set_paused(true);
+    // Half a minute in, a quick save.
+    let now = Instant::now();
+    for _ in 0..600 {
+        app.tick_once(now);
+    }
+    assert!(!app.keyboard_input(KeyCode::F5, ElementState::Pressed, false));
+    let saved_hash = app.sim.state_hash();
+    assert_eq!(save::list(&saves).len(), 1);
+    // The player's army, raised the way a test can, goes for the enemy
+    // town and then for whatever of theirs still stands, as a player
+    // would from the minimap, until the town is out.
+    let (ex, ey) = app.sim.starts()[1];
+    for i in 0..40 {
+        app.issue(CommandKind::Spawn {
+            kind: kinds::CLUBMAN,
+            pos: Vec2Fx::from_int(ex + 8 + i % 8, ey + 8 + i / 8),
+        });
+    }
+    for _ in 0..3 {
+        app.tick_once(now);
+    }
+    let army: Vec<EntityId> = {
+        let w = app.sim.world();
+        w.slots()
+            .filter(|s| w.owner[s.index()] == ME && w.kind[s.index()] == kinds::CLUBMAN)
+            .map(|s| w.id_at(s))
+            .collect()
+    };
+    assert_eq!(army.len(), 40);
+    app.issue(CommandKind::SetStance {
+        ids: army.clone(),
+        stance: Stance::Aggressive,
+    });
+    let mut ticks = 0;
+    while app.sim.winner().is_none() && ticks < 12_000 {
+        if ticks % 100 == 0 {
+            let target = {
+                let w = app.sim.world();
+                w.slots()
+                    .filter(|s| {
+                        w.owner[s.index()] == 1
+                            && w.dying[s.index()] == 0
+                            && w.health[s.index()] > sim::Fx::ZERO
+                    })
+                    .map(|s| w.pos[s.index()])
+                    .next()
+            };
+            if let Some(target) = target {
+                app.issue(CommandKind::AttackMove {
+                    ids: army.clone(),
+                    target,
+                });
+            }
+        }
+        app.tick_once(now);
+        ticks += 1;
+    }
+    assert_eq!(
+        app.sim.winner(),
+        Some(ME),
+        "the town is out within ten minutes"
+    );
+    draw(&mut app);
+    assert_eq!(app.results, ResultsState::Shown);
+    assert_eq!(app.results_now().heading, "VICTORY");
+    let (final_hash, final_tick) = (app.sim.state_hash(), app.sim.tick());
+    press(&mut app, ShellAction::QuitToTitle);
+    assert_eq!(app.shell, Shell::Title);
+    assert_eq!(save::replays::list(&replays).len(), 1);
+    // LOAD GAME: the save resumes in the middle of the match.
+    press(&mut app, ShellAction::LoadGame);
+    press(&mut app, ShellAction::Load(0));
+    assert_eq!(app.shell, Shell::Match);
+    app.clock.set_paused(true);
+    assert_eq!(app.sim.tick(), 600);
+    assert_eq!(app.sim.state_hash(), saved_hash);
+    assert_eq!(app.opponents.len(), 1);
+    for _ in 0..20 {
+        app.tick_once(now);
+    }
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    press(&mut app, ShellAction::QuitToTitle);
+    press(&mut app, ShellAction::QuitToTitle);
+    assert_eq!(app.shell, Shell::Title);
+    // WATCH REPLAY: the match that was won, back to its last tick.
+    press(&mut app, ShellAction::WatchReplay);
+    let row = app
+        .replays
+        .iter()
+        .position(|e| e.summary.tick == final_tick)
+        .expect("the won match is listed");
+    press(&mut app, ShellAction::Watch(row));
+    assert_eq!(app.shell, Shell::Match);
+    assert!(app.playback.is_some());
+    while !app.playback_over() {
+        app.tick_once(now);
+    }
+    assert_eq!(app.sim.tick(), final_tick);
+    assert_eq!(app.sim.state_hash(), final_hash);
+    draw(&mut app);
+    assert_eq!(app.results_now().heading, "REPLAY OVER");
+    press(&mut app, ShellAction::QuitToTitle);
+    assert_eq!(app.shell, Shell::Title);
+    let _ = std::fs::remove_dir_all(&saves);
+    let _ = std::fs::remove_dir_all(&replays);
 }
 
 /// The last side standing wins on the results screen; quitting a live

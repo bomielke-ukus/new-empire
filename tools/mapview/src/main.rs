@@ -427,6 +427,7 @@ fn run() -> Result<(), String> {
                 targeting: false,
                 defences: false,
                 settings: &settings,
+                notices: &[],
             },
         );
         scene.ui = hud.sprites;

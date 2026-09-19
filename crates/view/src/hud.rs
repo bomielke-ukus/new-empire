@@ -11,6 +11,7 @@ use crate::camera::Camera;
 use crate::font;
 use crate::fx_to_f32;
 use crate::iso;
+use crate::notify::{Notice, NoticeKind};
 use crate::palette::*;
 use crate::scene::SpriteInstance;
 use crate::settings::{pretty, Control, Settings};
@@ -64,7 +65,14 @@ pub enum Action {
     Stance(Stance),
     /// Set the selected units' formation (`UX-CMD-08`).
     Formation(Formation),
+    /// Put the camera where the notice on this row of the stack points.
+    Jump(usize),
 }
+
+/// A notice row on the stack.
+const NOTICE_H: f32 = 16.0;
+/// The stack's width.
+const NOTICE_W: f32 = 220.0;
 
 /// A clickable region.
 #[derive(Clone, PartialEq, Debug)]
@@ -169,6 +177,8 @@ pub struct HudInput<'a> {
     pub defences: bool,
     /// The player's settings, for the general keys the overlay names.
     pub settings: &'a Settings,
+    /// The notification stack, oldest first.
+    pub notices: &'a [Notice],
 }
 
 /// How long the "F1 CONTROLS" hint stays in the resource bar: the first
@@ -1477,6 +1487,40 @@ impl Hud {
             p.rect(sx - w / 2.0, sy - lift, w * frac, 4.0, colour, 0);
         }
 
+        // The notification stack (`docs/03` §6.3): what just happened to
+        // the side, newest at the bottom, above the panel on the left. A
+        // notice with a place is a button that puts the camera there.
+        let bottom = vh - BOTTOM_PANEL - 8.0;
+        for (i, n) in input.notices.iter().enumerate() {
+            let depth = (input.notices.len() - 1 - i) as f32;
+            let y = bottom - (depth + 1.0) * NOTICE_H;
+            let text = fit(&n.text, NOTICE_W - 28.0);
+            let mark = match n.kind {
+                NoticeKind::Attack => RED,
+                NoticeKind::Loss => GREY,
+                NoticeKind::Research => GOLD,
+                NoticeKind::Age => GOLD_LIGHT,
+            };
+            p.rect(8.0, y, NOTICE_W, NOTICE_H - 2.0, BLACK, 0);
+            p.rect(9.0, y + 1.0, NOTICE_W - 2.0, NOTICE_H - 4.0, BROWN_DARK, 0);
+            p.rect(12.0, y + 3.0, 8.0, 8.0, mark, 0);
+            p.text(24.0, y + 3.0, &text, false, 1.0);
+            if n.tile.is_some() {
+                buttons.push(Button {
+                    x: 8.0,
+                    y,
+                    w: NOTICE_W,
+                    h: NOTICE_H - 2.0,
+                    action: Action::Jump(i),
+                    label: text,
+                    cost: String::new(),
+                    hotkey: ' ',
+                    enabled: true,
+                    reason: "CLICK TO LOOK".to_string(),
+                });
+            }
+        }
+
         // Notifications share a frame; only an age-up announces unlocks ([GD-AGE-02]).
         if let Some(banner) = input.banner {
             let text = banner.title();
@@ -1690,6 +1734,7 @@ mod tests {
             targeting: false,
             defences: false,
             settings: &DEFAULT_SETTINGS,
+            notices: &[],
         };
         let none = Hud::build(&atlas, &base);
         assert!(none.buttons.is_empty());
@@ -1845,6 +1890,7 @@ mod tests {
                     targeting: false,
                     defences: false,
                     settings: &DEFAULT_SETTINGS,
+                    notices: &[],
                 },
             )
         };
@@ -1886,6 +1932,7 @@ mod tests {
                 targeting: false,
                 defences: false,
                 settings: &DEFAULT_SETTINGS,
+                notices: &[],
             },
         );
         assert_ne!(lit.sprites, b.sprites, "the hovered button draws lit");
@@ -1948,6 +1995,7 @@ mod tests {
             targeting: false,
             defences: false,
             settings: &DEFAULT_SETTINGS,
+            notices: &[],
         };
         let closed = Hud::build(&atlas, &base);
         let open = Hud::build(&atlas, &HudInput { help: true, ..base });
@@ -2000,6 +2048,7 @@ mod tests {
                     targeting: false,
                     defences: false,
                     settings: &DEFAULT_SETTINGS,
+                    notices: &[],
                 },
             );
             // Every glyph in the top bar stays inside the window.
@@ -2034,5 +2083,77 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The notification stack sits above the panel on the left, newest at
+    /// the bottom, and a notice with a place is a button to jump there.
+    #[test]
+    fn notices_stack_above_the_panel_and_those_with_a_place_are_buttons() {
+        let sim = Simulation::new(5, SimConfig::default());
+        let atlas = Atlas::placeholder();
+        let camera = Camera::new(sim.map().width(), sim.map().height(), (1280.0, 720.0));
+        let notices = [
+            Notice {
+                kind: NoticeKind::Research,
+                text: "STONE MINING RESEARCHED".into(),
+                tile: None,
+                tick: 10,
+            },
+            Notice {
+                kind: NoticeKind::Attack,
+                text: "UNDER ATTACK".into(),
+                tile: Some((40.0, 41.0)),
+                tick: 20,
+            },
+            Notice {
+                kind: NoticeKind::Loss,
+                text: "VILLAGER LOST".into(),
+                tile: Some((42.0, 41.0)),
+                tick: 30,
+            },
+        ];
+        let base = HudInput {
+            sim: &sim,
+            player: 0,
+            camera: &camera,
+            selected: &[],
+            build_mode: None,
+            fps: 60.0,
+            paused: false,
+            speed: 1.0,
+            status: "T0",
+            hover: None,
+            banner: None,
+            ui_scale: 1.0,
+            help: false,
+            targeting: false,
+            defences: false,
+            settings: &DEFAULT_SETTINGS,
+            notices: &[],
+        };
+        let none = Hud::build(&atlas, &base);
+        let some = Hud::build(
+            &atlas,
+            &HudInput {
+                notices: &notices,
+                ..base
+            },
+        );
+        assert!(some.sprites.len() > none.sprites.len() + 30);
+        let jumps: Vec<&Button> = some
+            .buttons
+            .iter()
+            .filter(|b| matches!(b.action, Action::Jump(_)))
+            .collect();
+        assert_eq!(jumps.len(), 2, "the research notice has no place");
+        assert_eq!(jumps[0].action, Action::Jump(1));
+        assert_eq!(jumps[0].label, "UNDER ATTACK");
+        assert_eq!(jumps[1].action, Action::Jump(2));
+        for b in &jumps {
+            assert!(b.x < 20.0, "on the left");
+            assert!(b.y + b.h <= 720.0 - BOTTOM_PANEL, "above the panel");
+            assert!(b.enabled && b.hotkey == ' ');
+        }
+        assert!(jumps[1].y > jumps[0].y, "newest at the bottom");
     }
 }

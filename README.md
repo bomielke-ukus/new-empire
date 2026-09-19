@@ -9,8 +9,9 @@ screen; a skirmish is set up against one to seven computer opponents at
 four difficulties, played to a results screen, saved and loaded. The
 opponents scout, build, advance and attack, seeing only what they have
 scouted; every match is recorded and can be watched back; the general
-keys, HUD size, edge scrolling and window mode are settings. Notifications
-are next. See the roadmap.**
+keys, HUD size, edge scrolling and window mode are settings; a stack of
+notices in the corner jumps the camera to what happened. M7, the feel
+pass, is next. See the roadmap.**
 
 ---
 
