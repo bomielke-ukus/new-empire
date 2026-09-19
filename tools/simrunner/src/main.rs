@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! simrunner determinism [--seed N] [--ticks N] [--players N] [--size N] [--save FILE]
-//! simrunner verify FILE
+//! simrunner verify FILE   (a replay, or a save: its snapshot must match its own replay)
 //! simrunner trace  FILE [--out FILE]
 //! simrunner record [--dir DIR]
 //! simrunner golden [--dir DIR] [--update]
@@ -179,6 +179,34 @@ fn verify_file(f: &Flags) -> ExitCode {
     let Some(path) = f.positional.first() else {
         return usage("verify needs a file");
     };
+    // A save is its own replay (`TA-SAVE-01`): its snapshot must be what
+    // the log inside it gives, and then that log must replay identically.
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => return fail(&format!("could not read {path}: {e}")),
+    };
+    match save::summary(&text) {
+        Err(save::SaveError::NotASave) => {}
+        Err(e) => return fail(&format!("{path}: {e}")),
+        Ok(summary) => {
+            let file = match save::Save::from_ron(&text) {
+                Ok(s) => s,
+                Err(e) => return fail(&format!("{path}: {e}")),
+            };
+            println!(
+                "loaded save {path}: seed={} tick={} players={} saved {}",
+                summary.seed,
+                summary.tick,
+                summary.players,
+                save::stamp(summary.saved_at)
+            );
+            match file.verify() {
+                Ok(hash) => println!("OK  the snapshot is what its replay gives, hash {hash:016x}"),
+                Err(e) => return fail(&format!("{path}: {e}")),
+            }
+            return verify_replay(&file.replay());
+        }
+    }
     let replay = match read_replay(Path::new(path)) {
         Ok(r) => r,
         Err(e) => return fail(&e),
@@ -817,7 +845,7 @@ fn usage(err: &str) -> ExitCode {
     eprintln!(
         "  simrunner determinism [--seed N] [--ticks N] [--players N] [--size N] [--save FILE]"
     );
-    eprintln!("  simrunner verify FILE");
+    eprintln!("  simrunner verify FILE   (a replay, or a save)");
     eprintln!("  simrunner trace  FILE [--out FILE]");
     eprintln!("  simrunner record [--dir DIR]");
     eprintln!("  simrunner golden [--dir DIR] [--update]");

@@ -18,10 +18,11 @@ pub mod military;
 use economy::{BuildOrder, Economy};
 use fogged::{Command, FoggedView, PlayerId, Rng};
 use military::Military;
+use serde::{Deserialize, Serialize};
 
 /// How hard the opponent tries (`docs/02` §12). Only Hardest is allowed
 /// anything a player is not, and it says so in the UI.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum Difficulty {
     /// Simple build order, small attacks, slow reactions, no raids.
     Easy,
@@ -62,7 +63,7 @@ impl Difficulty {
 }
 
 /// One computer player.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Opponent {
     player: PlayerId,
     difficulty: Difficulty,

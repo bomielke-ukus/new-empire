@@ -42,6 +42,7 @@ name = "ai"
 version = "0.1.0"
 dependencies = [
  "fogged",
+ "serde",
 ]
 
 [[package]]
@@ -993,6 +994,7 @@ dependencies = [
  "objc2",
  "pollster",
  "render",
+ "save",
  "sim",
  "view",
  "wgpu",
@@ -1669,6 +1671,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "save"
+version = "0.1.0"
+dependencies = [
+ "ai",
+ "fogged",
+ "ron",
+ "serde",
+ "sim",
+]
+
+[[package]]
 name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1786,6 +1799,7 @@ dependencies = [
  "ai",
  "fogged",
  "ron",
+ "save",
  "serde",
  "sim",
 ]

@@ -6,9 +6,9 @@ engaging, without its 1997 frustrations.
 
 **Status: M6 (the game shell) in progress — the game opens on a title
 screen; a skirmish is set up against one to seven computer opponents at
-four difficulties and played to a results screen. The opponents scout,
-build, advance and attack, seeing only what they have scouted. Save,
-load, replay playback and settings are next. See the roadmap.**
+four difficulties, played to a results screen, saved and loaded. The
+opponents scout, build, advance and attack, seeing only what they have
+scouted. Replay playback and settings are next. See the roadmap.**
 
 ---
 
@@ -41,6 +41,7 @@ cargo run --release -p simrunner -- determinism --ticks 10000
                                              # match twice, compare every tick
 cargo run --release -p simrunner -- bench            # per-tick timings
 cargo run --release -p simrunner -- golden           # replay the corpus, compare digests
+cargo run --release -p simrunner -- verify FILE      # a replay or a save: it must replay identically
 cargo run --release -p simrunner -- ai --matches 3 --difficulty hard,easy --stats   # computer opponents, headless
 cargo run --release -p simrunner -- versus --matches 20 --expect tools/simrunner/tests/versus-hard-easy.golden   # the M5 acceptance
 cargo run -p simrunner -- matrix                     # the damage matrix, from the kinds table
@@ -59,7 +60,12 @@ cargo run -p atlas -- rig                    # render rig, checked against the s
 
 The game opens on a title screen: `Enter` or NEW GAME opens the skirmish
 setup (map size, opponents and their difficulties, population cap, seed,
-with the map previewed); `Enter` or START begins the match.
+with the map previewed); `Enter` or START begins the match. LOAD GAME
+lists the saves and resumes one. In a match, `F5` or SAVE GAME on the
+pause menu saves it; saves go under `NEW_EMPIRE_SAVES` if set, else the
+platform's data directory (`~/.local/share/new-empire/saves`,
+`~/Library/Application Support/new-empire/saves`,
+`%APPDATA%\new-empire\saves`).
 
 In the match: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
 `+`/`-` to zoom, from 0.5× to 3×, about the cursor; click the minimap to

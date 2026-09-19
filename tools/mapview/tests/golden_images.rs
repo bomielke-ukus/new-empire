@@ -62,6 +62,13 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The load screen with two saves listed, the cursor on the first.
+        name: "load-screen",
+        args: &[
+            "--screen", "load", "--width", "960", "--height", "540", "--hover", "316,234",
+        ],
+    },
+    Scene {
         // The actual acceptance replay, during contact between the two armies.
         name: "battle-40v40",
         args: &[

@@ -6,7 +6,7 @@
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
 //!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0]
-//!         [--screen title|setup] [--difficulty easy,standard,hard,hardest]
+//!         [--screen title|setup|load] [--difficulty easy,standard,hard,hardest]
 //! ```
 //!
 //! Generates a map, runs it for `--ticks`, and writes a frame rendered by the
@@ -170,6 +170,20 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
     };
     let (screen, preview) = match name {
         "title" => (shell::title(&atlas, &input), None),
+        "load" => {
+            // Two saves as the app would list them, for the golden image.
+            let rows = [
+                shell::LoadRow {
+                    title: "SEED 42 AT 18:30".into(),
+                    detail: "2026-09-19 19:05 UTC - 3 PLAYERS".into(),
+                },
+                shell::LoadRow {
+                    title: "SEED 1 AT 2:15".into(),
+                    detail: "2026-09-18 22:40 UTC - 2 PLAYERS".into(),
+                },
+            ];
+            (shell::load_screen(&atlas, &input, &rows, None), None)
+        }
         "setup" => {
             let mut setup = Setup::new(a.seed);
             setup.size = MapSize::from_tiles(a.size)
@@ -190,7 +204,7 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
                 Some(Minimap::render(&sim)),
             )
         }
-        other => return Err(format!("--screen {other}: title or setup")),
+        other => return Err(format!("--screen {other}: title, setup or load")),
     };
     let mut img = raster::Image::new(a.width, a.height, [12, 10, 14, 255]);
     let cam = Camera::new(1, 1, (a.width as f32, a.height as f32));

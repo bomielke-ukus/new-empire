@@ -478,6 +478,25 @@ decided one takes one. Two golden images pin the title and the setup
 screen. Six existing app tests met the shell at once: their empty worlds
 are decided matches by `docs/02` §10, which the helper now puts away.
 
+**M6 chunk 2, save and load.** `crates/save` unit tests: a save read
+back has the match's state hash and, played on with the opponents it
+carries, issues the same commands and hashes the same as the match that
+was never saved, every tick for 300 ticks, and is its own replay before
+and after (`TA-SAVE-01`); a save from another build is refused by its
+numbers, in the message, before the world is parsed, a replay is not a
+save, garbage does not parse, and a snapshot claiming another seed fails
+verification with both hashes (`TA-DET-06`); a directory of saves lists
+newest first from the file names alone, leaves other files out, and
+reads back. `tools/simrunner/tests/save_verify.rs` runs the built
+`simrunner verify` on a written save and requires the snapshot check and
+the twice-over replay to pass, and on a forged and an old one to fail
+with the reason. `crates/app/src/tests.rs`: a match saved from the pause
+menu and again with F5 is listed newest first on the title's LOAD GAME
+screen and resumes at its tick with its hash, its opponent, its camera
+and no age celebration, then plays on; a save from another build is
+refused on that screen with both numbers, Enter meets the same refusal,
+and Escape goes back. A golden image pins the load screen.
+
 ### Data files — M3 onward
 
 The startup validator from `docs/04` §9 run as a test: every referenced ID

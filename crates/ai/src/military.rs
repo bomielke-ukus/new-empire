@@ -14,6 +14,7 @@ use fogged::{
 };
 
 use crate::economy::{afford, builder, place, spend, BuildOrder};
+use serde::{Deserialize, Serialize};
 
 /// How long an alarm is answered for, in ticks.
 const THREAT_TICKS: u64 = 600;
@@ -25,7 +26,7 @@ const SCOUT_RINGS: [i32; 5] = [14, 22, 30, 40, 50];
 const RESERVE: Cost = [150, 50, 0, 0];
 
 /// The manager's memory between thoughts.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Military {
     /// Where the side was hit lately, and when.
     threats: Vec<(Vec2Fx, u64)>,

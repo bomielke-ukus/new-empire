@@ -63,7 +63,7 @@ pub use replay::{Divergence, Replay, ReplayError, Trace, VerifyError};
 pub use rng::Rng;
 pub use simulation::{
     ConfigError, PlaceError, ResearchError, TickStats, TrainError, Violation,
-    HARDEST_GATHER_BONUS_PCT, MAX_GATHER_BONUS_PCT,
+    HARDEST_GATHER_BONUS_PCT, MAX_GATHER_BONUS_PCT, STATE_VERSION,
 };
 pub use simulation::{
     SimConfig, Simulation, DEFAULT_STOCKPILE, POP_CAP_RANGE, TICKS_PER_SECOND, TICK_MS,

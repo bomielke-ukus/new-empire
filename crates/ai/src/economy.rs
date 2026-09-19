@@ -15,9 +15,10 @@ use fogged::{
 };
 
 use crate::Difficulty;
+use serde::{Deserialize, Serialize};
 
 /// What a difficulty aims for, by age index (Stone, Tool, Bronze, Iron).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct BuildOrder {
     /// Villagers to keep, by age.
     pub villagers: [u32; 4],
@@ -127,7 +128,7 @@ impl BuildOrder {
 }
 
 /// The manager's own memory between thoughts.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Economy {
     /// The node the Town Center's rally points at.
     rally: Option<EntityId>,

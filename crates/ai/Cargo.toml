@@ -10,3 +10,5 @@ rust-version.workspace = true
 # exist to refuse (TA-AI-01).
 [dependencies]
 fogged = { path = "../fogged" }
+# A save carries the opponents' minds (`docs/04` §10), so they serialise.
+serde = { workspace = true }

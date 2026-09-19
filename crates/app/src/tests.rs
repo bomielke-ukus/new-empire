@@ -456,6 +456,108 @@ fn the_pause_menu_pauses_and_resigning_ends_the_match_on_the_results_screen() {
     assert!(app.opponents.is_empty() && !app.menu);
 }
 
+/// A match saved from the pause menu or with F5 is listed on the title's
+/// LOAD GAME screen, newest first, and resumes at its tick with its
+/// opponents and its camera; a save from another build is refused on
+/// that screen with both version numbers, and the game stays there.
+///
+/// REQ: TA-SAVE-01
+/// REQ: TA-DET-06
+#[test]
+fn a_saved_match_is_listed_on_the_load_screen_and_resumes_where_it_was() {
+    let dir = std::env::temp_dir().join(format!("new-empire-app-saves-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut app = App::new();
+    app.camera.viewport = (1280.0, 720.0);
+    app.input.edge_scroll = false;
+    app.saves_dir = dir.clone();
+    app.setup.seed = 3;
+    app.setup.opponents = vec![Difficulty::Hard];
+    app.shell = Shell::Setup;
+    app.preview();
+    press(&mut app, ShellAction::Start);
+    let now = Instant::now();
+    for _ in 0..120 {
+        app.tick_once(now);
+    }
+    app.camera.look_at_tile(30.0, 30.0);
+    app.camera.set_zoom_index(1);
+    let (focus, zoom) = (app.camera.focus, app.camera.zoom_index);
+    let hash = app.sim.state_hash();
+    // Save from the menu; the file is named for the moment and the tick.
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    press(&mut app, ShellAction::Save);
+    assert!(app.saved_note().is_some_and(|n| n.starts_with("SAVED ")));
+    let files = save::list(&dir);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].summary.tick, 120);
+    assert_eq!(files[0].summary.players, 2);
+    // F5 saves too, and the menu comes back with the note.
+    press(&mut app, ShellAction::Resume);
+    for _ in 0..40 {
+        app.tick_once(now);
+    }
+    assert!(!app.keyboard_input(KeyCode::F5, ElementState::Pressed, false));
+    assert_eq!(save::list(&dir).len(), 2);
+    draw(&mut app);
+    // Leave the match and load the first save from the title.
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    press(&mut app, ShellAction::QuitToTitle);
+    press(&mut app, ShellAction::QuitToTitle);
+    assert_eq!(app.shell, Shell::Title);
+    press(&mut app, ShellAction::LoadGame);
+    assert_eq!(app.shell, Shell::Load);
+    assert_eq!(app.saves.len(), 2);
+    assert_eq!(app.saves[0].summary.tick, 160, "newest first");
+    press(&mut app, ShellAction::Load(1));
+    assert_eq!(app.shell, Shell::Match);
+    assert_eq!(app.sim.tick(), 120);
+    assert_eq!(app.sim.state_hash(), hash);
+    assert_eq!(app.sim.seed(), 3);
+    assert_eq!(app.opponents.len(), 1);
+    assert_eq!(app.opponents[0].difficulty(), Difficulty::Hard);
+    assert_eq!(app.camera.focus, focus);
+    assert_eq!(app.camera.zoom_index, zoom);
+    assert_eq!(app.results, ResultsState::Pending);
+    assert!(!app.menu && !app.clock.paused());
+    assert!(app.age_up.is_none(), "no celebration for the age it was in");
+    // It plays on, the opponent with it.
+    let before = app.sim.replay().commands.len();
+    for _ in 0..100 {
+        app.tick_once(now);
+    }
+    assert!(app.sim.replay().commands.len() > before);
+    assert_eq!(app.sim.tick(), 220);
+    // A save from another build is refused with both numbers, on the
+    // screen, and Enter (the newest) meets the same refusal.
+    let text = std::fs::read_to_string(&files[0].path).unwrap();
+    let old = text.replacen("state_version:1", "state_version:9", 1);
+    std::fs::write(dir.join("20990101-000000-seed3-tick1-p2.ron"), old).unwrap();
+    app.quit_to_title();
+    press(&mut app, ShellAction::LoadGame);
+    assert_eq!(app.saves.len(), 3);
+    assert_eq!(app.saves[0].summary.saved_at, 4_070_908_800);
+    press(&mut app, ShellAction::Load(0));
+    assert_eq!(app.shell, Shell::Load);
+    let err = app.load_error.clone().expect("the refusal is shown");
+    assert!(
+        err.contains("version 9") && err.contains("version 1"),
+        "{err}"
+    );
+    let plain = {
+        app.load_error = None;
+        draw(&mut app);
+        app.screen.sprites.len()
+    };
+    assert!(!app.keyboard_input(KeyCode::Enter, ElementState::Pressed, false));
+    assert!(app.load_error.is_some());
+    draw(&mut app);
+    assert!(app.screen.sprites.len() > plain, "the error line is drawn");
+    assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    assert_eq!(app.shell, Shell::Title);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The last side standing wins on the results screen; quitting a live
 /// match to the title takes two clicks, and Escape disarms the first.
 ///

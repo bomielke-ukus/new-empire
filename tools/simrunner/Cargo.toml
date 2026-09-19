@@ -10,5 +10,6 @@ rust-version.workspace = true
 sim = { path = "../../crates/sim" }
 fogged = { path = "../../crates/fogged" }
 ai = { path = "../../crates/ai" }
+save = { path = "../../crates/save" }
 ron = { workspace = true }
 serde = { workspace = true }

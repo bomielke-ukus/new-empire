@@ -23,15 +23,19 @@ use selection::Selection;
 use sim::kinds;
 use sim::tech;
 use sim::{Age, Command, CommandKind, EntityId, Rally, Simulation, Source, Vec2Fx, TICK_MS};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use view::hud::{Action, BOTTOM_PANEL, TOP_BAR};
 use view::minimap::{Minimap, MinimapRect};
 use view::shell::{self, Results, Side};
 use view::{
-    Atlas, Camera, FogLights, Ghost, Hud, HudInput, Scene, SceneOptions, Screen, Setup,
+    Atlas, Camera, FogLights, Ghost, Hud, HudInput, LoadRow, Scene, SceneOptions, Screen, Setup,
     ShellAction, ShellInput, Sweep, SWEEP_MS,
 };
+
+/// How long "SAVED ..." stays up, in ms.
+const SAVED_NOTE_MS: u128 = 4000;
 
 /// How long the age banner stays up, in ms.
 const BANNER_MS: u128 = 4000;
@@ -201,6 +205,14 @@ struct App {
     minimap_dirty: bool,
     /// The player asked to close the game.
     quit: bool,
+    /// Where saves are written and read.
+    saves_dir: PathBuf,
+    /// The saves listed on the load screen, newest first.
+    saves: Vec<save::Entry>,
+    /// Why the last load was refused, shown on the load screen.
+    load_error: Option<String>,
+    /// The last save's outcome and when, for the note that follows it.
+    saved: Option<(Instant, String)>,
 }
 
 /// Which screen the game is on.
@@ -210,8 +222,30 @@ enum Shell {
     Title,
     /// The skirmish setup.
     Setup,
+    /// The saves, to load one.
+    Load,
     /// A match, with the pause menu or the results over it or not.
     Match,
+}
+
+/// Where saves live: `NEW_EMPIRE_SAVES` if set, else the platform's data
+/// directory for the game, else `saves` under the working directory.
+fn saves_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("NEW_EMPIRE_SAVES") {
+        return PathBuf::from(dir);
+    }
+    let home = |var: &str| std::env::var_os(var).map(PathBuf::from);
+    let base = if cfg!(target_os = "windows") {
+        home("APPDATA")
+    } else if cfg!(target_os = "macos") {
+        home("HOME").map(|h| h.join("Library").join("Application Support"))
+    } else {
+        home("XDG_DATA_HOME").or_else(|| home("HOME").map(|h| h.join(".local").join("share")))
+    };
+    base.map_or_else(
+        || PathBuf::from("saves"),
+        |b| b.join("new-empire").join("saves"),
+    )
 }
 
 /// The results screen comes up once, when the match is decided, and
@@ -299,6 +333,10 @@ impl App {
             screen: Screen::default(),
             minimap_dirty: true,
             quit: false,
+            saves_dir: saves_dir(),
+            saves: Vec::new(),
+            load_error: None,
+            saved: None,
         }
     }
 
@@ -385,6 +423,7 @@ impl App {
         if let Some(w) = &self.window {
             let state = match self.shell {
                 Shell::Title => "title".to_string(),
+                Shell::Load => "load".to_string(),
                 Shell::Setup => format!("setup — seed {}", self.setup.seed),
                 Shell::Match => {
                     let paused = if self.clock.paused() { " [paused]" } else { "" };
@@ -407,7 +446,7 @@ impl App {
         self.last_frame = now;
         match self.shell {
             Shell::Match => self.frame_match(now, dt),
-            Shell::Title | Shell::Setup => self.frame_shell(now),
+            Shell::Title | Shell::Setup | Shell::Load => self.frame_shell(now),
         }
     }
 
@@ -504,7 +543,16 @@ impl App {
             }
         }
         let run = self.run_status();
-        let status = format!("{run}SEED {} TICK {}", self.sim.seed(), self.sim.tick());
+        let saved = if self.saved_note().is_some() {
+            "SAVED "
+        } else {
+            ""
+        };
+        let status = format!(
+            "{saved}{run}SEED {} TICK {}",
+            self.sim.seed(),
+            self.sim.tick()
+        );
         let hud = Hud::build(
             &self.atlas,
             &HudInput {
@@ -540,6 +588,7 @@ impl App {
                 &input,
                 self.decided(),
                 self.confirm,
+                self.saved_note().as_deref(),
             ))
         } else if self.results == ResultsState::Shown {
             Some(shell::results(&self.atlas, &input, &self.results_now()))
@@ -582,6 +631,12 @@ impl App {
         let input = self.shell_input();
         let screen = match self.shell {
             Shell::Title => shell::title(&self.atlas, &input),
+            Shell::Load => shell::load_screen(
+                &self.atlas,
+                &input,
+                &self.load_rows(),
+                self.load_error.as_deref(),
+            ),
             _ => shell::setup(
                 &self.atlas,
                 &input,
@@ -617,6 +672,82 @@ impl App {
             self.last_title = now;
             self.update_title();
         }
+    }
+
+    /// "SAVED ..." while it is fresh.
+    fn saved_note(&self) -> Option<String> {
+        self.saved
+            .as_ref()
+            .filter(|(at, _)| at.elapsed().as_millis() < SAVED_NOTE_MS)
+            .map(|(_, note)| note.clone())
+    }
+
+    /// The saves as the load screen lists them.
+    fn load_rows(&self) -> Vec<LoadRow> {
+        self.saves
+            .iter()
+            .map(|e| LoadRow {
+                title: format!("SEED {} AT {}", e.summary.seed, save::clock(e.summary.tick)),
+                detail: format!(
+                    "{} - {} PLAYERS",
+                    save::stamp(e.summary.saved_at),
+                    e.summary.players
+                ),
+            })
+            .collect()
+    }
+
+    /// Writes the match as it stands to the saves directory and notes
+    /// the outcome for the menu and the status line.
+    fn save_game(&mut self) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let view = save::View {
+            focus: self.camera.focus,
+            zoom_index: self.camera.zoom_index,
+        };
+        let file = save::Save::new(&self.sim, &self.opponents, view, now);
+        let note = match save::write(&self.saves_dir, &file) {
+            Ok(path) => format!(
+                "SAVED {}",
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("?")
+                    .to_uppercase()
+            ),
+            Err(e) => format!("SAVE FAILED: {e}").to_uppercase(),
+        };
+        self.saved = Some((Instant::now(), note));
+    }
+
+    /// Opens the load screen on what the saves directory holds.
+    fn open_load(&mut self) {
+        self.saves = save::list(&self.saves_dir);
+        self.load_error = None;
+        self.shell = Shell::Load;
+    }
+
+    /// Loads the save on a row of the load screen, or says why not.
+    fn load_game(&mut self, row: usize) {
+        let Some(entry) = self.saves.get(row) else {
+            return;
+        };
+        match save::read(&entry.path) {
+            Ok(file) => self.resume(file),
+            Err(e) => self.load_error = Some(e.to_string()),
+        }
+    }
+
+    /// Resumes a loaded match: its world, its opponents mid-thought, and
+    /// the camera where it was.
+    fn resume(&mut self, file: save::Save) {
+        self.sim = file.sim;
+        self.opponents = file.opponents;
+        self.enter_match();
+        self.camera.focus = file.view.focus;
+        self.camera.set_zoom_index(file.view.zoom_index);
+        self.camera.clamp();
     }
 
     /// Whether the shell has something over the world that takes the
@@ -696,7 +827,10 @@ impl App {
                 self.shell = Shell::Setup;
                 self.preview();
             }
-            ShellAction::LoadGame | ShellAction::WatchReplay | ShellAction::Settings => {}
+            ShellAction::LoadGame => self.open_load(),
+            ShellAction::Load(row) => self.load_game(row),
+            ShellAction::Save => self.save_game(),
+            ShellAction::WatchReplay | ShellAction::Settings => {}
             ShellAction::Quit => self.quit = true,
             ShellAction::Adjust(field, delta) => {
                 self.setup.adjust(field, delta);
@@ -756,12 +890,20 @@ impl App {
             .enumerate()
             .map(|(i, d)| Opponent::new(i as u8 + 1, *d, seed))
             .collect();
+        self.enter_match();
+    }
+
+    /// Enters the match `self.sim` holds, new or loaded: the camera over
+    /// the player's start, the clock fresh, and everything of the last
+    /// match cleared.
+    fn enter_match(&mut self) {
         let (viewport, dpi) = (self.camera.viewport, self.camera.dpi);
         let map = self.sim.map();
         self.camera = Camera::new(map.width(), map.height(), viewport);
         self.camera.dpi = dpi;
-        let (sx, sy) = self.sim.starts()[ME as usize];
-        self.camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
+        if let Some(&(sx, sy)) = self.sim.starts().get(ME as usize) {
+            self.camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
+        }
         self.prev_pos = self.sim.world().pos.clone();
         self.feedback = view::feedback::CombatFeedback::default();
         self.clock = FixedClock::new(TICK_MS);
@@ -772,7 +914,8 @@ impl App {
         self.wall_from = None;
         self.alarm_at = None;
         self.show_help = false;
-        self.last_age = Age::Stone;
+        // A loaded match is in the age it was left in: no celebration.
+        self.last_age = self.sim.player(ME).map_or(Age::Stone, |p| p.age);
         self.age_up = None;
         self.last_click = None;
         self.last_fog_tick = None;
@@ -1252,6 +1395,16 @@ impl App {
                 }
                 return false;
             }
+            Shell::Load => {
+                match code {
+                    KeyCode::Enter | KeyCode::NumpadEnter => {
+                        self.shell_action(ShellAction::Load(0))
+                    }
+                    KeyCode::Escape => self.shell_action(ShellAction::Back),
+                    _ => {}
+                }
+                return false;
+            }
             Shell::Match => {}
         }
         if self.menu {
@@ -1299,6 +1452,7 @@ impl App {
         }
         match code {
             KeyCode::F1 | KeyCode::Slash => self.show_help = !self.show_help,
+            KeyCode::F5 => self.save_game(),
             KeyCode::Escape => {
                 if self.show_help {
                     self.show_help = false;

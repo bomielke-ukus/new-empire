@@ -681,7 +681,7 @@ impl Simulation {
             return;
         }
         // Raise the alarm, once in a while.
-        if let Some(last) = self.scratch.last_alarm.get_mut(owner as usize) {
+        if let Some(last) = self.last_alarm.get_mut(owner as usize) {
             if *last == 0 || self.tick >= *last + ALARM_TICKS {
                 *last = self.tick.max(1);
                 self.events.push(Event::Alarm { player: owner, pos });

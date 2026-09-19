@@ -28,7 +28,7 @@ pub use camera::Camera;
 pub use fog::FogLights;
 pub use hud::{Action, Button, Hud, HudInput};
 pub use scene::{Ghost, Scene, SceneOptions, SpriteInstance, Sweep, SWEEP_MS};
-pub use shell::{Screen, Setup, ShellAction, ShellButton, ShellInput};
+pub use shell::{LoadRow, Screen, Setup, ShellAction, ShellButton, ShellInput};
 pub use sprites::{Anim, Atlas, Frame, Ink};
 pub use terrain::{ChunkMesh, TerrainVertex, CHUNK_TILES};
 

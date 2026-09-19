@@ -306,6 +306,14 @@ first-class treatment.
 - **[TA-DET-06]** Both are versioned; loading an incompatible version fails loudly with the
   version numbers rather than corrupting.
 
+*As built (M6):* a save (`crates/save`) is the whole `Simulation`, which
+carries its command log from tick 0, plus the opponents mid-thought and
+the camera, so the "log since the last snapshot" is the whole log and
+`Save::replay` is the match so far; `Save::verify` replays it and requires
+the snapshot's hash. Three version numbers are checked before the world
+is parsed: the save layout, `sim::STATE_VERSION` and `Replay::VERSION`.
+See §31.
+
 ---
 
 ## 11. Testing
@@ -1106,4 +1114,52 @@ siege are still owed, and a human will find this opponent predictable.
   chunks; a Small map after a Giant one would have kept the Giant's
   edges. `Gpu::render` takes the minimap rectangle as an option, since
   the title has none and the setup's preview sits inside its panel.
+
+## 31. Implementation notes from M6, chunk 2: save and load
+
+- **A save is the simulation, whole.** `Simulation` already derived
+  serde for the soak; the snapshot is that, with the command log it has
+  carried since M0 inside it, so a save is its own replay (`TA-SAVE-01`)
+  with nothing to reconcile. `crates/save` adds the opponents' minds
+  (`ai` now derives serde on `Opponent` and its managers) and the camera,
+  and a header repeating the seed, tick and player count.
+- **Three versions, checked before the world is read** (`TA-DET-06`).
+  `save::VERSION` for the file's layout, `sim::STATE_VERSION` for the
+  serialised shape of `Simulation`, `Replay::VERSION` for the commands.
+  A `Header` with defaulted fields is parsed first (serde ignores the
+  rest), so a save from another build is refused as "simulation state
+  version 9 but this build reads version 1" rather than as a parse error
+  deep inside the world. A replay file parses as a header with no state
+  version and is reported as not a save, which is how `simrunner verify`
+  tells the two apart.
+- **The alarm rate-limit moved out of scratch.** `last_alarm` steered
+  when the next UNDER ATTACK could sound and lived in the unserialised
+  `Scratch`, so a loaded match would have raised its next alarm at once
+  and the opponents, who hear alarms, would have thought differently
+  from the unsaved match. It is a `#[serde(default)]` field of
+  `Simulation` now, and the round-trip test plays 300 ticks of opponents
+  on both and requires the same commands and hashes every tick. It is
+  still not hashed: it steers an event, never a replay's outcome.
+- **`Save::verify` is the tool's check.** Replaying the log inside a save
+  from tick 0 must reach the snapshot's hash; `simrunner verify` runs
+  that on a save and then the usual twice-over replay, so a save from a
+  bug report is checked the way a replay is.
+- **Files are named for listing.** `20260919-190512-seed3-tick4321-p2.ron`
+  (UTC) carries everything the load screen shows, so a directory of
+  multi-megabyte saves is listed without reading one. A file with
+  another name is not listed; a listed file from another build is
+  refused on loading, on the screen, with its numbers. Saves live under
+  `NEW_EMPIRE_SAVES`, else the platform's data directory
+  (`~/.local/share/new-empire/saves`, `~/Library/Application
+  Support/new-empire/saves`, `%APPDATA%\new-empire\saves`), else
+  `saves` under the working directory; no crate was added for that.
+- **Loading is entering a match.** `start_match` and `resume` share
+  `enter_match`: a fresh clock and selection, the camera over the
+  player's start, the age remembered as the one the player is in (a
+  loaded Bronze Age match does not celebrate the Bronze Age), the results
+  pending. `resume` then puts the camera back where the save left it.
+- **Dates without a crate.** The civil-date arithmetic for the file
+  names and the list is twenty lines (Hinnant's algorithms), in UTC and
+  saying so; a local time zone would need a dependency and is not worth
+  one for a file name.
 

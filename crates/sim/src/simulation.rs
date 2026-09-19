@@ -92,6 +92,12 @@ pub struct SimConfig {
     pub gather_bonus_pct: Vec<i32>,
 }
 
+/// The serialised shape of [`Simulation`], for a save file (`docs/04`
+/// §10, `TA-DET-06`). Bump it when a field changes meaning or a field
+/// without a default is added, so an old save is refused with the two
+/// numbers rather than read wrong.
+pub const STATE_VERSION: u32 = 1;
+
 /// The bonus a Hardest opponent is set up with, declared in the UI.
 pub const HARDEST_GATHER_BONUS_PCT: i32 = 25;
 /// The most a gather bonus may be.
@@ -246,9 +252,6 @@ pub(crate) struct Scratch {
     head: Vec<u32>,
     next: Vec<u32>,
     pub(crate) stats: TickStats,
-    /// The tick each player's side was last told it was under attack; 0
-    /// for never.
-    pub(crate) last_alarm: Vec<u64>,
     /// Sight discs by radius, built on first use.
     stamps: Vec<Vec<(i32, i32)>>,
 }
@@ -466,6 +469,12 @@ pub struct Simulation {
     /// Arrows and stones in flight.
     #[serde(default)]
     pub(crate) projectiles: Vec<Projectile>,
+    /// The tick each player's side was last told it was under attack; 0
+    /// for never. State, not scratch: a match resumed from a save raises
+    /// its next alarm when the unsaved match would have. Not hashed,
+    /// since it steers only the alarm event and nothing a replay decides.
+    #[serde(default)]
+    pub(crate) last_alarm: Vec<u64>,
     /// What happened this tick that the presentation may care about.
     #[serde(skip)]
     pub(crate) events: Vec<Event>,
@@ -499,6 +508,7 @@ impl Simulation {
             fog: Vec::new(),
             nav_seen: 0,
             projectiles: Vec::new(),
+            last_alarm: Vec::new(),
             events: Vec::new(),
             scratch: Scratch::default(),
             config,
@@ -977,8 +987,8 @@ impl Simulation {
     pub fn step(&mut self) {
         self.scratch.stats = TickStats::default();
         self.events.clear();
-        if self.scratch.last_alarm.len() != self.players.len() {
-            self.scratch.last_alarm.resize(self.players.len(), 0);
+        if self.last_alarm.len() != self.players.len() {
+            self.last_alarm.resize(self.players.len(), 0);
         }
         self.apply_commands();
         self.farms();

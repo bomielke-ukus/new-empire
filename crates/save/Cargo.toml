@@ -1,0 +1,17 @@
+[package]
+name = "save"
+description = "A saved match: the simulation as it stands with its whole command log inside it, and the opponents' minds, versioned. Every save is a resumable replay."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sim = { path = "../sim" }
+ai = { path = "../ai" }
+serde = { workspace = true }
+ron = { workspace = true }
+
+[dev-dependencies]
+# The round-trip test plays opponents on a match, which needs their view.
+fogged = { path = "../fogged" }

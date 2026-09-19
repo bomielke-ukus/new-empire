@@ -25,7 +25,7 @@ its halfway point.
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
-| M6 — Game shell | **In progress**: 1 of 5 chunks landed 2026-09-19 | Configure, play, save, reload and watch a replay without a terminal |
+| M6 — Game shell | **In progress**: 2 of 5 chunks landed 2026-09-19 | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
@@ -54,8 +54,10 @@ or stone wall, set a gate into it, put up a Watch Tower and garrison it or
 the Town Center; knock the other side's buildings down to rubble. The
 opponents play from the first tick, scouting, building, advancing and
 coming for the Town Center; Escape opens the pause menu (resume, resign,
-quit) and the results come up when the match is decided. Save, load,
-replay playback, settings and notifications are still to come in M6.
+quit, save) and the results come up when the match is decided. F5 or
+the menu saves the match; LOAD GAME on the title lists the saves and
+resumes one where it was. Replay playback, settings and notifications
+are still to come in M6.
 
 ```sh
 cargo run --release -p new-empire           # the game window
@@ -835,14 +837,45 @@ what was done:
   handlers and the software rasteriser, as every milestone's first
   chunk has been.
 
+### Work record: M6 chunk 2 — save and load (2026-09-19)
+
+- **What landed.** `crates/save`: a save is the whole `Simulation`
+  (which carries its command log, so a save is its own replay,
+  `TA-SAVE-01`), the opponents mid-thought and the camera, under three
+  version numbers checked before the world is parsed (`TA-DET-06`);
+  `Save::verify` replays the log inside and requires the snapshot's
+  hash. `ai` derives serde on the opponent; `sim` gains
+  `STATE_VERSION` and moves the alarm rate-limit out of scratch so a
+  resumed match raises its next alarm when the unsaved one would. The
+  app has SAVE GAME on the pause menu and F5, a LOAD GAME screen on the
+  title listing the saves newest first from their file names, and a
+  `resume` that shares `enter_match` with a new game. `simrunner verify`
+  takes a save. `docs/04` §31 has the notes.
+- **What changed for the player.** F5, or SAVE GAME on the pause menu,
+  writes the match to the saves directory and says so. LOAD GAME on the
+  title lists the saves (seed, match clock, when, players); clicking one
+  or pressing Enter resumes it at its tick with the opponents where they
+  were in their thinking and the camera where it was. A save from
+  another build is refused on that screen with both version numbers.
+  Saves live under `NEW_EMPIRE_SAVES` or the platform's data directory.
+- **Measured.** A save of a Tiny map after 600 ticks of two opponents is
+  241 KB of RON; a loaded save continues identically to
+  the unsaved match for 300 ticks of opponent play. Three unit tests in
+  the save crate, one app test through the handlers, one on the built
+  `simrunner`, one golden image.
+- **Not done, deliberately.** No save names: the time, seed and tick
+  are the name. No delete on the load screen. Saves are plain RON, not
+  compressed. The list shows at most ten, newest first, and says how
+  many older there are. Nothing has been clicked on the Mac.
+
 ### Resume here next session
 
-**M6 chunk 1 is landed; chunk 2, save and load, is next** (§4c):
-`TA-SAVE-01` and `TA-DET-06`, a versioned save that is also a resumable
-replay, written from the pause menu and loaded from the title. Then
-replay playback, settings, notifications and the `RM-M6-01` run. The
-parallel track (§4b) runs on its own branch. Keep the art pipeline on
-the `docs/08` schedule.
+**M6 chunks 1 and 2 are landed; chunk 3, replay playback, is next**
+(§4c): every match played in the app recorded, WATCH REPLAY listing the
+recordings, playback from the command log with pause and speed, seen
+through any side's eyes or none. Then settings, notifications and the
+`RM-M6-01` run. The parallel track (§4b) runs on its own branch. Keep
+the art pipeline on the `docs/08` schedule.
 
 ## 4. What M4 completed — Combat
 
@@ -944,9 +977,10 @@ own handlers before anyone clicks it:
    cap and the seed, the map previewed, the Hardest bonus declared beside
    the opponent that gets it; the opponents thinking in the app's tick
    loop; the pause menu with resign and quit; the results screen.
-2. **Save and load** (`TA-SAVE-01`, `TA-DET-06`): a versioned save of
-   the match that is also a resumable replay, written from the pause
-   menu, listed and loaded from the title.
+2. **Save and load** (`TA-SAVE-01`, `TA-DET-06`). **Done 2026-09-19**,
+   record above: `crates/save`, the whole simulation with its log and the
+   opponents' minds, three versions checked before the world is read;
+   SAVE GAME and F5; the load screen; `simrunner verify` on a save.
 3. **Replay playback with speed controls**: every match played in the
    app is recorded; WATCH REPLAY lists them; playback from the command
    log with pause and speed, seen through any side's eyes or none.
