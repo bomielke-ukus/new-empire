@@ -6,7 +6,7 @@
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
 //!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0]
-//!         [--screen title|setup|load] [--difficulty easy,standard,hard,hardest]
+//!         [--screen title|setup|load|settings] [--difficulty easy,standard,hard,hardest]
 //! ```
 //!
 //! Generates a map, runs it for `--ticks`, and writes a frame rendered by the
@@ -22,7 +22,8 @@ use view::camera::ZOOM_LEVELS;
 use view::minimap::{Minimap, MinimapRect};
 use view::shell::{self, Difficulty, MapSize, ShellInput};
 use view::{
-    raster, Atlas, Camera, FogLights, Ghost, Hud, HudInput, Scene, SceneOptions, Setup, Sweep,
+    raster, Atlas, Camera, FogLights, Ghost, Hud, HudInput, Scene, SceneOptions, Settings, Setup,
+    Sweep,
 };
 
 struct Args {
@@ -204,7 +205,11 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
                 Some(Minimap::render(&sim)),
             )
         }
-        other => return Err(format!("--screen {other}: title, setup or load")),
+        "settings" => (
+            shell::settings_screen(&atlas, &input, &Settings::default(), None, None),
+            None,
+        ),
+        other => return Err(format!("--screen {other}: title, setup, load or settings")),
     };
     let mut img = raster::Image::new(a.width, a.height, [12, 10, 14, 255]);
     let cam = Camera::new(1, 1, (a.width as f32, a.height as f32));
@@ -402,6 +407,7 @@ fn run() -> Result<(), String> {
         cam.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
     }
     if a.hud {
+        let settings = Settings::default();
         let hud = Hud::build(
             &atlas,
             &HudInput {
@@ -420,6 +426,7 @@ fn run() -> Result<(), String> {
                 help: a.controls,
                 targeting: false,
                 defences: false,
+                settings: &settings,
             },
         );
         scene.ui = hud.sprites;

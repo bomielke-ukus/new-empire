@@ -10,7 +10,7 @@ pub const GLYPH_W: u32 = 5;
 pub const GLYPH_H: u32 = 7;
 
 /// Characters the font contains, in atlas order.
-pub const CHARS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :/-.%+()?,!";
+pub const CHARS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :/-.%+()?,![]=;";
 
 /// Rows of a glyph, `#` for a lit pixel.
 pub fn rows(c: char) -> [&'static str; 7] {
@@ -140,6 +140,18 @@ pub fn rows(c: char) -> [&'static str; 7] {
         ],
         '+' => [
             "     ", "  #  ", "  #  ", "#####", "  #  ", "  #  ", "     ",
+        ],
+        '[' => [
+            "###  ", "#    ", "#    ", "#    ", "#    ", "#    ", "###  ",
+        ],
+        ']' => [
+            "  ###", "    #", "    #", "    #", "    #", "    #", "  ###",
+        ],
+        '=' => [
+            "     ", "     ", "#####", "     ", "#####", "     ", "     ",
+        ],
+        ';' => [
+            "     ", " ##  ", " ##  ", "     ", " ##  ", "  #  ", " #   ",
         ],
         '(' => [
             "   # ", "  #  ", " #   ", " #   ", " #   ", "  #  ", "   # ",

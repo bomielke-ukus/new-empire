@@ -13,6 +13,7 @@ use crate::fx_to_f32;
 use crate::iso;
 use crate::palette::*;
 use crate::scene::SpriteInstance;
+use crate::settings::{pretty, Control, Settings};
 use crate::sprites::{Atlas, Frame, Ink};
 
 /// Height of the top resource bar.
@@ -166,6 +167,8 @@ pub struct HudInput<'a> {
     /// The defences page is open: walls, the tower and the gate in place
     /// of the build grid.
     pub defences: bool,
+    /// The player's settings, for the general keys the overlay names.
+    pub settings: &'a Settings,
 }
 
 /// How long the "F1 CONTROLS" hint stays in the resource bar: the first
@@ -180,18 +183,39 @@ pub fn controls_hint(sim: &Simulation) -> bool {
 /// Every control, as two columns of `(key, what it does)`: the general
 /// controls, and the build, train and research keys. The second column
 /// comes from the same tables the command grid uses, so it cannot drift.
-pub fn controls() -> [Vec<(String, String)>; 2] {
+pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
     let s = |k: &str, a: &str| (k.to_string(), a.to_string());
+    let key = |c: Control| pretty(settings.key(c));
+    // The general keys are the player's bindings, so the overlay cannot
+    // disagree with the settings screen.
+    let pan: Vec<String> = [
+        Control::PanUp,
+        Control::PanLeft,
+        Control::PanDown,
+        Control::PanRight,
+    ]
+    .into_iter()
+    .map(key)
+    .collect();
+    let pan = if pan.iter().all(|k| k.chars().count() == 1) {
+        pan.concat()
+    } else {
+        pan.join(" ")
+    };
     let general = vec![
-        s("WASD", "PAN THE CAMERA"),
+        (pan, "PAN THE CAMERA".to_string()),
         s("MID DRAG", "PAN"),
         s("WHEEL +-", "ZOOM 0.5X TO 3X"),
+        (
+            format!("{} {}", key(Control::ZoomIn), key(Control::ZoomOut)),
+            "ZOOM IN, OUT".to_string(),
+        ),
         s("MINIMAP", "CLICK JUMPS, RIGHT-CLICK SENDS"),
         s("CLICK", "SELECT, DRAG FOR A BOX"),
         s("DBL CLICK", "ALL OF A KIND ON SCREEN"),
         s("SHIFT", "ADD TO THE SELECTION"),
         s("CTRL+0-9", "SAVE A GROUP, 0-9 RECALLS"),
-        s(".", "NEXT IDLE VILLAGER"),
+        (key(Control::NextIdle), "NEXT IDLE VILLAGER".to_string()),
         s("RIGHT", "MOVE, GATHER, BUILD, RALLY"),
         s("T", "STOP"),
         s("C P G B L", "TRAIN AT A BARRACKS, RANGE, STABLE"),
@@ -201,12 +225,19 @@ pub fn controls() -> [Vec<(String, String)>; 2] {
         s("M, P", "ATTACK-MOVE, PATROL, THEN CLICK"),
         s("Q E I K", "STANCE, AGGRESSIVE TO PASSIVE"),
         s("Z", "NEXT FORMATION"),
-        s("DELETE", "DISMISS"),
-        s("SPACE", "PAUSE"),
-        s("[ ]", "SLOWER, FASTER"),
-        s("SHIFT+E", "EDGE SCROLL ON, OFF"),
-        s("F2", "HUD SIZE"),
-        s("ESC", "CANCEL, DESELECT, QUIT"),
+        (key(Control::Dismiss), "DISMISS".to_string()),
+        (key(Control::Pause), "PAUSE".to_string()),
+        (
+            format!("{} {}", key(Control::Slower), key(Control::Faster)),
+            "SLOWER, FASTER".to_string(),
+        ),
+        (key(Control::EdgeScroll), "EDGE SCROLL ON, OFF".to_string()),
+        (key(Control::HudSize), "HUD SIZE".to_string()),
+        (key(Control::QuickSave), "QUICK SAVE".to_string()),
+        (key(Control::Home), "HOME: THE TOWN CENTER".to_string()),
+        (key(Control::Eyes), "EYES, IN A REPLAY".to_string()),
+        (key(Control::Help), "THIS OVERLAY".to_string()),
+        s("ESC", "CANCEL, DESELECT, MENU"),
     ];
     let mut build: Vec<&KindInfo> = kinds::all()
         .iter()
@@ -470,6 +501,20 @@ fn build_hotkey(kind: KindId) -> char {
         kinds::GOVERNMENT_CENTRE => 'C',
         _ => 'N',
     }
+}
+
+/// Every letter a command button may carry: the panels' keys, which a
+/// general control may not take (`settings::Settings::bind`).
+pub fn command_letters() -> std::collections::BTreeSet<char> {
+    let mut keys: std::collections::BTreeSet<char> =
+        ['T', 'V', 'X', 'R', 'U', 'M', 'P', DEFENCES_KEY].into();
+    keys.extend(TECH_KEYS);
+    for k in kinds::all() {
+        keys.insert(build_hotkey(k.id));
+        keys.insert(train_hotkey(k.id));
+    }
+    keys.remove(&' ');
+    keys
 }
 
 /// The key that trains a unit. Keys repeat across buildings (the panel
@@ -1452,7 +1497,7 @@ impl Hud {
 
         // The controls overlay, over everything but the panels.
         if input.help {
-            let [general, orders] = controls();
+            let [general, orders] = controls(input.settings);
             let rows = general.len().max(orders.len());
             let pw = 620.0_f32.min(vw - 16.0);
             let line = 11.0;
@@ -1518,6 +1563,10 @@ impl Hud {
 mod tests {
     use super::*;
     use sim::SimConfig;
+
+    /// The out-of-the-box settings, for the tests' HUD inputs.
+    static DEFAULT_SETTINGS: std::sync::LazyLock<Settings> =
+        std::sync::LazyLock::new(Settings::default);
 
     #[test]
     fn command_shortcuts_are_unique_and_do_not_use_camera_keys() {
@@ -1640,6 +1689,7 @@ mod tests {
             help: false,
             targeting: false,
             defences: false,
+            settings: &DEFAULT_SETTINGS,
         };
         let none = Hud::build(&atlas, &base);
         assert!(none.buttons.is_empty());
@@ -1794,6 +1844,7 @@ mod tests {
                     help: false,
                     targeting: false,
                     defences: false,
+                    settings: &DEFAULT_SETTINGS,
                 },
             )
         };
@@ -1834,6 +1885,7 @@ mod tests {
                 help: false,
                 targeting: false,
                 defences: false,
+                settings: &DEFAULT_SETTINGS,
             },
         );
         assert_ne!(lit.sprites, b.sprites, "the hovered button draws lit");
@@ -1843,7 +1895,7 @@ mod tests {
     /// points at it lasts a minute.
     #[test]
     fn the_controls_overlay_covers_every_hotkey() {
-        let [general, orders] = controls();
+        let [general, orders] = controls(&DEFAULT_SETTINGS);
         let keys: Vec<String> = orders.iter().map(|(k, _)| k.clone()).collect();
         for k in kinds::all()
             .iter()
@@ -1895,6 +1947,7 @@ mod tests {
             help: false,
             targeting: false,
             defences: false,
+            settings: &DEFAULT_SETTINGS,
         };
         let closed = Hud::build(&atlas, &base);
         let open = Hud::build(&atlas, &HudInput { help: true, ..base });
@@ -1946,6 +1999,7 @@ mod tests {
                     help: false,
                     targeting: false,
                     defences: false,
+                    settings: &DEFAULT_SETTINGS,
                 },
             );
             // Every glyph in the top bar stays inside the window.

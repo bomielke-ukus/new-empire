@@ -92,8 +92,13 @@ Center or tower of yours with units selected to garrison them; T on the
 building alone lets them all out. Technologies use Q, E, I, K, Z in displayed order;
 the HUD is authoritative as researched technologies leave the list.
 V trains a villager, U advances age, R toggles auto-reseed, X unqueues,
-and T stops units. Shift+E toggles edge scrolling. X cancels placement
-when its separate panel is active. Unmodified E remains available for research.
+and T stops units. F3 toggles edge scrolling. X cancels placement
+when its separate panel is active. The general keys (camera, pause, speed,
+zoom, HUD size, overlay, quick save, edge scrolling, home, next idle,
+dismiss, and whose eyes in a replay) are rebound on the settings screen
+(`GD-A11Y-02`), which refuses a key another control holds, a letter the
+panels use, Escape and the digits; the command letters on the panels are
+the HUD's tables and are not rebindable yet.
 Zoom is six discrete levels from 0.5× to 3× of the sprite's authored size,
 stepped by wheel travel about the cursor or by `+`/`-` about the centre; the
 display's scale factor is applied underneath, so a level looks the same on

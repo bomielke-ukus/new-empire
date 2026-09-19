@@ -18,6 +18,7 @@ use crate::hud::{fit, Painter};
 use crate::minimap::MinimapRect;
 use crate::palette::*;
 use crate::scene::SpriteInstance;
+use crate::settings::{pretty, Control, Settings};
 use crate::sprites::{Atlas, Ink};
 
 /// The name on the title screen. `docs/07` Q5 is open: this is the
@@ -248,6 +249,16 @@ pub enum ShellAction {
     Load(usize),
     /// Replay screen: watch the recording on this row.
     Watch(usize),
+    /// Settings: the next HUD size along.
+    SettingScale(i32),
+    /// Settings: edge scrolling on or off.
+    ToggleEdgeScroll,
+    /// Settings: fullscreen or a window.
+    ToggleFullscreen,
+    /// Settings: wait for a new key for this control.
+    Rebind(Control),
+    /// Settings: everything back to the defaults.
+    ResetSettings,
 }
 
 /// A clickable region on a shell screen.
@@ -483,7 +494,7 @@ pub fn title(atlas: &Atlas, input: &ShellInput) -> Screen {
         (ShellAction::NewGame, "NEW GAME", true, ""),
         (ShellAction::LoadGame, "LOAD GAME", true, ""),
         (ShellAction::WatchReplay, "WATCH REPLAY", true, ""),
-        (ShellAction::Settings, "SETTINGS", false, "NOT YET"),
+        (ShellAction::Settings, "SETTINGS", true, ""),
         (ShellAction::Quit, "QUIT", true, ""),
     ];
     let my = (s.vh * 0.42).round().max(ty + 64.0);
@@ -710,6 +721,137 @@ fn kind_name(kind: MapKind) -> String {
         MapKind::Flat => "FLAT".to_string(),
         MapKind::Inland => "INLAND".to_string(),
     }
+}
+
+/// The settings screen (`GD-A11Y-02`): the HUD size, edge scrolling, the
+/// window mode, and every general key with a CHANGE button. `capturing`
+/// is the control waiting for its new key; `error` is why the last key
+/// was refused.
+pub fn settings_screen(
+    atlas: &Atlas,
+    input: &ShellInput,
+    settings: &Settings,
+    capturing: Option<Control>,
+    error: Option<&str>,
+) -> Screen {
+    let mut s = Sheet::new(atlas, input);
+    s.backdrop();
+    let rows = 4 + Control::ALL.len();
+    let pw = 560.0_f32.min(s.vw - 16.0);
+    let ph = 40.0 + rows as f32 * ROW_H + 14.0 + 12.0 + 26.0 + 16.0 + 8.0;
+    let x = ((s.vw - pw) / 2.0).round();
+    let y = ((s.vh - ph) / 2.0).max(4.0).round();
+    s.panel(x, y, pw, ph);
+    s.centred(x + pw / 2.0, y + 10.0, "SETTINGS", Ink::Gold, 2.0);
+    let (label_x, minus_x, value_x, value_w) = (x + 16.0, x + 236.0, x + 260.0, 140.0);
+    let plus_x = value_x + value_w + 4.0;
+    let mut ry = y + 40.0;
+    // One row: the label, a step button, the value, a step or CHANGE
+    // button. Takes the row's top and hands back the next one's.
+    let row = |s: &mut Sheet<'_>,
+               ry: f32,
+               label: &str,
+               value: &str,
+               minus: (ShellAction, &str),
+               plus: (ShellAction, &str, bool)|
+     -> f32 {
+        let ty = ry + (ROW_H - 7.0) / 2.0 - 1.0;
+        s.p.text(label_x, ty, label, false, 1.0);
+        let by = ry + (ROW_H - STEP_H) / 2.0;
+        if !minus.1.is_empty() {
+            s.button((minus_x, by, STEP_W, STEP_H), minus.0, minus.1, true, "");
+        }
+        s.centred(value_x + value_w / 2.0, ty, value, Ink::Gold, 1.0);
+        let (pw_, label_) = if plus.1.len() > 1 {
+            (70.0, plus.1)
+        } else {
+            (STEP_W, plus.1)
+        };
+        s.button((plus_x, by, pw_, STEP_H), plus.0, label_, plus.2, "");
+        ry + ROW_H
+    };
+    ry = row(
+        &mut s,
+        ry,
+        "HUD SIZE",
+        &format!("{}%", (settings.ui_scale * 100.0).round() as i32),
+        (ShellAction::SettingScale(-1), "-"),
+        (ShellAction::SettingScale(1), "+", true),
+    );
+    ry = row(
+        &mut s,
+        ry,
+        "EDGE SCROLL",
+        if settings.edge_scroll { "ON" } else { "OFF" },
+        (ShellAction::ToggleEdgeScroll, "-"),
+        (ShellAction::ToggleEdgeScroll, "+", true),
+    );
+    ry = row(
+        &mut s,
+        ry,
+        "WINDOW",
+        if settings.fullscreen {
+            "FULLSCREEN"
+        } else {
+            "WINDOWED"
+        },
+        (ShellAction::ToggleFullscreen, "-"),
+        (ShellAction::ToggleFullscreen, "+", true),
+    );
+    let ky = ry + (ROW_H - 7.0) / 2.0 - 1.0;
+    s.p.text_in(label_x, ky, "KEYS", Ink::Gold, 1.0);
+    ry += ROW_H;
+    for c in Control::ALL {
+        let (value, enabled) = if capturing == Some(c) {
+            ("PRESS A KEY".to_string(), false)
+        } else {
+            (pretty(settings.key(c)), true)
+        };
+        ry = row(
+            &mut s,
+            ry,
+            c.name(),
+            &value,
+            (ShellAction::Rebind(c), ""),
+            (ShellAction::Rebind(c), "CHANGE", enabled),
+        );
+    }
+    let note = if capturing.is_some() {
+        "PRESS THE NEW KEY. ESC KEEPS THE OLD ONE."
+    } else {
+        "LETTERS THE PANELS USE, DIGITS AND ESC CANNOT BE TAKEN."
+    };
+    s.centred(x + pw / 2.0, ry + 4.0, note, Ink::White, 1.0);
+    if let Some(e) = error {
+        let text = fit(&e.to_uppercase(), pw - 32.0);
+        let tw = font::width(&text) as f32;
+        let ex = (x + (pw - tw) / 2.0).round() - 4.0;
+        s.p.rect(ex, ry + 16.0, tw + 8.0, 11.0, RED_DARK, 0);
+        s.p.text(ex + 4.0, ry + 18.0, &text, false, 1.0);
+    }
+    let by = y + ph - 16.0 - 26.0;
+    s.button(
+        (x + 16.0, by, 120.0, 26.0),
+        ShellAction::Back,
+        "BACK",
+        true,
+        "",
+    );
+    s.button(
+        (x + pw - 16.0 - 120.0, by, 120.0, 26.0),
+        ShellAction::ResetSettings,
+        "DEFAULTS",
+        true,
+        "",
+    );
+    s.centred(
+        x + pw / 2.0,
+        by + 10.0,
+        "CHANGES ARE KEPT AT ONCE. ESC: BACK",
+        Ink::White,
+        1.0,
+    );
+    s.finish(None)
 }
 
 /// The pause menu, over a match. `decided` greys RESIGN once the match is
@@ -1033,9 +1175,11 @@ mod tests {
         assert!(find(&screen, ShellAction::LoadGame).enabled);
         assert!(find(&screen, ShellAction::WatchReplay).enabled);
         assert!(find(&screen, ShellAction::Quit).enabled);
-        let settings = find(&screen, ShellAction::Settings);
-        assert!(!settings.enabled);
-        assert_eq!(settings.reason, "NOT YET");
+        assert!(find(&screen, ShellAction::Settings).enabled);
+        assert!(
+            screen.buttons.iter().all(|b| b.enabled),
+            "every entry is built"
+        );
         assert!(inside(&screen, &input));
         assert!(screen.preview.is_none());
         assert!(screen.sprites.iter().all(|s| s.screen));
@@ -1170,6 +1314,57 @@ mod tests {
         );
         assert!(more.sprites.len() > screen.sprites.len());
         assert!(inside(&more, &input()));
+    }
+
+    /// The settings screen has a step either side of the three settings,
+    /// a CHANGE button per control showing its key, the control being
+    /// rebound saying so with its button greyed, an error line, and BACK
+    /// and DEFAULTS.
+    ///
+    /// REQ: GD-A11Y-02
+    #[test]
+    fn the_settings_screen_lists_every_control_with_its_key() {
+        let atlas = Atlas::placeholder();
+        let mut settings = Settings::default();
+        let plain = settings_screen(&atlas, &input(), &settings, None, None);
+        assert!(find(&plain, ShellAction::SettingScale(-1)).enabled);
+        assert!(find(&plain, ShellAction::SettingScale(1)).enabled);
+        assert!(find(&plain, ShellAction::ToggleEdgeScroll).enabled);
+        assert!(find(&plain, ShellAction::ToggleFullscreen).enabled);
+        for c in Control::ALL {
+            assert!(find(&plain, ShellAction::Rebind(c)).enabled, "{c:?}");
+        }
+        assert!(find(&plain, ShellAction::Back).enabled);
+        assert!(find(&plain, ShellAction::ResetSettings).enabled);
+        assert!(inside(&plain, &input()));
+        assert!(inside(
+            &settings_screen(
+                &atlas,
+                &ShellInput {
+                    viewport: (960.0, 540.0),
+                    ..input()
+                },
+                &settings,
+                None,
+                None
+            ),
+            &ShellInput {
+                viewport: (960.0, 540.0),
+                ..input()
+            }
+        ));
+        let waiting = settings_screen(&atlas, &input(), &settings, Some(Control::Pause), None);
+        assert!(!find(&waiting, ShellAction::Rebind(Control::Pause)).enabled);
+        assert!(find(&waiting, ShellAction::Rebind(Control::Faster)).enabled);
+        settings.bind(Control::Pause, "F6").unwrap();
+        let refused = settings_screen(
+            &atlas,
+            &input(),
+            &settings,
+            None,
+            Some("H IS A COMMAND KEY ON THE PANELS"),
+        );
+        assert!(refused.sprites.len() > plain.sprites.len() + 20);
     }
 
     /// The load screen lists a button per save, newest first as given,

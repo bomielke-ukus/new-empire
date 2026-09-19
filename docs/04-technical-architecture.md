@@ -1204,3 +1204,41 @@ siege are still owed, and a human will find this opponent predictable.
   sixty frames is twenty-four times real time; the replay's speed cap is
   sixteen and a match's stays at eight.
 
+## 33. Implementation notes from M6, chunk 4: settings
+
+- **Keys are names.** A binding is the key's name as `winit` prints it
+  (`KeyW`, `F5`, `BracketRight`), so the settings model lives in `view`
+  with no dependency on the windowing crate, the file is readable, and
+  the app compares names on a key press. Only the four pan keys need
+  turning back into keys, since the camera reads them while held;
+  `app::keys::code` knows every bindable key and refuses the rest.
+- **What a general key may not take.** `hud::command_letters` is every
+  letter a command button may carry, gathered from the same tables the
+  buttons are built from, so `Settings::bind` refuses a letter the
+  panels use and stays right when a table changes. Escape is the menu
+  and the digits are the control groups, so those are refused too, and
+  a key already bound to another control is refused with that control's
+  name. A refusal changes nothing.
+- **The overlay reads the bindings.** `hud::controls` takes the settings
+  and names the bound key on every general row; the pan row reads
+  `WASD` when the four keys are single letters and lists them otherwise.
+  The overlay and the settings screen cannot disagree.
+- **Applied and kept at once.** Every change on the screen, and the
+  HUD-size and edge-scroll keys in a match, go through
+  `apply_and_save_settings`: into effect (the HUD scale, edge scrolling,
+  the pan keys, the window mode) and onto disk. There is no OK button to
+  forget. A file that cannot be written reports on the screen and the
+  change still holds for the session.
+- **A file never fails for being old.** `#[serde(default)]` on
+  `Settings` gives a missing field its default, so a build that adds a
+  setting reads last week's file; a file that does not parse is left
+  alone, reported, and the defaults stand in. This is the other side of
+  the save format's strictness: a save read wrong corrupts a match, a
+  setting read wrong is a key.
+- **Shift+E became F3.** A binding is one key without modifiers, and E
+  is a panel letter; the edge-scroll toggle needed a key of its own.
+  Home took over the Town Center jump from H for the same reason.
+- **The window mode is winit's borderless fullscreen**, set at creation
+  and on the change; nothing else about video is a setting yet, since
+  the renderer has no options to expose.
+

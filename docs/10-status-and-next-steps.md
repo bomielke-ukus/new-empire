@@ -25,7 +25,7 @@ its halfway point.
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
-| M6 — Game shell | **In progress**: 3 of 5 chunks landed 2026-09-19 | Configure, play, save, reload and watch a replay without a terminal |
+| M6 — Game shell | **In progress**: 4 of 5 chunks landed 2026-09-19 | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
@@ -58,7 +58,9 @@ quit, save) and the results come up when the match is decided. F5 or
 the menu saves the match; LOAD GAME on the title lists the saves and
 resumes one where it was. Every match played is recorded; WATCH REPLAY
 plays one back with pause and speed, through any side's eyes or
-everyone's. Settings and notifications are still to come in M6.
+everyone's. SETTINGS holds the HUD size, edge scrolling, the window mode
+and every general key, kept in a file. Notifications are still to come
+in M6.
 
 ```sh
 cargo run --release -p new-empire           # the game window
@@ -901,14 +903,46 @@ what was done:
   the difficulties; the sides are PLAYER 1 to n. A save's history can
   be watched only by way of `simrunner verify`, not from the title.
 
+### Work record: M6 chunk 4 — settings (2026-09-19)
+
+- **What landed.** `crates/view/src/settings.rs`: `Settings` (the HUD
+  size, edge scrolling, fullscreen, and a key per `Control`, seventeen
+  general controls named by `winit`'s key names) with `bind` refusing a
+  key another control holds, a letter the panels use
+  (`hud::command_letters`), Escape and the digits, each with its reason;
+  pretty RON with every field defaulted so an older file loads. The
+  settings screen: three settings with step buttons, a CHANGE button per
+  control that waits for the next key. The app keeps `settings.ron` in
+  the data directory, applies every change at once and writes it at
+  once, routes its general keys through the bindings (arrows, the keypad
+  and `?` stay fixed aliases), and the controls overlay names the bound
+  keys. `crates/app/src/keys.rs` turns key names back into keys for the
+  four pan keys the camera reads while held. The font gained `[ ] = ;`
+  so those keys can be shown. `docs/04` §33 has the notes.
+- **What changed for the player.** SETTINGS on the title. Edge
+  scrolling's toggle moved from Shift+E to F3 (E is a panel letter, and a
+  binding is one key); Home jumps to the Town Center where H did with
+  nothing selected. Fullscreen is borderless and takes effect at once.
+- **Measured.** Nothing timed; the file is a few hundred bytes. Two unit
+  tests in the settings module, one in `keys`, one shell test, one app
+  test through the handlers; the overlay and settings screen goldens.
+- **Not done, deliberately.** The panels' command letters (build, train,
+  research, stance, formation, stop and the rest) are the HUD's tables
+  and are not rebindable; `GD-A11Y-02` is met for the general keys only,
+  and full rebinding is owed to M7 or M8 with a per-command capture
+  flow. No audio settings (there is no audio). No edge-scroll dead zone
+  setting, no key for a second binding per control, no mouse settings.
+  Fullscreen has not been tried on the Mac.
+
 ### Resume here next session
 
-**M6 chunks 1 to 3 are landed; chunk 4, settings, is next** (§4c): a
-settings file; UI scale, edge scrolling, window mode, and the key
-bindings (`GD-A11Y-02`) as far as one chunk allows. Then notifications
-with click-to-jump and the `RM-M6-01` run. The parallel track (§4b)
-runs on its own branch. Keep the art pipeline on the `docs/08`
-schedule.
+**M6 chunks 1 to 4 are landed; chunk 5, notifications and the
+acceptance run, is next** (§4c): the lower-left notification stack
+(`docs/03` §6.3, `UX-NOTIFY-01`) with click-to-jump, and the `RM-M6-01`
+run recorded: the whole path from the title to the replay, driven
+headless through the app's handlers, and once by hand on the Mac. The
+parallel track (§4b) runs on its own branch. Keep the art pipeline on
+the `docs/08` schedule.
 
 ## 4. What M4 completed — Combat
 
@@ -1018,8 +1052,11 @@ own handlers before anyone clicks it:
    above: every match played is recorded when decided or left, one file
    per match; WATCH REPLAY lists the recordings; playback from the log
    with pause, speed to 16× and Tab for whose eyes, nothing issued.
-4. **Settings**: a settings file; UI scale, edge scrolling, window mode,
-   and the key bindings (`GD-A11Y-02`) as far as one chunk allows.
+4. **Settings.** **Done 2026-09-19**, record above: `settings.ron` in
+   the data directory; the HUD size, edge scrolling and the window mode;
+   every general key rebound on the settings screen with the panels'
+   letters, Escape and the digits refused (`GD-A11Y-02` for the general
+   keys; the panels' command letters are owed).
 5. **Notifications with click-to-jump** (`docs/03` §6.3,
    `UX-NOTIFY-01`), and the `RM-M6-01` run recorded: the whole path from
    the title to the replay, driven headless through the app's handlers,
@@ -1041,6 +1078,10 @@ Stated so they are not rediscovered.
 - **Waypoints** (`UX-CMD-04`) are untouched; Shift only keeps placement
   and targeting armed.
 - **Attack-move is `M`**, where `docs/03` says `A`; `A` pans the camera.
+- **The panels' command letters are not rebindable** (`GD-A11Y-02`):
+  the settings screen rebinds the seventeen general keys only. Full
+  rebinding needs a per-command capture flow and the HUD's tables read
+  through the bindings.
 - The age-up **fanfare** waits for audio (M7). The sweep and banner exist.
 - **Auto-reseed is per player**, not per farm as `docs/02` [GD-ECON-05]
   asks. A per-farm flag needs a per-entity toggle in the world store.

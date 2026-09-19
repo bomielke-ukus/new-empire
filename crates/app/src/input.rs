@@ -32,6 +32,9 @@ pub struct Input {
     /// small deltas; a notched wheel sends whole ones. Both step once per
     /// unit of travel rather than once per event.
     pub wheel: f32,
+    /// The bound pan keys, up, down, left and right; the arrows always
+    /// pan as well.
+    pub pan: [Option<KeyCode>; 4],
 }
 
 /// Pixel-delta scroll travel that counts as one zoom step.
@@ -60,8 +63,23 @@ impl Input {
         Input {
             edge_scroll: true,
             focused: true,
+            pan: [
+                Some(KeyCode::KeyW),
+                Some(KeyCode::KeyS),
+                Some(KeyCode::KeyA),
+                Some(KeyCode::KeyD),
+            ],
             ..Default::default()
         }
+    }
+
+    /// Whether a key pans the camera: a bound pan key or an arrow.
+    pub fn is_pan_key(&self, code: KeyCode) -> bool {
+        self.pan.contains(&Some(code))
+            || matches!(
+                code,
+                KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::ArrowLeft | KeyCode::ArrowRight
+            )
     }
 
     /// Applies held keys and edge scrolling for a frame of `dt` seconds.
@@ -71,16 +89,17 @@ impl Input {
         let band = EDGE_BAND * cam.dpi;
         let (mut dx, mut dy) = (0.0, 0.0);
         let held = |k: KeyCode| self.held.contains(&k);
-        if held(KeyCode::KeyA) || held(KeyCode::ArrowLeft) {
+        let bound = |i: usize| self.pan[i].is_some_and(held);
+        if bound(2) || held(KeyCode::ArrowLeft) {
             dx -= step;
         }
-        if held(KeyCode::KeyD) || held(KeyCode::ArrowRight) {
+        if bound(3) || held(KeyCode::ArrowRight) {
             dx += step;
         }
-        if held(KeyCode::KeyW) || held(KeyCode::ArrowUp) {
+        if bound(0) || held(KeyCode::ArrowUp) {
             dy -= step;
         }
-        if held(KeyCode::KeyS) || held(KeyCode::ArrowDown) {
+        if bound(1) || held(KeyCode::ArrowDown) {
             dy += step;
         }
         if self.edge_scroll && self.focused && self.dragging.is_none() {

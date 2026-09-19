@@ -10,6 +10,7 @@
 
 mod clock;
 mod input;
+mod keys;
 mod selection;
 
 #[cfg(test)]
@@ -32,8 +33,8 @@ use view::hud::{Action, BOTTOM_PANEL, TOP_BAR};
 use view::minimap::{Minimap, MinimapRect};
 use view::shell::{self, Results, Side};
 use view::{
-    Atlas, Camera, FogLights, Ghost, Hud, HudInput, LoadRow, Scene, SceneOptions, Screen, Setup,
-    ShellAction, ShellInput, Sweep, SWEEP_MS,
+    Atlas, Camera, Control, FogLights, Ghost, Hud, HudInput, LoadRow, Scene, SceneOptions, Screen,
+    Settings, Setup, ShellAction, ShellInput, Sweep, SWEEP_MS,
 };
 
 /// How long "SAVED ..." stays up, in ms.
@@ -45,7 +46,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
-use winit::window::{CursorIcon, Window, WindowId};
+use winit::window::{CursorIcon, Fullscreen, Window, WindowId};
 
 /// The human player.
 const ME: u8 = 0;
@@ -229,6 +230,14 @@ struct App {
     match_started: u64,
     /// The recording written for this match so far, replaced as it goes.
     recording: Option<PathBuf>,
+    /// The player's settings, as applied.
+    settings: Settings,
+    /// Where they are kept.
+    settings_path: PathBuf,
+    /// The control waiting for its new key on the settings screen.
+    capturing: Option<Control>,
+    /// Why the last key was refused, or the file could not be written.
+    settings_error: Option<String>,
 }
 
 /// A recording being watched: the log, and where playback is in it.
@@ -249,6 +258,8 @@ enum Shell {
     Load,
     /// The recordings, to watch one.
     Replays,
+    /// The settings.
+    Settings,
     /// A match, with the pause menu or the results over it or not.
     Match,
 }
@@ -388,6 +399,95 @@ impl App {
             viewer: Some(ME),
             match_started: 0,
             recording: None,
+            settings: Settings::default(),
+            settings_path: data_dir("NEW_EMPIRE_SETTINGS", "settings.ron"),
+            capturing: None,
+            settings_error: None,
+        }
+    }
+
+    /// Reads the settings file, if there is one, and applies it. A file
+    /// that does not parse is left alone and reported; the defaults
+    /// stand in.
+    fn load_settings(&mut self) {
+        match std::fs::read_to_string(&self.settings_path) {
+            Ok(text) => match Settings::from_ron(&text) {
+                Ok(s) => self.settings = s,
+                Err(e) => {
+                    eprintln!(
+                        "warning: {}: {e}; the default settings are in use",
+                        self.settings_path.display()
+                    );
+                    self.settings_error = Some("THE SETTINGS FILE COULD NOT BE READ".to_string());
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => eprintln!("warning: {}: {e}", self.settings_path.display()),
+        }
+        self.apply_settings();
+    }
+
+    /// Puts the settings into effect: the HUD size, edge scrolling, the
+    /// pan keys the camera reads while held, and the window mode.
+    fn apply_settings(&mut self) {
+        self.ui_scale_user = self.settings.ui_scale;
+        self.input.edge_scroll = self.settings.edge_scroll;
+        self.input.pan = [
+            Control::PanUp,
+            Control::PanDown,
+            Control::PanLeft,
+            Control::PanRight,
+        ]
+        .map(|c| keys::code(self.settings.key(c)));
+        if let Some(w) = &self.window {
+            let mode = self
+                .settings
+                .fullscreen
+                .then_some(Fullscreen::Borderless(None));
+            if w.fullscreen().is_some() != self.settings.fullscreen {
+                w.set_fullscreen(mode);
+            }
+        }
+    }
+
+    /// Writes the settings file, making its directory; a failure is
+    /// shown on the settings screen and does not undo the change.
+    fn save_settings(&mut self) {
+        let written = self.settings.to_ron().and_then(|text| {
+            if let Some(dir) = self.settings_path.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(&self.settings_path, text).map_err(|e| e.to_string())
+        });
+        if let Err(e) = written {
+            eprintln!("warning: {}: {e}", self.settings_path.display());
+            self.settings_error = Some("THE SETTINGS COULD NOT BE WRITTEN".to_string());
+        }
+    }
+
+    /// A change on the settings screen or from a key: in effect and on
+    /// disk at once.
+    fn apply_and_save_settings(&mut self) {
+        self.apply_settings();
+        self.save_settings();
+    }
+
+    /// The settings screen's new key for the control being rebound: a
+    /// pan key must be one the camera can read while held.
+    fn capture_key(&mut self, control: Control, code: KeyCode) {
+        let name = keys::name(code);
+        let bound = if control.pans() && keys::code(&name).is_none() {
+            Err(format!("{} CANNOT PAN", view::settings::pretty(&name)))
+        } else {
+            self.settings.bind(control, &name)
+        };
+        self.capturing = None;
+        match bound {
+            Ok(()) => {
+                self.settings_error = None;
+                self.apply_and_save_settings();
+            }
+            Err(e) => self.settings_error = Some(e),
         }
     }
 
@@ -500,6 +600,7 @@ impl App {
             let state = match self.shell {
                 Shell::Title => "title".to_string(),
                 Shell::Load => "load".to_string(),
+                Shell::Settings => "settings".to_string(),
                 Shell::Replays => "replays".to_string(),
                 Shell::Setup => format!("setup — seed {}", self.setup.seed),
                 Shell::Match => {
@@ -528,7 +629,9 @@ impl App {
         self.last_frame = now;
         match self.shell {
             Shell::Match => self.frame_match(now, dt),
-            Shell::Title | Shell::Setup | Shell::Load | Shell::Replays => self.frame_shell(now),
+            Shell::Title | Shell::Setup | Shell::Load | Shell::Replays | Shell::Settings => {
+                self.frame_shell(now)
+            }
         }
     }
 
@@ -682,6 +785,7 @@ impl App {
                 defences: self.defences,
                 ui_scale: self.ui_scale(),
                 help: self.show_help,
+                settings: &self.settings,
             },
         );
         scene.ui.extend(hud.sprites.iter().cloned());
@@ -768,6 +872,13 @@ impl App {
                 &rows_for(&self.replays),
                 self.load_error.as_deref(),
                 true,
+            ),
+            Shell::Settings => shell::settings_screen(
+                &self.atlas,
+                &input,
+                &self.settings,
+                self.capturing,
+                self.settings_error.as_deref(),
             ),
             _ => shell::setup(
                 &self.atlas,
@@ -1001,7 +1112,33 @@ impl App {
             ShellAction::Save => self.save_game(),
             ShellAction::WatchReplay => self.open_replays(),
             ShellAction::Watch(row) => self.watch_replay(row),
-            ShellAction::Settings => {}
+            ShellAction::Settings => {
+                self.shell = Shell::Settings;
+                self.capturing = None;
+                self.settings_error = None;
+            }
+            ShellAction::SettingScale(delta) => {
+                self.settings.cycle_scale(delta);
+                self.apply_and_save_settings();
+            }
+            ShellAction::ToggleEdgeScroll => {
+                self.settings.edge_scroll = !self.settings.edge_scroll;
+                self.apply_and_save_settings();
+            }
+            ShellAction::ToggleFullscreen => {
+                self.settings.fullscreen = !self.settings.fullscreen;
+                self.apply_and_save_settings();
+            }
+            ShellAction::Rebind(control) => {
+                self.capturing = Some(control);
+                self.settings_error = None;
+            }
+            ShellAction::ResetSettings => {
+                self.settings.reset();
+                self.capturing = None;
+                self.settings_error = None;
+                self.apply_and_save_settings();
+            }
             ShellAction::Quit => self.quit = true,
             ShellAction::Adjust(field, delta) => {
                 self.setup.adjust(field, delta);
@@ -1597,6 +1734,15 @@ impl App {
                 }
                 return false;
             }
+            Shell::Settings => {
+                match (self.capturing, code) {
+                    (Some(_), KeyCode::Escape) => self.capturing = None,
+                    (Some(control), code) => self.capture_key(control, code),
+                    (None, KeyCode::Escape) => self.shell_action(ShellAction::Back),
+                    _ => {}
+                }
+                return false;
+            }
             Shell::Match => {}
         }
         if self.menu {
@@ -1612,11 +1758,8 @@ impl App {
             return false;
         }
         // Camera movement is handled through held keys, regardless of the
-        // selection. Never let WASD also dispatch a command.
-        if matches!(
-            code,
-            KeyCode::KeyW | KeyCode::KeyA | KeyCode::KeyS | KeyCode::KeyD
-        ) {
+        // selection. Never let a pan key also dispatch a command.
+        if self.input.is_pan_key(code) {
             return false;
         }
         let ctrl = self.modifiers.control_key();
@@ -1642,32 +1785,49 @@ impl App {
             }
             return false;
         }
-        match code {
-            KeyCode::F1 | KeyCode::Slash => self.show_help = !self.show_help,
-            KeyCode::F5 => self.save_game(),
-            KeyCode::Escape => {
-                if self.show_help {
-                    self.show_help = false;
-                } else if self.build_mode.is_some() || self.targeting.is_some() || self.defences {
-                    self.build_mode = None;
-                    self.wall_from = None;
-                    self.targeting = None;
-                    self.defences = false;
-                } else if !self.selection.ids.is_empty() {
-                    self.selection.set(vec![]);
-                } else {
-                    self.open_menu();
-                }
-            }
-            KeyCode::Space => {
+        // The general keys are the player's bindings (`GD-A11Y-02`); a few
+        // fixed aliases keep the keypad and `?` working.
+        let control = self.settings.control(&keys::name(code)).or(match code {
+            KeyCode::Slash => Some(Control::Help),
+            KeyCode::NumpadAdd => Some(Control::ZoomIn),
+            KeyCode::NumpadSubtract => Some(Control::ZoomOut),
+            _ => None,
+        });
+        match control {
+            Some(Control::Help) => self.show_help = !self.show_help,
+            Some(Control::QuickSave) => self.save_game(),
+            Some(Control::Pause) => {
                 let p = !self.clock.paused();
                 self.clock.set_paused(p);
             }
-            KeyCode::BracketRight => {
+            Some(Control::Faster) => {
                 self.clock.speed = (self.clock.speed * 2.0).min(self.max_speed())
             }
-            // A replay is seen through any side's eyes, or nobody's.
-            KeyCode::Tab if self.playback.is_some() => {
+            Some(Control::Slower) => self.clock.speed = (self.clock.speed / 2.0).max(0.25),
+            Some(Control::ZoomIn) => self.camera.zoom_step(1),
+            Some(Control::ZoomOut) => self.camera.zoom_step(-1),
+            Some(Control::HudSize) => {
+                self.settings.cycle_scale(1);
+                self.apply_and_save_settings();
+            }
+            Some(Control::EdgeScroll) => {
+                self.settings.edge_scroll = !self.settings.edge_scroll;
+                self.apply_and_save_settings();
+            }
+            Some(Control::Home) => {
+                if let Some(&(sx, sy)) = self.sim.starts().get(ME as usize) {
+                    self.camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
+                }
+            }
+            Some(Control::NextIdle) => {
+                if let Some(id) = self.selection.next_idle(&self.sim, ME) {
+                    let i = self.sim.world().slot(id).unwrap().index();
+                    let p = self.sim.world().pos[i];
+                    self.camera
+                        .look_at_tile(view::fx_to_f32(p.x), view::fx_to_f32(p.y));
+                }
+            }
+            Some(Control::Eyes) if self.playback.is_some() => {
                 let players = self.sim.players().len() as u8;
                 self.viewer = match self.viewer {
                     Some(p) if p + 1 < players => Some(p + 1),
@@ -1677,32 +1837,7 @@ impl App {
                 self.last_fog_tick = None;
                 self.last_minimap = Instant::now() - Duration::from_secs(10);
             }
-            KeyCode::BracketLeft => self.clock.speed = (self.clock.speed / 2.0).max(0.25),
-            KeyCode::Equal | KeyCode::NumpadAdd => self.camera.zoom_step(1),
-            KeyCode::Minus | KeyCode::NumpadSubtract => self.camera.zoom_step(-1),
-            KeyCode::F2 => {
-                self.ui_scale_user = match self.ui_scale_user {
-                    x if x < 1.25 => 1.5,
-                    x if x < 1.75 => 2.0,
-                    _ => 1.0,
-                };
-            }
-            KeyCode::KeyH if self.selection.own_villagers(&self.sim, ME).is_empty() => {
-                let (sx, sy) = self.sim.starts()[ME as usize];
-                self.camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
-            }
-            KeyCode::KeyE if self.modifiers.shift_key() => {
-                self.input.edge_scroll = !self.input.edge_scroll;
-            }
-            KeyCode::Period => {
-                if let Some(id) = self.selection.next_idle(&self.sim, ME) {
-                    let i = self.sim.world().slot(id).unwrap().index();
-                    let p = self.sim.world().pos[i];
-                    self.camera
-                        .look_at_tile(view::fx_to_f32(p.x), view::fx_to_f32(p.y));
-                }
-            }
-            KeyCode::Delete if self.playback.is_none() => {
+            Some(Control::Dismiss) if self.playback.is_none() => {
                 let ids = self.selection.own_mobile(&self.sim, ME);
                 let sites: Vec<_> = self
                     .selection
@@ -1720,13 +1855,38 @@ impl App {
                     self.issue(CommandKind::Despawn { id });
                 }
             }
-            code => {
-                if let Some(ch) = letter(code) {
-                    if self.playback.is_none() {
-                        self.hotkey(ch);
+            Some(
+                Control::Eyes
+                | Control::Dismiss
+                | Control::PanUp
+                | Control::PanDown
+                | Control::PanLeft
+                | Control::PanRight,
+            ) => {}
+            None => match code {
+                KeyCode::Escape => {
+                    if self.show_help {
+                        self.show_help = false;
+                    } else if self.build_mode.is_some() || self.targeting.is_some() || self.defences
+                    {
+                        self.build_mode = None;
+                        self.wall_from = None;
+                        self.targeting = None;
+                        self.defences = false;
+                    } else if !self.selection.ids.is_empty() {
+                        self.selection.set(vec![]);
+                    } else {
+                        self.open_menu();
                     }
                 }
-            }
+                code => {
+                    if let Some(ch) = letter(code) {
+                        if self.playback.is_none() {
+                            self.hotkey(ch);
+                        }
+                    }
+                }
+            },
         }
         false
     }
@@ -1824,7 +1984,12 @@ impl ApplicationHandler for App {
         }
         let attrs = Window::default_attributes()
             .with_title("New Empire")
-            .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0));
+            .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0))
+            .with_fullscreen(
+                self.settings
+                    .fullscreen
+                    .then_some(Fullscreen::Borderless(None)),
+            );
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let mut gpu = Gpu::new(window.clone(), &self.atlas);
         let chunks = view::terrain::build_all(self.sim.map());
@@ -1946,5 +2111,6 @@ fn main() {
     }));
     let event_loop = EventLoop::new().expect("event loop");
     let mut app = App::new();
+    app.load_settings();
     event_loop.run_app(&mut app).expect("event loop failed");
 }

@@ -513,6 +513,25 @@ SAVE and RESIGN and QUIT needs one click and records nothing; a
 recording from another build is refused on the screen with its number.
 The shell test covers the replay screen's buttons and the greyed menu.
 
+**M6 chunk 4, settings.** `crates/view/src/settings.rs` unit tests: the
+defaults give every control its own key and none a panel letter; a key
+another control holds, a panel letter, Escape and a digit are refused
+with the reason and change nothing; the file round-trips, an older file
+lacking a field loads with the default, the HUD size cycles and wraps,
+and keys read as the screen shows them (`GD-A11Y-02`).
+`crates/app/src/keys.rs`: every default key's name resolves to its key
+and back. The shell test lists every control with its CHANGE button, the
+one being rebound greyed and saying so, and the error line. The HUD test
+still finds WASD, F2, ESC, SPACE and T in the overlay, now drawn from the
+bindings. `crates/app/src/tests.rs`: the settings screen changes the HUD
+size, edge scrolling, the window mode and a key, each kept in the file at
+once and read back by a fresh app; a command letter is refused on the
+screen with the reason; Escape while waiting keeps the old key; in a
+match the new key pauses and the old one no longer does; the overlay
+names the new key; a missing file is nothing and a broken one reports
+and defaults; DEFAULTS restores everything. Golden images pin the
+settings screen and the overlay with its bound keys.
+
 ### Data files — M3 onward
 
 The startup validator from `docs/04` §9 run as a test: every referenced ID

@@ -6,7 +6,7 @@ use super::*;
 use ai::Difficulty;
 use sim::{Command, Formation, Item, MapKind, MapSpec, Order, SimConfig, Stance};
 use view::shell::Field;
-use view::ShellButton;
+use view::{Control, Settings, ShellButton};
 
 #[test]
 fn camera_keys_pan_without_building_or_spending_and_release_stops_panning() {
@@ -210,7 +210,9 @@ fn app() -> App {
     );
     app.camera = Camera::new(48, 48, (1280.0, 720.0));
     app.clock.set_paused(true);
-    app.input.edge_scroll = false;
+    app.settings.edge_scroll = false;
+    app.settings_path = scratch("helper-settings").join("settings.ron");
+    app.apply_settings();
     // Straight into a match, as the shell would after START. The world is
     // empty until a test spawns into it, which the shell would call a
     // decided match; the results panel is put away so the world takes
@@ -707,6 +709,106 @@ fn a_match_is_recorded_and_watched_back_to_the_same_hash() {
     assert_eq!(app.shell, Shell::Title);
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&app.saves_dir);
+}
+
+/// The settings screen changes the HUD size, edge scrolling, the window
+/// mode and a key, each change written to the file at once and read back
+/// by a fresh app; a rebound key works in a match and the old one no
+/// longer does; a refused key says why and changes nothing; Escape keeps
+/// the old key; the overlay names the new one; DEFAULTS restores all.
+///
+/// REQ: GD-A11Y-02
+#[test]
+fn settings_are_edited_on_their_screen_kept_at_once_and_read_back() {
+    let dir = scratch("settings");
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("settings.ron");
+    let mut app = App::new();
+    app.camera.viewport = (1280.0, 720.0);
+    app.settings_path = path.clone();
+    app.replays_dir = scratch("settings-replays");
+    app.apply_settings();
+    assert!(app.input.edge_scroll && app.ui_scale() == 1.0);
+    press(&mut app, ShellAction::Settings);
+    assert_eq!(app.shell, Shell::Settings);
+    press(&mut app, ShellAction::SettingScale(1));
+    assert_eq!(app.settings.ui_scale, 1.5);
+    assert_eq!(app.ui_scale(), 1.5, "in effect at once");
+    let text = std::fs::read_to_string(&path).expect("kept at once");
+    assert!(text.contains("1.5"), "{text}");
+    press(&mut app, ShellAction::ToggleEdgeScroll);
+    assert!(!app.settings.edge_scroll && !app.input.edge_scroll);
+    press(&mut app, ShellAction::ToggleFullscreen);
+    assert!(app.settings.fullscreen);
+    // Rebind PAUSE: CHANGE, then the key; the row says it is waiting.
+    press(&mut app, ShellAction::Rebind(Control::Pause));
+    assert_eq!(app.capturing, Some(Control::Pause));
+    draw(&mut app);
+    assert!(!shell_button(&app, ShellAction::Rebind(Control::Pause)).enabled);
+    assert!(!app.keyboard_input(KeyCode::F6, ElementState::Pressed, false));
+    assert_eq!(app.capturing, None);
+    assert_eq!(app.settings.key(Control::Pause), "F6");
+    assert!(std::fs::read_to_string(&path).unwrap().contains("F6"));
+    // A command letter is refused with the reason, and nothing changes.
+    press(&mut app, ShellAction::Rebind(Control::Faster));
+    assert!(!app.keyboard_input(KeyCode::KeyH, ElementState::Pressed, false));
+    assert_eq!(app.capturing, None);
+    let err = app.settings_error.clone().expect("the refusal is shown");
+    assert!(err.contains("COMMAND KEY"), "{err}");
+    assert_eq!(app.settings.key(Control::Faster), "BracketRight");
+    // Escape while waiting keeps the old key; Escape after goes back.
+    press(&mut app, ShellAction::Rebind(Control::Faster));
+    assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    assert_eq!(app.capturing, None);
+    assert_eq!(app.shell, Shell::Settings);
+    assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    assert_eq!(app.shell, Shell::Title);
+    // A fresh app reads the file and applies it.
+    let mut fresh = App::new();
+    fresh.settings_path = path.clone();
+    fresh.load_settings();
+    assert_eq!(fresh.settings.ui_scale, 1.5);
+    assert_eq!(fresh.ui_scale(), 1.5);
+    assert!(!fresh.settings.edge_scroll && !fresh.input.edge_scroll);
+    assert!(fresh.settings.fullscreen);
+    assert_eq!(fresh.settings.key(Control::Pause), "F6");
+    // In a match the new key pauses and the old one does nothing; the
+    // overlay names the new one.
+    app.setup.seed = 3;
+    app.shell = Shell::Setup;
+    app.preview();
+    press(&mut app, ShellAction::Start);
+    assert!(!app.clock.paused());
+    app.keyboard_input(KeyCode::F6, ElementState::Pressed, false);
+    assert!(app.clock.paused());
+    app.keyboard_input(KeyCode::F6, ElementState::Pressed, false);
+    assert!(!app.clock.paused());
+    app.keyboard_input(KeyCode::Space, ElementState::Pressed, false);
+    assert!(!app.clock.paused(), "Space is nobody's now");
+    let [general, _] = view::hud::controls(&app.settings);
+    assert!(general.contains(&("F6".to_string(), "PAUSE".to_string())));
+    assert!(general.iter().any(|(k, _)| k == "WASD"));
+    // A missing file is not an error; a broken one reports and defaults.
+    let mut none = App::new();
+    none.settings_path = dir.join("nothing.ron");
+    none.load_settings();
+    assert_eq!(none.settings, Settings::default());
+    assert!(none.settings_error.is_none());
+    std::fs::write(dir.join("broken.ron"), "(ui_scale: \"big\")").unwrap();
+    let mut broken = App::new();
+    broken.settings_path = dir.join("broken.ron");
+    broken.load_settings();
+    assert_eq!(broken.settings, Settings::default());
+    assert!(broken.settings_error.is_some());
+    // DEFAULTS restores everything and keeps it.
+    app.quit_to_title();
+    press(&mut app, ShellAction::Settings);
+    press(&mut app, ShellAction::ResetSettings);
+    assert_eq!(app.settings, Settings::default());
+    assert_eq!(app.ui_scale(), 1.0);
+    assert!(std::fs::read_to_string(&path).unwrap().contains("Space"));
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&app.replays_dir);
 }
 
 /// The last side standing wins on the results screen; quitting a live

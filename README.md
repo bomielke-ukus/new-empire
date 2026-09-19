@@ -8,7 +8,9 @@ engaging, without its 1997 frustrations.
 screen; a skirmish is set up against one to seven computer opponents at
 four difficulties, played to a results screen, saved and loaded. The
 opponents scout, build, advance and attack, seeing only what they have
-scouted. Replay playback and settings are next. See the roadmap.**
+scouted; every match is recorded and can be watched back; the general
+keys, HUD size, edge scrolling and window mode are settings. Notifications
+are next. See the roadmap.**
 
 ---
 
@@ -74,11 +76,16 @@ everyone's. Saves go under `NEW_EMPIRE_SAVES` and recordings under
 
 In the match: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
 `+`/`-` to zoom, from 0.5× to 3×, about the cursor; click the minimap to
-jump; `Space` pause; `[` `]` speed; `Shift`+`E` toggles edge scrolling;
-`F2` cycles the HUD size (1×, 1.5×, 2×); `F1` or `?` opens a controls
-overlay listing all of this, and the resource bar points at it for the first
-minute of a match. WASD is reserved for camera movement. The game honours the display's scale factor, so 1× is the same
-apparent size on a Retina screen as on any other.
+jump; `Space` pause; `[` `]` speed; `F3` toggles edge scrolling; `F2`
+cycles the HUD size (1×, 1.5×, 2×); `Home` jumps to your Town Center;
+`F1` or `?` opens a controls overlay listing all of this, and the resource
+bar points at it for the first minute of a match. WASD is reserved for
+camera movement. Every one of these general keys can be rebound on the
+title's SETTINGS screen, which also holds the HUD size, edge scrolling and
+the window mode, kept in `settings.ron` in the game's data directory (or
+`NEW_EMPIRE_SETTINGS`); the command letters on the panels are fixed. The
+game honours the display's scale factor, so 1× is the same apparent size
+on a Retina screen as on any other.
 
 Rendered sprite sets under `assets/sprites` replace the procedural placeholders
 for their kinds at startup (today: the greybox villager). `cargo run -p atlas

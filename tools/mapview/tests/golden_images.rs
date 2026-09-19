@@ -69,6 +69,14 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The settings screen with the default keys, the cursor on the
+        // first CHANGE button.
+        name: "settings-screen",
+        args: &[
+            "--screen", "settings", "--width", "960", "--height", "540", "--hover", "639,144",
+        ],
+    },
+    Scene {
         // The actual acceptance replay, during contact between the two armies.
         name: "battle-40v40",
         args: &[
