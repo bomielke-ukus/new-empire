@@ -62,10 +62,15 @@ The game opens on a title screen: `Enter` or NEW GAME opens the skirmish
 setup (map size, opponents and their difficulties, population cap, seed,
 with the map previewed); `Enter` or START begins the match. LOAD GAME
 lists the saves and resumes one. In a match, `F5` or SAVE GAME on the
-pause menu saves it; saves go under `NEW_EMPIRE_SAVES` if set, else the
-platform's data directory (`~/.local/share/new-empire/saves`,
-`~/Library/Application Support/new-empire/saves`,
-`%APPDATA%\new-empire\saves`).
+pause menu saves it. Every match played is recorded when it is decided
+or left; WATCH REPLAY lists the recordings and plays one back from the
+start, with `Space` to pause, `[` `]` for speed up to 16× and `Tab` to
+switch whose eyes it is seen through, each player's in turn and then
+everyone's. Saves go under `NEW_EMPIRE_SAVES` and recordings under
+`NEW_EMPIRE_REPLAYS` if set, else the platform's data directory
+(`~/.local/share/new-empire/{saves,replays}`,
+`~/Library/Application Support/new-empire/{saves,replays}`,
+`%APPDATA%\new-empire\{saves,replays}`).
 
 In the match: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
 `+`/`-` to zoom, from 0.5× to 3×, about the cursor; click the minimap to
@@ -87,7 +92,7 @@ or vein, or helps build when over your own site. With villagers selected,
 and `J` a watch tower (`Shift` keeps placing; age/resource gates apply); with the
 Town Center selected, `V` trains a villager, `X` unqueues, and right-click
 sets its rally point. `T` stops, `Delete` dismisses, `Esc` cancels, or with nothing to cancel
-opens the pause menu (resume, resign, quit to title).
+opens the pause menu (resume, save, resign, quit to title).
 Research buttons use `Q`, `E`, `I`, `K`, then `Z` in displayed order;
 the command grid shows the current key for each available technology.
 Completed training waits in its paid queue slot if the entity cap blocks

@@ -214,10 +214,17 @@ fn app() -> App {
     // Straight into a match, as the shell would after START. The world is
     // empty until a test spawns into it, which the shell would call a
     // decided match; the results panel is put away so the world takes
-    // input.
+    // input. Anything recorded or saved goes to a scratch directory.
     app.shell = Shell::Match;
     app.results = ResultsState::Dismissed;
+    app.saves_dir = scratch("helper-saves");
+    app.replays_dir = scratch("helper-replays");
     app
+}
+
+/// A scratch directory for this process, under the system's temp dir.
+fn scratch(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("new-empire-app-{name}-{}", std::process::id()))
 }
 
 /// Clicks the shell button for `action` on the screen as last drawn.
@@ -437,7 +444,7 @@ fn the_pause_menu_pauses_and_resigning_ends_the_match_on_the_results_screen() {
     assert!(!app.sim.standing(ME));
     assert_eq!(app.results, ResultsState::Shown);
     let r = app.results_now();
-    assert!(!r.won);
+    assert_eq!(r.heading, "DEFEAT");
     assert_eq!(r.why, "YOU RESIGNED");
     assert_eq!(r.sides.len(), 2);
     assert_eq!(r.sides[0].name, "YOU");
@@ -465,12 +472,13 @@ fn the_pause_menu_pauses_and_resigning_ends_the_match_on_the_results_screen() {
 /// REQ: TA-DET-06
 #[test]
 fn a_saved_match_is_listed_on_the_load_screen_and_resumes_where_it_was() {
-    let dir = std::env::temp_dir().join(format!("new-empire-app-saves-{}", std::process::id()));
+    let dir = scratch("saves");
     let _ = std::fs::remove_dir_all(&dir);
     let mut app = App::new();
     app.camera.viewport = (1280.0, 720.0);
     app.input.edge_scroll = false;
     app.saves_dir = dir.clone();
+    app.replays_dir = scratch("saves-replays");
     app.setup.seed = 3;
     app.setup.opponents = vec![Difficulty::Hard];
     app.shell = Shell::Setup;
@@ -558,6 +566,149 @@ fn a_saved_match_is_listed_on_the_load_screen_and_resumes_where_it_was() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Every match played is recorded when it is decided or left, one file
+/// per match named for when it started and how far it got; WATCH REPLAY
+/// lists the recordings and plays one from tick 0 to its end, reaching
+/// the recorded match's hash, through any side's eyes or nobody's, with
+/// pause and speed, and nothing the watcher does issues a command.
+///
+/// REQ: TA-DET-05
+#[test]
+fn a_match_is_recorded_and_watched_back_to_the_same_hash() {
+    let dir = scratch("replays");
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut app = App::new();
+    app.camera.viewport = (1280.0, 720.0);
+    app.input.edge_scroll = false;
+    app.replays_dir = dir.clone();
+    app.saves_dir = scratch("replays-saves");
+    let _ = std::fs::remove_dir_all(&app.saves_dir);
+    app.setup.seed = 5;
+    app.setup.opponents = vec![Difficulty::Easy];
+    app.shell = Shell::Setup;
+    app.preview();
+    press(&mut app, ShellAction::Start);
+    let now = Instant::now();
+    for _ in 0..200 {
+        app.tick_once(now);
+    }
+    assert!(save::replays::list(&dir).is_empty(), "nothing yet");
+    // Resigning decides the match, and the match is recorded then.
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    press(&mut app, ShellAction::Resign);
+    press(&mut app, ShellAction::Resign);
+    for _ in 0..3 {
+        app.tick_once(now);
+    }
+    draw(&mut app);
+    assert_eq!(app.results, ResultsState::Shown);
+    let recorded = save::replays::list(&dir);
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].summary.tick, 203);
+    assert_eq!(recorded[0].summary.seed, 5);
+    // Playing on and leaving replaces the recording, not adds to it.
+    press(&mut app, ShellAction::KeepWatching);
+    for _ in 0..10 {
+        app.tick_once(now);
+    }
+    let final_hash = app.sim.state_hash();
+    let commands = app.sim.replay().commands.len();
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    press(&mut app, ShellAction::QuitToTitle);
+    assert_eq!(app.shell, Shell::Title);
+    let recorded = save::replays::list(&dir);
+    assert_eq!(recorded.len(), 1, "one recording per match");
+    assert_eq!(recorded[0].summary.tick, 213);
+    // WATCH REPLAY lists it; watching starts at tick 0 with no opponent
+    // thinking, seen through player 1's eyes.
+    press(&mut app, ShellAction::WatchReplay);
+    assert_eq!(app.shell, Shell::Replays);
+    assert_eq!(app.replays.len(), 1);
+    press(&mut app, ShellAction::Watch(0));
+    assert_eq!(app.shell, Shell::Match);
+    assert!(app.playback.is_some());
+    assert_eq!(app.sim.tick(), 0);
+    assert_eq!(app.sim.seed(), 5);
+    assert!(app.opponents.is_empty());
+    assert_eq!(app.viewer, Some(ME));
+    assert!(!app.playback_over());
+    for _ in 0..50 {
+        app.tick_once(now);
+    }
+    // Nothing the watcher does issues a command or saves.
+    let issued = app.sim.replay().commands.len();
+    draw(&mut app);
+    assert!(!app.keyboard_input(KeyCode::KeyV, ElementState::Pressed, false));
+    let (sx, sy) = app.sim.starts()[0];
+    let (px, py) = on_screen(&app, sx as f32 + 0.5, sy as f32 + 0.5, 0.0);
+    app.right_press(px, py);
+    app.keyboard_input(KeyCode::Delete, ElementState::Pressed, false);
+    app.keyboard_input(KeyCode::F5, ElementState::Pressed, false);
+    app.issue(CommandKind::Resign);
+    assert_eq!(app.sim.replay().commands.len(), issued);
+    assert!(save::list(&app.saves_dir).is_empty());
+    // Tab cycles the eyes: player 1, player 2, everyone's, player 1.
+    app.keyboard_input(KeyCode::Tab, ElementState::Pressed, false);
+    assert_eq!(app.viewer, Some(1));
+    draw(&mut app);
+    app.keyboard_input(KeyCode::Tab, ElementState::Pressed, false);
+    assert_eq!(app.viewer, None);
+    draw(&mut app);
+    app.keyboard_input(KeyCode::Tab, ElementState::Pressed, false);
+    assert_eq!(app.viewer, Some(0));
+    // Speed goes to sixteen times in a replay; Space pauses.
+    for _ in 0..5 {
+        app.keyboard_input(KeyCode::BracketRight, ElementState::Pressed, false);
+    }
+    assert_eq!(app.clock.speed, 16.0);
+    app.keyboard_input(KeyCode::Space, ElementState::Pressed, false);
+    assert!(app.clock.paused());
+    app.keyboard_input(KeyCode::Space, ElementState::Pressed, false);
+    assert!(!app.clock.paused());
+    // To the end: the world is the recorded match's, and the results say
+    // where the recording ends.
+    while !app.playback_over() {
+        app.tick_once(now);
+    }
+    assert_eq!(app.sim.tick(), 213);
+    assert_eq!(app.sim.state_hash(), final_hash);
+    assert_eq!(app.sim.replay().commands.len(), commands);
+    draw(&mut app);
+    assert_eq!(app.results, ResultsState::Shown);
+    let r = app.results_now();
+    assert_eq!(r.heading, "REPLAY OVER");
+    assert_eq!(r.sides[0].name, "PLAYER 1");
+    assert_eq!(r.sides[1].name, "PLAYER 2");
+    // The menu in a replay greys SAVE and RESIGN; QUIT needs no second
+    // click and records nothing new.
+    press(&mut app, ShellAction::KeepWatching);
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    draw(&mut app);
+    assert!(!shell_button(&app, ShellAction::Save).enabled);
+    assert!(!shell_button(&app, ShellAction::Resign).enabled);
+    press(&mut app, ShellAction::QuitToTitle);
+    assert_eq!(app.shell, Shell::Title);
+    assert!(app.playback.is_none());
+    assert_eq!(save::replays::list(&dir).len(), 1);
+    // A recording from another build is refused on the screen.
+    let text = std::fs::read_to_string(&recorded[0].path).unwrap();
+    std::fs::write(
+        dir.join("20990101-000000-seed5-tick9-p2.ron"),
+        text.replacen("version:1", "version:7", 1),
+    )
+    .unwrap();
+    press(&mut app, ShellAction::WatchReplay);
+    assert_eq!(app.replays.len(), 2);
+    press(&mut app, ShellAction::Watch(0));
+    assert_eq!(app.shell, Shell::Replays);
+    let err = app.load_error.clone().expect("the refusal is shown");
+    assert!(err.contains("version 7"), "{err}");
+    assert!(!app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false));
+    assert_eq!(app.shell, Shell::Title);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&app.saves_dir);
+}
+
 /// The last side standing wins on the results screen; quitting a live
 /// match to the title takes two clicks, and Escape disarms the first.
 ///
@@ -591,7 +742,7 @@ fn victory_shows_the_results_and_quitting_a_live_match_takes_two_clicks() {
     assert_eq!(app.sim.winner(), Some(ME));
     assert_eq!(app.results, ResultsState::Shown);
     let r = app.results_now();
-    assert!(r.won);
+    assert_eq!(r.heading, "VICTORY");
     assert_eq!(r.why, "EVERY OTHER SIDE IS OUT");
     assert!(r.sides[0].standing && !r.sides[1].standing);
     assert!(shell_button(&app, ShellAction::KeepWatching).enabled);

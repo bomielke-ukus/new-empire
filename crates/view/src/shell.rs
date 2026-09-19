@@ -246,6 +246,8 @@ pub enum ShellAction {
     Save,
     /// Load screen: load the save on this row.
     Load(usize),
+    /// Replay screen: watch the recording on this row.
+    Watch(usize),
 }
 
 /// A clickable region on a shell screen.
@@ -301,8 +303,8 @@ pub struct ShellInput {
 /// How the match ended, for the results screen.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Results {
-    /// Whether the viewer won.
-    pub won: bool,
+    /// VICTORY, DEFEAT, or REPLAY OVER.
+    pub heading: String,
     /// One line on how it was decided.
     pub why: String,
     /// Every side, in player order.
@@ -480,7 +482,7 @@ pub fn title(atlas: &Atlas, input: &ShellInput) -> Screen {
     let entries = [
         (ShellAction::NewGame, "NEW GAME", true, ""),
         (ShellAction::LoadGame, "LOAD GAME", true, ""),
-        (ShellAction::WatchReplay, "WATCH REPLAY", false, "NOT YET"),
+        (ShellAction::WatchReplay, "WATCH REPLAY", true, ""),
         (ShellAction::Settings, "SETTINGS", false, "NOT YET"),
         (ShellAction::Quit, "QUIT", true, ""),
     ];
@@ -718,6 +720,7 @@ pub fn pause_menu(
     decided: bool,
     confirm: Option<ShellAction>,
     saved: Option<&str>,
+    replay: bool,
 ) -> Screen {
     let mut s = Sheet::new(atlas, input);
     let (pw, ph) = (300.0, 40.0 + 4.0 * (MENU_H + 8.0) + 40.0);
@@ -742,10 +745,11 @@ pub fn pause_menu(
     } else {
         "QUIT TO TITLE"
     };
+    // A replay is watched, not played: nothing to save or give up.
     let entries = [
         (ShellAction::Resume, "RESUME", true, ""),
-        (ShellAction::Save, "SAVE GAME", true, ""),
-        (ShellAction::Resign, resign, !decided, ""),
+        (ShellAction::Save, "SAVE GAME", !replay, ""),
+        (ShellAction::Resign, resign, !decided && !replay, ""),
         (ShellAction::QuitToTitle, quit, true, ""),
     ];
     let below = s.menu(cx, y + 40.0, &entries);
@@ -768,13 +772,15 @@ pub struct LoadRow {
 /// The most saves the load screen lists.
 pub const LOAD_ROWS: usize = 10;
 
-/// The load screen: the saves newest first, one button each, and what
-/// went wrong with the last one tried, if anything.
+/// The load screen, or with `watch` the replay screen: the files newest
+/// first, one button each, and what went wrong with the last one tried,
+/// if anything.
 pub fn load_screen(
     atlas: &Atlas,
     input: &ShellInput,
     rows: &[LoadRow],
     error: Option<&str>,
+    watch: bool,
 ) -> Screen {
     let mut s = Sheet::new(atlas, input);
     s.backdrop();
@@ -785,23 +791,27 @@ pub fn load_screen(
     let x = ((s.vw - pw) / 2.0).round();
     let y = ((s.vh - ph) / 2.0).max(4.0).round();
     s.panel(x, y, pw, ph);
-    s.centred(x + pw / 2.0, y + 10.0, "LOAD GAME", Ink::Gold, 2.0);
+    let heading = if watch { "WATCH REPLAY" } else { "LOAD GAME" };
+    s.centred(x + pw / 2.0, y + 10.0, heading, Ink::Gold, 2.0);
     let mut ry = y + 40.0;
     if rows.is_empty() {
-        s.centred(
-            x + pw / 2.0,
-            ry + 8.0,
-            "NO SAVES YET. F5 OR THE PAUSE MENU SAVES A MATCH.",
-            Ink::White,
-            1.0,
-        );
+        let none = if watch {
+            "NO RECORDINGS YET. EVERY MATCH PLAYED IS RECORDED."
+        } else {
+            "NO SAVES YET. F5 OR THE PAUSE MENU SAVES A MATCH."
+        };
+        s.centred(x + pw / 2.0, ry + 8.0, none, Ink::White, 1.0);
         ry += row_h + gap;
     }
     let button_w = 280.0;
     for (i, row) in rows.iter().take(LOAD_ROWS).enumerate() {
         s.button(
             (x + 16.0, ry, button_w, row_h),
-            ShellAction::Load(i),
+            if watch {
+                ShellAction::Watch(i)
+            } else {
+                ShellAction::Load(i)
+            },
             &row.title,
             true,
             "",
@@ -842,7 +852,7 @@ pub fn load_screen(
     s.centred(
         x + pw / 2.0 + 60.0,
         by + 10.0,
-        "ENTER: LOAD THE NEWEST   ESC: BACK",
+        "ENTER: THE NEWEST   ESC: BACK",
         Ink::White,
         1.0,
     );
@@ -861,13 +871,7 @@ pub fn results(atlas: &Atlas, input: &ShellInput, r: &Results) -> Screen {
     let y = ((s.vh - ph) / 2.0).max(4.0).round();
     s.panel(x, y, pw, ph);
     let cx = x + pw / 2.0;
-    s.centred(
-        cx,
-        y + 10.0,
-        if r.won { "VICTORY" } else { "DEFEAT" },
-        Ink::Gold,
-        2.0,
-    );
+    s.centred(cx, y + 10.0, &r.heading, Ink::Gold, 2.0);
     s.centred(cx, y + 40.0, &r.why, Ink::White, 1.0);
     let (col_side, col_score, col_status) = (x + 24.0, x + 250.0, x + 340.0);
     let hy = y + 58.0;
@@ -1027,12 +1031,11 @@ mod tests {
         assert_eq!(screen.buttons.len(), 5);
         assert!(find(&screen, ShellAction::NewGame).enabled);
         assert!(find(&screen, ShellAction::LoadGame).enabled);
+        assert!(find(&screen, ShellAction::WatchReplay).enabled);
         assert!(find(&screen, ShellAction::Quit).enabled);
-        for a in [ShellAction::WatchReplay, ShellAction::Settings] {
-            let b = find(&screen, a);
-            assert!(!b.enabled);
-            assert_eq!(b.reason, "NOT YET");
-        }
+        let settings = find(&screen, ShellAction::Settings);
+        assert!(!settings.enabled);
+        assert_eq!(settings.reason, "NOT YET");
         assert!(inside(&screen, &input));
         assert!(screen.preview.is_none());
         assert!(screen.sprites.iter().all(|s| s.screen));
@@ -1094,7 +1097,7 @@ mod tests {
     #[test]
     fn the_overlays_scale_with_the_hud_and_the_results_list_every_side() {
         let atlas = Atlas::placeholder();
-        let one = pause_menu(&atlas, &input(), false, None, None);
+        let one = pause_menu(&atlas, &input(), false, None, None, false);
         let two = pause_menu(
             &atlas,
             &ShellInput {
@@ -1104,6 +1107,7 @@ mod tests {
             false,
             None,
             None,
+            false,
         );
         let (a, b) = (
             find(&one, ShellAction::Resume),
@@ -1118,8 +1122,13 @@ mod tests {
             true,
             Some(ShellAction::QuitToTitle),
             Some("SAVED 20260919-190512-SEED3-TICK4321-P2"),
+            false,
         );
         assert!(find(&decided, ShellAction::Save).enabled);
+        let watching = pause_menu(&atlas, &input(), false, None, None, true);
+        assert!(!find(&watching, ShellAction::Save).enabled);
+        assert!(!find(&watching, ShellAction::Resign).enabled);
+        assert!(find(&watching, ShellAction::QuitToTitle).enabled);
         assert!(
             decided.sprites.len() > one.sprites.len() + 20,
             "the save note is drawn"
@@ -1131,7 +1140,7 @@ mod tests {
         );
 
         let r = Results {
-            won: false,
+            heading: "DEFEAT".into(),
             why: "YOU RESIGNED".into(),
             sides: vec![
                 Side {
@@ -1169,7 +1178,7 @@ mod tests {
     #[test]
     fn the_load_screen_lists_the_saves_and_says_what_went_wrong() {
         let atlas = Atlas::placeholder();
-        let none = load_screen(&atlas, &input(), &[], None);
+        let none = load_screen(&atlas, &input(), &[], None, false);
         assert_eq!(none.buttons.len(), 1, "BACK alone");
         assert!(find(&none, ShellAction::Back).enabled);
         let rows: Vec<LoadRow> = (0..14)
@@ -1178,8 +1187,15 @@ mod tests {
                 detail: "2026-09-19 19:05 UTC - 2 PLAYERS".into(),
             })
             .collect();
-        let full = load_screen(&atlas, &input(), &rows, None);
+        let full = load_screen(&atlas, &input(), &rows, None, false);
         assert_eq!(full.buttons.len(), LOAD_ROWS + 1);
+        let replays = load_screen(&atlas, &input(), &rows[..3], None, true);
+        assert_eq!(replays.buttons.len(), 4);
+        assert!(find(&replays, ShellAction::Watch(2)).enabled);
+        assert!(replays
+            .buttons
+            .iter()
+            .all(|b| !matches!(b.action, ShellAction::Load(_))));
         assert_eq!(find(&full, ShellAction::Load(0)).label, "SEED 0 AT 1:00");
         assert!(find(&full, ShellAction::Load(LOAD_ROWS - 1)).enabled);
         assert!(full
@@ -1187,12 +1203,13 @@ mod tests {
             .iter()
             .all(|b| b.action != ShellAction::Load(LOAD_ROWS)));
         assert!(inside(&full, &input()));
-        let two = load_screen(&atlas, &input(), &rows[..2], None);
+        let two = load_screen(&atlas, &input(), &rows[..2], None, false);
         let failed = load_screen(
             &atlas,
             &input(),
             &rows[..2],
             Some("simulation state version 9 but this build reads version 1"),
+            false,
         );
         assert!(failed.sprites.len() > two.sprites.len() + 20);
         assert_eq!(failed.buttons.len(), 3);

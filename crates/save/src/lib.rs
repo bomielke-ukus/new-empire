@@ -389,6 +389,55 @@ pub fn clock(tick: u64) -> String {
     format!("{}:{:02}", secs / 60, secs % 60)
 }
 
+/// Recordings of matches played in the app (`docs/04` §10, `TA-DET-05`):
+/// one replay file per match, named like a save for when the match
+/// started, its seed, how far it got and its players, so the WATCH
+/// REPLAY screen lists a directory without reading a file.
+pub mod replays {
+    use super::{compact_stamp, io, Entry, SaveError};
+    use sim::Replay;
+    use std::path::{Path, PathBuf};
+
+    /// The file name a recording gets.
+    pub fn file_name(replay: &Replay, started_at: u64) -> String {
+        format!(
+            "{}-seed{}-tick{}-p{}.ron",
+            compact_stamp(started_at),
+            replay.seed,
+            replay.ticks,
+            replay.config.map.players
+        )
+    }
+
+    /// Writes a recording into `dir` under its own name, making the
+    /// directory. Compact RON, as `simrunner` writes replays.
+    pub fn write(dir: &Path, replay: &Replay, started_at: u64) -> Result<PathBuf, SaveError> {
+        std::fs::create_dir_all(dir).map_err(|e| io(e, dir))?;
+        let path = dir.join(file_name(replay, started_at));
+        let text = ron::to_string(replay).map_err(|e| SaveError::Parse(e.to_string()))?;
+        std::fs::write(&path, format!("{text}\n")).map_err(|e| io(e, &path))?;
+        Ok(path)
+    }
+
+    /// Reads a recording and validates it as a replay, its version
+    /// included (`TA-DET-06`), and its setup as the engine would.
+    pub fn read(path: &Path) -> Result<Replay, SaveError> {
+        let text = std::fs::read_to_string(path).map_err(|e| io(e, path))?;
+        let replay: Replay = ron::from_str(&text).map_err(|e| SaveError::Parse(e.to_string()))?;
+        replay.validate().map_err(SaveError::Replay)?;
+        replay
+            .config
+            .validate()
+            .map_err(|e| SaveError::Parse(format!("match setup: {e}")))?;
+        Ok(replay)
+    }
+
+    /// Every recording in `dir`, newest first, from the names alone.
+    pub fn list(dir: &Path) -> Vec<Entry> {
+        super::list(dir)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -576,6 +625,43 @@ mod tests {
         assert_eq!(clock(20 * 754), "12:34");
         assert_eq!(civil_from_days(days_from_civil(2026, 9, 19)), (2026, 9, 19));
         assert_eq!(civil_from_days(0), (1970, 1, 1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A recording is written under a name that says when the match
+    /// started and how far it got, listed like a save, and read back as
+    /// the replay it is; one from another build is refused by version.
+    ///
+    /// REQ: TA-DET-05
+    #[test]
+    fn a_recording_is_a_replay_file_named_for_its_match() {
+        let dir = scratch_dir("replays");
+        let (mut sim, mut bots) = fresh(6);
+        for _ in 0..50 {
+            tick(&mut sim, &mut bots);
+        }
+        let replay = sim.replay();
+        let path = replays::write(&dir, &replay, 1_700_000_000).unwrap();
+        assert_eq!(
+            path.file_name().unwrap().to_str().unwrap(),
+            "20231114-221320-seed6-tick50-p2.ron"
+        );
+        let listed = replays::list(&dir);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].summary.tick, 50);
+        assert_eq!(listed[0].summary.seed, 6);
+        let back = replays::read(&path).unwrap();
+        assert_eq!(back, replay);
+        assert_eq!(back.trace_digest().unwrap(), replay.trace_digest().unwrap());
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            dir.join("old.ron"),
+            text.replacen("version:1", "version:7", 1),
+        )
+        .unwrap();
+        let err = replays::read(&dir.join("old.ron")).unwrap_err();
+        assert!(matches!(err, SaveError::Replay(_)));
+        assert!(err.to_string().contains("version 7"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

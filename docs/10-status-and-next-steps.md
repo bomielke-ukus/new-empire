@@ -25,7 +25,7 @@ its halfway point.
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
-| M6 — Game shell | **In progress**: 2 of 5 chunks landed 2026-09-19 | Configure, play, save, reload and watch a replay without a terminal |
+| M6 — Game shell | **In progress**: 3 of 5 chunks landed 2026-09-19 | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
@@ -56,8 +56,9 @@ opponents play from the first tick, scouting, building, advancing and
 coming for the Town Center; Escape opens the pause menu (resume, resign,
 quit, save) and the results come up when the match is decided. F5 or
 the menu saves the match; LOAD GAME on the title lists the saves and
-resumes one where it was. Replay playback, settings and notifications
-are still to come in M6.
+resumes one where it was. Every match played is recorded; WATCH REPLAY
+plays one back with pause and speed, through any side's eyes or
+everyone's. Settings and notifications are still to come in M6.
 
 ```sh
 cargo run --release -p new-empire           # the game window
@@ -868,14 +869,46 @@ what was done:
   compressed. The list shows at most ten, newest first, and says how
   many older there are. Nothing has been clicked on the Mac.
 
+### Work record: M6 chunk 3 — replay playback (2026-09-19)
+
+- **What landed.** `save::replays`: a recording is the simulation's
+  replay written under a name for when the match started, its seed,
+  how far it got and its players, like a save. The app records the
+  match when it is decided, when it is left and when the window is
+  closed on it, replacing the match's earlier file each time, so a
+  match leaves one recording. WATCH REPLAY on the title lists the
+  recordings; watching one is the match state with a `Playback` that
+  issues the log's commands at their ticks, as `Replay::run` does, and
+  no opponents thinking. Tab cycles the viewer through each player's
+  fog and then no fog at all (`FogLights::lit`); the HUD, the minimap,
+  the banner and the alarm follow the viewer. Nothing the watcher does
+  issues a command: `issue` is a no-op in playback and the panels,
+  hotkeys, right-click and Delete are looked at, not used. The status
+  line shows `REPLAY 12:34/40:00 P2`; the results screen says REPLAY
+  OVER where the recording ends. `docs/04` §32 has the notes.
+- **What changed for the player.** WATCH REPLAY on the title. In a
+  replay: Space pauses, `[` `]` set the speed up to 16×, Tab changes
+  whose eyes, Escape's menu has SAVE and RESIGN greyed and QUIT needs
+  no second click. Recordings live under `NEW_EMPIRE_REPLAYS` or the
+  platform's data directory beside the saves.
+- **Measured.** A recorded match watched back to its end reaches the
+  recorded match's state hash and command count, in the app test, with
+  the viewer changed twice on the way. One unit test in the save crate,
+  one app test through the handlers, one more case in the shell tests.
+- **Not done, deliberately.** No seeking: a replay runs forward from
+  tick 0, and the way back is to watch it again. No recording is
+  written for a match that never ticked. A recording says nothing of
+  the difficulties; the sides are PLAYER 1 to n. A save's history can
+  be watched only by way of `simrunner verify`, not from the title.
+
 ### Resume here next session
 
-**M6 chunks 1 and 2 are landed; chunk 3, replay playback, is next**
-(§4c): every match played in the app recorded, WATCH REPLAY listing the
-recordings, playback from the command log with pause and speed, seen
-through any side's eyes or none. Then settings, notifications and the
-`RM-M6-01` run. The parallel track (§4b) runs on its own branch. Keep
-the art pipeline on the `docs/08` schedule.
+**M6 chunks 1 to 3 are landed; chunk 4, settings, is next** (§4c): a
+settings file; UI scale, edge scrolling, window mode, and the key
+bindings (`GD-A11Y-02`) as far as one chunk allows. Then notifications
+with click-to-jump and the `RM-M6-01` run. The parallel track (§4b)
+runs on its own branch. Keep the art pipeline on the `docs/08`
+schedule.
 
 ## 4. What M4 completed — Combat
 
@@ -981,9 +1014,10 @@ own handlers before anyone clicks it:
    record above: `crates/save`, the whole simulation with its log and the
    opponents' minds, three versions checked before the world is read;
    SAVE GAME and F5; the load screen; `simrunner verify` on a save.
-3. **Replay playback with speed controls**: every match played in the
-   app is recorded; WATCH REPLAY lists them; playback from the command
-   log with pause and speed, seen through any side's eyes or none.
+3. **Replay playback with speed controls.** **Done 2026-09-19**, record
+   above: every match played is recorded when decided or left, one file
+   per match; WATCH REPLAY lists the recordings; playback from the log
+   with pause, speed to 16× and Tab for whose eyes, nothing issued.
 4. **Settings**: a settings file; UI scale, edge scrolling, window mode,
    and the key bindings (`GD-A11Y-02`) as far as one chunk allows.
 5. **Notifications with click-to-jump** (`docs/03` §6.3,

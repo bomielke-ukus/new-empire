@@ -22,7 +22,9 @@ use input::Input;
 use selection::Selection;
 use sim::kinds;
 use sim::tech;
-use sim::{Age, Command, CommandKind, EntityId, Rally, Simulation, Source, Vec2Fx, TICK_MS};
+use sim::{
+    Age, Command, CommandKind, EntityId, Rally, Replay, Simulation, Source, Vec2Fx, TICK_MS,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -213,6 +215,27 @@ struct App {
     load_error: Option<String>,
     /// The last save's outcome and when, for the note that follows it.
     saved: Option<(Instant, String)>,
+    /// Where recordings of matches are written and read.
+    replays_dir: PathBuf,
+    /// The recordings listed on the replay screen, newest first.
+    replays: Vec<save::Entry>,
+    /// The recording being watched, if the match is a replay.
+    playback: Option<Playback>,
+    /// Whose eyes the world is seen through: a player's, or nobody's for
+    /// the whole map, which only a replay allows.
+    viewer: Option<u8>,
+    /// When the match was entered, seconds since the epoch, for the
+    /// recording's name.
+    match_started: u64,
+    /// The recording written for this match so far, replaced as it goes.
+    recording: Option<PathBuf>,
+}
+
+/// A recording being watched: the log, and where playback is in it.
+struct Playback {
+    replay: Replay,
+    /// The next command to issue.
+    next: usize,
 }
 
 /// Which screen the game is on.
@@ -224,14 +247,17 @@ enum Shell {
     Setup,
     /// The saves, to load one.
     Load,
+    /// The recordings, to watch one.
+    Replays,
     /// A match, with the pause menu or the results over it or not.
     Match,
 }
 
-/// Where saves live: `NEW_EMPIRE_SAVES` if set, else the platform's data
-/// directory for the game, else `saves` under the working directory.
-fn saves_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("NEW_EMPIRE_SAVES") {
+/// Where the game keeps a kind of file: `env` if set, else `name` under
+/// the platform's data directory for the game, else under the working
+/// directory.
+fn data_dir(env: &str, name: &str) -> PathBuf {
+    if let Some(dir) = std::env::var_os(env) {
         return PathBuf::from(dir);
     }
     let home = |var: &str| std::env::var_os(var).map(PathBuf::from);
@@ -242,10 +268,29 @@ fn saves_dir() -> PathBuf {
     } else {
         home("XDG_DATA_HOME").or_else(|| home("HOME").map(|h| h.join(".local").join("share")))
     };
-    base.map_or_else(
-        || PathBuf::from("saves"),
-        |b| b.join("new-empire").join("saves"),
-    )
+    base.map_or_else(|| PathBuf::from(name), |b| b.join("new-empire").join(name))
+}
+
+/// Saves or recordings as the list screens show them.
+fn rows_for(entries: &[save::Entry]) -> Vec<LoadRow> {
+    entries
+        .iter()
+        .map(|e| LoadRow {
+            title: format!("SEED {} AT {}", e.summary.seed, save::clock(e.summary.tick)),
+            detail: format!(
+                "{} - {} PLAYERS",
+                save::stamp(e.summary.saved_at),
+                e.summary.players
+            ),
+        })
+        .collect()
+}
+
+/// Seconds since the epoch, or 0 if the clock is before it.
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// The results screen comes up once, when the match is decided, and
@@ -333,10 +378,16 @@ impl App {
             screen: Screen::default(),
             minimap_dirty: true,
             quit: false,
-            saves_dir: saves_dir(),
+            saves_dir: data_dir("NEW_EMPIRE_SAVES", "saves"),
             saves: Vec::new(),
             load_error: None,
             saved: None,
+            replays_dir: data_dir("NEW_EMPIRE_REPLAYS", "replays"),
+            replays: Vec::new(),
+            playback: None,
+            viewer: Some(ME),
+            match_started: 0,
+            recording: None,
         }
     }
 
@@ -372,7 +423,32 @@ impl App {
     }
 
     fn issue(&mut self, kind: CommandKind) {
+        // A replay is watched: the log is the only source of commands.
+        if self.playback.is_some() {
+            return;
+        }
         self.sim.issue(Command { player: ME, kind });
+    }
+
+    /// The player whose panel the HUD shows.
+    fn hud_player(&self) -> u8 {
+        self.viewer.unwrap_or(ME)
+    }
+
+    /// The fastest the clock goes: a replay may be hurried more.
+    fn max_speed(&self) -> f32 {
+        if self.playback.is_some() {
+            16.0
+        } else {
+            8.0
+        }
+    }
+
+    /// A replay has reached the end of its recording.
+    fn playback_over(&self) -> bool {
+        self.playback
+            .as_ref()
+            .is_some_and(|p| self.sim.tick() >= p.replay.ticks)
     }
 
     /// True if a window point is over the HUD rather than the world.
@@ -424,11 +500,17 @@ impl App {
             let state = match self.shell {
                 Shell::Title => "title".to_string(),
                 Shell::Load => "load".to_string(),
+                Shell::Replays => "replays".to_string(),
                 Shell::Setup => format!("setup — seed {}", self.setup.seed),
                 Shell::Match => {
                     let paused = if self.clock.paused() { " [paused]" } else { "" };
+                    let mode = if self.playback.is_some() {
+                        "replay "
+                    } else {
+                        ""
+                    };
                     format!(
-                        "seed {} — tick {} — {} entities — {:.1}x{paused}",
+                        "{mode}seed {} — tick {} — {} entities — {:.1}x{paused}",
                         self.sim.seed(),
                         self.sim.tick(),
                         self.sim.world().len(),
@@ -446,14 +528,25 @@ impl App {
         self.last_frame = now;
         match self.shell {
             Shell::Match => self.frame_match(now, dt),
-            Shell::Title | Shell::Setup | Shell::Load => self.frame_shell(now),
+            Shell::Title | Shell::Setup | Shell::Load | Shell::Replays => self.frame_shell(now),
         }
     }
 
     /// One tick of the match: every opponent thinks on its own view of it
-    /// and issues as the AI (`GD-AI-01`), then the world moves.
+    /// and issues as the AI (`GD-AI-01`), then the world moves. In a
+    /// replay the recording issues instead, as `Replay::run` does.
     fn tick_once(&mut self, now: Instant) {
         self.prev_pos.clone_from(&self.sim.world().pos);
+        if let Some(p) = &mut self.playback {
+            while let Some((tick, command)) = p.replay.commands.get(p.next) {
+                if *tick != self.sim.tick() {
+                    break;
+                }
+                let via = p.replay.sources.get(p.next).copied().unwrap_or_default();
+                self.sim.issue_from(command.clone(), via);
+                p.next += 1;
+            }
+        }
         for bot in &mut self.opponents {
             let commands = {
                 let view = FoggedView::new(&self.sim, bot.player());
@@ -465,11 +558,12 @@ impl App {
         }
         self.sim.step();
         self.feedback.observe(&self.sim);
+        let me = self.hud_player();
         if self
             .sim
             .events()
             .iter()
-            .any(|e| matches!(e, sim::Event::Alarm { player, .. } if *player == ME))
+            .any(|e| matches!(e, sim::Event::Alarm { player, .. } if *player == me))
         {
             self.alarm_at = Some(now);
         }
@@ -481,13 +575,17 @@ impl App {
         }
         let ticks = self.clock.advance(now);
         for _ in 0..ticks {
+            if self.playback_over() {
+                break;
+            }
             self.tick_once(now);
         }
         self.selection.prune(&self.sim);
 
         // An age completing is the moment the presentation celebrates
         // ([GD-AGE-02]): the sweep over the settlement and the banner.
-        let age = self.sim.player(ME).map_or(Age::Stone, |p| p.age);
+        let me = self.hud_player();
+        let age = self.sim.player(me).map_or(Age::Stone, |p| p.age);
         if age != self.last_age {
             self.age_up = Some((now, age));
             self.last_age = age;
@@ -500,9 +598,9 @@ impl App {
         // The match decided outranks everything else ([GD-WIN-01]), and
         // stays up.
         let decided = match self.sim.winner() {
-            Some(w) if w == ME => Some(view::hud::Banner::Victory),
+            Some(w) if w == me => Some(view::hud::Banner::Victory),
             Some(_) => Some(view::hud::Banner::Defeat),
-            None if !self.sim.standing(ME) => Some(view::hud::Banner::Defeat),
+            None if !self.sim.standing(me) => Some(view::hud::Banner::Defeat),
             None => None,
         };
         let banner = decided.or(match (self.age_up, since) {
@@ -526,11 +624,11 @@ impl App {
                 selected: &selected,
                 ghost: self.ghost(),
                 sweep,
-                viewer: Some(ME),
+                viewer: self.viewer,
             },
         );
         self.feedback
-            .decorate(&mut scene, &self.sim, &self.atlas, Some(ME));
+            .decorate(&mut scene, &self.sim, &self.atlas, self.viewer);
         // Band-box outline.
         if let (Some(from), Some(to)) = (self.selection.drag_from, self.input.cursor) {
             let thr = DRAG_THRESHOLD * self.camera.dpi;
@@ -548,8 +646,21 @@ impl App {
         } else {
             ""
         };
+        // A replay says where it is and whose eyes it is seen through.
+        let watching = match &self.playback {
+            Some(p) => format!(
+                "REPLAY {}/{} {} ",
+                save::clock(self.sim.tick()),
+                save::clock(p.replay.ticks),
+                match self.viewer {
+                    Some(v) => format!("P{}", v + 1),
+                    None => "ALL".to_string(),
+                }
+            ),
+            None => String::new(),
+        };
         let status = format!(
-            "{saved}{run}SEED {} TICK {}",
+            "{saved}{watching}{run}SEED {} TICK {}",
             self.sim.seed(),
             self.sim.tick()
         );
@@ -557,7 +668,7 @@ impl App {
             &self.atlas,
             &HudInput {
                 sim: &self.sim,
-                player: ME,
+                player: me,
                 camera: &self.camera,
                 selected: &selected,
                 build_mode: self.build_mode,
@@ -576,10 +687,18 @@ impl App {
         scene.ui.extend(hud.sprites.iter().cloned());
         self.hud = hud;
 
-        // The match decided brings the results up once ([GD-WIN-01]);
-        // the pause menu and the results are the shell's, over the HUD.
-        if self.results == ResultsState::Pending && self.decided() {
+        // The match decided brings the results up once ([GD-WIN-01]), and
+        // a replay's end does the same; the match is recorded then, so a
+        // window closed on the results loses nothing. The pause menu and
+        // the results are the shell's, over the HUD.
+        let ended = if self.playback.is_some() {
+            self.playback_over()
+        } else {
+            self.decided()
+        };
+        if self.results == ResultsState::Pending && ended {
             self.results = ResultsState::Shown;
+            self.record_replay();
         }
         let input = self.shell_input();
         let overlay = if self.menu {
@@ -589,6 +708,7 @@ impl App {
                 self.decided(),
                 self.confirm,
                 self.saved_note().as_deref(),
+                self.playback.is_some(),
             ))
         } else if self.results == ResultsState::Shown {
             Some(shell::results(&self.atlas, &input, &self.results_now()))
@@ -608,14 +728,18 @@ impl App {
         let rect = self.minimap_rect();
         if let Some(gpu) = &mut self.gpu {
             if self.last_minimap.elapsed().as_millis() >= 500 {
-                let m = Minimap::render_for(&self.sim, Some(ME));
+                let m = Minimap::render_for(&self.sim, self.viewer);
                 gpu.renderer.upload_minimap(&gpu.device, &gpu.queue, &m);
                 self.last_minimap = now;
             }
-            // The fog changes only with the tick.
+            // The fog changes only with the tick; nobody's eyes see it all.
             if self.last_fog_tick != Some(self.sim.tick()) {
-                if let Some(fog) = self.sim.fog(ME) {
-                    let lights = FogLights::from_fog(fog);
+                let map = self.sim.map();
+                let lights = match self.viewer {
+                    Some(p) => self.sim.fog(p).map(FogLights::from_fog),
+                    None => Some(FogLights::lit(map.width(), map.height())),
+                };
+                if let Some(lights) = lights {
                     gpu.renderer.upload_fog(&gpu.device, &gpu.queue, &lights);
                     self.last_fog_tick = Some(self.sim.tick());
                 }
@@ -634,8 +758,16 @@ impl App {
             Shell::Load => shell::load_screen(
                 &self.atlas,
                 &input,
-                &self.load_rows(),
+                &rows_for(&self.saves),
                 self.load_error.as_deref(),
+                false,
+            ),
+            Shell::Replays => shell::load_screen(
+                &self.atlas,
+                &input,
+                &rows_for(&self.replays),
+                self.load_error.as_deref(),
+                true,
             ),
             _ => shell::setup(
                 &self.atlas,
@@ -682,27 +814,14 @@ impl App {
             .map(|(_, note)| note.clone())
     }
 
-    /// The saves as the load screen lists them.
-    fn load_rows(&self) -> Vec<LoadRow> {
-        self.saves
-            .iter()
-            .map(|e| LoadRow {
-                title: format!("SEED {} AT {}", e.summary.seed, save::clock(e.summary.tick)),
-                detail: format!(
-                    "{} - {} PLAYERS",
-                    save::stamp(e.summary.saved_at),
-                    e.summary.players
-                ),
-            })
-            .collect()
-    }
-
     /// Writes the match as it stands to the saves directory and notes
-    /// the outcome for the menu and the status line.
+    /// the outcome for the menu and the status line. A replay is not
+    /// saved: it is a recording already.
     fn save_game(&mut self) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
+        if self.playback.is_some() {
+            return;
+        }
+        let now = now_secs();
         let view = save::View {
             focus: self.camera.focus,
             zoom_index: self.camera.zoom_index,
@@ -744,10 +863,56 @@ impl App {
     fn resume(&mut self, file: save::Save) {
         self.sim = file.sim;
         self.opponents = file.opponents;
+        self.playback = None;
         self.enter_match();
         self.camera.focus = file.view.focus;
         self.camera.set_zoom_index(file.view.zoom_index);
         self.camera.clamp();
+    }
+
+    /// Opens the replay screen on what the recordings directory holds.
+    fn open_replays(&mut self) {
+        self.replays = save::replays::list(&self.replays_dir);
+        self.load_error = None;
+        self.shell = Shell::Replays;
+    }
+
+    /// Watches the recording on a row of the replay screen, from tick 0
+    /// through the player's own eyes, or says why not.
+    fn watch_replay(&mut self, row: usize) {
+        let Some(entry) = self.replays.get(row) else {
+            return;
+        };
+        match save::replays::read(&entry.path) {
+            Ok(replay) => {
+                self.sim = Simulation::new(replay.seed, replay.config.clone());
+                self.opponents.clear();
+                self.playback = Some(Playback { replay, next: 0 });
+                self.enter_match();
+            }
+            Err(e) => self.load_error = Some(e.to_string()),
+        }
+    }
+
+    /// Records the match so far (`TA-DET-05`): the log the simulation
+    /// carries, under a name for when the match started and how far it
+    /// got, replacing this match's earlier recording. A replay being
+    /// watched is not recorded again.
+    fn record_replay(&mut self) {
+        if self.playback.is_some() || self.sim.tick() == 0 {
+            return;
+        }
+        let replay = self.sim.replay();
+        match save::replays::write(&self.replays_dir, &replay, self.match_started) {
+            Ok(path) => {
+                if let Some(old) = self.recording.replace(path.clone()) {
+                    if old != path {
+                        let _ = std::fs::remove_file(old);
+                    }
+                }
+            }
+            Err(e) => eprintln!("warning: the match was not recorded: {e}"),
+        }
     }
 
     /// Whether the shell has something over the world that takes the
@@ -769,23 +934,27 @@ impl App {
         }
     }
 
-    /// The results as they stand: who won, why, and every side's score.
+    /// The results as they stand: who won, why, and every side's score;
+    /// or where a replay's recording ends.
     fn results_now(&self) -> Results {
         let won = self.sim.winner() == Some(ME);
         let resigned = self.sim.player(ME).is_some_and(|p| p.resigned);
-        let why = if won {
-            "EVERY OTHER SIDE IS OUT"
-        } else if resigned {
-            "YOU RESIGNED"
-        } else if !self.sim.standing(ME) {
-            "NOTHING LEFT TO FIGHT WITH"
-        } else {
-            "ANOTHER SIDE WON"
+        let (heading, why) = match &self.playback {
+            Some(p) => (
+                "REPLAY OVER",
+                format!("THE RECORDING ENDS AT {}", save::clock(p.replay.ticks)),
+            ),
+            None if won => ("VICTORY", "EVERY OTHER SIDE IS OUT".to_string()),
+            None if resigned => ("DEFEAT", "YOU RESIGNED".to_string()),
+            None if !self.sim.standing(ME) => ("DEFEAT", "NOTHING LEFT TO FIGHT WITH".to_string()),
+            None => ("DEFEAT", "ANOTHER SIDE WON".to_string()),
         };
         let sides = (0..self.sim.players().len() as u8)
             .map(|p| Side {
                 player: p,
-                name: if p == ME {
+                name: if self.playback.is_some() {
+                    format!("PLAYER {}", p + 1)
+                } else if p == ME {
                     "YOU".to_string()
                 } else {
                     self.opponents
@@ -800,8 +969,8 @@ impl App {
             })
             .collect();
         Results {
-            won,
-            why: why.to_string(),
+            heading: heading.to_string(),
+            why,
             sides,
         }
     }
@@ -830,7 +999,9 @@ impl App {
             ShellAction::LoadGame => self.open_load(),
             ShellAction::Load(row) => self.load_game(row),
             ShellAction::Save => self.save_game(),
-            ShellAction::WatchReplay | ShellAction::Settings => {}
+            ShellAction::WatchReplay => self.open_replays(),
+            ShellAction::Watch(row) => self.watch_replay(row),
+            ShellAction::Settings => {}
             ShellAction::Quit => self.quit = true,
             ShellAction::Adjust(field, delta) => {
                 self.setup.adjust(field, delta);
@@ -845,6 +1016,7 @@ impl App {
             ShellAction::Resume => self.close_menu(),
             // Ending a live match takes two clicks: the first arms the
             // button, the second is the deed.
+            ShellAction::Resign if self.playback.is_some() => {}
             ShellAction::Resign => {
                 if self.confirm == Some(ShellAction::Resign) {
                     self.issue(CommandKind::Resign);
@@ -854,7 +1026,10 @@ impl App {
                 }
             }
             ShellAction::QuitToTitle => {
-                if self.decided() || self.confirm == Some(ShellAction::QuitToTitle) {
+                if self.decided()
+                    || self.playback.is_some()
+                    || self.confirm == Some(ShellAction::QuitToTitle)
+                {
                     self.quit_to_title();
                 } else {
                     self.confirm = Some(ShellAction::QuitToTitle);
@@ -890,6 +1065,7 @@ impl App {
             .enumerate()
             .map(|(i, d)| Opponent::new(i as u8 + 1, *d, seed))
             .collect();
+        self.playback = None;
         self.enter_match();
     }
 
@@ -923,6 +1099,9 @@ impl App {
         self.menu = false;
         self.confirm = None;
         self.results = ResultsState::Pending;
+        self.viewer = Some(ME);
+        self.match_started = now_secs();
+        self.recording = None;
         self.shell = Shell::Match;
         if let Some(gpu) = &mut self.gpu {
             let chunks = view::terrain::build_all(self.sim.map());
@@ -933,8 +1112,11 @@ impl App {
     /// Leaves the match for the title. The world stays until the next
     /// setup replaces it.
     fn quit_to_title(&mut self) {
+        self.record_replay();
         self.shell = Shell::Title;
         self.opponents.clear();
+        self.playback = None;
+        self.viewer = Some(ME);
         self.menu = false;
         self.confirm = None;
         self.build_mode = None;
@@ -1064,7 +1246,7 @@ impl App {
         if self.input.left_pressed(&mut self.camera, mm, map, px, py) {
             return;
         }
-        // HUD buttons first.
+        // HUD buttons first. A replay's panels are looked at, not used.
         if self.over_hud(px, py) {
             if let Some(b) = self
                 .hud
@@ -1073,7 +1255,7 @@ impl App {
                 .find(|b| b.contains(px, py))
                 .cloned()
             {
-                if b.enabled {
+                if b.enabled && self.playback.is_none() {
                     self.do_action(b.action);
                 }
             }
@@ -1171,7 +1353,7 @@ impl App {
     }
 
     fn right_press(&mut self, px: f32, py: f32) {
-        if self.shell != Shell::Match || self.overlay() {
+        if self.shell != Shell::Match || self.overlay() || self.playback.is_some() {
             return;
         }
         if self.build_mode.is_some() || self.targeting.is_some() || self.defences {
@@ -1405,6 +1587,16 @@ impl App {
                 }
                 return false;
             }
+            Shell::Replays => {
+                match code {
+                    KeyCode::Enter | KeyCode::NumpadEnter => {
+                        self.shell_action(ShellAction::Watch(0))
+                    }
+                    KeyCode::Escape => self.shell_action(ShellAction::Back),
+                    _ => {}
+                }
+                return false;
+            }
             Shell::Match => {}
         }
         if self.menu {
@@ -1471,7 +1663,20 @@ impl App {
                 let p = !self.clock.paused();
                 self.clock.set_paused(p);
             }
-            KeyCode::BracketRight => self.clock.speed = (self.clock.speed * 2.0).min(8.0),
+            KeyCode::BracketRight => {
+                self.clock.speed = (self.clock.speed * 2.0).min(self.max_speed())
+            }
+            // A replay is seen through any side's eyes, or nobody's.
+            KeyCode::Tab if self.playback.is_some() => {
+                let players = self.sim.players().len() as u8;
+                self.viewer = match self.viewer {
+                    Some(p) if p + 1 < players => Some(p + 1),
+                    Some(_) => None,
+                    None => Some(ME),
+                };
+                self.last_fog_tick = None;
+                self.last_minimap = Instant::now() - Duration::from_secs(10);
+            }
             KeyCode::BracketLeft => self.clock.speed = (self.clock.speed / 2.0).max(0.25),
             KeyCode::Equal | KeyCode::NumpadAdd => self.camera.zoom_step(1),
             KeyCode::Minus | KeyCode::NumpadSubtract => self.camera.zoom_step(-1),
@@ -1497,7 +1702,7 @@ impl App {
                         .look_at_tile(view::fx_to_f32(p.x), view::fx_to_f32(p.y));
                 }
             }
-            KeyCode::Delete => {
+            KeyCode::Delete if self.playback.is_none() => {
                 let ids = self.selection.own_mobile(&self.sim, ME);
                 let sites: Vec<_> = self
                     .selection
@@ -1517,7 +1722,9 @@ impl App {
             }
             code => {
                 if let Some(ch) = letter(code) {
-                    self.hotkey(ch);
+                    if self.playback.is_none() {
+                        self.hotkey(ch);
+                    }
                 }
             }
         }
@@ -1634,7 +1841,13 @@ impl ApplicationHandler for App {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                // A match closed on is still recorded.
+                if self.shell == Shell::Match {
+                    self.record_replay();
+                }
+                event_loop.exit()
+            }
             WindowEvent::Resized(size) => {
                 self.camera.viewport = (size.width.max(1) as f32, size.height.max(1) as f32);
                 if let Some(gpu) = &mut self.gpu {
@@ -1699,6 +1912,9 @@ impl ApplicationHandler for App {
             _ => {}
         }
         if self.quit {
+            if self.shell == Shell::Match {
+                self.record_replay();
+            }
             event_loop.exit();
         }
     }

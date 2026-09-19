@@ -300,7 +300,10 @@ first-class treatment.
 ## 10. Saves and replays
 
 - **[TA-DET-05] Replay** = match setup + seed + the full command log. Kilobytes. Replays are
-  the primary debugging tool: a bug report is a replay file.
+  the primary debugging tool: a bug report is a replay file. *As built
+  (M6):* every match played in the app is recorded as one under the
+  recordings directory, named like a save, and the WATCH REPLAY screen
+  plays it back (§32).
 - **[TA-SAVE-01] Save** = a full serialised `World` snapshot plus the command log since the
   last snapshot, so a save is also a resumable replay.
 - **[TA-DET-06]** Both are versioned; loading an incompatible version fails loudly with the
@@ -1162,4 +1165,42 @@ siege are still owed, and a human will find this opponent predictable.
   names and the list is twenty lines (Hinnant's algorithms), in UTC and
   saying so; a local time zone would need a dependency and is not worth
   one for a file name.
+
+## 32. Implementation notes from M6, chunk 3: replay playback
+
+- **Playback is the match state with a different source of commands.**
+  `Playback { replay, next }` issues the log's commands at their ticks
+  through `issue_from` with their recorded source, exactly as
+  `Replay::run` does, and the opponents list is empty. Everything else
+  (the scene, the HUD, the fog, the minimap, the camera, the clock) is
+  the match's own code; the state machine did not grow a state for it.
+  The clock stops at the recording's last tick and the results come up.
+- **Nothing the watcher does reaches the log.** `issue` returns at once
+  in playback, the HUD's buttons and letter hotkeys are ignored,
+  right-click and Delete return early, F5 does not save. Selection
+  still works, so a unit or building can be looked at. The test issues
+  every one of those and requires the command count unchanged.
+- **The viewer is a field, not a constant.** `viewer: Option<u8>` is
+  `Some(ME)` in a match; in a replay Tab cycles it through every player
+  and then `None`, which draws with `FogLights::lit` and an unfogged
+  minimap and scene. The HUD's panel, the age banner, the VICTORY and
+  DEFEAT banner and the alarm follow `hud_player()`, the viewer or the
+  human. The match code paths that name `ME` for orders are untouched;
+  they cannot issue in playback anyway.
+- **One recording per match.** The recording is written at three
+  moments: when the match is decided (so a window closed on the results
+  loses nothing), when the match is left, and when the window is closed
+  on a live match; each write replaces the match's earlier file, whose
+  name differs only by the tick. A match that never ticked is not
+  recorded, and a replay being watched is never recorded again.
+- **A recording is a replay file, nothing more.** `save::replays` writes
+  `Simulation::replay()` as compact RON under a name shaped like a
+  save's, and `read` validates it as `Replay::validate` does, version
+  included (`TA-DET-06`), then runs the engine's config check. The
+  difficulties are not in a replay (`Replay` has no field for them and
+  adding one would change the format), so the results name sides by
+  number.
+- **Sixteen times.** `FixedClock` allows eight ticks per frame, which at
+  sixty frames is twenty-four times real time; the replay's speed cap is
+  sixteen and a match's stays at eight.
 

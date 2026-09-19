@@ -182,7 +182,7 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
                     detail: "2026-09-18 22:40 UTC - 2 PLAYERS".into(),
                 },
             ];
-            (shell::load_screen(&atlas, &input, &rows, None), None)
+            (shell::load_screen(&atlas, &input, &rows, None, false), None)
         }
         "setup" => {
             let mut setup = Setup::new(a.seed);

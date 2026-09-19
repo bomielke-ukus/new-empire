@@ -497,6 +497,22 @@ and no age celebration, then plays on; a save from another build is
 refused on that screen with both numbers, Enter meets the same refusal,
 and Escape goes back. A golden image pins the load screen.
 
+**M6 chunk 3, replay playback.** `crates/save` unit test: a recording
+is written under a name for its match, listed like a save, read back
+equal to the replay it was with the same trace digest, and refused by
+version from another build (`TA-DET-05`). `crates/app/src/tests.rs`: a
+match resigned is recorded at that tick; playing on and leaving replaces
+the file rather than adding one; WATCH REPLAY lists it; watching starts
+at tick 0 with no opponents through player 1's eyes; a hotkey, a
+right-click, Delete, F5 and a direct `issue` add nothing to the log and
+save nothing; Tab cycles the eyes through player 2 and everyone's back
+to player 1; the speed reaches 16× and Space pauses; played to its end
+the world has the recorded match's hash and command count and the
+results say REPLAY OVER with the sides named by number; the menu greys
+SAVE and RESIGN and QUIT needs one click and records nothing; a
+recording from another build is refused on the screen with its number.
+The shell test covers the replay screen's buttons and the greyed menu.
+
 ### Data files — M3 onward
 
 The startup validator from `docs/04` §9 run as a test: every referenced ID
