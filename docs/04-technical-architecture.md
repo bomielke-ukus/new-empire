@@ -1013,3 +1013,47 @@ anticipate:
   is within the acceptance as written and short of the opponent we want;
   the next step in `docs/10` says what to do about it.
 
+## 29. Implementation notes from the M5 tuning pass: an army that ends a match
+
+The first acceptance record was twenty wins on score and none by
+elimination. Six changes, each found by watching one seed, turned that
+into eighteen eliminations in twenty:
+
+- **All out.** Every villager of the losing side was sitting inside its
+  Town Center. Villagers shelter when hit (`GD-STANCE-02`) and nothing
+  but their own side tells them the danger has passed; a player presses
+  ALL OUT and the opponent never did. So the economy stopped (the
+  manager gives no orders to anyone inside) and the Town Center, which
+  shoots one arrow per unit inside, became a fortress that killed every
+  assault. The military manager now empties every building with anyone
+  inside once no alarm has sounded for thirty seconds. This one change
+  did more than the other five together.
+- **The army masses.** Raids in ones and twos, and assaults of eight,
+  fed the Town Center's arrows and took nothing. The army now waits at
+  home for the attack size (twenty for Hard) or three quarters of it
+  once the order's hour has come, then attack-moves at the enemy Town
+  Center as one, fighting what meets it on the way, in Aggressive stance
+  so it chases what runs. A plain `Attack` on the Town Center was tried
+  and dropped: the soldiers ignored the defenders killing them.
+- **Wood, not food, was the army's limit.** Food piled up to two
+  thousand while soldiers waited on twenty wood each. The gather shares
+  moved from gold to wood, and when nothing in the composition can be
+  paid for, the cheapest soldier a building trains for food alone is
+  trained instead. Hard builds a second Barracks.
+- **A side without a Town Center keeps working.** The economy manager
+  used to do nothing without one; a side that lost its Town Center stood
+  idle with farms in sight, which the stuck-villager rule rightly
+  refused. Home is now the Town Center, else any finished building,
+  else where the villagers are, and the first thing built is a new Town
+  Center.
+- **The scout keeps riding.** Once every point on its rings was seen it
+  stopped; now it rides them again regardless, for what has changed and
+  for whoever is hiding, which is how the army finds the last villagers.
+- **The limit is forty minutes**, because assaults leave at twenty and
+  the hunt for the last villager takes a while. The record shows the
+  earliest elimination at twenty minutes and the latest at thirty-nine.
+
+What still ends on score: two seeds in twenty where the last villagers
+are never found in time. Counters to what the enemy fields, walls, and
+siege are still owed, and a human will find this opponent predictable.
+

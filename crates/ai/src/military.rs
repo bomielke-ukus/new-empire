@@ -41,8 +41,12 @@ pub struct Military {
 
 /// A soldier: mobile, armed, and not a villager or the scout.
 fn is_soldier(s: &Sighting) -> bool {
-    let info = kinds::info(s.kind);
-    info.mobile && info.combat.attack > 0 && s.kind != kinds::VILLAGER && s.kind != kinds::SCOUT
+    is_soldier_kind(s.kind)
+}
+
+fn is_soldier_kind(kind: KindId) -> bool {
+    let info = kinds::info(kind);
+    info.mobile && info.combat.attack > 0 && kind != kinds::VILLAGER && kind != kinds::SCOUT
 }
 
 impl Military {
@@ -98,28 +102,27 @@ impl Military {
                 if scout.job == Job::Idle {
                     let tc_tile = (tc.pos.x.floor(), tc.pos.y.floor());
                     let legs = SCOUT_RINGS.len() * 8;
-                    let mut sent = false;
-                    for _ in 0..legs {
-                        let leg = self.scout_leg % legs;
-                        self.scout_leg += 1;
+                    let point_of = |leg: usize| {
                         let (ring, point) = (SCOUT_RINGS[leg / 8], leg % 8);
                         let (dx, dy) = COMPASS[point];
-                        let x = (tc_tile.0 + dx * ring).clamp(1, w - 2);
-                        let y = (tc_tile.1 + dy * ring).clamp(1, h - 2);
-                        if !view.explored(x, y) {
-                            out.push(CommandKind::Move {
-                                ids: vec![scout.id],
-                                target: fogged::nav::centre((x, y)),
-                            });
-                            sent = true;
-                            break;
-                        }
-                    }
-                    if !sent {
-                        // Everything on the rings is seen: ride them again
-                        // for what has changed since.
-                        self.scout_leg = 0;
-                    }
+                        (
+                            (tc_tile.0 + dx * ring).clamp(1, w - 2),
+                            (tc_tile.1 + dy * ring).clamp(1, h - 2),
+                        )
+                    };
+                    // The next point not yet seen; once every point is
+                    // seen, the next point regardless, for what has
+                    // changed since: an enemy that moved, or is hiding.
+                    let unseen = (0..legs)
+                        .map(|k| (self.scout_leg + k) % legs)
+                        .find(|&leg| !view.explored(point_of(leg).0, point_of(leg).1));
+                    let leg = unseen.unwrap_or(self.scout_leg % legs);
+                    self.scout_leg = leg + 1;
+                    let (x, y) = point_of(leg);
+                    out.push(CommandKind::Move {
+                        ids: vec![scout.id],
+                        target: fogged::nav::centre((x, y)),
+                    });
                 }
             }
         }
@@ -146,8 +149,30 @@ impl Military {
             }
         }
 
-        // ----- The attack: enough soldiers idle at home, and somewhere
-        // known to send them.
+        // ----- All out. Villagers shelter in the Town Center when hit
+        // (`GD-STANCE-02`) and nobody but their side tells them the danger
+        // has passed: a player presses ALL OUT. Once no alarm has sounded
+        // for a while, every building with anyone inside is emptied. A
+        // side that forgets this ends the match with its whole workforce
+        // sitting in the Town Center.
+        if self.threats.is_empty() && mine.iter().any(|s| s.inside) {
+            for b in mine
+                .iter()
+                .filter(|s| kinds::info(s.kind).garrison > 0 && !s.site)
+            {
+                out.push(CommandKind::Ungarrison { building: b.id });
+            }
+        }
+
+        // ----- The army. It gathers at home until it is the attack size
+        // (or half that once the order's hour has come), then goes at the
+        // nearest enemy building it knows of, in sight or remembered, the
+        // Town Center included: a raid in ones and twos only feeds the
+        // Town Center's arrows. Out of buildings to go for, it goes for
+        // any enemy unit in sight, and the scout keeps looking for more.
+        // Soldiers idle away from home press on to the next target or come
+        // home when there is none. Attacking soldiers are aggressive, so
+        // they chase what runs.
         let idle_home: Vec<EntityId> = soldiers
             .iter()
             .filter(|s| s.job == Job::Idle && home(s.pos))
@@ -156,59 +181,73 @@ impl Military {
         let out_already = self
             .attack
             .is_some_and(|(_, when)| tick.saturating_sub(when) < 1200);
-        // Every enemy building known of, in sight or remembered, with
-        // whether it shoots back: a raid goes for the houses, farms and
-        // stores; only a full army walks into the Town Center's arrows.
         let enemy = |owner: u8| owner != view.player() && owner != kinds::GAIA;
-        let shoots =
-            |kind: KindId| kinds::info(kind).combat.attack > 0 || kind == kinds::TOWN_CENTER;
-        let mut targets: Vec<(Vec2Fx, bool)> = seen
+        let mut buildings: Vec<Vec2Fx> = seen
             .iter()
             .filter(|s| enemy(s.owner) && kinds::info(s.kind).footprint > 0)
-            .map(|s| (s.pos, shoots(s.kind)))
+            .map(|s| s.pos)
             .collect();
-        targets.extend(
+        buildings.extend(
             view.remembered()
                 .into_iter()
                 .filter(|r| enemy(r.owner))
-                .map(|r| (fogged::nav::centre(r.tile), shoots(r.kind))),
+                .map(|r| fogged::nav::centre(r.tile)),
         );
-        let nearest_target = |to: Vec2Fx, full: bool| {
-            targets
-                .iter()
-                .filter(|(_, shoots)| full || !*shoots)
-                .map(|(p, _)| *p)
+        let units: Vec<Vec2Fx> = seen
+            .iter()
+            .filter(|s| enemy(s.owner) && kinds::info(s.kind).mobile)
+            .map(|s| s.pos)
+            .collect();
+        let nearest = |to: Vec2Fx, of: &[Vec2Fx]| {
+            of.iter()
+                .copied()
                 .min_by_key(|p| (p.distance_sq_raw(to), p.x.raw(), p.y.raw()))
         };
-        // A raid goes out with the attack size once the order's hour has
-        // come; the Town Center's arrows wait for twice that.
+        let target_from = |to: Vec2Fx| nearest(to, &buildings).or_else(|| nearest(to, &units));
+        // The enemy Town Center, if known: the army goes for it first and
+        // as one, fighting whatever meets it on the way, because a Town
+        // Center down is a side that can make nothing more.
+        let enemy_tc: Option<(EntityId, Vec2Fx)> = seen
+            .iter()
+            .find(|s| enemy(s.owner) && s.kind == kinds::TOWN_CENTER && !s.site)
+            .map(|s| (s.id, s.pos))
+            .or_else(|| {
+                view.remembered()
+                    .into_iter()
+                    .find(|r| enemy(r.owner) && r.kind == kinds::TOWN_CENTER && !r.site)
+                    .map(|r| (r.id, fogged::nav::centre(r.tile)))
+            });
+        let orders_for = |ids: Vec<EntityId>, from: Vec2Fx| -> Option<(CommandKind, Vec2Fx)> {
+            let target = enemy_tc.map(|(_, pos)| pos).or_else(|| target_from(from))?;
+            Some((CommandKind::AttackMove { ids, target }, target))
+        };
         let n_home = idle_home.len() as u32;
-        let full = n_home >= order.attack_size * 2;
-        let raid = tick >= order.attack_by && n_home >= order.attack_size;
-        if (full || raid) && !out_already && self.threats.is_empty() {
-            if let Some(target) = nearest_target(tc.pos, full) {
-                out.push(CommandKind::AttackMove {
+        let assault = n_home >= order.attack_size
+            || (tick >= order.attack_by && n_home >= (order.attack_size * 3).div_ceil(4));
+        if assault && !out_already && self.threats.is_empty() {
+            if let Some((order, target)) = orders_for(idle_home.clone(), tc.pos) {
+                out.push(CommandKind::SetStance {
                     ids: idle_home,
-                    target,
+                    stance: Stance::Aggressive,
                 });
+                out.push(order);
                 self.attack = Some((target, tick));
             }
         }
-        // Soldiers idle away from home carry on to the next enemy building
-        // they know of, the Town Center included once they are enough, or
-        // come home when there is nothing left to go for.
-        let idle_away: Vec<&Sighting> = soldiers
+        let idle_away: Vec<EntityId> = soldiers
             .iter()
             .filter(|s| s.job == Job::Idle && !home(s.pos))
-            .copied()
+            .map(|s| s.id)
             .collect();
-        if let Some(lead) = idle_away.first() {
-            let ids: Vec<EntityId> = idle_away.iter().map(|s| s.id).collect();
-            let full = ids.len() as u32 >= order.attack_size;
-            match nearest_target(lead.pos, full) {
-                Some(target) => out.push(CommandKind::AttackMove { ids, target }),
+        if let Some(&lead) = idle_away.first() {
+            let from = soldiers
+                .iter()
+                .find(|s| s.id == lead)
+                .map_or(tc.pos, |s| s.pos);
+            match orders_for(idle_away.clone(), from) {
+                Some((order, _)) => out.push(order),
                 None => out.push(CommandKind::Move {
-                    ids,
+                    ids: idle_away,
                     target: tc.pos,
                 }),
             }
@@ -265,9 +304,76 @@ impl Military {
                     }
                 }
             }
+            // Nothing in the composition can be paid for, usually for want
+            // of wood while the food piles up: the cheapest soldier a
+            // building of ours trains, paid in food alone, is better than
+            // none.
+            if best.is_none() {
+                let mut cheapest: Option<(i32, KindId, EntityId)> = None;
+                for b in mine
+                    .iter()
+                    .filter(|s| kinds::info(s.kind).trains && !s.site)
+                {
+                    if view.queue(b.id).len() >= 2 {
+                        continue;
+                    }
+                    for kind in view.roster(b.kind) {
+                        let info = kinds::info(kind);
+                        if !is_soldier_kind(kind) || info.cost[1..].iter().any(|&c| c > 0) {
+                            continue;
+                        }
+                        let mut with_reserve = info.cost;
+                        with_reserve[0] += RESERVE[0];
+                        if !afford(stock, &with_reserve) || view.can_train(b.id, kind).is_err() {
+                            continue;
+                        }
+                        if cheapest.is_none_or(|(c, _, _)| info.cost[0] < c) {
+                            cheapest = Some((info.cost[0], kind, b.id));
+                        }
+                    }
+                }
+                best = cheapest;
+            }
             if let Some((_, kind, building)) = best {
                 out.push(CommandKind::Train { building, kind });
                 spend(stock, &kinds::info(kind).cost);
+            }
+        }
+
+        // ----- A second Barracks, for the orders that want one, once the
+        // first stands and the army is wanted bigger than it alone trains
+        // in time.
+        let barracks: Vec<&Sighting> = mine
+            .iter()
+            .filter(|s| s.kind == kinds::BARRACKS)
+            .copied()
+            .collect();
+        if (barracks.len() as u32) < order.barracks
+            && barracks.iter().any(|b| !b.site)
+            && barracks.iter().all(|b| !b.site)
+            && view.can_build(kinds::BARRACKS).is_ok()
+        {
+            let cost = kinds::info(kinds::BARRACKS).cost;
+            let mut with_reserve = cost;
+            with_reserve[1] += 100;
+            if afford(stock, &with_reserve) {
+                let villagers: Vec<&Sighting> = mine
+                    .iter()
+                    .filter(|s| s.kind == kinds::VILLAGER && !s.inside)
+                    .copied()
+                    .collect();
+                let tc_tile = (tc.pos.x.floor(), tc.pos.y.floor());
+                if let Some((x, y)) = place(view, kinds::BARRACKS, tc_tile, 4, 12, rng) {
+                    if let Some(b) = builder(&villagers, fogged::nav::centre((x, y)), None, &[]) {
+                        out.push(CommandKind::Build {
+                            kind: kinds::BARRACKS,
+                            x,
+                            y,
+                            ids: vec![b],
+                        });
+                        spend(stock, &cost);
+                    }
+                }
             }
         }
 
@@ -327,8 +433,8 @@ const COMPASS: [(i32, i32); 8] = [
 const COMPOSITION: [&[(KindId, u32)]; 4] = [
     &[(kinds::CLUBMAN, 100)],
     &[
-        (kinds::AXEMAN, 40),
-        (kinds::BOWMAN, 30),
+        (kinds::AXEMAN, 50),
+        (kinds::BOWMAN, 20),
         (kinds::SLINGER, 15),
         (kinds::CLUBMAN, 15),
     ],

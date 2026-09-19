@@ -414,8 +414,9 @@ resource in sight counted as stuck, one line per match recorded in
 plays all twenty against the record and needs eighteen Hard wins.
 `tools/simrunner/tests/ai_versus.rs` plays the first recorded match in
 full and requires the recorded line, and shows a short match decided on
-score and the same setup playing the same match. The first record: Hard
-20 of 20, all on score.
+score and the same setup playing the same match. The first record was
+Hard 20 of 20, all on score; after the tuning pass (`docs/04` §29) it is
+20 of 20 with 18 by elimination, at a forty-minute limit.
 
 ### Interface — M2–M6
 

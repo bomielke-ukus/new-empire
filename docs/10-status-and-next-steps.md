@@ -23,7 +23,7 @@ Five milestones landed; the vertical slice is beyond its halfway point.
 | M2 — Villagers, movement, economy | Landed | Gathering all four resources, building, training with rally points, on a pathfinder that does not get stuck |
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
-| M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, on score, in CI |
+| M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
 | M6 — Game shell | Not started | Configure, play, save, reload and watch a replay without a terminal |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
@@ -770,15 +770,34 @@ what was done:
   key in the app (M6's menu). The nightly job could run more seeds and
   longer limits than CI's twenty.
 
+### Work record: M5 tuning — an army that ends a match (2026-09-19)
+
+- **What landed.** The opponent empties its buildings once an alarm has
+  passed (its whole workforce used to sit in the Town Center for the rest
+  of the match); the army masses to the attack size and goes at the enemy
+  Town Center as one, aggressive; soldiers are trained for food alone
+  when wood is short and Hard builds a second Barracks; a side without a
+  Town Center keeps gathering and builds one; the scout keeps riding once
+  the map is seen. The acceptance limit is forty minutes. `docs/04` §29
+  has the notes, one per thing found.
+- **What changed for the player.** Nothing in the app. Under `simrunner
+  versus`, Hard now ends a match.
+- **Measured.** Twenty matches, Hard against Easy: 20 wins, 18 by
+  elimination between twenty and thirty-nine minutes, 2 on score at the
+  limit. No invariant broke, no villager stuck. 123 s of release time.
+- **Not done, deliberately.** No counters to what the enemy fields, no
+  walls, no siege. Standard against Standard is not in the record. A
+  human will find the assault predictable: it comes from the nearest
+  side, at the Town Center, at about twenty minutes.
+
 ### Resume here next session
 
-**M5 is landed; M6 (the game shell) is next**, per `docs/06`: a setup
-screen with difficulty and the declared Hardest bonus, victory and defeat
-on a results screen, save and load, replay playback. Before it, one
-tuning pass on the opponent is worth a chunk of its own: an army that can
-end a match, so the acceptance record shows eliminations. The parallel
-track (§4b) runs on its own branch. Keep the art pipeline on the
-`docs/08` schedule.
+**M5 is landed and tuned; M6 (the game shell) is next**, per `docs/06`:
+a setup screen with map, size, difficulty per opponent and the declared
+Hardest bonus; the opponent in the app; victory and defeat on a results
+screen; save and load; replay playback with speed controls; settings.
+The parallel track (§4b) runs on its own branch. Keep the art pipeline on
+the `docs/08` schedule.
 
 ## 4. What M4 completed — Combat
 

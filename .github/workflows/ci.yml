@@ -119,7 +119,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: twenty matches, Hard against Easy, against the record
-        run: cargo run --release -p simrunner --features sim/debug-checks -- versus --matches 20 --ticks 36000 --difficulty hard,easy --expect tools/simrunner/tests/versus-hard-easy.golden
+        run: cargo run --release -p simrunner --features sim/debug-checks -- versus --matches 20 --ticks 48000 --difficulty hard,easy --expect tools/simrunner/tests/versus-hard-easy.golden
 
   # A cliff detector, not a precision instrument — see perf/budgets.ron for
   # why the ceilings are as loose as they are.

@@ -1033,7 +1033,7 @@ fn versus(f: &Flags) -> ExitCode {
     if matches == 0 || matches > 1000 {
         return usage("--matches must be 1..=1000");
     }
-    let ticks = f.ticks.unwrap_or(36_000);
+    let ticks = f.ticks.unwrap_or(48_000);
     if ticks == 0 || ticks > sim::Replay::MAX_TICKS {
         return usage("--ticks must be 1..=MAX_TICKS");
     }

@@ -34,15 +34,18 @@ pub struct BuildOrder {
     pub rebalances: bool,
     /// Soldiers to keep, by age.
     pub army: [u32; 4],
-    /// Soldiers idle at home before a raid goes out; twice this before
-    /// the army walks into the Town Center's arrows.
+    /// Soldiers idle at home before the army goes out; three quarters of
+    /// this once `attack_by` has passed.
     pub attack_size: u32,
-    /// Not before this many ticks does a raid go out.
+    /// After this many ticks, three quarters of the attack size is enough
+    /// to go.
     pub attack_by: u64,
     /// Whether the scout rides the map.
     pub scouts: bool,
     /// Watch Towers wanted by the Town Center.
     pub towers: u32,
+    /// Barracks wanted: a second one trains the army twice as fast.
+    pub barracks: u32,
 }
 
 /// The buildings that count toward the next age, in the order they are
@@ -79,42 +82,45 @@ impl BuildOrder {
                 attack_by: 18_000,
                 scouts: false,
                 towers: 0,
+                barracks: 1,
             },
             Difficulty::Standard => BuildOrder {
                 villagers: [8, 16, 22, 26],
                 shares: [
                     [60, 40, 0, 0],
-                    [45, 35, 5, 15],
-                    [40, 30, 10, 20],
-                    [40, 30, 10, 20],
+                    [45, 40, 5, 10],
+                    [40, 40, 5, 15],
+                    [40, 40, 5, 15],
                 ],
                 cadence: 20,
                 headroom: 3,
                 last_age: Age::Bronze,
                 rebalances: true,
-                army: [4, 10, 16, 20],
-                attack_size: 6,
-                attack_by: 12_000,
+                army: [4, 14, 20, 24],
+                attack_size: 12,
+                attack_by: 21_000,
                 scouts: true,
                 towers: 0,
+                barracks: 1,
             },
             Difficulty::Hard | Difficulty::Hardest => BuildOrder {
                 villagers: [10, 20, 28, 32],
                 shares: [
                     [60, 40, 0, 0],
-                    [45, 35, 5, 15],
-                    [40, 30, 10, 20],
-                    [40, 30, 10, 20],
+                    [45, 40, 5, 10],
+                    [40, 40, 5, 15],
+                    [40, 40, 5, 15],
                 ],
                 cadence: 10,
                 headroom: 4,
                 last_age: Age::Iron,
                 rebalances: true,
-                army: [6, 14, 24, 30],
-                attack_size: 8,
-                attack_by: 9_000,
+                army: [6, 24, 32, 36],
+                attack_size: 20,
+                attack_by: 24_000,
                 scouts: true,
                 towers: 1,
+                barracks: 2,
             },
         }
     }
@@ -187,15 +193,6 @@ impl Economy {
         };
         let seen = view.sightings();
         let mine: Vec<&Sighting> = seen.iter().filter(|s| s.owner == view.player()).collect();
-        // Homeless: nothing this manager can do yet.
-        let Some(tc) = mine
-            .iter()
-            .find(|s| s.kind == kinds::TOWN_CENTER && !s.site)
-            .copied()
-        else {
-            return out;
-        };
-        let tc_tile = tile(tc.pos);
         let age = me.age.index().min(3);
         let villagers: Vec<&Sighting> = mine
             .iter()
@@ -205,9 +202,28 @@ impl Economy {
         // Those sheltering count toward the target too: a raid is not a
         // reason to train a second workforce.
         let villagers_all = mine.iter().filter(|s| s.kind == kinds::VILLAGER).count() as u32;
+        // Home is the Town Center; without one (it fell, or is not built
+        // yet) it is any finished building of ours, or where the villagers
+        // are. A side with nothing at all has nothing to manage.
+        let tc = mine
+            .iter()
+            .find(|s| s.kind == kinds::TOWN_CENTER && !s.site)
+            .copied();
+        let Some(home_pos) = tc
+            .map(|t| t.pos)
+            .or_else(|| {
+                mine.iter()
+                    .find(|s| kinds::info(s.kind).footprint > 0 && !s.site)
+                    .map(|s| s.pos)
+            })
+            .or_else(|| villagers.first().map(|v| v.pos))
+        else {
+            return out;
+        };
+        let tc_tile = tile(home_pos);
         // `stock` is spent as orders go out, so two orders in one thought
         // do not both count the same wood.
-        let queued = view.queue(tc.id);
+        let queued = tc.map(|t| view.queue(t.id)).unwrap_or_default();
         let queued_villagers = queued
             .iter()
             .filter(|i| **i == Item::Unit(kinds::VILLAGER))
@@ -352,6 +368,31 @@ impl Economy {
             }
         }
 
+        // ----- No Town Center: the first thing to build is one, where
+        // what is left of the settlement stands.
+        if tc.is_none()
+            && !pending(&self.ordered, kinds::TOWN_CENTER)
+            && view.can_build(kinds::TOWN_CENTER).is_ok()
+        {
+            let cost = kinds::info(kinds::TOWN_CENTER).cost;
+            if afford(stock, &cost) {
+                if let Some((x, y)) = place(view, kinds::TOWN_CENTER, tc_tile, 1, 10, rng) {
+                    if let Some(b) = builder(&villagers, fogged::nav::centre((x, y)), None, &taken)
+                    {
+                        out.push(CommandKind::Build {
+                            kind: kinds::TOWN_CENTER,
+                            x,
+                            y,
+                            ids: vec![b],
+                        });
+                        spend(stock, &cost);
+                        self.ordered.push((kinds::TOWN_CENTER, tick));
+                        taken.push(b);
+                    }
+                }
+            }
+        }
+
         // ----- Houses ahead of the cap (`GD-POP`): one at a time.
         if me.pop_cap < view.pop_cap_max()
             && me.pop_cap.saturating_sub(me.pop) <= order.headroom + queued_villagers
@@ -429,7 +470,7 @@ impl Economy {
         // ----- The age gate: the buildings the next age needs, then the
         // advance itself.
         self.saving = [0; 4];
-        if me.age.index() < order.last_age.index() {
+        if let (Some(tc), true) = (tc, me.age.index() < order.last_age.index()) {
             if let Some(next) = tech::age_advance(me.age) {
                 if !queued.contains(&Item::Tech(next.id)) {
                     match view.can_research(tc.id, next.id) {
@@ -466,7 +507,7 @@ impl Economy {
                 }
                 // The Storehouse goes by the wood it will take in; the rest
                 // by the Town Center.
-                let (around, min, max) = match nearest(Resource::Wood, tc.pos) {
+                let (around, min, max) = match nearest(Resource::Wood, home_pos) {
                     Some(tree) if kind == kinds::STOREHOUSE => (tile(tree.pos), 2, 5),
                     _ => (tc_tile, 4, 10),
                 };
@@ -490,16 +531,18 @@ impl Economy {
 
         // ----- Villagers, while under the target and the queue is short.
         let cost = kinds::info(kinds::VILLAGER).cost;
-        if villagers_all + queued_villagers < order.villagers[age]
-            && queued_villagers < 2
-            && afford(stock, &cost)
-            && view.can_train(tc.id, kinds::VILLAGER).is_ok()
-        {
-            out.push(CommandKind::Train {
-                building: tc.id,
-                kind: kinds::VILLAGER,
-            });
-            spend(stock, &cost);
+        if let Some(tc) = tc {
+            if villagers_all + queued_villagers < order.villagers[age]
+                && queued_villagers < 2
+                && afford(stock, &cost)
+                && view.can_train(tc.id, kinds::VILLAGER).is_ok()
+            {
+                out.push(CommandKind::Train {
+                    building: tc.id,
+                    kind: kinds::VILLAGER,
+                });
+                spend(stock, &cost);
+            }
         }
 
         // ----- Idle villagers to the resource furthest below its share.
@@ -544,7 +587,7 @@ impl Economy {
                         .filter(|v| v.job == Job::Gathering(from) && !taken.contains(&v.id))
                         .min_by_key(|v| v.id)
                         .copied();
-                    if let (Some(v), Some(node)) = (mover, nearest(to, tc.pos)) {
+                    if let (Some(v), Some(node)) = (mover, nearest(to, home_pos)) {
                         out.push(go(v.id, &node));
                     }
                 }
@@ -561,10 +604,12 @@ impl Economy {
                 let i = r.index();
                 (want(i) as i32 - have[i] as i32, shares[i], 3 - i)
             });
-        if let Some(node) = wanted
-            .and_then(|r| nearest(r, tc.pos))
-            .filter(|n| n.left.is_some())
-        {
+        if let (Some(tc), Some(node)) = (
+            tc,
+            wanted
+                .and_then(|r| nearest(r, home_pos))
+                .filter(|n| n.left.is_some()),
+        ) {
             if self.rally != Some(node.id) {
                 out.push(CommandKind::SetRally {
                     building: tc.id,

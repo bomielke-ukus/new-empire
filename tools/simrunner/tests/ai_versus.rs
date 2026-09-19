@@ -25,7 +25,7 @@ fn the_first_recorded_match_plays_out_as_recorded() {
         .expect("ticks in the record");
     let setup = Setup {
         seed: 1,
-        ticks: ticks.max(36_000),
+        ticks: ticks.max(48_000),
         size: 96,
         difficulties: vec![Difficulty::Hard, Difficulty::Easy],
     };
