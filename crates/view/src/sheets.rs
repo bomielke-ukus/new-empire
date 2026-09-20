@@ -266,21 +266,41 @@ fn read_indexed_png(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
     Ok((width, height, buf))
 }
 
-/// The sprite directory: `assets/sprites` in the current directory or any
-/// ancestor, so the game and its tools find the same art whether run from
-/// the repository root, a crate directory, or an installed layout.
+/// The sprite directory: the first of [`candidates`] that exists. An
+/// installed game finds the art it shipped with, beside its binary or in
+/// its bundle's `Resources`; run from the repository, the game and its
+/// tools find `assets/sprites` from the root, a crate directory or
+/// `target/release` alike.
 pub fn default_dir() -> Option<PathBuf> {
-    let mut dir = std::env::current_dir().ok()?;
-    for _ in 0..6 {
-        let candidate = dir.join("assets").join("sprites");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-        if !dir.pop() {
-            break;
+    let exe = std::env::current_exe().ok();
+    let cwd = std::env::current_dir().ok();
+    candidates(exe.as_deref(), cwd.as_deref())
+        .into_iter()
+        .find(|c| c.is_dir())
+}
+
+/// Where `assets/sprites` is looked for, in order, for a binary at `exe`
+/// run from `cwd`: beside the binary; in a macOS bundle's
+/// `Contents/Resources`, which sits beside the binary's `Contents/MacOS`;
+/// then `cwd` and up to five ancestors. Pure, so the layouts are testable.
+pub fn candidates(exe: Option<&Path>, cwd: Option<&Path>) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Some(bin_dir) = exe.and_then(Path::parent) {
+        out.push(bin_dir.join("assets").join("sprites"));
+        if let Some(contents) = bin_dir.parent() {
+            out.push(contents.join("Resources").join("assets").join("sprites"));
         }
     }
-    None
+    if let Some(cwd) = cwd {
+        let mut dir = cwd.to_path_buf();
+        for _ in 0..6 {
+            out.push(dir.join("assets").join("sprites"));
+            if !dir.pop() {
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// Every manifest under `dir/*/*.ron`, sorted.
@@ -327,6 +347,37 @@ mod tests {
 
     fn repo_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    /// A double-clicked bundle runs from `/`, where no ancestor holds
+    /// the art: the binary's own bundle is looked in first, then a plain
+    /// install beside the binary, then the working directory and its
+    /// ancestors, which is how a checkout finds the committed sets.
+    #[test]
+    fn a_bundle_and_an_install_find_their_own_art_before_the_working_directory() {
+        let exe = Path::new("/Applications/New Empire.app/Contents/MacOS/new-empire");
+        let c = candidates(Some(exe), Some(Path::new("/")));
+        assert_eq!(
+            c[0],
+            Path::new("/Applications/New Empire.app/Contents/MacOS/assets/sprites")
+        );
+        assert_eq!(
+            c[1],
+            Path::new("/Applications/New Empire.app/Contents/Resources/assets/sprites")
+        );
+        assert_eq!(c[2], Path::new("/assets/sprites"));
+        assert_eq!(c.len(), 3, "the root has no ancestors");
+        let c = candidates(
+            Some(Path::new("/repo/target/release/mapview")),
+            Some(Path::new("/repo/crates/view")),
+        );
+        assert!(c.contains(&PathBuf::from("/repo/assets/sprites")));
+        assert_eq!(candidates(None, None), Vec::<PathBuf>::new());
+        assert_eq!(
+            default_dir().as_deref().map(|d| d.file_name()),
+            Some(Some(std::ffi::OsStr::new("sprites"))),
+            "the test binary runs in the checkout, which has the art"
+        );
     }
 
     #[test]
