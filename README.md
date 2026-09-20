@@ -61,6 +61,22 @@ cargo run -p atlas -- validate               # art conformance gate
 cargo run -p atlas -- rig                    # render rig, checked against the specs
 ```
 
+### Testing a build on a Mac
+
+Every push to `main`, and a manual run of the **Mac build** workflow under
+the repository's Actions tab, builds `New Empire.app` for Apple Silicon and
+attaches it to the run as the artifact `New-Empire-macOS-<commit>`, kept
+for thirty days. On the Mac: open the run, download the artifact, and
+unzip the `New Empire.zip` inside it to get `New Empire.app`. The bundle
+is ad-hoc signed and not notarised, so the first launch is refused. On
+macOS 15 and later: open it once, click Done, then in System Settings,
+Privacy & Security, scroll to the note that "New Empire" was blocked and
+click Open Anyway. On older macOS, Control-click the app and choose Open.
+After that it opens normally. Saves, recordings and settings go to
+`~/Library/Application Support/new-empire/` as with any other build.
+`scripts/bundle-mac.sh` builds the same bundle from a checkout on a Mac,
+into `target/bundle/`.
+
 The game opens on a title screen: `Enter` or NEW GAME opens the skirmish
 setup (map size, opponents and their difficulties, population cap, seed,
 with the map previewed); `Enter` or START begins the match. LOAD GAME
@@ -123,7 +139,8 @@ Workspace layout:
 | `tools/atlas` | Art gate: bakes the palette, validates sprite sets, generates placeholders, quantises and composes renders |
 | `tools/render` | Blender scripts for the frozen camera and light rig, and the render driver |
 | `tools/gen` | Generators for committed tables (trig) |
-| `scripts` | CI checks |
+| `scripts` | CI checks, and the Mac bundle |
+| `packaging/macos` | The `Info.plist` template `scripts/bundle-mac.sh` fills in |
 | `assets/palette` | The 256-colour indexed palette, with the reserved player-colour ramp |
 | `assets/render` | The frozen render rig every sprite is rendered through |
 | `assets/sprites` | Rendered art (needs Blender, so committed rather than regenerated) |

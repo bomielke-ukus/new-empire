@@ -964,6 +964,31 @@ what was done:
   grey the button and say why), no notice for an idle unit at a rally.
   The M6 run has not been done by hand on the Mac; `docs/06` says so.
 
+### Work record: a downloadable Mac build (2026-09-20)
+
+- The owner asked for a build to test on the Mac. Nothing in the
+  development environment can produce one (Linux, no Apple SDK), so CI
+  does: `.github/workflows/mac-build.yml` builds `New Empire.app` on an
+  Apple Silicon runner on every push to `main` and on demand, and attaches
+  it to the run as `New-Empire-macOS-<commit>` for thirty days.
+  `scripts/bundle-mac.sh` lays the bundle out (the release binary,
+  `assets/sprites`, `packaging/macos/Info.plist` with the version and run
+  number filled in, `PkgInfo`), ad-hoc signs it and zips it with `ditto`,
+  which keeps the bundle's permissions. Without those tools it still
+  assembles the layout, which is how it was dry-run on Linux.
+- A double-clicked bundle runs with `/` as its working directory, where
+  the old lookup (`assets/sprites` in the working directory or an
+  ancestor) finds nothing, and the game would have fallen back to
+  placeholders without a word. `view::sheets::candidates` now looks beside
+  the binary and in `Contents/Resources` first, then the working directory
+  and its ancestors. A unit test pins the order; `mapview` copied into a
+  bundle layout and run from an empty directory loaded the villager set.
+- The first run of the workflow was by hand on the development branch;
+  `main` builds on its next push.
+- Not done: the bundle is not notarised, so the first launch of a
+  downloaded copy goes through Privacy & Security, Open Anyway (the
+  README says how); it is Apple Silicon only; it has no icon.
+
 ### Resume here next session
 
 **M6 is landed; M7, the feel pass, is next**, per `docs/06`: audio,
@@ -1114,6 +1139,10 @@ Stated so they are not rediscovered.
   the settings screen rebinds the seventeen general keys only. Full
   rebinding needs a per-command capture flow and the HUD's tables read
   through the bindings.
+- **The Mac build is not notarised, Apple Silicon only, and has no icon.**
+  Notarising needs an Apple Developer account and a signing identity in
+  the workflow's secrets; an Intel slice needs a second target and `lipo`;
+  the icon waits on the name (`docs/07` Q5).
 - The age-up **fanfare** waits for audio (M7). The sweep and banner exist.
 - **Auto-reseed is per player**, not per farm as `docs/02` [GD-ECON-05]
   asks. A per-farm flag needs a per-entity toggle in the world store.
@@ -1148,6 +1177,7 @@ scripts/check-traceability.sh                # every landed requirement has a te
 scripts/check-perf.sh                        # bench against perf/budgets.ron
 cargo run -p simrunner -- golden             # the replay corpus still verifies
 cargo test -p mapview --test golden_images   # the pinned frames still render
+scripts/bundle-mac.sh                        # New Empire.app into target/bundle (on a Mac)
 ```
 
 The golden images under `tools/mapview/tests/golden-images/` are the
