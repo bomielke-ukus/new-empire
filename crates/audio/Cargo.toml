@@ -1,0 +1,12 @@
+[package]
+name = "audio"
+description = "Sound as the game asks for it: buses, cues, voice limiting, positional gain, and the sim events that drive them. No device."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Cues are raised by the simulation's events and named by its kinds; the
+# fog decides what the listener may hear.
+sim = { path = "../sim" }

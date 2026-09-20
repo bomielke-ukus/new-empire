@@ -20,6 +20,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: ALSA headers, which the audio device (cpal) builds against
+        run: sudo apt-get update -q && sudo apt-get install -y -q libasound2-dev
       - name: rustfmt
         run: cargo fmt --all --check
       - name: clippy
@@ -59,9 +61,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: software GPU, so the headless render test has a device (Linux)
+      - name: software GPU for the headless render test, ALSA headers for the audio device (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -q && sudo apt-get install -y -q mesa-vulkan-drivers
+        run: sudo apt-get update -q && sudo apt-get install -y -q mesa-vulkan-drivers libasound2-dev
       - name: unit tests
         run: cargo test --workspace
       - name: combat acceptance and counter balance (release, invariant checks)

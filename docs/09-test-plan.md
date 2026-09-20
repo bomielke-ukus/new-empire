@@ -552,6 +552,31 @@ the opponent, quit again, the recording listed and watched to the won
 match's last tick and hash, REPLAY OVER; every step a button or a key
 through the window's handlers. The same run by hand on the Mac is owed.
 
+**M7 chunk 1, audio.** `crates/audio/src/lib.rs` unit tests: twelve chop
+cues at one moment play four, each at its own pitch within five percent,
+a fifth is dropped and chops play again once those end; an
+acknowledgment with four variations never plays the same one twice
+running; a fanfare keeps its key (`TA-AUDIO-01`, `UX-AUDIO-02`); a world
+sound in view plays full and panned to its side, one past the edge is
+quieter but never silent, a cue from nowhere is centred; every cue has a
+folder name that reads back. `placeholder.rs`: every cue has a clip,
+three to five for an acknowledgment, each short, in range and ending in
+silence. `events.rs`, on a real simulation: a villager chopping swings on
+the beat and a delivered load clinks; a fight in the far corner is heard
+by the side that can see it and silent for the side whose fog hides it,
+and the recording replayed as each side and as no one confirms the bell
+and the loss are the loser's alone and the woodline is everyone's who
+can see it; building, training, research and the age advance each raise
+their cue (`TA-AUDIO-02`). `crates/app/src/tests.rs`: a click on the
+player's villager is its selection call and a right-click order its bark,
+each recorded in the same input call before a tick has passed; a panel
+button clicks and a greyed one buzzes; twelve villagers on one tree
+through the app's own tick are at most four chop voices (`UX-AUDIO-01`,
+`UX-AUDIO-02`); the bus volumes step by ten on the settings screen, are
+kept in the file and reach the mixer at once. The settings golden image
+shows the audio column. The device itself is not tested: `kira` opens the
+default output at launch and the game says so once if it cannot.
+
 ### Data files — M3 onward
 
 The startup validator from `docs/04` §9 run as a test: every referenced ID
@@ -575,7 +600,7 @@ one with a `REQ: <id>` marker. `scripts/check-traceability.sh` pairs them up.
 As of this acceptance chunk: **127 declared, 83 claimed by tests, 0 gaps in
 landed work.** M4 closure enables `RM-M4`, `GD-COMBAT` and `GD-STANCE`
 enforcement; M5 added `GD-FOG`, `TA-AI`, `GD-AI` and `RM-M5`; M6 added
-`TA-SAVE`, `RM-M6` and `UX-NOTIFY`. Run the script for current counts. A claim can cover only part
+`TA-SAVE`, `RM-M6`, `UX-NOTIFY`, `UX-AUDIO` and `TA-AUDIO`. Run the script for current counts. A claim can cover only part
 of a requirement: `RM-M4-01` has a separately recorded native readability approval, and
 `TA-PATH-06` still owes player-versus-AI priority in M5.
 

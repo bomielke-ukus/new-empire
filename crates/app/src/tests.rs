@@ -4,6 +4,8 @@
 
 use super::*;
 use ai::Difficulty;
+use audio::Play;
+use sim::Task;
 use sim::{Command, Formation, Item, MapKind, MapSpec, Order, SimConfig, Stance};
 use view::shell::{Field, MapSize};
 use view::{Control, NoticeKind, Settings, ShellButton};
@@ -213,6 +215,8 @@ fn app() -> App {
     app.settings.edge_scroll = false;
     app.settings_path = scratch("helper-settings").join("settings.ron");
     app.apply_settings();
+    // Every sound asked for is recorded, so a test can hear it.
+    app.speaker = Speaker::Recorder(Vec::new());
     // Straight into a match, as the shell would after START. The world is
     // empty until a test spawns into it, which the shell would call a
     // decided match; the results panel is put away so the world takes
@@ -222,6 +226,11 @@ fn app() -> App {
     app.saves_dir = scratch("helper-saves");
     app.replays_dir = scratch("helper-replays");
     app
+}
+
+/// What has played since the last time this was asked.
+fn plays(app: &mut App) -> Vec<Play> {
+    app.speaker.take()
 }
 
 /// A scratch directory for this process, under the system's temp dir.
@@ -1626,4 +1635,136 @@ fn button_enabled(app: &App, label: &str) -> bool {
         .buttons
         .iter()
         .any(|b| b.label == label && b.enabled)
+}
+
+/// The units answer as they are told: a click on one of the player's
+/// villagers is its selection call and a right-click order its bark,
+/// each in the same input call, before a tick has passed; a panel
+/// button clicks and a greyed one buzzes; and twelve villagers on one
+/// tree are at most four chop voices at once, each at its own pitch.
+///
+/// REQ: UX-AUDIO-01
+/// REQ: UX-AUDIO-02
+#[test]
+fn units_answer_at_once_buttons_click_and_a_woodline_is_four_voices() {
+    let mut app = app();
+    two_sides(&mut app);
+    app.clock.set_paused(true);
+    let v = spawn(&mut app, kinds::VILLAGER, 16, 10);
+    app.camera.look_at_tile(16.5, 10.5);
+    draw(&mut app);
+    let _ = plays(&mut app);
+    // Click the middle of its sprite as drawn.
+    let slot = app.sim.world().slot(v).unwrap().index() as u32;
+    let sprite = app
+        .scene
+        .sprites
+        .iter()
+        .find(|s| s.slot == slot && !s.screen)
+        .cloned()
+        .expect("the villager is drawn");
+    let (x0, y0) = app.camera.to_window(sprite.x, sprite.y);
+    let z = app.camera.zoom();
+    let (px, py) = (x0 + sprite.w * z * 0.5, y0 + sprite.h * z * 0.6);
+    app.left_press(px, py);
+    app.left_release(px, py);
+    assert_eq!(app.selection.ids, vec![v], "the click selected it");
+    let heard = plays(&mut app);
+    assert!(
+        heard
+            .iter()
+            .any(|p| p.cue == Cue::Select(Class::Villager) && p.bus == Bus::Voice),
+        "{heard:?}"
+    );
+    let tick = app.sim.tick();
+    let (qx, qy) = on_screen(&app, 20.5, 12.5, 0.0);
+    app.right_press(qx, qy);
+    let heard = plays(&mut app);
+    assert_eq!(app.sim.tick(), tick, "no tick has passed");
+    assert!(
+        heard.iter().any(|p| p.cue == Cue::Ack(Class::Villager)),
+        "the bark: {heard:?}"
+    );
+    // The panel: HOUSE is affordable and clicks; a building the age
+    // refuses buzzes and does not click.
+    draw(&mut app);
+    let house = button(&app, "HOUSE");
+    click(&mut app, &house);
+    let heard = plays(&mut app);
+    assert!(
+        heard
+            .iter()
+            .any(|p| p.cue == Cue::Click && p.bus == Bus::Ui),
+        "{heard:?}"
+    );
+    app.do_action(Action::Cancel);
+    let _ = plays(&mut app);
+    draw(&mut app);
+    let greyed = app
+        .hud
+        .buttons
+        .iter()
+        .find(|b| !b.enabled)
+        .cloned()
+        .expect("something the Stone Age refuses");
+    click(&mut app, &greyed);
+    let heard = plays(&mut app);
+    assert!(heard.iter().any(|p| p.cue == Cue::Invalid), "{heard:?}");
+    assert!(
+        !heard.iter().any(|p| p.cue == Cue::Click),
+        "a refusal is not a click"
+    );
+    // The woodline: twelve on one tree.
+    let tree = spawn(&mut app, kinds::TREE, 24, 24);
+    let ids: Vec<EntityId> = (0..12)
+        .map(|k| spawn(&mut app, kinds::VILLAGER, 20 + k % 4, 20 + k / 4))
+        .collect();
+    app.issue(CommandKind::Gather { ids, node: tree });
+    step(&mut app, 200);
+    // Voices are busy in wall time; let the last ones end.
+    std::thread::sleep(Duration::from_millis(300));
+    let _ = plays(&mut app);
+    // The app's own tick, which is where the events are heard.
+    for _ in 0..sim::WORK_PERIOD {
+        app.tick_once(Instant::now());
+    }
+    let heard = plays(&mut app);
+    let chops: Vec<&Play> = heard
+        .iter()
+        .filter(|p| p.cue == Cue::Work(Task::Chop))
+        .collect();
+    assert!(
+        !chops.is_empty() && chops.len() <= audio::MAX_VOICES,
+        "{} chops in one period: {heard:?}",
+        chops.len()
+    );
+    assert!(chops.iter().all(|p| p.bus == Bus::World));
+    assert!(
+        chops.len() == 1 || chops.iter().any(|p| (p.rate - chops[0].rate).abs() > 1e-4),
+        "the pitches differ"
+    );
+}
+
+/// The four bus volumes are on the settings screen in steps of ten, kept
+/// in the file and applied to the mixer at once.
+#[test]
+fn bus_volumes_are_set_on_the_settings_screen_and_kept() {
+    let mut app = app();
+    app.shell = Shell::Title;
+    press(&mut app, ShellAction::Settings);
+    press(&mut app, ShellAction::Volume(Bus::Music, -1));
+    press(&mut app, ShellAction::Volume(Bus::Music, -1));
+    assert_eq!(app.settings.volume(Bus::Music), 50);
+    assert!((app.mixer.volume(Bus::Music) - 0.5).abs() < 1e-6);
+    let text = std::fs::read_to_string(&app.settings_path).unwrap();
+    assert_eq!(Settings::from_ron(&text).unwrap().volume(Bus::Music), 50);
+    for _ in 0..12 {
+        press(&mut app, ShellAction::Volume(Bus::Ui, -1));
+    }
+    assert_eq!(app.settings.volume(Bus::Ui), 0, "floors at silent");
+    assert_eq!(app.mixer.volume(Bus::Ui), 0.0);
+    press(&mut app, ShellAction::Volume(Bus::Ui, 1));
+    assert_eq!(app.settings.volume(Bus::Ui), 10);
+    press(&mut app, ShellAction::ResetSettings);
+    assert_eq!(app.settings.volume(Bus::Music), 70, "the default");
 }

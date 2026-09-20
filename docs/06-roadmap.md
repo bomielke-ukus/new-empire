@@ -194,7 +194,10 @@ touching a terminal.
 
 **Status: landed 2026-09-19**, with the same caveat as the milestones before
 it: the shell is verified by the app's own handlers and the software
-rasteriser, and the same run by hand on the Mac is owed. The game opens on
+rasteriser. The owner played the downloadable build on the Mac on
+2026-09-20 (the Mac build workflow, `docs/10`) and reported that it plays
+well; the save, load and replay steps by hand there are not separately
+confirmed. The game opens on
 a title screen; a skirmish is set up (map size, one to seven opponents each
 at a difficulty with the Hardest bonus declared beside it, population cap,
 seed, the map previewed) and played against opponents thinking in the
@@ -219,6 +222,16 @@ the game's name (`docs/07` Q5).
 ## M7 — The feel pass ← **vertical slice complete**
 
 *The milestone that decides whether this is the game you remember.*
+
+**Status: in progress since 2026-09-20.** Chunk 1, the audio engine,
+landed: four buses, the units answering orders and selection, the world
+heard where it is through the fog, buttons and refusals, the bell and the
+fanfares, every sound a synthesised placeholder until the recordings
+exist (`docs/07` Q7), the volumes on the settings screen. The plan and
+the record are in `docs/10` §4d. Music and ambience, the visual feedback,
+tooltips and hints, the performance pass and the playtest follow in that
+order; the real sprite art and its animations wait on the art pipeline
+(`docs/08` §9 step 3), which needs a modeller and Blender.
 
 - Full audio: acknowledgments, work loops, positional world SFX, ambience,
   age fanfares, music stems, combat ducking

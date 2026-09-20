@@ -16,10 +16,15 @@ fogged = { path = "../fogged" }
 ai = { path = "../ai" }
 save = { path = "../save" }
 view = { path = "../view" }
+audio = { path = "../audio" }
 render = { path = "../render" }
 winit = "0.30"
 wgpu = "23"
 pollster = "0.4"
+# The device: mixing with a track per bus. `wav` reads the recordings that
+# replace the placeholder sounds; no other decoder until there is something
+# for it to decode.
+kira = { version = "0.12.4", default-features = false, features = ["cpal", "wav"] }
 
 # macOS 26 changed the Objective-C type encoding of `countByEnumeratingWithState:`
 # from unsigned to signed. winit enumerates NSScreen through it at launch, and

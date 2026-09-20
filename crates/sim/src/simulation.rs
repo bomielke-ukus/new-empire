@@ -16,7 +16,7 @@
 //!
 //! Nothing here reads a clock or a float; see the crate docs.
 
-use crate::battle::{Event, Projectile};
+use crate::battle::{Event, Projectile, Task, WORK_PERIOD};
 use crate::combat;
 use crate::command::{Command, CommandKind, CommandQueue, PlayerId, Source};
 use crate::entity::{EntityId, KindId, Slot, World, WorldViolation};
@@ -1757,6 +1757,21 @@ impl Simulation {
                 if matches!(self.world.carry[i], Some((r, _)) if r != resource) {
                     self.world.carry[i] = None;
                 }
+                // The swing, for the ear: once every WORK_PERIOD ticks per
+                // worker, staggered by slot (`TA-AUDIO-02`).
+                if (self.tick + i as u64).is_multiple_of(WORK_PERIOD) {
+                    let task = match resource {
+                        Resource::Wood => Task::Chop,
+                        Resource::Stone | Resource::Gold => Task::Mine,
+                        Resource::Food if self.world.kind[n] == kinds::FARM => Task::Farm,
+                        Resource::Food => Task::Forage,
+                    };
+                    self.events.push(Event::Work {
+                        task,
+                        owner: me,
+                        pos: self.world.pos[i],
+                    });
+                }
                 let modifiers = self.modifiers(me);
                 let rate = modifiers.gather_rate(resource) / TICKS_PER_SECOND as i32;
                 self.world.work[i] += rate;
@@ -1803,6 +1818,12 @@ impl Simulation {
                 if self.within_reach(i, ds) {
                     if let Some((r, amount)) = self.world.carry[i].take() {
                         self.players[me as usize].deposit(r, amount);
+                        self.events.push(Event::Deposited {
+                            owner: me,
+                            resource: r,
+                            amount,
+                            pos: self.world.pos[i],
+                        });
                     }
                     self.world.order[i] = Order::Gather {
                         node,
@@ -2586,6 +2607,14 @@ impl Simulation {
                 if let Some(b) = builders.iter_mut().find(|(id, _)| *id == site) {
                     b.1 += 1;
                 }
+                // The hammer, for the ear (`TA-AUDIO-02`).
+                if (self.tick + s.index() as u64).is_multiple_of(WORK_PERIOD) {
+                    self.events.push(Event::Work {
+                        task: Task::Build,
+                        owner: self.world.owner[s.index()],
+                        pos: self.world.pos[s.index()],
+                    });
+                }
             }
         }
         for (k, site) in sites.iter().enumerate() {
@@ -2608,6 +2637,11 @@ impl Simulation {
             if done >= total {
                 self.world.construction[i] = None;
                 self.world.health[i] = Fx::from_int(info.max_health);
+                self.events.push(Event::Completed {
+                    kind: self.world.kind[i],
+                    owner,
+                    pos: self.world.pos[i],
+                });
                 if let Some((_, base)) = info.resource {
                     // A finished farm is seeded for free; only reseeds cost.
                     self.world.resource[i] = modifiers.farm_yield(base);
@@ -2723,6 +2757,11 @@ impl Simulation {
                 p.queue.remove(0);
             }
             self.players[owner as usize].pop += info.pop_cost;
+            self.events.push(Event::Trained {
+                kind,
+                owner,
+                pos: nav::centre(exit),
+            });
             self.apply_rally(unit, rally);
         }
     }
@@ -2737,6 +2776,7 @@ impl Simulation {
             return;
         };
         p.mark_researched(id);
+        self.events.push(Event::Researched { owner, tech: id });
         let mut upgrades = Vec::new();
         for effect in t.effects {
             match *effect {

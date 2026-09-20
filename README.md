@@ -35,7 +35,8 @@ Read in order:
 ## Building and running
 
 Requires a stable Rust toolchain (`rustup` installs it; `rust-toolchain.toml`
-pins the channel).
+pins the channel). On Linux the audio device builds against ALSA
+(`libasound2-dev`); macOS and Windows need nothing extra.
 
 ```sh
 cargo test --workspace                       # unit tests for every crate
@@ -98,8 +99,8 @@ cycles the HUD size (1×, 1.5×, 2×); `Home` jumps to your Town Center;
 `F1` or `?` opens a controls overlay listing all of this, and the resource
 bar points at it for the first minute of a match. WASD is reserved for
 camera movement. Every one of these general keys can be rebound on the
-title's SETTINGS screen, which also holds the HUD size, edge scrolling and
-the window mode, kept in `settings.ron` in the game's data directory (or
+title's SETTINGS screen, which also holds the HUD size, edge scrolling, the
+window mode and the four sound volumes, kept in `settings.ron` in the game's data directory (or
 `NEW_EMPIRE_SETTINGS`); the command letters on the panels are fixed. The
 game honours the display's scale factor, so 1× is the same apparent size
 on a Retina screen as on any other.
@@ -107,6 +108,15 @@ on a Retina screen as on any other.
 Rendered sprite sets under `assets/sprites` replace the procedural placeholders
 for their kinds at startup (today: the greybox villager). `cargo run -p atlas
 -- repalette` refreshes their palette chunks after a palette colour changes.
+
+The game is heard from the first click: units answer an order and a
+selection, the woodline and the fight sound where they are and only where
+you can see, a button clicks, a greyed one buzzes, the bell tolls for an
+attack and a fanfare for an age. Twelve villagers chopping are four voices
+at once, each at its own pitch. Every sound today is a synthesised
+placeholder; a recording under `assets/sounds/<cue>/*.wav` (`ack-villager`,
+`work-chop`, `alarm`: the names are in `crates/audio/src/lib.rs`) replaces
+it with no code change. There is no music yet.
 
 Play: left-click or drag to select, double-click for all of a kind on screen,
 `Shift` adds, `Ctrl`+`0-9` saves a control group and `0-9` recalls it, `.`
@@ -131,6 +141,7 @@ Workspace layout:
 | `crates/sim` | Deterministic simulation: fixed-point maths, RNG, entity store, command queue, replay, tile map, map generation |
 | `crates/fogged` | One player's view of a match, and nothing else: the interface a computer opponent gets |
 | `crates/ai` | Computer opponents: they issue the same commands a player can and read only a `FoggedView`; depends on `fogged`, never on `sim` |
+| `crates/audio` | Sound as the game asks for it: buses, cues, voice limiting, positional gain, the events that drive them; no device |
 | `crates/view` | Presentation maths: projection, camera, palette, placeholder atlas, terrain mesh, scene, minimap, software rasteriser |
 | `crates/render` | The wgpu renderer: terrain, palette-indexed sprites, minimap |
 | `crates/app` | The game binary: window, GPU surface, input, fixed-timestep clock |

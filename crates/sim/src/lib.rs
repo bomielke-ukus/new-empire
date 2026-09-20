@@ -42,7 +42,7 @@ mod trig_table;
 pub mod vec2;
 
 pub use angle::Angle;
-pub use battle::{Event, Projectile, DECAY_TICKS, RUBBLE_TICKS};
+pub use battle::{Event, Projectile, Task, DECAY_TICKS, RUBBLE_TICKS, WORK_PERIOD};
 pub use combat::{Armour, Elevation};
 pub use command::{
     Command, CommandError, CommandKind, CommandQueue, PlayerId, Source, COMMAND_DELAY,

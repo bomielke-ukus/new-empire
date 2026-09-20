@@ -12,20 +12,24 @@ mod clock;
 mod input;
 mod keys;
 mod selection;
+mod sound;
 
 #[cfg(test)]
 mod tests;
 
 use ai::Opponent;
+use audio::{Bus, Cue};
 use clock::FixedClock;
 use fogged::FoggedView;
 use input::Input;
 use selection::Selection;
 use sim::kinds;
 use sim::tech;
+use sim::Class;
 use sim::{
     Age, Command, CommandKind, EntityId, Rally, Replay, Simulation, Source, Vec2Fx, TICK_MS,
 };
+use sound::Speaker;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -243,6 +247,12 @@ struct App {
     /// How many technologies the viewer had last frame, to notice a new
     /// one.
     last_researched: usize,
+    /// What plays: the mixer decides (`docs/04` §8).
+    mixer: audio::Mixer,
+    /// Where it plays: the device, a recorder in tests, or nowhere.
+    speaker: Speaker,
+    /// When the app started: the mixer's clock, wall time.
+    started: Instant,
 }
 
 /// A world position as a tile for the camera and the notices.
@@ -358,6 +368,16 @@ impl App {
         if !atlas.loaded_sets.is_empty() {
             eprintln!("rendered sprite sets: {}", atlas.loaded_sets.join(", "));
         }
+        // Recordings under assets/sounds replace the placeholder sounds by
+        // cue name, as rendered sprite sets replace placeholder art.
+        let mut library = audio::placeholder::library();
+        let recorded = view::sheets::default_dir()
+            .and_then(|d| d.parent().map(|p| p.join("sounds")))
+            .map(|dir| sound::recordings(&dir, &mut library))
+            .unwrap_or_default();
+        if !recorded.is_empty() {
+            eprintln!("recorded sounds: {}", recorded.join(", "));
+        }
         App {
             window: None,
             gpu: None,
@@ -415,6 +435,9 @@ impl App {
             settings_error: None,
             notices: Notices::default(),
             last_researched: 0,
+            mixer: audio::Mixer::new(library),
+            speaker: Speaker::Silent,
+            started: Instant::now(),
         }
     }
 
@@ -443,6 +466,11 @@ impl App {
     /// pan keys the camera reads while held, and the window mode.
     fn apply_settings(&mut self) {
         self.ui_scale_user = self.settings.ui_scale;
+        for bus in Bus::ALL {
+            let volume = f32::from(self.settings.volume(bus)) / 100.0;
+            self.mixer.set_volume(bus, volume);
+            self.speaker.set_volume(bus, volume);
+        }
         self.input.edge_scroll = self.settings.edge_scroll;
         self.input.pan = [
             Control::PanUp,
@@ -539,7 +567,70 @@ impl App {
         if self.playback.is_some() {
             return;
         }
+        // The units answer the moment they are told (`UX-AUDIO-01`): the
+        // bark is the command's, not the tick's, which is two ticks off.
+        let voice = match &kind {
+            CommandKind::Move { ids, .. }
+            | CommandKind::Stop { ids }
+            | CommandKind::Gather { ids, .. }
+            | CommandKind::Build { ids, .. }
+            | CommandKind::Assist { ids, .. }
+            | CommandKind::Attack { ids, .. }
+            | CommandKind::AttackMove { ids, .. }
+            | CommandKind::Patrol { ids, .. }
+            | CommandKind::Garrison { ids, .. } => self.voice_of(ids),
+            _ => None,
+        };
+        if let Some(class) = voice {
+            self.cue(Cue::Ack(class), None);
+        }
         self.sim.issue(Command { player: ME, kind });
+    }
+
+    /// Milliseconds since the app started: the mixer's clock. Wall time,
+    /// so a voice is busy for its clip's length whatever the match does.
+    fn now_ms(&self) -> u64 {
+        self.started.elapsed().as_millis() as u64
+    }
+
+    /// Asks for a sound, from a tile or from nowhere in particular; the
+    /// mixer decides whether and how it plays, and the speaker plays it.
+    fn cue(&mut self, cue: Cue, at: Option<(f32, f32)>) {
+        let at = at.map(|(x, y)| view::iso::project(x, y, 0.0));
+        let now = self.now_ms();
+        if let Some(play) = self.mixer.cue(cue, at, now) {
+            if let Some(clip) = self.mixer.library().clip(play.cue, play.variant) {
+                self.speaker.play(&play, clip);
+            }
+        }
+    }
+
+    /// The class that answers for some of the player's units: the first
+    /// mobile one's.
+    fn voice_of(&self, ids: &[EntityId]) -> Option<Class> {
+        let world = self.sim.world();
+        ids.iter().find_map(|id| {
+            let i = world.slot(*id)?.index();
+            let info = kinds::info(world.kind[i]);
+            (world.owner[i] == ME && info.mobile).then_some(info.class)
+        })
+    }
+
+    /// The selection answers: the first of the player's units in it.
+    fn selection_sound(&mut self) {
+        if let Some(class) = self.voice_of(&self.selection.ids) {
+            self.cue(Cue::Select(class), None);
+        }
+    }
+
+    /// Opens the audio device; without one the game is silent and says
+    /// so once.
+    fn open_speaker(&mut self) {
+        match sound::Device::open(self.mixer.library()) {
+            Ok(device) => self.speaker = Speaker::Device(Box::new(device)),
+            Err(e) => eprintln!("warning: no audio device: {e}"),
+        }
+        self.apply_settings();
     }
 
     /// The player whose panel the HUD shows.
@@ -673,6 +764,12 @@ impl App {
         }
         self.sim.step();
         self.feedback.observe(&self.sim);
+        // What the tick sounded like, through the viewer's fog
+        // (`TA-AUDIO-02`).
+        let viewer = self.viewer;
+        for (cue, at) in audio::events::cues(&self.sim, viewer) {
+            self.cue(cue, at);
+        }
         // What happened to the side goes on the stack (`docs/03` §6.3);
         // an attack also raises the banner.
         let me = self.hud_player();
@@ -708,6 +805,13 @@ impl App {
         if !self.overlay() {
             self.input.update_camera(&mut self.camera, dt);
         }
+        // The listener is the camera: the centre of the view, and how far
+        // the view reaches from it (`docs/03` §6.1).
+        let (l, t, r, b) = self.camera.visible_rect();
+        self.mixer.set_listener(audio::Listener {
+            focus: self.camera.focus,
+            half: ((r - l) * 0.5, (b - t) * 0.5),
+        });
         let ticks = self.clock.advance(now);
         for _ in 0..ticks {
             if self.playback_over() {
@@ -1160,6 +1264,7 @@ impl App {
             .cloned()
         {
             if b.enabled {
+                self.cue(Cue::Click, None);
                 self.shell_action(b.action);
             }
         }
@@ -1183,6 +1288,10 @@ impl App {
             }
             ShellAction::SettingScale(delta) => {
                 self.settings.cycle_scale(delta);
+                self.apply_and_save_settings();
+            }
+            ShellAction::Volume(bus, steps) => {
+                self.settings.step_volume(bus, steps);
                 self.apply_and_save_settings();
             }
             ShellAction::ToggleEdgeScroll => {
@@ -1471,6 +1580,10 @@ impl App {
             {
                 if b.enabled && self.playback.is_none() {
                     self.do_action(b.action);
+                } else if self.playback.is_none() {
+                    // A greyed button buzzes: the refusal is heard as well
+                    // as read (`docs/03` §8).
+                    self.cue(Cue::Invalid, None);
                 }
             }
             return;
@@ -1532,6 +1645,7 @@ impl App {
             } else {
                 self.selection.set(ids);
             }
+            self.selection_sound();
             return;
         }
         // A click.
@@ -1549,6 +1663,7 @@ impl App {
                         let same =
                             selection::same_kind_on_screen(&self.sim, &self.camera, ME, kind);
                         self.selection.set(same);
+                        self.selection_sound();
                         return;
                     }
                 }
@@ -1557,6 +1672,7 @@ impl App {
                 } else {
                     self.selection.set(vec![id]);
                 }
+                self.selection_sound();
             }
             None => {
                 if !shift {
@@ -1664,6 +1780,9 @@ impl App {
     }
 
     fn do_action(&mut self, action: Action) {
+        // A button answers as it is pressed (`UX-AUDIO-01`), from the
+        // panel or its key alike.
+        self.cue(Cue::Click, None);
         match action {
             Action::Jump(row) => {
                 if let Some((x, y)) = self.notices.shown().get(row).and_then(|n| n.tile) {
@@ -1864,6 +1983,7 @@ impl App {
             } else if !self.selection.groups[d].is_empty() {
                 let g = self.selection.groups[d].clone();
                 self.selection.set(g);
+                self.selection_sound();
             }
             return false;
         }
@@ -1907,6 +2027,7 @@ impl App {
                     let p = self.sim.world().pos[i];
                     self.camera
                         .look_at_tile(view::fx_to_f32(p.x), view::fx_to_f32(p.y));
+                    self.selection_sound();
                 }
             }
             Some(Control::Eyes) if self.playback.is_some() => {
@@ -2200,5 +2321,6 @@ fn main() {
     let event_loop = EventLoop::new().expect("event loop");
     let mut app = App::new();
     app.load_settings();
+    app.open_speaker();
     event_loop.run_app(&mut app).expect("event loop failed");
 }

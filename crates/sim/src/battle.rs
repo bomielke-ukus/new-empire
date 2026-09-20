@@ -11,10 +11,11 @@ use crate::command::PlayerId;
 use crate::entity::{EntityId, KindId, Slot};
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
-use crate::kinds::{self, DamageType, GAIA};
+use crate::kinds::{self, DamageType, Resource, GAIA};
 use crate::nav;
 use crate::orders::{Nav, NavState, Order, Stance, Then};
 use crate::simulation::{Simulation, REACH, REACH_SLACK, TICKS_PER_SECOND};
+use crate::tech::TechId;
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
 
@@ -79,6 +80,26 @@ impl HashState for Projectile {
     }
 }
 
+/// What a villager is swinging at, for the ear (`docs/05` §5.1: one work
+/// loop per gather task, and building).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Task {
+    /// An axe on a tree.
+    Chop,
+    /// A pick on stone or gold.
+    Mine,
+    /// Hands in a bush.
+    Forage,
+    /// A hoe on a farm.
+    Farm,
+    /// A hammer on a site.
+    Build,
+}
+
+/// A working villager swings once every this many ticks, staggered by
+/// slot, so a woodline of twelve is a rhythm and not a single blow.
+pub const WORK_PERIOD: u64 = 16;
+
 /// Something the presentation layer may want to react to. Cleared every
 /// tick; not state, so not hashed or saved.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -103,6 +124,51 @@ pub enum Event {
     Death {
         /// What.
         kind: KindId,
+        /// Whose.
+        owner: PlayerId,
+        /// Where.
+        pos: Vec2Fx,
+    },
+    /// A building finished.
+    Completed {
+        /// What.
+        kind: KindId,
+        /// Whose.
+        owner: PlayerId,
+        /// Where.
+        pos: Vec2Fx,
+    },
+    /// A unit stepped out of the building that trained it.
+    Trained {
+        /// What.
+        kind: KindId,
+        /// Whose.
+        owner: PlayerId,
+        /// Where it stands.
+        pos: Vec2Fx,
+    },
+    /// A technology finished for a player; an age advance is one.
+    Researched {
+        /// Whose.
+        owner: PlayerId,
+        /// Which.
+        tech: TechId,
+    },
+    /// A load reached a stockpile.
+    Deposited {
+        /// Whose.
+        owner: PlayerId,
+        /// What.
+        resource: Resource,
+        /// How much.
+        amount: i32,
+        /// Where the villager stood.
+        pos: Vec2Fx,
+    },
+    /// A working villager's swing, once every [`WORK_PERIOD`] ticks.
+    Work {
+        /// At what.
+        task: Task,
         /// Whose.
         owner: PlayerId,
         /// Where.

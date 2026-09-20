@@ -1272,3 +1272,53 @@ siege are still owed, and a human will find this opponent predictable.
   exercised as the player does it; the sprites and the window are not,
   which is what the Mac pass is for.
 
+---
+
+## 35. Implementation notes from M7, chunk 1: audio
+
+- **The split.** `crates/audio` is pure: it knows the buses (§8), the
+  cues the game raises, the clips, and the rules that decide what plays.
+  It never touches a device. The app owns the device (`crates/app/src/sound.rs`,
+  `kira` with a sub-track per bus) and a test owns a recorder instead, so
+  everything about sound short of the loudspeaker is verified headless,
+  the way the software rasteriser verifies the renderer.
+- **Events, not polling (`TA-AUDIO-02`).** The simulation gained five
+  events beside `Hit`, `Alarm` and `Death`: `Completed`, `Trained`,
+  `Researched`, `Deposited` and `Work`. `Work` is the swing: a villager
+  gathering within reach, or building, raises it once every
+  `WORK_PERIOD` (16) ticks, staggered by slot, so twelve on a woodline
+  are a rhythm and not one blow. Events are cleared each tick and are
+  not state: not hashed, not saved, so the corpus digests did not move.
+  `audio::events::cues` maps a tick's events to cues through one
+  player's fog; a positional event the viewer cannot see is dropped, and
+  a side's own hits and deaths are always heard, since a dying unit is
+  the last thing its side sees of the tile. No side's news (the bell,
+  the loss, the research note) plays for a replay watched through every
+  eye.
+- **The rules (`TA-AUDIO-01`, `UX-AUDIO-02`).** The mixer keeps a voice
+  per playing cue with its end time on the wall clock; a fifth of one cue
+  is dropped. Each play is pitched within ±5% by the mixer's own
+  generator, never the sim's; a fanfare is exempt, since a tune in a new
+  key each time is wrong. Variations are chosen round-robin with a
+  shuffle, never the same twice running. A world sound's gain and pan
+  come from the listener, which is the camera: full and panned within the
+  view, quieter past its edge down to a floor of 0.2 at two half-widths
+  out, never silent, so the economy is heard running (`docs/03` §6.1).
+- **Fifty milliseconds (`UX-AUDIO-01`).** The bark is raised in the
+  input handler that issues the command, before the command is even
+  queued, so it is not two ticks behind the click; selection, buttons
+  and refusals likewise. A frame is under sixteen milliseconds.
+- **Placeholders.** `placeholder.rs` synthesises a clip for every cue at
+  22,050 Hz: a two-note bark whose voice is the class and whose contour
+  is the variation, thuds and clicks for the tools, a bell of partials,
+  four-note fanfares whose intervals widen with the age. Recordings
+  under `assets/sounds/<cue>/*.wav` replace them by name at launch, in
+  file order as the variations, decoded by `kira` and folded to mono.
+- **Volumes.** Four percentages in `settings.ron` (`volumes`, defaulting
+  to full with the music at 70), a column on the settings screen, applied
+  to the mixer and the device's tracks at once. An older file takes the
+  defaults.
+- **Not done.** Music, the combat stem and the ambient beds (chunk 2);
+  the notification cues beyond the bell, the loss and the research note
+  (chunk 4); the device on Linux needs ALSA headers to build, which CI
+  installs.

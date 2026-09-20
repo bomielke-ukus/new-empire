@@ -5,6 +5,7 @@
 //! rebound here; a general key may not take one of them.
 
 use crate::hud::command_letters;
+use audio::Bus;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -142,7 +143,14 @@ pub struct Settings {
     /// (`KeyW`, `F5`, `BracketRight`). A control left out keeps its
     /// default.
     pub bindings: BTreeMap<Control, String>,
+    /// Each bus's volume in percent, in [`Bus::ALL`] order.
+    pub volumes: [u8; 4],
 }
+
+/// The volumes out of the box: everything full, the music under it.
+pub const DEFAULT_VOLUMES: [u8; 4] = [100, 100, 100, 70];
+/// A step on the settings screen, percent.
+pub const VOLUME_STEP: i32 = 10;
 
 impl Default for Settings {
     fn default() -> Settings {
@@ -154,6 +162,7 @@ impl Default for Settings {
                 .iter()
                 .map(|c| (*c, c.default_key().to_string()))
                 .collect(),
+            volumes: DEFAULT_VOLUMES,
         }
     }
 }
@@ -194,6 +203,18 @@ impl Settings {
         }
         self.bindings.insert(control, key.to_string());
         Ok(())
+    }
+
+    /// A bus's volume, percent.
+    pub fn volume(&self, bus: Bus) -> u8 {
+        self.volumes[bus.index()]
+    }
+
+    /// A bus's volume up or down by [`VOLUME_STEP`] per step, from silent
+    /// to full.
+    pub fn step_volume(&mut self, bus: Bus, steps: i32) {
+        let v = i32::from(self.volumes[bus.index()]) + steps * VOLUME_STEP;
+        self.volumes[bus.index()] = v.clamp(0, 100) as u8;
     }
 
     /// Everything back to the defaults.
@@ -333,6 +354,16 @@ mod tests {
         assert_eq!(old.ui_scale, 1.5);
         assert!(old.edge_scroll);
         assert_eq!(old.key(Control::Pause), "Space");
+        assert_eq!(old.volumes, DEFAULT_VOLUMES, "a file from before the buses");
+        s.step_volume(Bus::Music, -2);
+        assert_eq!(s.volume(Bus::Music), 50);
+        s.step_volume(Bus::Music, -9);
+        assert_eq!(s.volume(Bus::Music), 0, "floors at silent");
+        s.step_volume(Bus::Music, 1);
+        assert_eq!(s.volume(Bus::Music), 10);
+        s.step_volume(Bus::Ui, 3);
+        assert_eq!(s.volume(Bus::Ui), 100, "caps at full");
+        assert_eq!(Settings::from_ron(&s.to_ron().unwrap()).unwrap(), s);
         assert!(Settings::from_ron("(ui_scale: \"big\")").is_err());
         assert_eq!(pretty("KeyW"), "W");
         assert_eq!(pretty("ArrowUp"), "UP");

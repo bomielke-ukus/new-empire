@@ -24,7 +24,8 @@ Six milestones landed; the vertical slice wants only the feel pass, M7.
 | M3 — Ages, production and technology | **Landed 2026-09-11** | Stone → Tool → Bronze in a live match, with the settlement visibly changing at each transition |
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
-| M6 — Game shell | **Landed 2026-09-19** | Configure, play, save, reload and watch a replay without a terminal: the run in `crates/app/src/tests.rs`, the Mac pass owed |
+| M6 — Game shell | **Landed 2026-09-19** | Configure, play, save, reload and watch a replay without a terminal: the run in `crates/app/src/tests.rs`; the owner played the Mac build 2026-09-20 |
+| M7 — The feel pass | **In progress since 2026-09-20** | Chunk 1, audio, landed; music, visual feedback, tooltips and hints, the performance pass and the playtest follow (§4d) |
 | M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
@@ -60,6 +61,11 @@ plays one back with pause and speed, through any side's eyes or
 everyone's. SETTINGS holds the HUD size, edge scrolling, the window mode
 and every general key, kept in a file. A stack in the lower left names
 attacks, losses, research and ages, and a click on one looks there.
+The game is heard: units answer an order and a click, the woodline and
+the fight sound where they are and only where the player can see, a
+button clicks and a greyed one buzzes, the bell tolls for an attack and
+a fanfare for an age, every sound a synthesised placeholder for now.
+SETTINGS holds the four volumes.
 
 ```sh
 cargo run --release -p new-empire           # the game window
@@ -989,16 +995,59 @@ what was done:
   downloaded copy goes through Privacy & Security, Open Anyway (the
   README says how); it is Apple Silicon only; it has no icon.
 
+### Work record: M7 chunk 1 — the audio engine (2026-09-20)
+
+- The owner played the downloadable Mac build and reported that it plays
+  well, which closes the Mac pass owed on M6 as far as playing goes; the
+  save, load and replay steps by hand on the Mac are not separately
+  confirmed. `docs/06` M6 says so.
+- `crates/audio`, pure: `Bus` (UI, voices, world, music), `Cue` (the
+  bark and the selection call per class, the swing per task, hits on
+  units and buildings, deaths per class, completed, trained, deposited,
+  research, a fanfare per age, click, invalid, alarm, loss), `Clip`,
+  `Library`, `Listener`, `Play` and `Mixer`: four voices per cue on the
+  wall clock, ±5% pitch from the mixer's own generator, round-robin
+  never twice running, gain and pan from the listener with an
+  off-screen floor of 0.2 (`TA-AUDIO-01`, `UX-AUDIO-02`).
+  `placeholder.rs` synthesises every cue's clips at 22,050 Hz.
+  `events.rs` maps a tick's events to cues through one player's fog
+  (`TA-AUDIO-02`).
+- `crates/sim`: `Task` and `WORK_PERIOD`; events `Completed`,
+  `Trained`, `Researched`, `Deposited` and `Work`, the last raised by a
+  villager gathering within reach or building once every sixteen ticks,
+  staggered by slot. Events are not state: no hash, corpus or replay
+  moved; `check-sim-purity` passes.
+- `crates/app/src/sound.rs`: `Speaker` (silent, a recorder for tests,
+  the device), `Device` on `kira` with a sub-track per bus and every
+  clip decoded once, `recordings` loading `assets/sounds/<cue>/*.wav`
+  over the placeholders. `main.rs`: the bark raised in `issue` before
+  the command is queued (`UX-AUDIO-01`), the selection call at every
+  place the selection is set, a click in `do_action` and on shell
+  buttons, a buzz on a greyed panel button, the tick's cues in
+  `tick_once` through the viewer's fog, the listener from the camera
+  each frame, the device opened after the settings in `main`.
+  `kira` is `default-features = false` with `cpal` and `wav`.
+- Settings: `volumes` (four percentages, music at 70 by default) with
+  `volume` and `step_volume`; `ShellAction::Volume`; the settings screen
+  widened to 800 with a VOLUME column beside the keys. The
+  settings-screen golden image rebaked; the battle goldens moved within
+  tolerance and were restored.
+- CI: the Linux lint and test jobs install `libasound2-dev`, which
+  `cpal` builds against. The bundle script copies `assets/sounds` when
+  it exists.
+- Tests as `docs/09` records them; `TRACEABILITY_LANDED` gained
+  `UX-AUDIO` and `TA-AUDIO`. Nothing has been heard on the Mac: the
+  device is opened there for the first time by the next build.
+
 ### Resume here next session
 
-**M6 is landed; M7, the feel pass, is next**, per `docs/06`: audio,
-real sprite art for two civilisations across three ages, animations,
-hit reactions and death animations, construction stages, notification
-polish, tooltips and first-time hints, the performance pass, and the
-acceptance that someone who loved the original plays a match and does
-not want to stop. Before the sprites, the Mac pass of the M6 run and
-the name (`docs/07` Q5). Keep the art pipeline on the `docs/08`
-schedule; the parallel track (§4b) runs on its own branch.
+**M7 is in progress; chunk 2, music and ambience, is next** (§4d): a
+stem per age cross-fading on age-up, the combat stem ducking in, an
+ambient bed per terrain, placeholders synthesised on the music bus.
+Then the visual feedback, tooltips and hints, the performance pass and
+the playtest handoff. The real sprite art is the owner's decision
+(§4d, `docs/08` §9 step 3), and the name (`docs/07` Q5) still bites.
+The parallel track (§4b) runs on its own branch.
 
 ## 4. What M4 completed — Combat
 
@@ -1086,7 +1135,7 @@ the merge reconciles. M5 stays out of the three files above.
 
 ---
 
-## 4c. What comes next: M6 — The game shell
+## 4c. What M6 completed — The game shell
 
 `docs/06` M6: a player launches the game, configures and plays a full
 skirmish to a victory screen, saves mid-match, reloads, and watches the
@@ -1124,6 +1173,46 @@ placeholder.
 
 ---
 
+## 4d. What comes next: M7 — The feel pass
+
+`docs/06` M7: the milestone that decides whether this is the game you
+remember. In the order we intend to build it, each chunk shippable and
+verified headless before anyone hears or sees it on the Mac:
+
+1. **The audio engine.** **Done 2026-09-20**, record above: `crates/audio`
+   with the four buses, cues, voice limiting, pitch variation, round-robin
+   and positional gain (`TA-AUDIO-01`, `UX-AUDIO-02`); the simulation's
+   new events and their mapping through the fog (`TA-AUDIO-02`); the
+   units answering the moment they are told (`UX-AUDIO-01`); clicks,
+   refusals, the bell and the fanfares; a synthesised placeholder for
+   every cue with recordings replacing them by name; `kira` in the app;
+   the volumes on the settings screen.
+2. **Music and ambience.** A stem per age cross-fading over four seconds
+   on age-up, the combat stem ducking in when six or more units fight in
+   view, an ambient bed per terrain under the camera; placeholders
+   synthesised, on the music bus.
+3. **Visual feedback** (`docs/03` §6.2), with placeholder art: the hit
+   flinch and spark, the kill puff, three visible construction stages,
+   bushes thinning and veins shrinking, trees falling, the screen-edge
+   indicator for an attack off-screen. Golden images.
+4. **Tooltips, hints and notification polish.** Every unit and building
+   tooltip with cost, build time, counters and hotkey (`UX-TIP-01`);
+   contextual hints shown at most twice and disableable; the rest of
+   `docs/03` §6.3: the idle-at-rally chime, cannot-afford with the
+   resource flashing, the minimap flash and ping.
+5. **The performance pass and the playtest handoff.** The scenarios
+   against `docs/04` §12 on known hardware, cliffs fixed and ceilings
+   lowered; the `RM-M7-01` observation sheet in `docs/09`; the Mac
+   measurement and the six players are the owner's.
+
+**Not in these chunks:** the real sprite art for two civilisations across
+three ages and its animations (`docs/06` M7 bullets 2 and 3). They are
+the art pipeline's step 3 (`docs/08` §9), which needs a modeller and a
+Blender install; nothing here can produce them. The vertical slice is not
+complete without them, and the owner decides when and by whom.
+
+---
+
 ## 5. Owed items and known debt
 
 Stated so they are not rediscovered.
@@ -1139,6 +1228,12 @@ Stated so they are not rediscovered.
   the settings screen rebinds the seventeen general keys only. Full
   rebinding needs a per-command capture flow and the HUD's tables read
   through the bindings.
+- **Every sound is a placeholder** (`docs/07` Q7): synthesised tones and
+  noise. Recordings under `assets/sounds/<cue>/` replace them by name.
+- **No music, no ambient beds** yet: M7 chunk 2.
+- **The notification cues are partial**: the bell, the loss and the
+  research note play; the idle-at-rally chime, cannot-afford and the
+  minimap flash and ping are chunk 4.
 - **The Mac build is not notarised, Apple Silicon only, and has no icon.**
   Notarising needs an Apple Developer account and a signing identity in
   the workflow's secrets; an Intel slice needs a second target and `lipo`;
