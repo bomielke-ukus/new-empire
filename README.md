@@ -122,6 +122,13 @@ wind or birds sit under the camera by the ground it is over. Those are
 placeholders too (`stem-stone`, `stem-combat`, `bed-surf`, the names in
 `crates/audio/src/score.rs`).
 
+And it is seen: a blow moves what it hits and sparks; a kill throws dust
+the way the blow went; a building coming down raises a cloud over its
+rubble; a site rises in three stages under the hammers; a bush thins and
+a vein shrinks as they are used; a tree falls toward whoever felled it;
+and an attack on your own out of view is a red chevron at the screen's
+edge.
+
 Play: left-click or drag to select, double-click for all of a kind on screen,
 `Shift` adds, `Ctrl`+`0-9` saves a control group and `0-9` recalls it, `.`
 cycles idle villagers. Right-click moves, or gathers when over a tree, bush

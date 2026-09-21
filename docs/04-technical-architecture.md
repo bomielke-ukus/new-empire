@@ -1372,3 +1372,49 @@ siege are still owed, and a human will find this opponent predictable.
 - **Not done.** The music is placeholder in every sense (`docs/07` Q7);
   the beds are not positional (they follow the view as a whole); no
   stem plays on the title screen.
+
+---
+
+## 37. Implementation notes from M7, chunk 3: the visual feedback
+
+- **One collector, tick time** (`crates/view/src/feedback.rs`). The
+  `CombatFeedback` that already kept the impact spark now keeps
+  everything short-lived the last ticks left to show: impacts (with
+  where the blow came from, which `Event::Hit` now carries), puffs, a
+  falling tree, and the attacks that mark the screen's edge. Each has a
+  life in ticks, so pause and speed apply to all of it, and `observe`
+  runs once per tick whatever the frame rate. `decorate` draws over a
+  built scene; `edge_indicators` draws in window pixels.
+- **The flinch.** For three ticks after a blow the struck sprite is
+  moved two pixels, then one, away from where the blow came, in screen
+  space via `iso::direction`; a corpse is not moved. It is done by
+  nudging the sprite the scene already built, so nothing else changes.
+- **The puffs.** A kill throws five motes the way the blow went, the
+  middle one red for the first part of half a second, then dust; the
+  direction is the last blow on that tile, so an arrow's kill puffs away
+  from the archer. A building coming down leaves a ring of ten motes
+  rising for just over a second, its radius the footprint's. A hammer
+  swing (`Event::Work` for building) lifts two motes off the site. Motes
+  are solid squares from the atlas's solids, two or three pixels at 1×.
+- **The stages** (`scene.rs`). A site is pegs for the first third of its
+  work, then the building's own frame clipped to its lower half, then to
+  85%, drawn from the ground up by moving the atlas rectangle's top and
+  the sprite's top together; done, the whole building. The fog's
+  memories keep showing pegs for a site, since they hold no progress.
+- **Depletion.** A bush or a vein is drawn at `0.5 + 0.5 × left/base`
+  about its anchor, so it thins toward half as it is used; a farm is
+  reseeded and a tree falls instead: the simulation raises
+  `Event::Felled` with the tree's tile and the last gatherer's, and the
+  view draws the tree's frame for sixteen ticks shortening as
+  `1 − 0.9t²`, leaning toward the villager, and then not at all.
+- **The edge mark.** An attack on the viewer's own registers once per
+  twelve tiles per three seconds; if its ground point is inside the
+  view's inset rectangle (the top bar and the bottom panel excluded) the
+  spark is enough; otherwise the line from the rectangle's centre to it
+  is cut at the rectangle's edge and a red chevron, outlined, points
+  there, blinking after the first second. In an isometric view a
+  diagonal in tiles is straight down the screen, which is worth knowing
+  when reading the test.
+- **Not done.** Death animations and the villager's hammering animation
+  are art; the collapse is a cloud over the rubble, not an animation;
+  the placeholder motes are squares.

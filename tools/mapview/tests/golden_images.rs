@@ -329,6 +329,63 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // Two sites rising (`docs/03` §6.2): the storehouse at its pegs, the
+        // house's lower half up with its builders hammering.
+        name: "site-stages",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "build",
+            "--ticks",
+            "450",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // Nodes giving out: the tree mid-fall toward the villagers who
+        // felled it, the berry bush thinned and the gold vein shrunk.
+        name: "felled-tree",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "fell",
+            "--ticks",
+            "1066",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // The battle out of view: the camera up and right of the town, and
+        // the red chevron at the edge where the player's own are being hit.
+        name: "edge-mark",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "battle",
+            "--ticks",
+            "150",
+            "--at",
+            "54,22",
+            "--fog",
+            "1",
+            "--hud",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The F1 controls overlay over a fresh match, with the resource bar
         // still carrying its first-minute hint.
         name: "controls-overlay",

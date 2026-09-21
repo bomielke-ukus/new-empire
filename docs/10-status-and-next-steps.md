@@ -68,7 +68,12 @@ button clicks and a greyed one buzzes, the bell tolls for an attack and
 a fanfare for an age, every sound a synthesised placeholder for now.
 A stem plays under the match and changes with the age; a fight in view
 brings the drums in; surf, wind or birds sit under the camera by the
-ground it is over. SETTINGS holds the four volumes.
+ground it is over. SETTINGS holds the four volumes. A blow moves what
+it hits and leaves a spark; a kill throws dust the way the blow went; a
+building coming down raises a cloud over its rubble; a site rises in
+three stages under hammering villagers; a bush thins and a vein shrinks
+as they are used; a tree falls toward whoever felled it; an attack on
+your own out of view is a red chevron at the screen's edge.
 
 ```sh
 cargo run --release -p new-empire           # the game window
@@ -1066,16 +1071,41 @@ what was done:
   frame), `hear_nothing` every shell frame.
 - Tests as `docs/09` records them. Nothing has been heard on the Mac.
 
+### Work record: M7 chunk 3 — the visual feedback (2026-09-21)
+
+- `crates/sim`: `Event::Hit` carries `from`, where the blow came from;
+  `Event::Felled` is raised when a node is used up, with the node's
+  tile and the last gatherer's. Events are not state: nothing hashed
+  or saved moved.
+- `crates/view/src/feedback.rs`: `CombatFeedback` keeps impacts, puffs
+  (a kill's five motes thrown the way the blow went, a building's
+  rising ring of ten, a hammer's two), falling trees and the attacks
+  that mark the edge; `decorate` nudges the struck sprite away from
+  the blow for three ticks, draws the spark, the motes and the falling
+  tree; `edge_indicators` draws the red chevron at the view's inset
+  edge for an attack on the viewer's own out of view, one per twelve
+  tiles per three seconds, blinking after the first. `scene.rs`: a site
+  in three stages (pegs, the lower half, most of it) by clipping the
+  building's frame from the top; a bush or vein drawn at half to full
+  size by what is left. The app and `mapview` add the edge marks to the
+  UI layer.
+- `mapview`: the `fell` scenario (eight villagers on a tree, three on a
+  bush, three on a vein); a note on stderr of the start tile and of
+  every felling, for whoever picks a golden's camera and tick.
+- Tests as `docs/09` records them; goldens `site-stages`,
+  `felled-tree`, `edge-mark` added, three rebaked.
+
 ### Resume here next session
 
-**M7 is in progress; chunk 3, the visual feedback, is next** (§4d):
-the hit flinch and spark, the kill puff, three visible construction
-stages, bushes thinning and veins shrinking, trees falling, the
-screen-edge indicator for an attack off-screen, all with placeholder
-art and pinned by golden images. Then tooltips and hints, the
-performance pass and the playtest handoff. The real sprite art is the
-owner's decision (§4d, `docs/08` §9 step 3), and the name (`docs/07`
-Q5) still bites. The parallel track (§4b) runs on its own branch.
+**M7 is in progress; chunk 4, tooltips, hints and notification polish,
+is next** (§4d): every unit and building tooltip with cost, build
+time, counters and hotkey (`UX-TIP-01`); contextual hints shown at
+most twice and disableable; the rest of `docs/03` §6.3, the
+idle-at-rally chime, cannot-afford with the resource flashing, the
+minimap flash and ping. Then the performance pass and the playtest
+handoff. The real sprite art is the owner's decision (§4d, `docs/08`
+§9 step 3), and the name (`docs/07` Q5) still bites. The parallel
+track (§4b) runs on its own branch.
 
 ## 4. What M4 completed — Combat
 
@@ -1220,10 +1250,12 @@ verified headless before anyone hears or sees it on the Mac:
    when six or more units fight in view and out after a six-second
    lull, an ambient bed per kind of ground under the camera on the
    world bus; every loop a synthesised placeholder, replaced by name.
-3. **Visual feedback** (`docs/03` §6.2), with placeholder art: the hit
-   flinch and spark, the kill puff, three visible construction stages,
-   bushes thinning and veins shrinking, trees falling, the screen-edge
-   indicator for an attack off-screen. Golden images.
+3. **Visual feedback** (`docs/03` §6.2). **Done 2026-09-21**, record
+   above: the hit flinch and spark, the kill puff thrown the way the
+   blow went, the collapse cloud, the hammer's dust, three visible
+   construction stages, bushes thinning and veins shrinking, trees
+   falling toward their fellers, the red chevron at the screen's edge
+   for an attack on the player's own out of view; three golden images.
 4. **Tooltips, hints and notification polish.** Every unit and building
    tooltip with cost, build time, counters and hotkey (`UX-TIP-01`);
    contextual hints shown at most twice and disableable; the rest of
@@ -1263,6 +1295,10 @@ Stated so they are not rediscovered.
   replace them by name.
 - **The beds are not positional** (`docs/05` §5.1 asks it): they follow
   the view as a whole. **No stem plays on the title screen.**
+- **Death animations and the hammering animation are art** (`docs/03`
+  §6.2, `docs/06` M7): the placeholders have a fall and a corpse and no
+  more; a building's collapse is a cloud over the rubble, not an
+  animation.
 - **The notification cues are partial**: the bell, the loss and the
   research note play; the idle-at-rally chime, cannot-afford and the
   minimap flash and ping are chunk 4.

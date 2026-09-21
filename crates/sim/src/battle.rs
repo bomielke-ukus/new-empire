@@ -117,6 +117,9 @@ pub enum Event {
         target: EntityId,
         /// Where.
         pos: Vec2Fx,
+        /// Where the blow came from: the striker, or the arrow's last
+        /// position.
+        from: Vec2Fx,
         /// How much.
         damage: i32,
     },
@@ -164,6 +167,16 @@ pub enum Event {
         amount: i32,
         /// Where the villager stood.
         pos: Vec2Fx,
+    },
+    /// A node used up and gone: a tree falls toward where its last
+    /// gatherer stood; a bush or a vein is simply no more.
+    Felled {
+        /// What.
+        kind: KindId,
+        /// Where it stood.
+        pos: Vec2Fx,
+        /// Where the villager stood.
+        toward: Vec2Fx,
     },
     /// A working villager's swing, once every [`WORK_PERIOD`] ticks.
     Work {
@@ -740,6 +753,7 @@ impl Simulation {
         self.events.push(Event::Hit {
             target: victim,
             pos,
+            from,
             damage,
         });
         let owner = self.world.owner[t];

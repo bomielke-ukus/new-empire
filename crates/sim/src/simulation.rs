@@ -1792,6 +1792,11 @@ impl Simulation {
                 // An exhausted node is gone; an exhausted farm stays, empty,
                 // for `farms` to reseed when its owner can pay.
                 if self.world.resource[n] <= 0 && self.world.kind[n] != kinds::FARM {
+                    self.events.push(Event::Felled {
+                        kind: self.world.kind[n],
+                        pos: self.world.pos[n],
+                        toward: self.world.pos[i],
+                    });
                     self.remove(node);
                 }
                 if carried >= capacity {

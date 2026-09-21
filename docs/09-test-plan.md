@@ -596,6 +596,28 @@ Tool Age researched cross-fades the stems, six clubmen sent at an enemy
 in view bring the combat stem in, and the title takes the stem, the
 combat stem and the bed out.
 
+**M7 chunk 3, the visual feedback.** `crates/view/src/feedback.rs`
+unit tests on a real simulation: three clubmen on a villager, and at
+the first blow the villager's sprite has moved a step away from them
+and the spark is drawn; with the camera due west the villager's side
+gets one outlined chevron on the right-hand edge of the view inside the
+top bar and the bottom panel, the attacker gets none, and with the
+fight in view there is none; at the death the one puff is thrown the
+way the blows went, draws at least five motes and is gone after ten
+ticks; a house brought down leaves a collapse cloud of at least ten
+motes. Hammering a house raises dust at the builder; eight villagers on
+a tree fell it, the fall is toward them, mid-fall the tree is drawn
+shorter than it stood while the world no longer has it, and it is gone
+sixteen ticks on. `scene.rs`: a house built by five villagers is drawn
+as pegs, then the frame clipped to half its height, then most of it,
+then whole, every stage seen; a bush partly eaten is drawn narrower,
+never under half, still on the ground. Golden images `site-stages`
+(pegs and a half-built house with its builders), `felled-tree` (the
+tree mid-fall, the bush thinned, the vein shrunk) and `edge-mark` (the
+battle out of view, the chevron on the left edge); `battle-hud`,
+`battle-40v40` and `siege-hud` rebaked for the flinches and the puffs,
+`gather-hud` for the bush thinning.
+
 ### Data files — M3 onward
 
 The startup validator from `docs/04` §9 run as a test: every referenced ID

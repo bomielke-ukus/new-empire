@@ -275,6 +275,14 @@ fn run() -> Result<(), String> {
         for _ in 0..a.ticks {
             sim.step();
             feedback.observe(&sim);
+            // A note for whoever is picking a golden's tick.
+            if sim
+                .events()
+                .iter()
+                .any(|e| matches!(e, sim::Event::Felled { .. }))
+            {
+                eprintln!("felled at tick {}", sim.tick());
+            }
         }
         (sim, a.seed)
     };
@@ -431,6 +439,10 @@ fn run() -> Result<(), String> {
             },
         );
         scene.ui = hud.sprites;
+        // The marks at the screen's edge for an attack out of view.
+        scene
+            .ui
+            .extend(feedback.edge_indicators(&sim, &atlas, &cam, viewer, a.dpi * a.ui_scale));
     }
     let mut img = raster::Image::new(a.width, a.height, [12, 10, 14, 255]);
     let lights = viewer.and_then(|p| sim.fog(p)).map(FogLights::from_fog);
@@ -474,6 +486,8 @@ fn run() -> Result<(), String> {
 fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
     use sim::{Command, CommandKind};
     let (sx, sy) = sim.starts()[0];
+    // A note for whoever is picking a golden's camera.
+    eprintln!("start ({sx}, {sy})");
     let tc_pos = sim::nav::centre((sx, sy));
     let world = sim.world();
     let villagers: Vec<_> = world
@@ -516,6 +530,65 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
                     kind: kinds::VILLAGER,
                 }));
             }
+        }
+        "fell" => {
+            // Nodes being used up, beside the Town Center: eight villagers on
+            // one tree, three on a berry bush, three on a gold vein. The tree
+            // falls; the bush and the vein are drawn smaller as they go.
+            let node = |sim: &mut sim::Simulation, kind, x, y| {
+                sim.issue(Command {
+                    player: 0,
+                    kind: CommandKind::Spawn {
+                        kind,
+                        pos: sim::nav::centre((x, y)),
+                    },
+                });
+            };
+            node(sim, kinds::TREE, sx + 4, sy - 3);
+            node(sim, kinds::BERRY_BUSH, sx - 4, sy + 3);
+            node(sim, kinds::GOLD_MINE, sx + 4, sy + 4);
+            for k in 0..11 {
+                node(sim, kinds::VILLAGER, sx - 5 + k % 6, sy - 6 + k / 6);
+            }
+            for _ in 0..3 {
+                sim.step();
+            }
+            let world = sim.world();
+            // The node spawned on that tile, not the map's own elsewhere.
+            let find = |kind, x, y| {
+                let at = sim::nav::centre((x, y));
+                world
+                    .slots()
+                    .filter(|s| world.kind[s.index()] == kind && world.pos[s.index()] == at)
+                    .map(|s| world.id_at(s))
+                    .last()
+                    .expect("spawned")
+            };
+            let mut new_villagers: Vec<_> = world
+                .slots()
+                .filter(|s| world.owner[s.index()] == 0 && world.kind[s.index()] == kinds::VILLAGER)
+                .map(|s| world.id_at(s))
+                .filter(|id| !villagers.contains(id))
+                .collect();
+            let (tree, bush, vein) = (
+                find(kinds::TREE, sx + 4, sy - 3),
+                find(kinds::BERRY_BUSH, sx - 4, sy + 3),
+                find(kinds::GOLD_MINE, sx + 4, sy + 4),
+            );
+            let gang: Vec<_> = new_villagers.drain(..8).collect();
+            let foragers = std::mem::take(&mut new_villagers);
+            sim.issue(cmd(CommandKind::Gather {
+                ids: gang,
+                node: tree,
+            }));
+            sim.issue(cmd(CommandKind::Gather {
+                ids: foragers,
+                node: bush,
+            }));
+            sim.issue(cmd(CommandKind::Gather {
+                ids: villagers.clone(),
+                node: vein,
+            }));
         }
         "build" => {
             sim.issue(cmd(CommandKind::Build {

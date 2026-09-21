@@ -231,11 +231,14 @@ fanfares, every sound a synthesised placeholder until the recordings
 exist (`docs/07` Q7), the volumes on the settings screen. Chunk 2, the
 score and the beds, landed 2026-09-21: a stem per age cross-fading on
 age-up, the combat stem over a fight in view, an ambient bed per kind of
-ground under the camera, placeholders all. The plan and the record are
-in `docs/10` §4d. The visual feedback, tooltips and hints, the
-performance pass and the playtest follow in that order; the real sprite
-art and its animations wait on the art pipeline (`docs/08` §9 step 3),
-which needs a modeller and Blender.
+ground under the camera, placeholders all. Chunk 3, the visual
+feedback, landed 2026-09-21: the flinch and the spark, the kill puff,
+the collapse cloud, the hammer's dust, three construction stages, nodes
+thinning and trees falling, the chevron at the screen's edge for an
+attack out of view. The plan and the record are in `docs/10` §4d.
+Tooltips and hints, the performance pass and the playtest follow in
+that order; the real sprite art and its animations wait on the art
+pipeline (`docs/08` §9 step 3), which needs a modeller and Blender.
 
 - Full audio: acknowledgments, work loops, positional world SFX, ambience,
   age fanfares, music stems, combat ducking

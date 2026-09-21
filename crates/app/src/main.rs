@@ -1035,6 +1035,14 @@ impl App {
         );
         self.feedback
             .decorate(&mut scene, &self.sim, &self.atlas, self.viewer);
+        // An attack on the player's own out of view: a mark at the edge.
+        scene.ui.extend(self.feedback.edge_indicators(
+            &self.sim,
+            &self.atlas,
+            &self.camera,
+            self.viewer,
+            self.ui_scale(),
+        ));
         // Band-box outline.
         if let (Some(from), Some(to)) = (self.selection.drag_from, self.input.cursor) {
             let thr = DRAG_THRESHOLD * self.camera.dpi;

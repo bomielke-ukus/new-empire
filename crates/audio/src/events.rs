@@ -71,6 +71,8 @@ pub fn cues(sim: &Simulation, viewer: Option<u8>) -> Vec<Placed> {
                     out.push((Cue::Work(task), Some(tile(pos))));
                 }
             }
+            // A node giving out is seen, not heard: the last swing was.
+            Event::Felled { .. } => {}
             Event::Researched { owner, tech: id } => {
                 if mine(owner) {
                     let cue = match tech::info(id).and_then(|t| t.advances_age()) {
