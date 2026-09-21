@@ -29,8 +29,9 @@ every per-tick hash matches, on all three platforms.
 **Size:** Medium.
 
 **Status:** landed. `simrunner determinism --ticks 10000` passes locally
-(4 players, 400 units, ~4,500 commands, ~28 µs/tick); CI runs it on Linux,
-Windows and macOS and asserts the three final hashes are identical. The
+(4 players, 400 units, ~4,500 commands, ~28 µs/tick); CI runs it on Linux
+and macOS and asserts the final hashes are identical (Windows was a third
+leg until 2026-09-21). The
 window opens and clears to a colour, and drives the sim at 20 Hz from a
 fixed-timestep clock (Space pauses, `+`/`-` change speed). Not yet verified
 on a real GPU from this environment — first thing to check on a desktop.
@@ -227,11 +228,14 @@ the game's name (`docs/07` Q5).
 landed: four buses, the units answering orders and selection, the world
 heard where it is through the fog, buttons and refusals, the bell and the
 fanfares, every sound a synthesised placeholder until the recordings
-exist (`docs/07` Q7), the volumes on the settings screen. The plan and
-the record are in `docs/10` §4d. Music and ambience, the visual feedback,
-tooltips and hints, the performance pass and the playtest follow in that
-order; the real sprite art and its animations wait on the art pipeline
-(`docs/08` §9 step 3), which needs a modeller and Blender.
+exist (`docs/07` Q7), the volumes on the settings screen. Chunk 2, the
+score and the beds, landed 2026-09-21: a stem per age cross-fading on
+age-up, the combat stem over a fight in view, an ambient bed per kind of
+ground under the camera, placeholders all. The plan and the record are
+in `docs/10` §4d. The visual feedback, tooltips and hints, the
+performance pass and the playtest follow in that order; the real sprite
+art and its animations wait on the art pipeline (`docs/08` §9 step 3),
+which needs a modeller and Blender.
 
 - Full audio: acknowledgments, work loops, positional world SFX, ambience,
   age fanfares, music stems, combat ducking

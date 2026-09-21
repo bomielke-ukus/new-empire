@@ -18,10 +18,12 @@
 
 pub mod events;
 pub mod placeholder;
+pub mod score;
 
 use sim::{Age, Class};
 use std::sync::Arc;
 
+pub use score::{Ambience, Bed, Fade, Ground, Layer, Score};
 pub use sim::Task;
 
 /// The four buses (`docs/04` §8), each with its own volume.
@@ -205,7 +207,7 @@ fn class_name(c: Class) -> &'static str {
     }
 }
 
-fn age_name(a: Age) -> &'static str {
+pub(crate) fn age_name(a: Age) -> &'static str {
     match a {
         Age::Stone => "stone",
         Age::Tool => "tool",
@@ -240,10 +242,12 @@ impl Clip {
     }
 }
 
-/// The clips for every cue: one or more variations each.
+/// The clips for every cue, one or more variations each, and a loop for
+/// every layer.
 #[derive(Clone, Debug, Default)]
 pub struct Library {
     clips: Vec<(Cue, Vec<Clip>)>,
+    layers: Vec<(Layer, Clip)>,
 }
 
 impl Library {
@@ -281,6 +285,28 @@ impl Library {
         Cue::all()
             .into_iter()
             .filter(|c| self.variants(*c) == 0)
+            .collect()
+    }
+
+    /// Sets a layer's loop.
+    pub fn insert_layer(&mut self, layer: Layer, clip: Clip) {
+        self.layers.retain(|(l, _)| *l != layer);
+        self.layers.push((layer, clip));
+    }
+
+    /// A layer's loop, if it has one.
+    pub fn layer(&self, layer: Layer) -> Option<&Clip> {
+        self.layers
+            .iter()
+            .find(|(l, _)| *l == layer)
+            .map(|(_, c)| c)
+    }
+
+    /// The layers that have nothing to play.
+    pub fn missing_layers(&self) -> Vec<Layer> {
+        Layer::all()
+            .into_iter()
+            .filter(|l| self.layer(*l).is_none())
             .collect()
     }
 }

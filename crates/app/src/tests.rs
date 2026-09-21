@@ -4,7 +4,8 @@
 
 use super::*;
 use ai::Difficulty;
-use audio::Play;
+use audio::score::{BED_GAIN, COMBAT_IN_MS, CROSSFADE_MS};
+use audio::{Bed, Fade, Layer, Play};
 use sim::Task;
 use sim::{Command, Formation, Item, MapKind, MapSpec, Order, SimConfig, Stance};
 use view::shell::{Field, MapSize};
@@ -216,7 +217,7 @@ fn app() -> App {
     app.settings_path = scratch("helper-settings").join("settings.ron");
     app.apply_settings();
     // Every sound asked for is recorded, so a test can hear it.
-    app.speaker = Speaker::Recorder(Vec::new());
+    app.speaker = Speaker::Recorder(Default::default());
     // Straight into a match, as the shell would after START. The world is
     // empty until a test spawns into it, which the shell would call a
     // decided match; the results panel is put away so the world takes
@@ -1767,4 +1768,120 @@ fn bus_volumes_are_set_on_the_settings_screen_and_kept() {
     assert_eq!(app.settings.volume(Bus::Ui), 10);
     press(&mut app, ShellAction::ResetSettings);
     assert_eq!(app.settings.volume(Bus::Music), 70, "the default");
+}
+
+/// The score follows the match: the Stone stem fades in at the start and
+/// the field's bed sits under it; the Tool Age cross-fades the stems over
+/// four seconds; six units fighting in view bring the combat stem in; and
+/// the title has none of it.
+#[test]
+fn the_score_follows_the_age_and_the_fight_and_the_beds_the_ground() {
+    let mut app = app();
+    two_sides(&mut app);
+    app.clock.set_paused(true);
+    draw(&mut app);
+    let fades = app.speaker.take_fades();
+    assert!(
+        fades.contains(&Fade {
+            layer: Layer::Stem(Age::Stone),
+            level: 1.0,
+            ms: CROSSFADE_MS
+        }),
+        "{fades:?}"
+    );
+    let field = fades
+        .iter()
+        .find(|f| f.layer == Layer::Bed(Bed::Field))
+        .expect("the field under the camera");
+    assert!(
+        field.level > 0.0 && field.level <= BED_GAIN,
+        "{}",
+        field.level
+    );
+    assert!(
+        !fades
+            .iter()
+            .any(|f| f.layer == Layer::Bed(Bed::Surf) && f.level > 0.0),
+        "no water here"
+    );
+    draw(&mut app);
+    assert!(app.speaker.take_fades().is_empty(), "steady");
+    // The Tool Age: the two buildings it asks for, then the research.
+    let tc = spawn(&mut app, kinds::TOWN_CENTER, 12, 12);
+    spawn(&mut app, kinds::STOREHOUSE, 16, 8);
+    spawn(&mut app, kinds::BARRACKS, 16, 16);
+    let age = tech::all()
+        .iter()
+        .find(|t| t.advances_age() == Some(Age::Tool))
+        .expect("the Tool Age advance");
+    app.issue(CommandKind::Research {
+        building: tc,
+        tech: age.id,
+    });
+    step(&mut app, age.seconds as u32 * 20 + 40);
+    assert_eq!(app.sim.player(ME).unwrap().age, Age::Tool);
+    draw(&mut app);
+    let fades = app.speaker.take_fades();
+    assert!(
+        fades.contains(&Fade {
+            layer: Layer::Stem(Age::Stone),
+            level: 0.0,
+            ms: CROSSFADE_MS
+        }),
+        "{fades:?}"
+    );
+    assert!(fades.contains(&Fade {
+        layer: Layer::Stem(Age::Tool),
+        level: 1.0,
+        ms: CROSSFADE_MS
+    }));
+    // Six clubmen sent at an enemy in view.
+    app.camera.look_at_tile(30.0, 30.0);
+    let mine: Vec<EntityId> = (0..6)
+        .map(|k| spawn(&mut app, kinds::CLUBMAN, 28 + k, 28))
+        .collect();
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Spawn {
+            kind: kinds::CLUBMAN,
+            pos: Vec2Fx::from_int(31, 31),
+        },
+    });
+    step(&mut app, 3);
+    let theirs = {
+        let w = app.sim.world();
+        w.slots()
+            .find(|s| w.kind[s.index()] == kinds::CLUBMAN && w.owner[s.index()] == 1)
+            .map(|s| w.id_at(s))
+            .expect("the enemy")
+    };
+    app.issue(CommandKind::Attack {
+        ids: mine,
+        target: theirs,
+    });
+    step(&mut app, 10);
+    draw(&mut app);
+    let fades = app.speaker.take_fades();
+    assert!(
+        fades.contains(&Fade {
+            layer: Layer::Combat,
+            level: 1.0,
+            ms: COMBAT_IN_MS
+        }),
+        "{fades:?}"
+    );
+    // The title: everything out.
+    app.shell = Shell::Title;
+    draw(&mut app);
+    let fades = app.speaker.take_fades();
+    for layer in [
+        Layer::Stem(Age::Tool),
+        Layer::Combat,
+        Layer::Bed(Bed::Field),
+    ] {
+        assert!(
+            fades.iter().any(|f| f.layer == layer && f.level == 0.0),
+            "{layer:?} out: {fades:?}"
+        );
+    }
 }

@@ -7,8 +7,9 @@ which of them are done, what was learned, and what the next steps are. Update
 it whenever a milestone lands or the plan changes.
 
 **Target platform: macOS.** Development, live testing and release acceptance
-focus on the Mac. Existing Windows/Linux CI jobs remain additional
-portability and determinism checks, without a shipping commitment.
+focus on the Mac. The Linux CI jobs are the fast gate and the other leg
+of the determinism check, without a shipping commitment; Windows was
+dropped from CI on 2026-09-21.
 
 ---
 
@@ -65,7 +66,9 @@ The game is heard: units answer an order and a click, the woodline and
 the fight sound where they are and only where the player can see, a
 button clicks and a greyed one buzzes, the bell tolls for an attack and
 a fanfare for an age, every sound a synthesised placeholder for now.
-SETTINGS holds the four volumes.
+A stem plays under the match and changes with the age; a fight in view
+brings the drums in; surf, wind or birds sit under the camera by the
+ground it is over. SETTINGS holds the four volumes.
 
 ```sh
 cargo run --release -p new-empire           # the game window
@@ -1039,15 +1042,40 @@ what was done:
   `UX-AUDIO` and `TA-AUDIO`. Nothing has been heard on the Mac: the
   device is opened there for the first time by the next build.
 
+### Work record: M7 chunk 2 — the score and the beds (2026-09-21)
+
+- Windows dropped from the CI matrix at the owner's request: nothing
+  targets it, and its job was the slowest. The determinism check now
+  compares Linux and macOS. README, `docs/04`, `docs/06` and `docs/09`
+  say so.
+- `crates/audio/src/score.rs`: `Layer` (a stem per age, the combat
+  stem, four beds) with folder names; `Fade`; `Score` deciding the
+  cross-fades and the combat stem from the age, the count fighting in
+  view and the time (`CROSSFADE_MS` 4,000, `COMBAT_IN_MS` 1,000,
+  `COMBAT_OUT_MS` 3,000, `COMBAT_HOLD_MS` 6,000,
+  `FIGHTING_FOR_COMBAT` 6); `Ground` and `Ambience` deciding the beds'
+  levels from the ground under the camera (`BED_FADE_MS` 2,000,
+  `BED_GAIN` 0.35). `Library` holds a loop per layer beside the cues.
+- `placeholder.rs`: a `Loop` builder with a seam cross-fade; the four
+  stems, the combat stem and the four beds synthesised (`docs/04` §36).
+- `crates/app/src/sound.rs`: `Speaker::fade` and the device's loops,
+  started silent and tweened; `Recording` for the tests holds plays and
+  fades; recordings load a layer's loop from its folder. `main.rs`:
+  `hear_the_match` every match frame (the view surveyed every five
+  ticks or half a second for the fight and the ground, the age every
+  frame), `hear_nothing` every shell frame.
+- Tests as `docs/09` records them. Nothing has been heard on the Mac.
+
 ### Resume here next session
 
-**M7 is in progress; chunk 2, music and ambience, is next** (§4d): a
-stem per age cross-fading on age-up, the combat stem ducking in, an
-ambient bed per terrain, placeholders synthesised on the music bus.
-Then the visual feedback, tooltips and hints, the performance pass and
-the playtest handoff. The real sprite art is the owner's decision
-(§4d, `docs/08` §9 step 3), and the name (`docs/07` Q5) still bites.
-The parallel track (§4b) runs on its own branch.
+**M7 is in progress; chunk 3, the visual feedback, is next** (§4d):
+the hit flinch and spark, the kill puff, three visible construction
+stages, bushes thinning and veins shrinking, trees falling, the
+screen-edge indicator for an attack off-screen, all with placeholder
+art and pinned by golden images. Then tooltips and hints, the
+performance pass and the playtest handoff. The real sprite art is the
+owner's decision (§4d, `docs/08` §9 step 3), and the name (`docs/07`
+Q5) still bites. The parallel track (§4b) runs on its own branch.
 
 ## 4. What M4 completed — Combat
 
@@ -1187,10 +1215,11 @@ verified headless before anyone hears or sees it on the Mac:
    refusals, the bell and the fanfares; a synthesised placeholder for
    every cue with recordings replacing them by name; `kira` in the app;
    the volumes on the settings screen.
-2. **Music and ambience.** A stem per age cross-fading over four seconds
-   on age-up, the combat stem ducking in when six or more units fight in
-   view, an ambient bed per terrain under the camera; placeholders
-   synthesised, on the music bus.
+2. **Music and ambience.** **Done 2026-09-21**, record above: a stem
+   per age cross-fading over four seconds on age-up, the combat stem in
+   when six or more units fight in view and out after a six-second
+   lull, an ambient bed per kind of ground under the camera on the
+   world bus; every loop a synthesised placeholder, replaced by name.
 3. **Visual feedback** (`docs/03` §6.2), with placeholder art: the hit
    flinch and spark, the kill puff, three visible construction stages,
    bushes thinning and veins shrinking, trees falling, the screen-edge
@@ -1229,8 +1258,11 @@ Stated so they are not rediscovered.
   rebinding needs a per-command capture flow and the HUD's tables read
   through the bindings.
 - **Every sound is a placeholder** (`docs/07` Q7): synthesised tones and
-  noise. Recordings under `assets/sounds/<cue>/` replace them by name.
-- **No music, no ambient beds** yet: M7 chunk 2.
+  noise, the stems and the beds included. Recordings under
+  `assets/sounds/<cue>/`, `stem-<age>/`, `stem-combat/` and `bed-<kind>/`
+  replace them by name.
+- **The beds are not positional** (`docs/05` §5.1 asks it): they follow
+  the view as a whole. **No stem plays on the title screen.**
 - **The notification cues are partial**: the bell, the loss and the
   research note play; the idle-at-rally chime, cannot-afford and the
   minimap flash and ping are chunk 4.

@@ -68,13 +68,15 @@ raising a tree's wood yield from 75 to 76, which fails four entries by name.
 ### Why the platform matrix matters
 
 **macOS is the product target.** Its test job and a live Mac hardware pass
-are the target-platform evidence. Windows/Linux jobs remain extra
-portability and determinism checks, not shipping commitments.
+are the target-platform evidence. The Linux jobs are the fast gate and the
+other leg of the determinism check, not a shipping commitment. Windows was
+dropped from the matrix on 2026-09-21: nothing targets it, and its job was
+the slowest by far.
 
 `docs/04` §2 promises bit-identical state on every machine, and nothing but
 running it proves that. The corpus digests are recorded on x86_64 Linux and
-checked on Windows and on aarch64 macOS — a different architecture, not just a
-different OS. They match, which is the strongest evidence so far that the
+checked on aarch64 macOS — a different architecture, not just a different
+OS (and, until 2026-09-21, on Windows). They match, which is the strongest evidence so far that the
 fixed-point simulation is genuinely portable.
 
 Debug and release builds also differ in a way that matters: debug panics on
@@ -576,6 +578,23 @@ through the app's own tick are at most four chop voices (`UX-AUDIO-01`,
 kept in the file and reach the mixer at once. The settings golden image
 shows the audio column. The device itself is not tested: `kira` opens the
 default output at launch and the game says so once if it cannot.
+
+**M7 chunk 2, the score and the beds.** `crates/audio/src/score.rs`
+unit tests: a match starts on its age's stem, the next age cross-fades
+the old stem out and the new in over four seconds, five units fighting
+are a scuffle and six bring the combat stem in, fewer keep it for the
+hold and then let it go, leaving the match takes everything out; the
+beds follow the ground, water bringing the surf up, sand the wind, a
+canopy the birds, the open field quiet, a small move no fade and no
+ground silence; every layer has a folder name that reads back.
+`placeholder.rs`: every layer has a loop, seconds long, under half
+scale, with the two sides of its seam within a whisker of each other,
+and the Stone and Iron stems differ. `crates/app/src/tests.rs`: through
+the app's own frame, the Stone stem fades in at the start with the
+field's bed under it and no surf, a second frame fades nothing, the
+Tool Age researched cross-fades the stems, six clubmen sent at an enemy
+in view bring the combat stem in, and the title takes the stem, the
+combat stem and the bed out.
 
 ### Data files — M3 onward
 

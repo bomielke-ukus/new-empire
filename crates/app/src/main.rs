@@ -18,7 +18,7 @@ mod sound;
 mod tests;
 
 use ai::Opponent;
-use audio::{Bus, Cue};
+use audio::{Bus, Cue, Fade, Ground};
 use clock::FixedClock;
 use fogged::FoggedView;
 use input::Input;
@@ -29,6 +29,7 @@ use sim::Class;
 use sim::{
     Age, Command, CommandKind, EntityId, Rally, Replay, Simulation, Source, Vec2Fx, TICK_MS,
 };
+use sim::{Order, Terrain};
 use sound::Speaker;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -253,7 +254,22 @@ struct App {
     speaker: Speaker,
     /// When the app started: the mixer's clock, wall time.
     started: Instant,
+    /// The score: a stem per age, the combat stem over a fight.
+    score: audio::Score,
+    /// The beds under the camera.
+    ambience: audio::Ambience,
+    /// How many units were fighting in view at the last survey.
+    fighting: usize,
+    /// The ground under the camera at the last survey.
+    ground: Ground,
+    /// The tick and the time of the last survey of the view.
+    surveyed: Option<(u64, u64)>,
 }
+
+/// The view is surveyed for the score and the beds every this many
+/// ticks of the match, or this many milliseconds when it stands still.
+const SURVEY_TICKS: u64 = 5;
+const SURVEY_MS: u64 = 500;
 
 /// A world position as a tile for the camera and the notices.
 fn tile_of(pos: Vec2Fx) -> (f32, f32) {
@@ -438,6 +454,11 @@ impl App {
             mixer: audio::Mixer::new(library),
             speaker: Speaker::Silent,
             started: Instant::now(),
+            score: audio::Score::default(),
+            ambience: audio::Ambience::default(),
+            fighting: 0,
+            ground: Ground::default(),
+            surveyed: None,
         }
     }
 
@@ -602,6 +623,120 @@ impl App {
             if let Some(clip) = self.mixer.library().clip(play.cue, play.variant) {
                 self.speaker.play(&play, clip);
             }
+        }
+    }
+
+    /// Applies a fade to a layer: the device starts its loop if need be.
+    fn fade(&mut self, fade: Fade) {
+        let clip = self.mixer.library().layer(fade.layer);
+        self.speaker.fade(fade, clip);
+    }
+
+    /// The score and the beds follow the match (`docs/04` §8): the
+    /// viewer's age, the fight in view, the ground under the camera. The
+    /// view is surveyed every few ticks or half a second; the age is read
+    /// every frame so an advance is heard at once.
+    fn hear_the_match(&mut self) {
+        let now = self.now_ms();
+        let tick = self.sim.tick();
+        let due = self.surveyed.is_none_or(|(t, ms)| {
+            tick.saturating_sub(t) >= SURVEY_TICKS || now.saturating_sub(ms) >= SURVEY_MS
+        });
+        if due {
+            self.surveyed = Some((tick, now));
+            let rect = self.tiles_in_view();
+            self.fighting = self.fighting_in(rect);
+            self.ground = self.ground_in(rect);
+        }
+        let me = self.hud_player();
+        let age = self.sim.player(me).map(|p| p.age);
+        for f in self.score.update(age, self.fighting, now) {
+            self.fade(f);
+        }
+        for f in self.ambience.update(Some(self.ground)) {
+            self.fade(f);
+        }
+    }
+
+    /// No match on screen: the score and the beds go quiet.
+    fn hear_nothing(&mut self) {
+        let now = self.now_ms();
+        for f in self.score.update(None, 0, now) {
+            self.fade(f);
+        }
+        for f in self.ambience.update(None) {
+            self.fade(f);
+        }
+        self.surveyed = None;
+    }
+
+    /// The tiles the view covers, `(x0, y0, x1, y1)` inclusive, clamped
+    /// to the map: the bounding box of the view's four corners.
+    fn tiles_in_view(&self) -> (i32, i32, i32, i32) {
+        let (w, h) = self.map_size();
+        let (vw, vh) = self.camera.viewport;
+        let corners = [(0.0, 0.0), (vw, 0.0), (0.0, vh), (vw, vh)]
+            .map(|(px, py)| self.camera.window_to_world(px, py));
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for (x, y) in corners {
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x);
+            y1 = y1.max(y);
+        }
+        (
+            (x0.floor() as i32).clamp(0, w - 1),
+            (y0.floor() as i32).clamp(0, h - 1),
+            (x1.ceil() as i32).clamp(0, w - 1),
+            (y1.ceil() as i32).clamp(0, h - 1),
+        )
+    }
+
+    /// How many units are fighting in the view, as the viewer sees it: a
+    /// fight in the fog is not heard.
+    fn fighting_in(&self, (x0, y0, x1, y1): (i32, i32, i32, i32)) -> usize {
+        let world = self.sim.world();
+        let fog = self.viewer.and_then(|p| self.sim.fog(p));
+        world
+            .slots()
+            .filter(|s| {
+                let i = s.index();
+                if world.dying[i] != 0 || !matches!(world.order[i], Order::Attack { .. }) {
+                    return false;
+                }
+                let (x, y) = (world.pos[i].x.floor(), world.pos[i].y.floor());
+                (x0..=x1).contains(&x)
+                    && (y0..=y1).contains(&y)
+                    && fog.is_none_or(|f| f.visible(x, y))
+            })
+            .count()
+    }
+
+    /// The ground under the view, as fractions of its tiles: unexplored
+    /// ground is nothing, since it has no sound.
+    fn ground_in(&self, (x0, y0, x1, y1): (i32, i32, i32, i32)) -> Ground {
+        let map = self.sim.map();
+        let fog = self.viewer.and_then(|p| self.sim.fog(p));
+        let mut g = Ground::default();
+        let total = ((x1 - x0 + 1) * (y1 - y0 + 1)).max(1) as f32;
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                if fog.is_some_and(|f| !f.explored(x, y)) {
+                    continue;
+                }
+                match map.terrain(x, y) {
+                    Terrain::ForestFloor => g.forest += 1.0,
+                    Terrain::ShallowWater | Terrain::DeepWater => g.water += 1.0,
+                    Terrain::Desert | Terrain::Sand => g.sand += 1.0,
+                    Terrain::Grass | Terrain::Dirt | Terrain::Snow => g.open += 1.0,
+                }
+            }
+        }
+        Ground {
+            forest: g.forest / total,
+            water: g.water / total,
+            sand: g.sand / total,
+            open: g.open / total,
         }
     }
 
@@ -812,6 +947,7 @@ impl App {
             focus: self.camera.focus,
             half: ((r - l) * 0.5, (b - t) * 0.5),
         });
+        self.hear_the_match();
         let ticks = self.clock.advance(now);
         for _ in 0..ticks {
             if self.playback_over() {
@@ -1024,6 +1160,7 @@ impl App {
     /// The title and the setup screen: no world, a backdrop and buttons,
     /// and on the setup screen the seed's map as the minimap will show it.
     fn frame_shell(&mut self, now: Instant) {
+        self.hear_nothing();
         let input = self.shell_input();
         let screen = match self.shell {
             Shell::Title => shell::title(&self.atlas, &input),

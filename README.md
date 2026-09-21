@@ -36,7 +36,7 @@ Read in order:
 
 Requires a stable Rust toolchain (`rustup` installs it; `rust-toolchain.toml`
 pins the channel). On Linux the audio device builds against ALSA
-(`libasound2-dev`); macOS and Windows need nothing extra.
+(`libasound2-dev`); macOS needs nothing extra.
 
 ```sh
 cargo test --workspace                       # unit tests for every crate
@@ -116,7 +116,11 @@ attack and a fanfare for an age. Twelve villagers chopping are four voices
 at once, each at its own pitch. Every sound today is a synthesised
 placeholder; a recording under `assets/sounds/<cue>/*.wav` (`ack-villager`,
 `work-chop`, `alarm`: the names are in `crates/audio/src/lib.rs`) replaces
-it with no code change. There is no music yet.
+it with no code change. A stem plays under the match and cross-fades to
+the next age's; drums come in while six or more units fight in view; surf,
+wind or birds sit under the camera by the ground it is over. Those are
+placeholders too (`stem-stone`, `stem-combat`, `bed-surf`, the names in
+`crates/audio/src/score.rs`).
 
 Play: left-click or drag to select, double-click for all of a kind on screen,
 `Shift` adds, `Ctrl`+`0-9` saves a control group and `0-9` recalls it, `.`
@@ -167,8 +171,9 @@ Workspace layout:
 ## Shape of the build
 
 - **Rust**, native **macOS** desktop, `wgpu` + `winit` + `kira`.
-  macOS is the product target; Windows/Linux CI provides additional
-  portability and determinism checks, without a shipping commitment.
+  macOS is the product target; the Linux CI jobs are the fast gate and
+  the second leg of the determinism check, without a shipping commitment.
+  Windows is not built (dropped from CI 2026-09-21).
   The same stack compiles to WebAssembly for quick playtest builds.
 - **Deterministic lockstep simulation** at 20 Hz, fixed-point maths, seeded RNG,
   commands scheduled two ticks ahead — the architecture from *"1500 Archers on a

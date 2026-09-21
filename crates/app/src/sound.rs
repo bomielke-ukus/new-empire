@@ -4,8 +4,8 @@
 //! cues they are named for, the way rendered sprite sets replace the
 //! placeholder art (`docs/07` Q7).
 
-use audio::{Bus, Clip, Cue, Library, Play};
-use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
+use audio::{Bus, Clip, Cue, Fade, Layer, Library, Play};
+use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle, StaticSoundSettings};
 use kira::track::{TrackBuilder, TrackHandle};
 use kira::{
     AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Frame, Panning, PlaybackRate,
@@ -13,14 +13,25 @@ use kira::{
 };
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
+
+/// What a test's speaker remembers.
+#[derive(Default)]
+#[allow(dead_code)]
+pub struct Recording {
+    /// Every play, in order.
+    pub plays: Vec<Play>,
+    /// Every fade of a layer, in order.
+    pub fades: Vec<Fade>,
+}
 
 /// Where sound goes.
 pub enum Speaker {
     /// Nowhere: there is no device, or none was opened.
     Silent,
-    /// A list, for the tests.
+    /// A record, for the tests.
     #[allow(dead_code)]
-    Recorder(Vec<Play>),
+    Recorder(Recording),
     /// The device, boxed: it is large next to the others.
     Device(Box<Device>),
 }
@@ -30,8 +41,17 @@ impl Speaker {
     pub fn play(&mut self, play: &Play, clip: &Clip) {
         match self {
             Speaker::Silent => {}
-            Speaker::Recorder(plays) => plays.push(*play),
+            Speaker::Recorder(r) => r.plays.push(*play),
             Speaker::Device(d) => d.play(play, clip),
+        }
+    }
+
+    /// Fades a layer to a level, starting its loop if it is not playing.
+    pub fn fade(&mut self, fade: Fade, clip: Option<&Clip>) {
+        match self {
+            Speaker::Silent => {}
+            Speaker::Recorder(r) => r.fades.push(fade),
+            Speaker::Device(d) => d.fade(fade, clip),
         }
     }
 
@@ -42,11 +62,20 @@ impl Speaker {
         }
     }
 
-    /// What was recorded so far, taken.
+    /// The plays recorded so far, taken.
     #[allow(dead_code)]
     pub fn take(&mut self) -> Vec<Play> {
         match self {
-            Speaker::Recorder(plays) => std::mem::take(plays),
+            Speaker::Recorder(r) => std::mem::take(&mut r.plays),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The fades recorded so far, taken.
+    #[allow(dead_code)]
+    pub fn take_fades(&mut self) -> Vec<Fade> {
+        match self {
+            Speaker::Recorder(r) => std::mem::take(&mut r.fades),
             _ => Vec::new(),
         }
     }
@@ -60,6 +89,8 @@ pub struct Device {
     tracks: Vec<TrackHandle>,
     /// The clips, ready to play.
     sounds: Vec<((Cue, usize), StaticSoundData)>,
+    /// The layers playing, looped, each with its handle for the fades.
+    loops: Vec<(Layer, StaticSoundHandle)>,
 }
 
 impl Device {
@@ -84,7 +115,32 @@ impl Device {
             _manager: manager,
             tracks,
             sounds,
+            loops: Vec::new(),
         })
+    }
+
+    fn fade(&mut self, fade: Fade, clip: Option<&Clip>) {
+        let tween = Tween {
+            duration: Duration::from_millis(u64::from(fade.ms)),
+            ..Default::default()
+        };
+        if let Some((_, handle)) = self.loops.iter_mut().find(|(l, _)| *l == fade.layer) {
+            handle.set_volume(decibels(fade.level), tween);
+            return;
+        }
+        // Not playing yet: nothing to fade out, and a loop to start
+        // silent and bring up.
+        let Some(clip) = clip.filter(|_| fade.level > 0.0) else {
+            return;
+        };
+        let sound = data(clip).loop_region(..).volume(Decibels::SILENCE);
+        match self.tracks[fade.layer.bus().index()].play(sound) {
+            Ok(mut handle) => {
+                handle.set_volume(decibels(fade.level), tween);
+                self.loops.push((fade.layer, handle));
+            }
+            Err(e) => eprintln!("warning: {:?} did not start: {e}", fade.layer),
+        }
     }
 
     fn play(&mut self, play: &Play, clip: &Clip) {
@@ -146,10 +202,14 @@ pub fn recordings(dir: &Path, library: &mut Library) -> Vec<String> {
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_string();
-        let Some(cue) = Cue::from_name(&name) else {
-            eprintln!("warning: {}: not the name of a cue", folder.display());
+        let (cue, layer) = (Cue::from_name(&name), Layer::from_name(&name));
+        if cue.is_none() && layer.is_none() {
+            eprintln!(
+                "warning: {}: not the name of a cue or a layer",
+                folder.display()
+            );
             continue;
-        };
+        }
         let mut files: Vec<_> = std::fs::read_dir(&folder)
             .map(|d| {
                 d.flatten()
@@ -174,10 +234,16 @@ pub fn recordings(dir: &Path, library: &mut Library) -> Vec<String> {
                 Err(e) => eprintln!("warning: {}: {e:?}", file.display()),
             }
         }
-        if !clips.is_empty() {
-            library.insert(cue, clips);
-            replaced.push(name);
+        if clips.is_empty() {
+            continue;
         }
+        // A layer is one loop: the first file.
+        match (cue, layer) {
+            (Some(cue), _) => library.insert(cue, clips),
+            (None, Some(layer)) => library.insert_layer(layer, clips.swap_remove(0)),
+            (None, None) => unreachable!("checked above"),
+        }
+        replaced.push(name);
     }
     replaced
 }

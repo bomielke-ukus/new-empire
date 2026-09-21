@@ -340,8 +340,11 @@ tones and noise bursts of the right shape and length, honest about what
 they are, the way the placeholder sprites stand in for art. A recording
 under `assets/sounds/<cue>/*.wav` replaces one by name with no code
 change, so the commissioned cues and the licensed foley drop in when they
-exist. The music stems and the ambient beds are M7 chunk 2. The
-recommendation above stands and still needs taking.
+exist. The music stems and the ambient beds followed in chunk 2
+(2026-09-21), placeholders too: a pentatonic sketch per age, drums for a
+fight, noise for the surf, the wind and the birds. The recommendation
+above stands and still needs taking; the nine cues it names are exactly
+the loops under `stem-<age>/`, `stem-combat/` and the fanfares.
 
 ### Q8 — Do we want a hard 4-age structure, or a 5th age?
 The original's four ages map cleanly onto ancient history and end at a natural

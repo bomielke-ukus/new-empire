@@ -3,8 +3,9 @@
 Target: **native macOS desktop, written in Rust.**
 
 Platform clarification (2026-09-11): development, live testing and release
-acceptance target macOS. The existing Windows/Linux CI jobs remain additional
-portability and determinism checks; they do not define supported products.
+acceptance target macOS. The Linux CI jobs remain the fast gate and the
+second leg of the determinism check; they do not define a supported product.
+Windows was dropped from CI on 2026-09-21: nothing targets it.
 
 Rust over C++ because the two hardest problems in this project — a bit-exact
 deterministic simulation and a data-oriented entity store touched by many
@@ -1322,3 +1323,52 @@ siege are still owed, and a human will find this opponent predictable.
   the notification cues beyond the bell, the loss and the research note
   (chunk 4); the device on Linux needs ALSA headers to build, which CI
   installs.
+
+---
+
+## 36. Implementation notes from M7, chunk 2: the score and the beds
+
+- **Two small state machines, pure** (`crates/audio/src/score.rs`).
+  `Score` holds the age whose stem is playing and whether the combat
+  stem is in; `update(age, fighting, now)` returns the fades: the old
+  stem to 0 and the new to 1 over `CROSSFADE_MS` (4,000, §8) when the age
+  changes, the combat stem to 1 over 1,000 ms when six or more units
+  fight in view (`FIGHTING_FOR_COMBAT`, §8), and out over 3,000 ms once
+  no fight has been in view for `COMBAT_HOLD_MS` (6,000), so a battle
+  with lulls is one piece of music; no age, as on the title, takes
+  everything out. `Ambience` holds four bed levels and `update(ground)`
+  returns a fade for a bed whose target moved by at least 0.05 or to or
+  from silence, over 2,000 ms. The beds' targets come from the ground
+  under the camera: water at half the view is full surf, sand two thirds
+  is full wind, canopy at half is full birds, and the open field is
+  quiet; all under `BED_GAIN` (0.35).
+- **What the app surveys.** Every five ticks or half a second the app
+  takes the bounding box of the view's four corners in tiles, counts the
+  units in it with an attack order that the viewer can see, and sorts
+  its explored tiles by terrain into forest floor, water, sand and open
+  ground; unexplored tiles are nothing, since the ground the player has
+  not seen has no sound. The age is read every frame so an advance is
+  heard at once. The shell calls the quiet update, so leaving a match
+  fades everything out.
+- **Layers on the device.** A layer is a loop started silent on its
+  bus's track the first time it is asked for, then faded with the
+  handle's volume tween; a fade to a level it already holds is a no-op
+  at the state machine, not a call. The stems are on the music bus; the
+  beds are the world's and sit on the world bus, so a player who mutes
+  the music keeps the surf.
+- **Placeholders** (`placeholder.rs`): a `Loop` lays tones and bursts
+  onto a fixed buffer, wrapping at the end, and finishes by cross-fading
+  the last tenth of a second into the first so the seam is silent. The
+  stems are sixteen seconds at sixty beats a minute on a pentatonic on
+  A: the frame drum and the bone flute in the Stone Age, the lyre from
+  the Tool Age, a low saw chorus from the Bronze Age, everything denser
+  and the flute an octave up in the Iron Age (`docs/05` §5.3, as far as
+  a sine and a saw can take it). The combat stem is eight seconds of
+  fast drums over a pulse. The beds are eight seconds of low-passed
+  noise with slow wander: birds over the forest, a swell for the surf,
+  two slow waves for the wind, near nothing for the field. A recording
+  under `assets/sounds/stem-<age>/`, `stem-combat/` or `bed-<kind>/`
+  replaces one; the first file is the loop.
+- **Not done.** The music is placeholder in every sense (`docs/07` Q7);
+  the beds are not positional (they follow the view as a whole); no
+  stem plays on the title screen.
