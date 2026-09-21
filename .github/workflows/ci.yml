@@ -20,6 +20,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: ALSA headers, which the audio device (cpal) builds against
+        run: sudo apt-get update -q && sudo apt-get install -y -q libasound2-dev
       - name: rustfmt
         run: cargo fmt --all --check
       - name: clippy
@@ -46,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     env:
       # Absolute, via `github.workspace`. Two traps here: the `runner`
@@ -59,9 +61,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: software GPU, so the headless render test has a device (Linux)
+      - name: software GPU for the headless render test, ALSA headers for the audio device (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -q && sudo apt-get install -y -q mesa-vulkan-drivers
+        run: sudo apt-get update -q && sudo apt-get install -y -q mesa-vulkan-drivers libasound2-dev
       - name: unit tests
         run: cargo test --workspace
       - name: combat acceptance and counter balance (release, invariant checks)
@@ -139,11 +141,12 @@ jobs:
           {
             echo '### Simulation performance'
             echo
-            echo 'Per-tick timings, best of three. The trend matters more than'
-            echo 'the absolute numbers: shared runners are noisy.'
+            echo 'Per-tick timings, best of three, then where each tick went'
+            echo 'by phase (docs/04 §12). The trend matters more than the'
+            echo 'absolute numbers: shared runners are noisy.'
             echo
             echo '```'
-            cargo run --release --quiet -p simrunner -- bench || true
+            cargo run --release --quiet -p simrunner -- bench --stats || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

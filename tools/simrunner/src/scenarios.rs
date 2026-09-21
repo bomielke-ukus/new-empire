@@ -9,10 +9,13 @@
 //! the random spawn-and-move stream the M0 runner used. A corpus that only
 //! exercises movement would not notice a change to the economy.
 
+use ai::{Difficulty, Opponent};
+use fogged::FoggedView;
 use sim::{
     kinds, tech, Command, CommandKind, EntityId, KindId, MapKind, MapSpec, PlayerId, Rally, Replay,
-    Rng, SimConfig, Simulation, Vec2Fx,
+    Rng, SimConfig, Simulation, Source, Timings, Vec2Fx,
 };
+use std::time::Instant;
 
 /// A reproducible synthetic match.
 pub struct Scenario {
@@ -51,6 +54,14 @@ pub enum Style {
     /// villagers off their nodes, research is tried at every building, and
     /// the stockpile is expected to be deep enough to pay for it.
     Ages,
+    /// Two hundred soldiers a side, spawned facing each other and sent in:
+    /// the "400 units fighting" of `docs/04` §11, and the combat, order
+    /// and separation load of §12.
+    Melee,
+    /// Nobody scripted: every side is a Hard computer opponent, each
+    /// handed a crowd at the start so the world is §12-sized from the
+    /// first tick. The opponents' thinking is part of what is measured.
+    Opponents,
 }
 
 fn inland(size: u16, players: u8) -> SimConfig {
@@ -221,8 +232,49 @@ pub fn benchmarks() -> Vec<Scenario> {
             config: inland(200, 8),
             style: Style::Everything,
         },
+        Scenario {
+            name: "battle-400",
+            purpose: "four hundred soldiers fighting: the combat load",
+            seed: 103,
+            ticks: 1_500,
+            config: SimConfig {
+                wander: false,
+                ..flat(96, 2)
+            },
+            style: Style::Melee,
+        },
+        Scenario {
+            name: "opponents-8p",
+            purpose: "eight Hard opponents on a full world: the AI load",
+            seed: 104,
+            ticks: 2_000,
+            config: inland(168, 8),
+            style: Style::Opponents,
+        },
     ]
 }
+
+/// What [`Scenario::play`] tells about each tick when asked: the world
+/// after it, its phases, and the opponents' thinking in nanoseconds.
+pub type Observer<'a> = &'a mut dyn FnMut(&Simulation, Timings, u64);
+
+/// Soldiers a side in a [`Style::Melee`] scenario.
+const MELEE_SIDE: usize = 200;
+
+/// What a melee side is made of, in spawn order: a mix, so the fight has
+/// spears, archers and horses in it and not one kind walking into itself.
+const MELEE_ROSTER: [KindId; 5] = [
+    kinds::SPEARMAN,
+    kinds::AXEMAN,
+    kinds::BOWMAN,
+    kinds::SLINGER,
+    kinds::LIGHT_CAVALRY,
+];
+
+/// Units each opponent is handed at the start of a [`Style::Opponents`]
+/// scenario, soldiers and villagers, so the world carries the §12 load
+/// from the first tick instead of after twenty minutes of build-up.
+const OPPONENT_KIT: usize = 40;
 
 impl Scenario {
     /// Drives a live match and returns the replay of it.
@@ -242,6 +294,10 @@ impl Scenario {
         let mut sim = Simulation::new(self.seed, self.config.clone());
         let mut bot = Rng::new(self.seed ^ 0xD1CE);
         let players = self.config.map.players.clamp(1, 8);
+        for player in 0..players {
+            self.deploy(&mut sim, &mut bot, player);
+        }
+        let mut opponents = self.opponents();
 
         while sim.tick() < self.ticks {
             if self.style != Style::Idle {
@@ -249,9 +305,144 @@ impl Scenario {
                     self.act(&mut sim, &mut bot, player);
                 }
             }
+            for bot in &mut opponents {
+                let commands = {
+                    let view = FoggedView::new(&sim, bot.player());
+                    bot.think(&view)
+                };
+                for c in commands {
+                    sim.issue_from(c, Source::Ai);
+                }
+            }
             sim.step();
         }
         sim.replay()
+    }
+
+    /// The computer opponents of a [`Style::Opponents`] scenario, Hard and
+    /// one a side, seeded off the match; nobody for any other style.
+    pub fn opponents(&self) -> Vec<Opponent> {
+        if self.style != Style::Opponents {
+            return Vec::new();
+        }
+        (0..self.config.map.players.clamp(1, 8))
+            .map(|p| Opponent::new(p, Difficulty::Hard, self.seed))
+            .collect()
+    }
+
+    /// One pass over the match as the benchmark measures it: the
+    /// recording's commands replayed, except that a [`Style::Opponents`]
+    /// scenario has its opponents think live in place of their recorded
+    /// commands, because a recording holds what they said and not the time
+    /// it took them to say it. Returns each tick's wall time in
+    /// nanoseconds, the thinking included.
+    ///
+    /// With `observe`, the tick runs under [`Simulation::step_timed`] and
+    /// each tick's phases and thinking time are reported; the tick times
+    /// then carry the stopwatch's own cost, which is why the gate runs
+    /// without it.
+    pub fn play(
+        &self,
+        replay: &Replay,
+        mut observe: Option<Observer<'_>>,
+    ) -> Result<Vec<u128>, String> {
+        replay.validate().map_err(|e| e.to_string())?;
+        let mut opponents = self.opponents();
+        let live = !opponents.is_empty();
+        let mut sim = Simulation::new(replay.seed, replay.config.clone());
+        let mut per_tick = Vec::with_capacity(replay.ticks as usize);
+        let mut next = 0;
+        let epoch = Instant::now();
+        while sim.tick() < replay.ticks {
+            let t0 = Instant::now();
+            while let Some((tick, command)) = replay.commands.get(next) {
+                if *tick != sim.tick() {
+                    break;
+                }
+                let via = replay.sources.get(next).copied().unwrap_or_default();
+                if !(live && via == Source::Ai) {
+                    sim.issue_from(command.clone(), via);
+                }
+                next += 1;
+            }
+            let mut thinking = 0u64;
+            for bot in &mut opponents {
+                let t = Instant::now();
+                let commands = {
+                    let view = FoggedView::new(&sim, bot.player());
+                    bot.think(&view)
+                };
+                thinking += t.elapsed().as_nanos() as u64;
+                for c in commands {
+                    sim.issue_from(c, Source::Ai);
+                }
+            }
+            match observe.as_mut() {
+                None => sim.step(),
+                Some(o) => {
+                    let mut clock = || epoch.elapsed().as_nanos() as u64;
+                    let t = sim.step_timed(&mut clock);
+                    o(&sim, t, thinking);
+                }
+            }
+            per_tick.push(t0.elapsed().as_nanos());
+        }
+        if live && sim.replay().commands != replay.commands {
+            return Err(format!(
+                "{}: the opponents did not think what they thought when recorded",
+                self.name
+            ));
+        }
+        Ok(per_tick)
+    }
+
+    /// Tick 0 of a [`Style::Melee`] or [`Style::Opponents`] scenario: the
+    /// crowds, spawned in one go so the load is there from the first tick.
+    /// Nothing for any other style.
+    fn deploy(&self, sim: &mut Simulation, bot: &mut Rng, player: PlayerId) {
+        let spawn = |sim: &mut Simulation, kind: KindId, x: i32, y: i32| {
+            sim.issue(Command {
+                player,
+                kind: CommandKind::Spawn {
+                    kind,
+                    pos: Vec2Fx::from_int(x, y),
+                },
+            });
+        };
+        match self.style {
+            Style::Melee => {
+                // Two blocks of ten ranks by twenty files facing each other
+                // across the middle of the map.
+                let (cx, cy) = melee_block(sim, player);
+                for n in 0..MELEE_SIDE {
+                    let kind = MELEE_ROSTER[n % MELEE_ROSTER.len()];
+                    let rank = (n / 20) as i32;
+                    let file = (n % 20) as i32;
+                    let x = if player == 0 { cx - rank } else { cx + rank };
+                    spawn(sim, kind, x, cy - 10 + file);
+                }
+            }
+            Style::Opponents => {
+                let Some(&(sx, sy)) = sim.starts().get(player as usize) else {
+                    return;
+                };
+                let map = sim.map().width();
+                for n in 0..OPPONENT_KIT {
+                    // Three soldiers to a villager: an army the opponent's
+                    // military manager will use, and workers its economy
+                    // manager will place.
+                    let kind = if n % 4 == 0 {
+                        kinds::VILLAGER
+                    } else {
+                        MELEE_ROSTER[n % MELEE_ROSTER.len()]
+                    };
+                    let x = (sx + bot.range_i32(-6, 7)).clamp(0, map - 1);
+                    let y = (sy + bot.range_i32(-6, 7)).clamp(0, map - 1);
+                    spawn(sim, kind, x, y);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// One player's turn to consider issuing something.
@@ -269,6 +460,10 @@ impl Scenario {
                 9..=10 => self.research(sim, bot, player),
                 _ => self.reseed(sim, bot, player),
             }
+            return;
+        }
+        if self.style == Style::Melee {
+            self.melee(sim, bot, player);
             return;
         }
         let economy = matches!(self.style, Style::Economy | Style::Everything);
@@ -684,6 +879,55 @@ impl Scenario {
         sim.issue(Command { player, kind });
     }
 
+    /// The fight of a [`Style::Melee`] scenario: some of a side's soldiers
+    /// sent at the other side's block, most by attack-move, some at one
+    /// enemy in particular, with a stance change now and then so it is
+    /// not one formation walking into another.
+    fn melee(&self, sim: &mut Simulation, bot: &mut Rng, player: PlayerId) {
+        let fighters = owned(sim, player, |k, _| {
+            let info = kinds::info(k);
+            info.mobile && info.combat.attack > 0 && k != kinds::VILLAGER
+        });
+        if fighters.is_empty() {
+            return;
+        }
+        let players = sim.players().len().max(2) as u8;
+        let enemy = (player + 1) % players;
+        let n = 1 + bot.below(fighters.len() as u32) as usize;
+        let start = bot.below(fighters.len() as u32) as usize;
+        let ids: Vec<EntityId> = fighters
+            .iter()
+            .cycle()
+            .skip(start)
+            .take(n)
+            .copied()
+            .collect();
+        let kind = match bot.below(8) {
+            0 => {
+                let theirs = owned(sim, enemy, |k, _| kinds::info(k).mobile);
+                if theirs.is_empty() {
+                    return;
+                }
+                CommandKind::Attack {
+                    ids,
+                    target: theirs[bot.below(theirs.len() as u32) as usize],
+                }
+            }
+            1 => CommandKind::SetStance {
+                ids,
+                stance: sim::Stance::ALL[bot.below(4) as usize],
+            },
+            _ => {
+                let (cx, cy) = melee_block(sim, enemy);
+                CommandKind::AttackMove {
+                    ids,
+                    target: Vec2Fx::from_int(cx + bot.range_i32(-8, 9), cy + bot.range_i32(-8, 9)),
+                }
+            }
+        };
+        sim.issue(Command { player, kind });
+    }
+
     /// Free units, to press the entity cap and the population recount.
     ///
     /// Spawns a batch rather than one at a time: a marching scenario that
@@ -707,6 +951,15 @@ impl Scenario {
             });
         }
     }
+}
+
+/// Where a side's block stands in a [`Style::Melee`] scenario: a quarter
+/// of the way in from its edge, halfway down.
+fn melee_block(sim: &Simulation, player: PlayerId) -> (i32, i32) {
+    let w = sim.map().width();
+    let h = sim.map().height();
+    let x = if player == 0 { w / 4 } else { w - w / 4 };
+    (x, h / 2)
 }
 
 /// Mobile units per player a [`Style::Marching`] scenario keeps in the field.

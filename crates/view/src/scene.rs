@@ -183,9 +183,12 @@ impl Scene {
                     continue;
                 }
             }
-            // A site shows pegs until half built, then the building itself.
-            let half_built =
-                world.construction[i].is_some_and(|done| done * 2 < info.build_work().max(1));
+            // A site rises in three stages (`docs/03` §6.2): pegs, then the
+            // building's lower half, then most of it, then the building.
+            let stage = world.construction[i].map(|done| {
+                let total = info.build_work().max(1);
+                (done / (total / 3).max(1)).min(2)
+            });
             // Buildings and villagers wear their owner's age.
             let age = sim
                 .player(world.owner[i])
@@ -252,7 +255,7 @@ impl Scene {
                     + (alpha * TICK_MS as f32) as u32
                     + (i as u32 * 61) % 1000
             };
-            let looked_up = if half_built {
+            let looked_up = if stage == Some(0) {
                 atlas.site(info.footprint).map(|f| (f, false))
             } else if !info.mobile && world.dying[i] > 0 {
                 // Rubble where it stood, for as long as it lies.
@@ -303,11 +306,23 @@ impl Scene {
                     }
                 }
             }
-            sprites.push(SpriteInstance {
-                x: (gx - anchor_x).round(),
-                y: (gy - ay).round(),
-                w: frame.draw_w(),
-                h: frame.draw_h(),
+            // A node being used up is drawn smaller as it goes: a bush
+            // thins, a vein shrinks, down to half. Trees fall instead
+            // (`feedback.rs`) and farms are reseeded.
+            let worn = match info.resource {
+                Some((_, base))
+                    if kind != kinds::FARM && kind != kinds::TREE && world.dying[i] == 0 =>
+                {
+                    let left = world.resource[i].max(0) as f32 / base.max(1) as f32;
+                    0.5 + 0.5 * left.min(1.0)
+                }
+                _ => 1.0,
+            };
+            let mut sprite = SpriteInstance {
+                x: (gx - anchor_x * worn).round(),
+                y: (gy - ay * worn).round(),
+                w: frame.draw_w() * worn,
+                h: frame.draw_h() * worn,
                 u: frame.x,
                 v: frame.y,
                 uw: frame.w,
@@ -318,7 +333,18 @@ impl Scene {
                 slot: i as u32,
                 screen: false,
                 light: fog::VISIBLE,
-            });
+            };
+            // Rising: only the lower part of the building is there yet.
+            if let Some(stage @ 1..=2) = stage {
+                let keep = if stage == 1 { 0.5 } else { 0.85 };
+                let cut = (f32::from(frame.h) * (1.0 - keep)) as u16;
+                sprite.v += cut;
+                sprite.vh -= cut;
+                let full = sprite.h;
+                sprite.h = (full * keep).round();
+                sprite.y += full - sprite.h;
+            }
+            sprites.push(sprite);
         }
         // What was seen once and is out of sight now, as it was then, in the
         // explored light: buildings and nodes only, never a unit, and not
@@ -747,6 +773,150 @@ mod tests {
             .sprites
             .iter()
             .all(|s| s.slot != u32::MAX && sim.world().owner[s.slot as usize] == 1));
+    }
+
+    /// A site is pegs for its first third, the building's lower half for
+    /// the second, most of it for the last, and the building when done;
+    /// a bush being eaten is drawn smaller as it goes, never below half.
+    #[test]
+    fn sites_rise_in_three_stages_and_nodes_shrink_as_they_are_used() {
+        use sim::{Command, CommandKind, MapKind, MapSpec, SimConfig};
+        let atlas = Atlas::placeholder();
+        let mut sim = Simulation::new(
+            5,
+            SimConfig {
+                map: MapSpec {
+                    kind: MapKind::Flat,
+                    size: 48,
+                    players: 1,
+                },
+                starting_stockpile: [5000; 4],
+                wander: false,
+                ..SimConfig::default()
+            },
+        );
+        let spawn = |sim: &mut Simulation, kind, x, y| {
+            sim.issue(Command {
+                player: 0,
+                kind: CommandKind::Spawn {
+                    kind,
+                    pos: sim::nav::centre((x, y)),
+                },
+            });
+            for _ in 0..3 {
+                sim.step();
+            }
+            let w = sim.world();
+            w.slots()
+                .filter(|s| w.kind[s.index()] == kind)
+                .map(|s| w.id_at(s))
+                .last()
+                .unwrap()
+        };
+        let builders: Vec<_> = (0..5)
+            .map(|k| spawn(&mut sim, kinds::VILLAGER, 10 + k, 10))
+            .collect();
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Build {
+                kind: kinds::HOUSE,
+                x: 12,
+                y: 13,
+                ids: builders,
+            },
+        });
+        // The command lands two ticks on.
+        for _ in 0..3 {
+            sim.step();
+        }
+        let site_slot = |sim: &Simulation| {
+            let w = sim.world();
+            w.slots()
+                .find(|s| w.kind[s.index()] == kinds::HOUSE)
+                .map(|s| s.index())
+                .unwrap()
+        };
+        let house = |scene: &Scene, slot: usize| {
+            scene
+                .sprites
+                .iter()
+                .find(|s| s.slot == slot as u32)
+                .cloned()
+                .expect("the site is drawn")
+        };
+        let total = kinds::info(kinds::HOUSE).build_work().max(1);
+        let mut seen = [false; 4];
+        let (mut half_h, mut full_h) = (0.0_f32, 0.0_f32);
+        for _ in 0..2000 {
+            sim.step();
+            let i = site_slot(&sim);
+            let scene = Scene::build(&sim, &atlas, None, 0.0);
+            let s = house(&scene, i);
+            let pegs = atlas.site(kinds::info(kinds::HOUSE).footprint).unwrap();
+            let (frame, _) = atlas.frame(kinds::HOUSE, 0).unwrap();
+            match sim.world().construction[i] {
+                Some(done) if done < total / 3 => {
+                    assert_eq!((s.u, s.v), (pegs.x, pegs.y), "pegs");
+                    seen[0] = true;
+                }
+                Some(done) if done < 2 * (total / 3) => {
+                    assert_eq!(s.u, frame.x, "the building's own frame");
+                    assert!(s.v > frame.y, "clipped from the top");
+                    assert!(
+                        (s.h - (frame.draw_h() * 0.5).round()).abs() <= 1.0,
+                        "half: {}",
+                        s.h
+                    );
+                    half_h = s.h;
+                    seen[1] = true;
+                }
+                Some(_) => {
+                    assert!(s.h > half_h && s.h < frame.draw_h(), "most of it: {}", s.h);
+                    seen[2] = true;
+                }
+                None => {
+                    assert_eq!((s.u, s.v, s.h), (frame.x, frame.y, frame.draw_h()), "done");
+                    full_h = s.h;
+                    seen[3] = true;
+                }
+            }
+            if seen[3] {
+                break;
+            }
+        }
+        assert_eq!(seen, [true; 4], "every stage was drawn");
+        assert!(full_h > half_h);
+        // The bush.
+        let bush = spawn(&mut sim, kinds::BERRY_BUSH, 20, 20);
+        let bush_slot = sim.world().slot(bush).unwrap().index();
+        let eaters: Vec<_> = (0..4)
+            .map(|k| spawn(&mut sim, kinds::VILLAGER, 18 + k, 18))
+            .collect();
+        spawn(&mut sim, kinds::STOREHOUSE, 22, 22);
+        let (frame, _) = atlas.frame(kinds::BERRY_BUSH, 0).unwrap();
+        let before = house(&Scene::build(&sim, &atlas, None, 0.0), bush_slot);
+        assert_eq!(before.w, frame.draw_w(), "whole");
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Gather {
+                ids: eaters,
+                node: bush,
+            },
+        });
+        for _ in 0..1200 {
+            sim.step();
+        }
+        let left = sim.world().resource[bush_slot];
+        let base = kinds::info(kinds::BERRY_BUSH).resource.unwrap().1;
+        assert!(left > 0 && left < base, "partly eaten: {left} of {base}");
+        let after = house(&Scene::build(&sim, &atlas, None, 0.0), bush_slot);
+        assert!(
+            after.w < before.w && after.w >= before.w * 0.5,
+            "thinned: {} of {}",
+            after.w,
+            before.w
+        );
+        assert!(after.y > before.y, "still on the ground");
     }
 
     #[test]

@@ -12,23 +12,29 @@ mod clock;
 mod input;
 mod keys;
 mod selection;
+mod sound;
 
 #[cfg(test)]
 mod tests;
 
 use ai::Opponent;
+use audio::{Bus, Cue, Fade, Ground};
 use clock::FixedClock;
 use fogged::FoggedView;
 use input::Input;
 use selection::Selection;
 use sim::kinds;
 use sim::tech;
+use sim::Class;
 use sim::{
     Age, Command, CommandKind, EntityId, Rally, Replay, Simulation, Source, Vec2Fx, TICK_MS,
 };
+use sim::{Order, Terrain};
+use sound::Speaker;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use view::hints::{self, Hints, Keys};
 use view::hud::{Action, BOTTOM_PANEL, TOP_BAR};
 use view::minimap::{Minimap, MinimapRect};
 use view::shell::{self, Results, Side};
@@ -169,6 +175,10 @@ struct App {
     ui_scale_user: f32,
     /// The controls overlay is open (`F1` or `?`).
     show_help: bool,
+    /// The performance readout is up (`F4`).
+    show_perf: bool,
+    /// What the frames and the ticks cost, for the readout.
+    meter: view::Meter,
     /// The age the player was in last frame, to notice an advance.
     last_age: Age,
     /// When the last advance completed, and to what, for the celebration.
@@ -243,7 +253,40 @@ struct App {
     /// How many technologies the viewer had last frame, to notice a new
     /// one.
     last_researched: usize,
+    /// What plays: the mixer decides (`docs/04` §8).
+    mixer: audio::Mixer,
+    /// Where it plays: the device, a recorder in tests, or nowhere.
+    speaker: Speaker,
+    /// When the app started: the mixer's clock, wall time.
+    started: Instant,
+    /// The score: a stem per age, the combat stem over a fight.
+    score: audio::Score,
+    /// The beds under the camera.
+    ambience: audio::Ambience,
+    /// How many units were fighting in view at the last survey.
+    fighting: usize,
+    /// The ground under the camera at the last survey.
+    ground: Ground,
+    /// The tick and the time of the last survey of the view.
+    surveyed: Option<(u64, u64)>,
+    /// The first-time hints (`docs/03` §7).
+    hints: Hints,
+    /// The tick the side was last told it was under attack, for the hint.
+    attacked_at: Option<u64>,
+    /// What the last refused click was short of, and when: the resource
+    /// bar flashes it (`docs/03` §6.3).
+    flash: Option<(Instant, [bool; 4])>,
 }
+
+/// The bar flashes what a refused click was short of for this long.
+const FLASH_MS: u128 = 1500;
+/// The attack is news for the hint this long after the bell.
+const ATTACK_NEWS_TICKS: u64 = 200;
+
+/// The view is surveyed for the score and the beds every this many
+/// ticks of the match, or this many milliseconds when it stands still.
+const SURVEY_TICKS: u64 = 5;
+const SURVEY_MS: u64 = 500;
 
 /// A world position as a tile for the camera and the notices.
 fn tile_of(pos: Vec2Fx) -> (f32, f32) {
@@ -358,6 +401,16 @@ impl App {
         if !atlas.loaded_sets.is_empty() {
             eprintln!("rendered sprite sets: {}", atlas.loaded_sets.join(", "));
         }
+        // Recordings under assets/sounds replace the placeholder sounds by
+        // cue name, as rendered sprite sets replace placeholder art.
+        let mut library = audio::placeholder::library();
+        let recorded = view::sheets::default_dir()
+            .and_then(|d| d.parent().map(|p| p.join("sounds")))
+            .map(|dir| sound::recordings(&dir, &mut library))
+            .unwrap_or_default();
+        if !recorded.is_empty() {
+            eprintln!("recorded sounds: {}", recorded.join(", "));
+        }
         App {
             window: None,
             gpu: None,
@@ -376,6 +429,8 @@ impl App {
             alarm_at: None,
             ui_scale_user: 1.0,
             show_help: false,
+            show_perf: false,
+            meter: view::Meter::default(),
             last_age: Age::Stone,
             age_up: None,
             scene: Scene::default(),
@@ -415,6 +470,17 @@ impl App {
             settings_error: None,
             notices: Notices::default(),
             last_researched: 0,
+            mixer: audio::Mixer::new(library),
+            speaker: Speaker::Silent,
+            started: Instant::now(),
+            score: audio::Score::default(),
+            ambience: audio::Ambience::default(),
+            fighting: 0,
+            ground: Ground::default(),
+            surveyed: None,
+            hints: Hints::new(true, &std::collections::BTreeMap::new()),
+            attacked_at: None,
+            flash: None,
         }
     }
 
@@ -422,6 +488,11 @@ impl App {
     /// that does not parse is left alone and reported; the defaults
     /// stand in.
     fn load_settings(&mut self) {
+        self.read_settings();
+        self.hints = Hints::new(self.settings.hints, &self.settings.hints_shown);
+    }
+
+    fn read_settings(&mut self) {
         match std::fs::read_to_string(&self.settings_path) {
             Ok(text) => match Settings::from_ron(&text) {
                 Ok(s) => self.settings = s,
@@ -443,6 +514,12 @@ impl App {
     /// pan keys the camera reads while held, and the window mode.
     fn apply_settings(&mut self) {
         self.ui_scale_user = self.settings.ui_scale;
+        self.hints.enabled = self.settings.hints;
+        for bus in Bus::ALL {
+            let volume = f32::from(self.settings.volume(bus)) / 100.0;
+            self.mixer.set_volume(bus, volume);
+            self.speaker.set_volume(bus, volume);
+        }
         self.input.edge_scroll = self.settings.edge_scroll;
         self.input.pan = [
             Control::PanUp,
@@ -539,7 +616,184 @@ impl App {
         if self.playback.is_some() {
             return;
         }
+        // The units answer the moment they are told (`UX-AUDIO-01`): the
+        // bark is the command's, not the tick's, which is two ticks off.
+        let voice = match &kind {
+            CommandKind::Move { ids, .. }
+            | CommandKind::Stop { ids }
+            | CommandKind::Gather { ids, .. }
+            | CommandKind::Build { ids, .. }
+            | CommandKind::Assist { ids, .. }
+            | CommandKind::Attack { ids, .. }
+            | CommandKind::AttackMove { ids, .. }
+            | CommandKind::Patrol { ids, .. }
+            | CommandKind::Garrison { ids, .. } => self.voice_of(ids),
+            _ => None,
+        };
+        if let Some(class) = voice {
+            self.cue(Cue::Ack(class), None);
+        }
         self.sim.issue(Command { player: ME, kind });
+    }
+
+    /// Milliseconds since the app started: the mixer's clock. Wall time,
+    /// so a voice is busy for its clip's length whatever the match does.
+    fn now_ms(&self) -> u64 {
+        self.started.elapsed().as_millis() as u64
+    }
+
+    /// Asks for a sound, from a tile or from nowhere in particular; the
+    /// mixer decides whether and how it plays, and the speaker plays it.
+    fn cue(&mut self, cue: Cue, at: Option<(f32, f32)>) {
+        let at = at.map(|(x, y)| view::iso::project(x, y, 0.0));
+        let now = self.now_ms();
+        if let Some(play) = self.mixer.cue(cue, at, now) {
+            if let Some(clip) = self.mixer.library().clip(play.cue, play.variant) {
+                self.speaker.play(&play, clip);
+            }
+        }
+    }
+
+    /// Applies a fade to a layer: the device starts its loop if need be.
+    fn fade(&mut self, fade: Fade) {
+        let clip = self.mixer.library().layer(fade.layer);
+        self.speaker.fade(fade, clip);
+    }
+
+    /// The score and the beds follow the match (`docs/04` §8): the
+    /// viewer's age, the fight in view, the ground under the camera. The
+    /// view is surveyed every few ticks or half a second; the age is read
+    /// every frame so an advance is heard at once.
+    fn hear_the_match(&mut self) {
+        let now = self.now_ms();
+        let tick = self.sim.tick();
+        let due = self.surveyed.is_none_or(|(t, ms)| {
+            tick.saturating_sub(t) >= SURVEY_TICKS || now.saturating_sub(ms) >= SURVEY_MS
+        });
+        if due {
+            self.surveyed = Some((tick, now));
+            let rect = self.tiles_in_view();
+            self.fighting = self.fighting_in(rect);
+            self.ground = self.ground_in(rect);
+        }
+        let me = self.hud_player();
+        let age = self.sim.player(me).map(|p| p.age);
+        for f in self.score.update(age, self.fighting, now) {
+            self.fade(f);
+        }
+        for f in self.ambience.update(Some(self.ground)) {
+            self.fade(f);
+        }
+    }
+
+    /// No match on screen: the score and the beds go quiet.
+    fn hear_nothing(&mut self) {
+        let now = self.now_ms();
+        for f in self.score.update(None, 0, now) {
+            self.fade(f);
+        }
+        for f in self.ambience.update(None) {
+            self.fade(f);
+        }
+        self.surveyed = None;
+    }
+
+    /// The tiles the view covers, `(x0, y0, x1, y1)` inclusive, clamped
+    /// to the map: the bounding box of the view's four corners.
+    fn tiles_in_view(&self) -> (i32, i32, i32, i32) {
+        let (w, h) = self.map_size();
+        let (vw, vh) = self.camera.viewport;
+        let corners = [(0.0, 0.0), (vw, 0.0), (0.0, vh), (vw, vh)]
+            .map(|(px, py)| self.camera.window_to_world(px, py));
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for (x, y) in corners {
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x);
+            y1 = y1.max(y);
+        }
+        (
+            (x0.floor() as i32).clamp(0, w - 1),
+            (y0.floor() as i32).clamp(0, h - 1),
+            (x1.ceil() as i32).clamp(0, w - 1),
+            (y1.ceil() as i32).clamp(0, h - 1),
+        )
+    }
+
+    /// How many units are fighting in the view, as the viewer sees it: a
+    /// fight in the fog is not heard.
+    fn fighting_in(&self, (x0, y0, x1, y1): (i32, i32, i32, i32)) -> usize {
+        let world = self.sim.world();
+        let fog = self.viewer.and_then(|p| self.sim.fog(p));
+        world
+            .slots()
+            .filter(|s| {
+                let i = s.index();
+                if world.dying[i] != 0 || !matches!(world.order[i], Order::Attack { .. }) {
+                    return false;
+                }
+                let (x, y) = (world.pos[i].x.floor(), world.pos[i].y.floor());
+                (x0..=x1).contains(&x)
+                    && (y0..=y1).contains(&y)
+                    && fog.is_none_or(|f| f.visible(x, y))
+            })
+            .count()
+    }
+
+    /// The ground under the view, as fractions of its tiles: unexplored
+    /// ground is nothing, since it has no sound.
+    fn ground_in(&self, (x0, y0, x1, y1): (i32, i32, i32, i32)) -> Ground {
+        let map = self.sim.map();
+        let fog = self.viewer.and_then(|p| self.sim.fog(p));
+        let mut g = Ground::default();
+        let total = ((x1 - x0 + 1) * (y1 - y0 + 1)).max(1) as f32;
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                if fog.is_some_and(|f| !f.explored(x, y)) {
+                    continue;
+                }
+                match map.terrain(x, y) {
+                    Terrain::ForestFloor => g.forest += 1.0,
+                    Terrain::ShallowWater | Terrain::DeepWater => g.water += 1.0,
+                    Terrain::Desert | Terrain::Sand => g.sand += 1.0,
+                    Terrain::Grass | Terrain::Dirt | Terrain::Snow => g.open += 1.0,
+                }
+            }
+        }
+        Ground {
+            forest: g.forest / total,
+            water: g.water / total,
+            sand: g.sand / total,
+            open: g.open / total,
+        }
+    }
+
+    /// The class that answers for some of the player's units: the first
+    /// mobile one's.
+    fn voice_of(&self, ids: &[EntityId]) -> Option<Class> {
+        let world = self.sim.world();
+        ids.iter().find_map(|id| {
+            let i = world.slot(*id)?.index();
+            let info = kinds::info(world.kind[i]);
+            (world.owner[i] == ME && info.mobile).then_some(info.class)
+        })
+    }
+
+    /// The selection answers: the first of the player's units in it.
+    fn selection_sound(&mut self) {
+        if let Some(class) = self.voice_of(&self.selection.ids) {
+            self.cue(Cue::Select(class), None);
+        }
+    }
+
+    /// Opens the audio device; without one the game is silent and says
+    /// so once.
+    fn open_speaker(&mut self) {
+        match sound::Device::open(self.mixer.library()) {
+            Ok(device) => self.speaker = Speaker::Device(Box::new(device)),
+            Err(e) => eprintln!("warning: no audio device: {e}"),
+        }
+        self.apply_settings();
     }
 
     /// The player whose panel the HUD shows.
@@ -638,6 +892,8 @@ impl App {
     fn frame(&mut self) {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
+        self.meter
+            .frame(now.duration_since(self.last_frame).as_nanos() as u64);
         self.last_frame = now;
         match self.shell {
             Shell::Match => self.frame_match(now, dt),
@@ -662,17 +918,32 @@ impl App {
                 p.next += 1;
             }
         }
+        let mut thinking = 0u64;
         for bot in &mut self.opponents {
+            let t = Instant::now();
             let commands = {
                 let view = FoggedView::new(&self.sim, bot.player());
                 bot.think(&view)
             };
+            thinking += t.elapsed().as_nanos() as u64;
             for c in commands {
                 self.sim.issue_from(c, Source::Ai);
             }
         }
-        self.sim.step();
+        // The tick under the stopwatch, for the readout: the same tick,
+        // with the app's clock read between its phases.
+        let epoch = self.started;
+        let timings = self
+            .sim
+            .step_timed(&mut || epoch.elapsed().as_nanos() as u64);
+        self.meter.tick(&timings, thinking);
         self.feedback.observe(&self.sim);
+        // What the tick sounded like, through the viewer's fog
+        // (`TA-AUDIO-02`).
+        let viewer = self.viewer;
+        for (cue, at) in audio::events::cues(&self.sim, viewer) {
+            self.cue(cue, at);
+        }
         // What happened to the side goes on the stack (`docs/03` §6.3);
         // an attack also raises the banner.
         let me = self.hud_player();
@@ -681,6 +952,7 @@ impl App {
             match *e {
                 sim::Event::Alarm { player, pos } if player == me => {
                     self.alarm_at = Some(now);
+                    self.attacked_at = Some(tick);
                     self.notices.push(Notice {
                         kind: NoticeKind::Attack,
                         text: "UNDER ATTACK".to_string(),
@@ -707,6 +979,35 @@ impl App {
     fn frame_match(&mut self, now: Instant, dt: f32) {
         if !self.overlay() {
             self.input.update_camera(&mut self.camera, dt);
+        }
+        // The listener is the camera: the centre of the view, and how far
+        // the view reaches from it (`docs/03` §6.1).
+        let (l, t, r, b) = self.camera.visible_rect();
+        self.mixer.set_listener(audio::Listener {
+            focus: self.camera.focus,
+            half: ((r - l) * 0.5, (b - t) * 0.5),
+        });
+        self.hear_the_match();
+        // The first-time hints: read the moment, and a hint that starts is
+        // counted in the settings file, since each shows at most twice.
+        if self.playback.is_none() {
+            let tick = self.sim.tick();
+            let me = self.hud_player();
+            let c = hints::conditions(
+                &self.sim,
+                me,
+                !self.selection.own_villagers(&self.sim, ME).is_empty(),
+                self.attacked_at
+                    .is_some_and(|t| tick.saturating_sub(t) < ATTACK_NEWS_TICKS),
+            );
+            if let Some(h) = self.hints.update(&c, tick) {
+                *self
+                    .settings
+                    .hints_shown
+                    .entry(h.id().to_string())
+                    .or_insert(0) += 1;
+                self.save_settings();
+            }
         }
         let ticks = self.clock.advance(now);
         for _ in 0..ticks {
@@ -795,6 +1096,14 @@ impl App {
         );
         self.feedback
             .decorate(&mut scene, &self.sim, &self.atlas, self.viewer);
+        // An attack on the player's own out of view: a mark at the edge.
+        scene.ui.extend(self.feedback.edge_indicators(
+            &self.sim,
+            &self.atlas,
+            &self.camera,
+            self.viewer,
+            self.ui_scale(),
+        ));
         // Band-box outline.
         if let (Some(from), Some(to)) = (self.selection.drag_from, self.input.cursor) {
             let thr = DRAG_THRESHOLD * self.camera.dpi;
@@ -830,6 +1139,19 @@ impl App {
             self.sim.seed(),
             self.sim.tick()
         );
+        let keys = Keys {
+            next_idle: view::settings::pretty(self.settings.key(Control::NextIdle)),
+            pause: view::settings::pretty(self.settings.key(Control::Pause)),
+        };
+        let hint = self
+            .hints
+            .showing(self.sim.tick())
+            .filter(|_| self.playback.is_none())
+            .map(|h| h.text(&keys));
+        let readout = self.show_perf.then(|| {
+            self.meter
+                .readout(self.fps, self.sim.world().len(), scene.sprites.len())
+        });
         let hud = Hud::build(
             &self.atlas,
             &HudInput {
@@ -850,6 +1172,12 @@ impl App {
                 help: self.show_help,
                 settings: &self.settings,
                 notices: self.notices.shown(),
+                hint: hint.as_deref(),
+                flash: self
+                    .flash
+                    .filter(|(at, _)| at.elapsed().as_millis() < FLASH_MS)
+                    .map_or([false; 4], |(_, lacks)| lacks),
+                perf: readout.as_ref(),
             },
         );
         scene.ui.extend(hud.sprites.iter().cloned());
@@ -895,8 +1223,11 @@ impl App {
         self.update_cursor();
         let rect = self.minimap_rect();
         if let Some(gpu) = &mut self.gpu {
-            if self.last_minimap.elapsed().as_millis() >= 500 {
-                let m = Minimap::render_for(&self.sim, self.viewer);
+            // Twice a second, or eight times while a mark flashes on it.
+            let marks = self.feedback.minimap_marks(&self.sim, self.viewer);
+            let every = if marks.is_empty() { 500 } else { 125 };
+            if self.last_minimap.elapsed().as_millis() >= every {
+                let m = Minimap::render_marked(&self.sim, self.viewer, &marks);
                 gpu.renderer.upload_minimap(&gpu.device, &gpu.queue, &m);
                 self.last_minimap = now;
             }
@@ -920,6 +1251,7 @@ impl App {
     /// The title and the setup screen: no world, a backdrop and buttons,
     /// and on the setup screen the seed's map as the minimap will show it.
     fn frame_shell(&mut self, now: Instant) {
+        self.hear_nothing();
         let input = self.shell_input();
         let screen = match self.shell {
             Shell::Title => shell::title(&self.atlas, &input),
@@ -1160,6 +1492,7 @@ impl App {
             .cloned()
         {
             if b.enabled {
+                self.cue(Cue::Click, None);
                 self.shell_action(b.action);
             }
         }
@@ -1183,6 +1516,14 @@ impl App {
             }
             ShellAction::SettingScale(delta) => {
                 self.settings.cycle_scale(delta);
+                self.apply_and_save_settings();
+            }
+            ShellAction::Volume(bus, steps) => {
+                self.settings.step_volume(bus, steps);
+                self.apply_and_save_settings();
+            }
+            ShellAction::ToggleHints => {
+                self.settings.hints = !self.settings.hints;
                 self.apply_and_save_settings();
             }
             ShellAction::ToggleEdgeScroll => {
@@ -1274,6 +1615,9 @@ impl App {
     /// the player's start, the clock fresh, and everything of the last
     /// match cleared.
     fn enter_match(&mut self) {
+        self.hints.reset();
+        self.attacked_at = None;
+        self.flash = None;
         let (viewport, dpi) = (self.camera.viewport, self.camera.dpi);
         let map = self.sim.map();
         self.camera = Camera::new(map.width(), map.height(), viewport);
@@ -1471,6 +1815,16 @@ impl App {
             {
                 if b.enabled && self.playback.is_none() {
                     self.do_action(b.action);
+                } else if self.playback.is_none() {
+                    // A greyed button buzzes: the refusal is heard as well
+                    // as read (`docs/03` §8). Short of a resource, the bar
+                    // flashes it and the line says so (`docs/03` §6.3).
+                    if b.lacks.iter().any(|l| *l) {
+                        self.flash = Some((Instant::now(), b.lacks));
+                        self.cue(Cue::Poor, None);
+                    } else {
+                        self.cue(Cue::Invalid, None);
+                    }
                 }
             }
             return;
@@ -1532,6 +1886,7 @@ impl App {
             } else {
                 self.selection.set(ids);
             }
+            self.selection_sound();
             return;
         }
         // A click.
@@ -1549,6 +1904,7 @@ impl App {
                         let same =
                             selection::same_kind_on_screen(&self.sim, &self.camera, ME, kind);
                         self.selection.set(same);
+                        self.selection_sound();
                         return;
                     }
                 }
@@ -1557,6 +1913,7 @@ impl App {
                 } else {
                     self.selection.set(vec![id]);
                 }
+                self.selection_sound();
             }
             None => {
                 if !shift {
@@ -1664,6 +2021,9 @@ impl App {
     }
 
     fn do_action(&mut self, action: Action) {
+        // A button answers as it is pressed (`UX-AUDIO-01`), from the
+        // panel or its key alike.
+        self.cue(Cue::Click, None);
         match action {
             Action::Jump(row) => {
                 if let Some((x, y)) = self.notices.shown().get(row).and_then(|n| n.tile) {
@@ -1844,6 +2204,12 @@ impl App {
         if self.input.is_pan_key(code) {
             return false;
         }
+        // The performance readout is a meter, not a control: `F4` unless
+        // the player has bound `F4` to something.
+        if code == KeyCode::F4 && self.settings.control("F4").is_none() {
+            self.show_perf = !self.show_perf;
+            return false;
+        }
         let ctrl = self.modifiers.control_key();
         let digit = match code {
             KeyCode::Digit0 => Some(0),
@@ -1864,6 +2230,7 @@ impl App {
             } else if !self.selection.groups[d].is_empty() {
                 let g = self.selection.groups[d].clone();
                 self.selection.set(g);
+                self.selection_sound();
             }
             return false;
         }
@@ -1907,6 +2274,7 @@ impl App {
                     let p = self.sim.world().pos[i];
                     self.camera
                         .look_at_tile(view::fx_to_f32(p.x), view::fx_to_f32(p.y));
+                    self.selection_sound();
                 }
             }
             Some(Control::Eyes) if self.playback.is_some() => {
@@ -2200,5 +2568,6 @@ fn main() {
     let event_loop = EventLoop::new().expect("event loop");
     let mut app = App::new();
     app.load_settings();
+    app.open_speaker();
     event_loop.run_app(&mut app).expect("event loop failed");
 }

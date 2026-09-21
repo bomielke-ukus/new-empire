@@ -29,6 +29,10 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/assets"
 cp target/release/new-empire "$app/Contents/MacOS/new-empire"
 cp -R assets/sprites "$app/Contents/Resources/assets/sprites"
+# Recordings, once there are any; the placeholders are in the binary.
+if [ -d assets/sounds ]; then
+  cp -R assets/sounds "$app/Contents/Resources/assets/sounds"
+fi
 sed -e "s/@VERSION@/$version/" -e "s/@BUILD@/$build/" \
   packaging/macos/Info.plist > "$app/Contents/Info.plist"
 printf 'APPL????' > "$app/Contents/PkgInfo"

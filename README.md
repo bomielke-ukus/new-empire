@@ -35,7 +35,8 @@ Read in order:
 ## Building and running
 
 Requires a stable Rust toolchain (`rustup` installs it; `rust-toolchain.toml`
-pins the channel).
+pins the channel). On Linux the audio device builds against ALSA
+(`libasound2-dev`); macOS needs nothing extra.
 
 ```sh
 cargo test --workspace                       # unit tests for every crate
@@ -43,6 +44,7 @@ cargo run --release -p simrunner -- determinism --ticks 10000
                                              # M0 acceptance: run a synthetic
                                              # match twice, compare every tick
 cargo run --release -p simrunner -- bench            # per-tick timings
+cargo run --release -p simrunner -- bench --stats    # and where each tick went, by phase (docs/04 §12)
 cargo run --release -p simrunner -- golden           # replay the corpus, compare digests
 cargo run --release -p simrunner -- verify FILE      # a replay or a save: it must replay identically
 cargo run --release -p simrunner -- ai --matches 3 --difficulty hard,easy --stats   # computer opponents, headless
@@ -95,11 +97,13 @@ In the match: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
 `+`/`-` to zoom, from 0.5× to 3×, about the cursor; click the minimap to
 jump; `Space` pause; `[` `]` speed; `F3` toggles edge scrolling; `F2`
 cycles the HUD size (1×, 1.5×, 2×); `Home` jumps to your Town Center;
-`F1` or `?` opens a controls overlay listing all of this, and the resource
+`F4` opens a performance readout: the frame and the tick, the tick's
+phases and the budgets they are held to (`docs/04` §12), for measuring on
+real hardware. `F1` or `?` opens a controls overlay listing all of this, and the resource
 bar points at it for the first minute of a match. WASD is reserved for
 camera movement. Every one of these general keys can be rebound on the
-title's SETTINGS screen, which also holds the HUD size, edge scrolling and
-the window mode, kept in `settings.ron` in the game's data directory (or
+title's SETTINGS screen, which also holds the HUD size, edge scrolling, the
+window mode and the four sound volumes, kept in `settings.ron` in the game's data directory (or
 `NEW_EMPIRE_SETTINGS`); the command letters on the panels are fixed. The
 game honours the display's scale factor, so 1× is the same apparent size
 on a Retina screen as on any other.
@@ -107,6 +111,31 @@ on a Retina screen as on any other.
 Rendered sprite sets under `assets/sprites` replace the procedural placeholders
 for their kinds at startup (today: the greybox villager). `cargo run -p atlas
 -- repalette` refreshes their palette chunks after a palette colour changes.
+
+The game is heard from the first click: units answer an order and a
+selection, the woodline and the fight sound where they are and only where
+you can see, a button clicks, a greyed one buzzes, the bell tolls for an
+attack and a fanfare for an age. Twelve villagers chopping are four voices
+at once, each at its own pitch. Every sound today is a synthesised
+placeholder; a recording under `assets/sounds/<cue>/*.wav` (`ack-villager`,
+`work-chop`, `alarm`: the names are in `crates/audio/src/lib.rs`) replaces
+it with no code change. A stem plays under the match and cross-fades to
+the next age's; drums come in while six or more units fight in view; surf,
+wind or birds sit under the camera by the ground it is over. Those are
+placeholders too (`stem-stone`, `stem-combat`, `bed-surf`, the names in
+`crates/audio/src/score.rs`).
+
+And it is seen: a blow moves what it hits and sparks; a kill throws dust
+the way the blow went; a building coming down raises a cloud over its
+rubble; a site rises in three stages under the hammers; a bush thins and
+a vein shrinks as they are used; a tree falls toward whoever felled it;
+and an attack on your own out of view is a red chevron at the screen's
+edge and a flash on the minimap.
+
+Hover any unit, building or technology button for its tooltip: cost,
+time, what it counters and what counters it, and its key. Five first-time
+hints come in context, each at most twice, and SETTINGS turns them off. A
+click you cannot afford flashes the resource you are short of.
 
 Play: left-click or drag to select, double-click for all of a kind on screen,
 `Shift` adds, `Ctrl`+`0-9` saves a control group and `0-9` recalls it, `.`
@@ -131,6 +160,7 @@ Workspace layout:
 | `crates/sim` | Deterministic simulation: fixed-point maths, RNG, entity store, command queue, replay, tile map, map generation |
 | `crates/fogged` | One player's view of a match, and nothing else: the interface a computer opponent gets |
 | `crates/ai` | Computer opponents: they issue the same commands a player can and read only a `FoggedView`; depends on `fogged`, never on `sim` |
+| `crates/audio` | Sound as the game asks for it: buses, cues, voice limiting, positional gain, the events that drive them; no device |
 | `crates/view` | Presentation maths: projection, camera, palette, placeholder atlas, terrain mesh, scene, minimap, software rasteriser |
 | `crates/render` | The wgpu renderer: terrain, palette-indexed sprites, minimap |
 | `crates/app` | The game binary: window, GPU surface, input, fixed-timestep clock |
@@ -156,8 +186,9 @@ Workspace layout:
 ## Shape of the build
 
 - **Rust**, native **macOS** desktop, `wgpu` + `winit` + `kira`.
-  macOS is the product target; Windows/Linux CI provides additional
-  portability and determinism checks, without a shipping commitment.
+  macOS is the product target; the Linux CI jobs are the fast gate and
+  the second leg of the determinism check, without a shipping commitment.
+  Windows is not built (dropped from CI 2026-09-21).
   The same stack compiles to WebAssembly for quick playtest builds.
 - **Deterministic lockstep simulation** at 20 Hz, fixed-point maths, seeded RNG,
   commands scheduled two ticks ahead — the architecture from *"1500 Archers on a

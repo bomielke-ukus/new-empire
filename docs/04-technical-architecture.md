@@ -3,8 +3,9 @@
 Target: **native macOS desktop, written in Rust.**
 
 Platform clarification (2026-09-11): development, live testing and release
-acceptance target macOS. The existing Windows/Linux CI jobs remain additional
-portability and determinism checks; they do not define supported products.
+acceptance target macOS. The Linux CI jobs remain the fast gate and the
+second leg of the determinism check; they do not define a supported product.
+Windows was dropped from CI on 2026-09-21: nothing targets it.
 
 Rust over C++ because the two hardest problems in this project — a bit-exact
 deterministic simulation and a data-oriented entity store touched by many
@@ -354,6 +355,11 @@ Rendering is independent and targets ≤ 8 ms/frame for 60 fps with headroom.
 
 The original's ~30/30/30 split between rendering, pathing/AI and simulation is
 the sanity check: if our numbers drift far from that shape, something is wrong.
+
+How the tick is measured against these rows, and what it measured in M7,
+is §39: `Simulation::step_timed` credits each phase of the tick from a
+clock the caller supplies, `simrunner bench --stats` tabulates the phases
+over the benchmark scenarios, and `F4` in the app shows them live.
 
 ---
 
@@ -1272,3 +1278,266 @@ siege are still owed, and a human will find this opponent predictable.
   exercised as the player does it; the sprites and the window are not,
   which is what the Mac pass is for.
 
+---
+
+## 35. Implementation notes from M7, chunk 1: audio
+
+- **The split.** `crates/audio` is pure: it knows the buses (§8), the
+  cues the game raises, the clips, and the rules that decide what plays.
+  It never touches a device. The app owns the device (`crates/app/src/sound.rs`,
+  `kira` with a sub-track per bus) and a test owns a recorder instead, so
+  everything about sound short of the loudspeaker is verified headless,
+  the way the software rasteriser verifies the renderer.
+- **Events, not polling (`TA-AUDIO-02`).** The simulation gained five
+  events beside `Hit`, `Alarm` and `Death`: `Completed`, `Trained`,
+  `Researched`, `Deposited` and `Work`. `Work` is the swing: a villager
+  gathering within reach, or building, raises it once every
+  `WORK_PERIOD` (16) ticks, staggered by slot, so twelve on a woodline
+  are a rhythm and not one blow. Events are cleared each tick and are
+  not state: not hashed, not saved, so the corpus digests did not move.
+  `audio::events::cues` maps a tick's events to cues through one
+  player's fog; a positional event the viewer cannot see is dropped, and
+  a side's own hits and deaths are always heard, since a dying unit is
+  the last thing its side sees of the tile. No side's news (the bell,
+  the loss, the research note) plays for a replay watched through every
+  eye.
+- **The rules (`TA-AUDIO-01`, `UX-AUDIO-02`).** The mixer keeps a voice
+  per playing cue with its end time on the wall clock; a fifth of one cue
+  is dropped. Each play is pitched within ±5% by the mixer's own
+  generator, never the sim's; a fanfare is exempt, since a tune in a new
+  key each time is wrong. Variations are chosen round-robin with a
+  shuffle, never the same twice running. A world sound's gain and pan
+  come from the listener, which is the camera: full and panned within the
+  view, quieter past its edge down to a floor of 0.2 at two half-widths
+  out, never silent, so the economy is heard running (`docs/03` §6.1).
+- **Fifty milliseconds (`UX-AUDIO-01`).** The bark is raised in the
+  input handler that issues the command, before the command is even
+  queued, so it is not two ticks behind the click; selection, buttons
+  and refusals likewise. A frame is under sixteen milliseconds.
+- **Placeholders.** `placeholder.rs` synthesises a clip for every cue at
+  22,050 Hz: a two-note bark whose voice is the class and whose contour
+  is the variation, thuds and clicks for the tools, a bell of partials,
+  four-note fanfares whose intervals widen with the age. Recordings
+  under `assets/sounds/<cue>/*.wav` replace them by name at launch, in
+  file order as the variations, decoded by `kira` and folded to mono.
+- **Volumes.** Four percentages in `settings.ron` (`volumes`, defaulting
+  to full with the music at 70), a column on the settings screen, applied
+  to the mixer and the device's tracks at once. An older file takes the
+  defaults.
+- **Not done.** Music, the combat stem and the ambient beds (chunk 2);
+  the notification cues beyond the bell, the loss and the research note
+  (chunk 4); the device on Linux needs ALSA headers to build, which CI
+  installs.
+
+---
+
+## 36. Implementation notes from M7, chunk 2: the score and the beds
+
+- **Two small state machines, pure** (`crates/audio/src/score.rs`).
+  `Score` holds the age whose stem is playing and whether the combat
+  stem is in; `update(age, fighting, now)` returns the fades: the old
+  stem to 0 and the new to 1 over `CROSSFADE_MS` (4,000, §8) when the age
+  changes, the combat stem to 1 over 1,000 ms when six or more units
+  fight in view (`FIGHTING_FOR_COMBAT`, §8), and out over 3,000 ms once
+  no fight has been in view for `COMBAT_HOLD_MS` (6,000), so a battle
+  with lulls is one piece of music; no age, as on the title, takes
+  everything out. `Ambience` holds four bed levels and `update(ground)`
+  returns a fade for a bed whose target moved by at least 0.05 or to or
+  from silence, over 2,000 ms. The beds' targets come from the ground
+  under the camera: water at half the view is full surf, sand two thirds
+  is full wind, canopy at half is full birds, and the open field is
+  quiet; all under `BED_GAIN` (0.35).
+- **What the app surveys.** Every five ticks or half a second the app
+  takes the bounding box of the view's four corners in tiles, counts the
+  units in it with an attack order that the viewer can see, and sorts
+  its explored tiles by terrain into forest floor, water, sand and open
+  ground; unexplored tiles are nothing, since the ground the player has
+  not seen has no sound. The age is read every frame so an advance is
+  heard at once. The shell calls the quiet update, so leaving a match
+  fades everything out.
+- **Layers on the device.** A layer is a loop started silent on its
+  bus's track the first time it is asked for, then faded with the
+  handle's volume tween; a fade to a level it already holds is a no-op
+  at the state machine, not a call. The stems are on the music bus; the
+  beds are the world's and sit on the world bus, so a player who mutes
+  the music keeps the surf.
+- **Placeholders** (`placeholder.rs`): a `Loop` lays tones and bursts
+  onto a fixed buffer, wrapping at the end, and finishes by cross-fading
+  the last tenth of a second into the first so the seam is silent. The
+  stems are sixteen seconds at sixty beats a minute on a pentatonic on
+  A: the frame drum and the bone flute in the Stone Age, the lyre from
+  the Tool Age, a low saw chorus from the Bronze Age, everything denser
+  and the flute an octave up in the Iron Age (`docs/05` §5.3, as far as
+  a sine and a saw can take it). The combat stem is eight seconds of
+  fast drums over a pulse. The beds are eight seconds of low-passed
+  noise with slow wander: birds over the forest, a swell for the surf,
+  two slow waves for the wind, near nothing for the field. A recording
+  under `assets/sounds/stem-<age>/`, `stem-combat/` or `bed-<kind>/`
+  replaces one; the first file is the loop.
+- **Not done.** The music is placeholder in every sense (`docs/07` Q7);
+  the beds are not positional (they follow the view as a whole); no
+  stem plays on the title screen.
+
+---
+
+## 37. Implementation notes from M7, chunk 3: the visual feedback
+
+- **One collector, tick time** (`crates/view/src/feedback.rs`). The
+  `CombatFeedback` that already kept the impact spark now keeps
+  everything short-lived the last ticks left to show: impacts (with
+  where the blow came from, which `Event::Hit` now carries), puffs, a
+  falling tree, and the attacks that mark the screen's edge. Each has a
+  life in ticks, so pause and speed apply to all of it, and `observe`
+  runs once per tick whatever the frame rate. `decorate` draws over a
+  built scene; `edge_indicators` draws in window pixels.
+- **The flinch.** For three ticks after a blow the struck sprite is
+  moved two pixels, then one, away from where the blow came, in screen
+  space via `iso::direction`; a corpse is not moved. It is done by
+  nudging the sprite the scene already built, so nothing else changes.
+- **The puffs.** A kill throws five motes the way the blow went, the
+  middle one red for the first part of half a second, then dust; the
+  direction is the last blow on that tile, so an arrow's kill puffs away
+  from the archer. A building coming down leaves a ring of ten motes
+  rising for just over a second, its radius the footprint's. A hammer
+  swing (`Event::Work` for building) lifts two motes off the site. Motes
+  are solid squares from the atlas's solids, two or three pixels at 1×.
+- **The stages** (`scene.rs`). A site is pegs for the first third of its
+  work, then the building's own frame clipped to its lower half, then to
+  85%, drawn from the ground up by moving the atlas rectangle's top and
+  the sprite's top together; done, the whole building. The fog's
+  memories keep showing pegs for a site, since they hold no progress.
+- **Depletion.** A bush or a vein is drawn at `0.5 + 0.5 × left/base`
+  about its anchor, so it thins toward half as it is used; a farm is
+  reseeded and a tree falls instead: the simulation raises
+  `Event::Felled` with the tree's tile and the last gatherer's, and the
+  view draws the tree's frame for sixteen ticks shortening as
+  `1 − 0.9t²`, leaning toward the villager, and then not at all.
+- **The edge mark.** An attack on the viewer's own registers once per
+  twelve tiles per three seconds; if its ground point is inside the
+  view's inset rectangle (the top bar and the bottom panel excluded) the
+  spark is enough; otherwise the line from the rectangle's centre to it
+  is cut at the rectangle's edge and a red chevron, outlined, points
+  there, blinking after the first second. In an isometric view a
+  diagonal in tiles is straight down the screen, which is worth knowing
+  when reading the test.
+- **Not done.** Death animations and the villager's hammering animation
+  are art; the collapse is a cloud over the rubble, not an animation;
+  the placeholder motes are squares.
+
+---
+
+## 38. Implementation notes from M7, chunk 4: tooltips, hints and the rest of the notifications
+
+- **Tooltips are data on the button** (`UX-TIP-01`, `hud.rs`). Every
+  unit, building and technology button carries `tip`, its lines: the
+  name with its key, the cost and the time, and then what it is. A
+  unit's lines give its hit points and armour, its attack and range,
+  what it counters (the classes it has a bonus against, with the
+  bonus) and what counters it (every kind with a bonus against its
+  class). A building's give what it trains, whether it takes gathered
+  resources, what it houses or shelters, what it shoots and how many
+  technologies it researches, and the age it comes with. A
+  technology's give its effects in words and what it needs. Hovering
+  draws the box above the panel by the button, the reason last on a
+  red ground when the button is greyed; the line under the grid stays
+  as it was. The button also carries `lacks`, which resources the
+  stockpile is short of for its cost, so a refused click can say
+  which.
+- **Hints** (`docs/03` §7, `crates/view/src/hints.rs`). Five, in the
+  order they win when several are due: under attack, housed, idle
+  villagers, the next age within reach, right-click to gather. `Hints`
+  is a pure state machine over `Conditions` the app reads from the
+  match each frame (`hints::conditions`, plus whether a villager is
+  selected and whether the bell has rung in the last ten seconds). One
+  hint at a time, up for ten seconds, twenty seconds before the next,
+  idle villagers only after five seconds of idleness; each hint at most
+  twice, ever, counted in `settings.ron` (`hints_shown`) the moment it
+  starts; `hints: false` in the file, or HINTS OFF on the settings
+  screen, ends them. A replay shows none. The line is drawn centred
+  above the panel with a gold mark, clear of the notices on the left,
+  and names the keys as the player has them bound.
+- **The rest of `docs/03` §6.3.** A unit trained at a building with no
+  rally stands idle at its door: `Event::Trained` says so and the
+  viewer's own get the chime (`Cue::Idle`). A greyed button clicked
+  when short of a resource flashes that resource red on the bar for a
+  second and a half and plays the "cannot afford" line (`Cue::Poor`);
+  a button refused for any other reason keeps its buzz. The minimap
+  takes marks (`Minimap::render_marked`): an attack on the viewer's own
+  flashes red for three seconds, a loss of theirs pings white, large
+  then small; the app re-renders the minimap eight times a second while
+  a mark is up instead of twice.
+- **Not done.** No panel highlight for a finished technology; no
+  Wonder, so no Wonder announcement; the hints are five lines, not a
+  campaign.
+
+## 39. Implementation notes from M7, chunk 5: the performance pass
+
+- **The tick is measured by phase, from outside.** `Simulation::step_timed`
+  runs the same tick as `step` with a stopwatch the caller supplies (a
+  closure returning nanoseconds) read between the phases, and returns
+  `Timings`: commands, orders, paths, movement, combat, economy, fog. The
+  crate still never touches `Instant`; the stopwatch is the runner's or
+  the app's, and a tick with one is bit-identical to a tick without (a
+  test pins it). `simrunner bench --stats` tabulates the phases over a
+  scenario (mean, p99, max and share per phase, with the opponents'
+  thinking as an eighth row where there are opponents) after the untimed
+  passes that set the gate's numbers, so the stopwatch's own cost is not
+  in the gate. `F4` in the app shows the same table live, with the frame.
+- **Two scenarios the budget was written for** (§11, §12). `battle-400`:
+  two hundred soldiers a side on a flat map, spawned facing each other
+  and sent in by attack-move. `opponents-8p`: eight Hard computer
+  opponents on a 168-tile map, each handed forty units at tick 0 so the
+  world is §12-sized from the start, the opponents thinking live in the
+  measured pass (a recording holds what they said, not the time it took
+  them to say it) and checked against what they said when recorded.
+- **The old numbers carried a state hash.** `Replay::run` hashes the
+  whole world after every tick for the digest, and the benchmark had run
+  replays through it, so every "per-tick" figure since M0 included a full
+  hash of the state. The bench now steps the simulation itself; the
+  ceilings were reset to what the tick alone costs.
+- **The fog of war is incremental** (§12 asked for it; §6). The update had
+  cleared every player's visibility and re-stamped every unit's sight
+  disc every tick, then walked every immobile entity against every fog
+  to refresh its memory: linear in entities times players whether or not
+  anything moved, and the largest phase in every scenario (50–55% of
+  the tick on the eight-player maps, 35% in a fight). Now each slot
+  remembers what it last stamped (`Scratch::sight`: whose fog, from which
+  tile, how far), and a tick unstamps and restamps only the slots whose
+  stamp changed; `Fog::see` reports the first observer of a tile, and
+  only that first observer supersedes a memory. The memories are then
+  redone only where needed: tiles that came into view (per-fog bitmaps,
+  through a per-tile `cover` index of what immobile thing stands there),
+  anchors where something was placed, finished, felled or destroyed
+  (`Scratch::touched`, pushed by `spawn`, `remove`, construction
+  completion and `demolish`), and every building of a side that advanced
+  an age (`Scratch::aged`). A fresh match and a loaded save rebuild from
+  the world. The result is bit for bit what the old recomputation gave:
+  the corpus digests and the twenty recorded AI matches are unchanged,
+  and `check` recounts every fog from the world's discs and fails on any
+  drift (`Violation::FogDrift`), which the soak and the corpus run every
+  tick. Fog went from 569 µs a tick to 61 µs on `marching-8p`, from 668
+  to 53 on `crowded`, from 255 to 17 on `opponents-8p`, and the whole tick
+  on the eight-player maps roughly halved.
+- **The nearest-enemy search reads the tile buckets.** `nearest_enemy`
+  had scanned every entity on the map for every unit looking for a
+  target (every fourth tick each), trees included; on a full map that is
+  the quadratic term in the combat phase. Separation already buckets the
+  mobile units by tile each pass (`Simulation::bucket_mobiles`, now
+  shared); `acquire` builds the buckets again from where units stand
+  after movement and reads only the cells the radius reaches, with the
+  tie broken by slot as the scan broke it. Buildings, sought when an
+  attack-move ends, are few and still scanned. The acquisition filter
+  tests the cadence and the stance before `can_fight`, which counts a
+  building's garrison.
+- **Where the time goes now**, per tick on the 2.1 GHz Xeon the shared
+  runner resembles, against the rows of §12 (commands and orders share
+  the combat row): see `docs/09` §8 for the table. Every row is inside
+  its budget on that machine; paths remain the largest phase where
+  crowds march (60% of `marching-8p`) and combat with thinking where
+  opponents fight. The measurement on a real Mac is the owner's, with
+  `F4`.
+- **Not done.** The beds are still not positional (§5 note in `docs/10`);
+  rendering is measured only as the frame in `F4`, not gated, since the
+  software rasteriser proves nothing about the GPU; `orders` on a full
+  economy is the next phase worth a look (villagers seeking nodes and
+  drop-offs scan), inside budget and left alone.

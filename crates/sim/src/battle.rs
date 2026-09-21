@@ -11,10 +11,11 @@ use crate::command::PlayerId;
 use crate::entity::{EntityId, KindId, Slot};
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
-use crate::kinds::{self, DamageType, GAIA};
+use crate::kinds::{self, DamageType, Resource, GAIA};
 use crate::nav;
 use crate::orders::{Nav, NavState, Order, Stance, Then};
 use crate::simulation::{Simulation, REACH, REACH_SLACK, TICKS_PER_SECOND};
+use crate::tech::TechId;
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
 
@@ -79,6 +80,26 @@ impl HashState for Projectile {
     }
 }
 
+/// What a villager is swinging at, for the ear (`docs/05` §5.1: one work
+/// loop per gather task, and building).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Task {
+    /// An axe on a tree.
+    Chop,
+    /// A pick on stone or gold.
+    Mine,
+    /// Hands in a bush.
+    Forage,
+    /// A hoe on a farm.
+    Farm,
+    /// A hammer on a site.
+    Build,
+}
+
+/// A working villager swings once every this many ticks, staggered by
+/// slot, so a woodline of twelve is a rhythm and not a single blow.
+pub const WORK_PERIOD: u64 = 16;
+
 /// Something the presentation layer may want to react to. Cleared every
 /// tick; not state, so not hashed or saved.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -96,6 +117,9 @@ pub enum Event {
         target: EntityId,
         /// Where.
         pos: Vec2Fx,
+        /// Where the blow came from: the striker, or the arrow's last
+        /// position.
+        from: Vec2Fx,
         /// How much.
         damage: i32,
     },
@@ -103,6 +127,63 @@ pub enum Event {
     Death {
         /// What.
         kind: KindId,
+        /// Whose.
+        owner: PlayerId,
+        /// Where.
+        pos: Vec2Fx,
+    },
+    /// A building finished.
+    Completed {
+        /// What.
+        kind: KindId,
+        /// Whose.
+        owner: PlayerId,
+        /// Where.
+        pos: Vec2Fx,
+    },
+    /// A unit stepped out of the building that trained it.
+    Trained {
+        /// What.
+        kind: KindId,
+        /// Whose.
+        owner: PlayerId,
+        /// Where it stands.
+        pos: Vec2Fx,
+        /// Whether it stands there idle: the building has no rally.
+        idle: bool,
+    },
+    /// A technology finished for a player; an age advance is one.
+    Researched {
+        /// Whose.
+        owner: PlayerId,
+        /// Which.
+        tech: TechId,
+    },
+    /// A load reached a stockpile.
+    Deposited {
+        /// Whose.
+        owner: PlayerId,
+        /// What.
+        resource: Resource,
+        /// How much.
+        amount: i32,
+        /// Where the villager stood.
+        pos: Vec2Fx,
+    },
+    /// A node used up and gone: a tree falls toward where its last
+    /// gatherer stood; a bush or a vein is simply no more.
+    Felled {
+        /// What.
+        kind: KindId,
+        /// Where it stood.
+        pos: Vec2Fx,
+        /// Where the villager stood.
+        toward: Vec2Fx,
+    },
+    /// A working villager's swing, once every [`WORK_PERIOD`] ticks.
+    Work {
+        /// At what.
+        task: Task,
         /// Whose.
         owner: PlayerId,
         /// Where.
@@ -191,28 +272,55 @@ impl Simulation {
 
     /// The nearest enemy within `radius` of `i`, ties by slot: mobile units,
     /// or with `buildings` the enemy's buildings and sites instead.
+    ///
+    /// Units are found through the tile buckets, which the caller has
+    /// built for this pass ([`Simulation::bucket_mobiles`]), so a unit
+    /// looking round itself reads the cells its radius reaches and not
+    /// every entity on the map. Buildings are few and are scanned.
     fn nearest_enemy(&self, i: usize, radius: Fx, buildings: bool) -> Option<EntityId> {
         let me = self.world.owner[i];
         let pos = self.world.pos[i];
         let limit = radius.raw() as u64 * radius.raw() as u64;
         let mut best: Option<(u64, usize)> = None;
-        for s in self.world.slots() {
-            let j = s.index();
+        let mut consider = |j: usize| {
             let owner = self.world.owner[j];
             if owner == me
                 || owner == GAIA
                 || self.world.dying[j] != 0
                 || self.world.inside[j].is_some()
             {
-                continue;
+                return;
             }
             let k = kinds::info(self.world.kind[j]);
             if k.mobile == buildings || k.class == kinds::Class::Other {
-                continue;
+                return;
             }
             let d = pos.distance_sq_raw(self.world.pos[j]);
-            if d <= limit && best.is_none_or(|(bd, _)| d < bd) {
+            if d <= limit && best.is_none_or(|(bd, bj)| (d, j) < (bd, bj)) {
                 best = Some((d, j));
+            }
+        };
+        if buildings {
+            for s in self.world.slots() {
+                consider(s.index());
+            }
+        } else {
+            // Anything within the radius stands on a tile within that many
+            // whole tiles of this one.
+            let w = self.nav.width();
+            let r = radius.ceil().max(0);
+            let (tx, ty) = nav::tile_of(pos);
+            for cy in (ty - r)..=(ty + r) {
+                for cx in (tx - r)..=(tx + r) {
+                    if !self.nav.in_bounds(cx, cy) {
+                        continue;
+                    }
+                    let mut j = self.scratch.head[(cy * w + cx) as usize];
+                    while j != u32::MAX {
+                        consider(j as usize);
+                        j = self.scratch.next[j as usize];
+                    }
+                }
             }
         }
         best.map(|(_, j)| self.world.id_at(Slot::new(j)))
@@ -540,15 +648,19 @@ impl Simulation {
     /// this way; buildings are taken where an attack-move ends.
     pub(crate) fn acquire(&mut self) {
         let tick = self.tick;
+        // Where everyone stands now, for the searches below.
+        self.bucket_mobiles();
+        // Cheapest test first: the cadence and the stance are a load each,
+        // and `can_fight` counts a building's garrison.
         let slots: Vec<Slot> = self
             .world
             .slots()
             .filter(|s| {
                 let i = s.index();
-                self.world.owner[i] != GAIA
-                    && self.can_fight(i)
+                (i as u64 + tick).is_multiple_of(ACQUIRE_EVERY)
+                    && self.world.owner[i] != GAIA
                     && self.world.stance[i] != Stance::Passive
-                    && (i as u64 + tick).is_multiple_of(ACQUIRE_EVERY)
+                    && self.can_fight(i)
             })
             .collect();
         for slot in slots {
@@ -674,6 +786,7 @@ impl Simulation {
         self.events.push(Event::Hit {
             target: victim,
             pos,
+            from,
             damage,
         });
         let owner = self.world.owner[t];
@@ -801,6 +914,8 @@ impl Simulation {
         self.world.order[i] = Order::Idle;
         self.world.reload[i] = 0;
         self.world.dying[i] = RUBBLE_TICKS;
+        // Whoever sees the rubble no longer remembers a building.
+        self.scratch.touched.push((ax, ay));
         for s in self.world.slots().collect::<Vec<_>>() {
             let j = s.index();
             if matches!(self.world.order[j], Order::Build { site, .. } if site == id) {

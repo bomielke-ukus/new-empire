@@ -11,6 +11,9 @@ sim = { path = "../sim" }
 # The setup screen offers the opponent's difficulties; nothing else of the
 # opponent is the presentation's business.
 ai = { path = "../ai" }
+# The settings screen sets the volume of each bus; the buses are the
+# audio crate's.
+audio = { path = "../audio" }
 bytemuck = { workspace = true }
 # Sprite sets: RON manifests beside indexed PNGs, straight from the art
 # pipeline. `png` rather than `image` so the palette indices survive.

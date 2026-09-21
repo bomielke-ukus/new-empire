@@ -329,6 +329,133 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The tooltip (`UX-TIP-01`): the barracks selected and the clubman's
+        // button hovered, its cost, time, counters and key in a box above
+        // the panel.
+        name: "tooltip-hud",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "army",
+            "--stockpile",
+            "5000",
+            "--ticks",
+            "40",
+            "--select-kind",
+            "barracks",
+            "--hover-button",
+            "CLUBMAN",
+            "--hud",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // A first-time hint (`docs/03` §7): the side is housed, and the line
+        // says what to do about it, centred above the panel.
+        name: "hint-hud",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "gather",
+            "--ticks",
+            "600",
+            "--select",
+            "3",
+            "--hud",
+            "1",
+            "--hint",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // The performance readout (`F4`) with fixed sample numbers: the
+        // frame, the tick, its phases and the budgets of `docs/04` §12.
+        name: "perf-readout",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "gather",
+            "--ticks",
+            "200",
+            "--hud",
+            "1",
+            "--perf",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // Two sites rising (`docs/03` §6.2): the storehouse at its pegs, the
+        // house's lower half up with its builders hammering.
+        name: "site-stages",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "build",
+            "--ticks",
+            "450",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // Nodes giving out: the tree mid-fall toward the villagers who
+        // felled it, the berry bush thinned and the gold vein shrunk.
+        name: "felled-tree",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "fell",
+            "--ticks",
+            "1066",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // The battle out of view: the camera up and right of the town, and
+        // the red chevron at the edge where the player's own are being hit.
+        name: "edge-mark",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "battle",
+            "--ticks",
+            "150",
+            "--at",
+            "54,22",
+            "--fog",
+            "1",
+            "--hud",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The F1 controls overlay over a fresh match, with the resource bar
         // still carrying its first-minute hint.
         name: "controls-overlay",

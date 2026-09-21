@@ -68,13 +68,15 @@ raising a tree's wood yield from 75 to 76, which fails four entries by name.
 ### Why the platform matrix matters
 
 **macOS is the product target.** Its test job and a live Mac hardware pass
-are the target-platform evidence. Windows/Linux jobs remain extra
-portability and determinism checks, not shipping commitments.
+are the target-platform evidence. The Linux jobs are the fast gate and the
+other leg of the determinism check, not a shipping commitment. Windows was
+dropped from the matrix on 2026-09-21: nothing targets it, and its job was
+the slowest by far.
 
 `docs/04` §2 promises bit-identical state on every machine, and nothing but
 running it proves that. The corpus digests are recorded on x86_64 Linux and
-checked on Windows and on aarch64 macOS — a different architecture, not just a
-different OS. They match, which is the strongest evidence so far that the
+checked on aarch64 macOS — a different architecture, not just a different
+OS (and, until 2026-09-21, on Windows). They match, which is the strongest evidence so far that the
 fixed-point simulation is genuinely portable.
 
 Debug and release builds also differ in a way that matters: debug panics on
@@ -170,7 +172,7 @@ main job over time, and what turns the soak from a one-off run into a ratchet.
 
 ### 4.5 Rendering
 
-Thirteen scenes rendered through `tools/mapview` and compared against committed
+Twenty-four scenes rendered through `tools/mapview` and compared against committed
 PNGs with a tolerance. The test drives the binary rather than the rendering
 library, because the command line is what CI invokes and what a developer
 types.
@@ -552,6 +554,94 @@ the opponent, quit again, the recording listed and watched to the won
 match's last tick and hash, REPLAY OVER; every step a button or a key
 through the window's handlers. The same run by hand on the Mac is owed.
 
+**M7 chunk 1, audio.** `crates/audio/src/lib.rs` unit tests: twelve chop
+cues at one moment play four, each at its own pitch within five percent,
+a fifth is dropped and chops play again once those end; an
+acknowledgment with four variations never plays the same one twice
+running; a fanfare keeps its key (`TA-AUDIO-01`, `UX-AUDIO-02`); a world
+sound in view plays full and panned to its side, one past the edge is
+quieter but never silent, a cue from nowhere is centred; every cue has a
+folder name that reads back. `placeholder.rs`: every cue has a clip,
+three to five for an acknowledgment, each short, in range and ending in
+silence. `events.rs`, on a real simulation: a villager chopping swings on
+the beat and a delivered load clinks; a fight in the far corner is heard
+by the side that can see it and silent for the side whose fog hides it,
+and the recording replayed as each side and as no one confirms the bell
+and the loss are the loser's alone and the woodline is everyone's who
+can see it; building, training, research and the age advance each raise
+their cue (`TA-AUDIO-02`). `crates/app/src/tests.rs`: a click on the
+player's villager is its selection call and a right-click order its bark,
+each recorded in the same input call before a tick has passed; a panel
+button clicks and a greyed one buzzes; twelve villagers on one tree
+through the app's own tick are at most four chop voices (`UX-AUDIO-01`,
+`UX-AUDIO-02`); the bus volumes step by ten on the settings screen, are
+kept in the file and reach the mixer at once. The settings golden image
+shows the audio column. The device itself is not tested: `kira` opens the
+default output at launch and the game says so once if it cannot.
+
+**M7 chunk 2, the score and the beds.** `crates/audio/src/score.rs`
+unit tests: a match starts on its age's stem, the next age cross-fades
+the old stem out and the new in over four seconds, five units fighting
+are a scuffle and six bring the combat stem in, fewer keep it for the
+hold and then let it go, leaving the match takes everything out; the
+beds follow the ground, water bringing the surf up, sand the wind, a
+canopy the birds, the open field quiet, a small move no fade and no
+ground silence; every layer has a folder name that reads back.
+`placeholder.rs`: every layer has a loop, seconds long, under half
+scale, with the two sides of its seam within a whisker of each other,
+and the Stone and Iron stems differ. `crates/app/src/tests.rs`: through
+the app's own frame, the Stone stem fades in at the start with the
+field's bed under it and no surf, a second frame fades nothing, the
+Tool Age researched cross-fades the stems, six clubmen sent at an enemy
+in view bring the combat stem in, and the title takes the stem, the
+combat stem and the bed out.
+
+**M7 chunk 3, the visual feedback.** `crates/view/src/feedback.rs`
+unit tests on a real simulation: three clubmen on a villager, and at
+the first blow the villager's sprite has moved a step away from them
+and the spark is drawn; with the camera due west the villager's side
+gets one outlined chevron on the right-hand edge of the view inside the
+top bar and the bottom panel, the attacker gets none, and with the
+fight in view there is none; at the death the one puff is thrown the
+way the blows went, draws at least five motes and is gone after ten
+ticks; a house brought down leaves a collapse cloud of at least ten
+motes. Hammering a house raises dust at the builder; eight villagers on
+a tree fell it, the fall is toward them, mid-fall the tree is drawn
+shorter than it stood while the world no longer has it, and it is gone
+sixteen ticks on. `scene.rs`: a house built by five villagers is drawn
+as pegs, then the frame clipped to half its height, then most of it,
+then whole, every stage seen; a bush partly eaten is drawn narrower,
+never under half, still on the ground. Golden images `site-stages`
+(pegs and a half-built house with its builders), `felled-tree` (the
+tree mid-fall, the bush thinned, the vein shrunk) and `edge-mark` (the
+battle out of view, the chevron on the left edge); `battle-hud`,
+`battle-40v40` and `siege-hud` rebaked for the flinches and the puffs,
+`gather-hud` for the bush thinning.
+
+**M7 chunk 4, tooltips, hints and the rest of the notifications.**
+`crates/view/src/hud.rs` unit test: with a barracks selected the
+clubman's button carries its name and key, cost and time, what it
+counters and what counters it, every trainable unit's at least five
+lines; hovering it draws the box; the house's names what it houses and
+the age advance's what it reaches; the age button knows it is short of
+food and nothing else; a hint given draws its line and the built HUD
+names it; a flash draws its boxes (`UX-TIP-01`).
+`crates/view/src/hints.rs`: nothing is due on a quiet moment; a
+selected villager with nobody gathering brings the gather hint, up ten
+seconds; the next waits twenty more; an attack wins over idle
+villagers, and the idle hint follows once the attack is no longer
+news; a hint comes twice and never a third time; the counts survive a
+new match and turn off means none. `minimap.rs`: a mark colours its
+square. `crates/audio/src/events.rs`: a villager trained at a Town
+Center with no rally raises the idle chime. `crates/app/src/tests.rs`:
+a housed side with a villager selected gets the housed hint at once,
+counted in the settings file; HINTS OFF ends it and on restores them;
+a Town Center refused for a Government Centre buzzes and flashes
+nothing; a villager refused for food plays the line and flashes FOOD.
+Golden images `tooltip-hud` (the clubman's tooltip over the army
+panel) and `hint-hud` (the housed hint over the gather scene);
+`edge-mark` rebaked for the minimap's flash.
+
 ### Data files — M3 onward
 
 The startup validator from `docs/04` §9 run as a test: every referenced ID
@@ -575,7 +665,7 @@ one with a `REQ: <id>` marker. `scripts/check-traceability.sh` pairs them up.
 As of this acceptance chunk: **127 declared, 83 claimed by tests, 0 gaps in
 landed work.** M4 closure enables `RM-M4`, `GD-COMBAT` and `GD-STANCE`
 enforcement; M5 added `GD-FOG`, `TA-AI`, `GD-AI` and `RM-M5`; M6 added
-`TA-SAVE`, `RM-M6` and `UX-NOTIFY`. Run the script for current counts. A claim can cover only part
+`TA-SAVE`, `RM-M6`, `UX-NOTIFY`, `UX-AUDIO`, `TA-AUDIO` and `UX-TIP`. Run the script for current counts. A claim can cover only part
 of a requirement: `RM-M4-01` has a separately recorded native readability approval, and
 `TA-PATH-06` still owes player-versus-AI priority in M5.
 
@@ -651,18 +741,70 @@ AI trips wait, and that all are served a few ticks on.
 
 ## 8. Performance
 
-`simrunner bench --json` reports p50/p99/max per tick; `scripts/check-perf.sh`
-fails against ceilings in `perf/budgets.ron`, set at three times the observed
-p99. Measured spread on a developer machine was 1.1×–1.2×; CI is worse, which
-is what the headroom is for.
+`simrunner bench --json` reports p50/p99/max per tick over five scenarios;
+`scripts/check-perf.sh` fails against ceilings in `perf/budgets.ron`, set
+at three times the observed p99. `simrunner bench --stats` adds where each
+tick went, by the phases of `docs/04` §12: commands, orders, paths,
+movement, combat, economy, fog, and the opponents' thinking where there
+are opponents. The phases come from `Simulation::step_timed`, the same
+tick as `step` with the caller's clock read between its systems, so the
+simulation never touches wall time and the gate's numbers are taken
+without the stopwatch. `F4` in the app shows the same table live, with
+the frame, for the measurement on a real Mac.
 
-**The number worth knowing.** `marching-8p` — eight players keeping about 320
-mobile units under way, with **no combat and no AI** — spent roughly 6.5 ms
-at p99 on M2's per-unit A\*, nearly all of it planning paths, against the
-6 ms `docs/04` §12 budgets for pathfinding at 200 population and 400
-entities. M4 chunk 1's sector graph and flow fields brought it to about
-2.4 ms p99 (p50 from 0.9 ms to 0.6 ms), and `crowded` from 2.9 ms to 1.9 ms,
-on the same machine; the ceilings were lowered to match.
+**The two loads the budget was written for** (`docs/04` §11) are in the
+bench since M7 chunk 5: `battle-400`, two hundred soldiers a side sent in
+on a flat map, and `opponents-8p`, eight Hard computer opponents on a
+168-tile map, each handed forty units at tick 0, thinking live in the
+measured pass and checked against what they said when recorded.
+
+**Where the tick goes.** p99 per phase in microseconds, best-of-three on
+the 2.1 GHz Xeon the shared runner resembles, M7 chunk 5, against the
+rows of §12 (commands and orders count with combat; the frame is not in
+the tick):
+
+| Phase | §12 budget | economy-2p | marching-8p | crowded | battle-400 | opponents-8p |
+|---|---|---|---|---|---|---|
+| paths | 6 000 | 3 | 2 017 | 1 350 | 92 | 276 |
+| movement | 3 000 | 38 | 184 | 224 | 134 | 88 |
+| combat + orders + commands | 3 000 | 35 | 176 | 630 | 190 | 138 |
+| economy | 2 000 | 4 | 35 | 45 | 4 | 24 |
+| fog | 1 000 | 7 | 148 | 179 | 22 | 30 |
+| thinking | 4 000 | — | — | — | — | 242 |
+| **whole tick** | **19 000** | 75 | 2 208 | 2 257 | 359 | 917 |
+
+Every row is inside its budget on that machine, by four times at the
+narrowest (paths, marching); the whole tick has eight times its headroom
+on the busiest scenario. The shape is the one §12 expects: paths lead
+where crowds march, combat and thinking where opponents fight. The
+measurement that counts is the owner's on the Mac; this one says nothing
+is quadratic.
+
+**What the pass changed.** Two things were found by the phase table and
+fixed exactly, the corpus digests and the versus record unchanged:
+
+| Change | marching-8p fog, mean | crowded fog, mean | opponents-8p combat, mean | crowded tick, p50 |
+|---|---|---|---|---|
+| Before | 569 µs | 668 µs | 247 µs | 1 024 µs |
+| Fog incremental (`docs/04` §39) | 61 µs | 53 µs | 247 µs | 438 µs |
+| Nearest-enemy search through the tile buckets | 61 µs | 63 µs | 51 µs | 417 µs |
+
+The fog had been the largest phase in every scenario, recomputed from
+scratch every tick whether or not anything moved; the target search had
+scanned every entity, trees included, for every unit looking for one.
+The measurement itself was corrected too: every number before this pass
+included a full state hash per tick, because the bench had run replays
+through `Replay::run`, which hashes for the digest. The ceilings were
+reset to three times the tick alone.
+
+**The number worth knowing, historically.** `marching-8p` — eight players
+keeping about 320 mobile units under way, with **no combat and no AI** —
+spent roughly 6.5 ms at p99 on M2's per-unit A\*, nearly all of it
+planning paths, against the 6 ms `docs/04` §12 budgets for pathfinding at
+200 population and 400 entities. M4 chunk 1's sector graph and flow fields
+brought it to about 2.4 ms p99 (p50 from 0.9 ms to 0.6 ms), and `crowded`
+from 2.9 ms to 1.9 ms, on the same machine (hash included); the ceilings
+were lowered to match.
 
 Where the time went, and goes, is worth recording because the first flow
 field was *slower* than the A\* it replaced (7.2 ms p99):
@@ -679,7 +821,8 @@ field was *slower* than the A\* it replaced (7.2 ms p99):
 
 `simrunner bench --stats` prints the diagnostics that found each of these:
 fields built and tiles flooded (sum and peak per tick), corridor searches,
-whole-map fallbacks, steers, live fields and own-goal fallbacks.
+whole-map fallbacks, steers, live fields and own-goal fallbacks, and now
+the phase table under them.
 
 The ceilings are cliff detectors, not precision instruments. Verify §12
 properly on known hardware at milestone review; a shared runner cannot answer
@@ -702,7 +845,7 @@ simultaneous workers, the age-up presentation. `docs/02` pillar 4 says the feel
 
 **M7 playtest** (`RM-M7-01`). At least six people who played the original, a
 structured observation sheet, and the criterion operationalised: unprompted
-session length, and whether they start a second match.
+session length, and whether they start a second match. The sheet is §9.1.
 
 **Real hardware.** The golden images run on a software rasteriser, which proves
 the renderer and proves nothing about a GPU driver. `crates/render/tests/headless.rs`
@@ -711,6 +854,57 @@ renders a frame, on a software Vulkan driver in the Linux job and on Metal on
 the macOS runner. What it cannot prove is the window, the swapchain and the
 input path, so one pass on real Mac hardware per milestone stays, recording
 the macOS version, hardware and display/GPU setup.
+
+### 9.1 The `RM-M7-01` observation sheet
+
+`docs/06` M7 is done when "someone who loved the original plays a full
+match and does not want to stop". Nothing in CI has an opinion about that,
+so this is the sheet an observer fills in, one per player, and the tally
+that decides. It is written so that two observers would record the same
+session the same way.
+
+**Who.** Six people who played the original in its day and have not seen
+this build. One at a time, alone at the machine, the observer beside them
+with the sheet, a clock and a pen, silent unless the build breaks. Nobody
+is coached: the first and only instruction is *"Play until you want to
+stop."* The observer does not answer questions about how to play; every
+question is written down verbatim, because each one is a hint or a tooltip
+the game failed to give.
+
+**Setup.** The Mac build from the `Mac build` workflow, the artifact named
+on the sheet; a fresh `settings.ron` (hints on, the default volumes, the
+default keys); the setup screen's defaults (one Standard opponent). The
+match records itself, so a bug has a replay: note its path from the
+Replays screen at the end. The observer opens `F4` once during the biggest
+fight to read the frame and tick times, then closes it.
+
+**The sheet.**
+
+| | |
+|---|---|
+| Date, build | `New-Empire-macOS-<sha>` |
+| Machine | Mac model, macOS version, display and scale |
+| Player | Years they played the original; when they last did |
+| **Timeline** (mm:ss from "play") | first villager ordered · first building placed · first fight · Tool Age · Bronze Age · first pause or save · session end |
+| **Session end** | mm:ss, and who ended it: the player unprompted / the observer (time, room) / the build (crash, hang, unplayable). Only the first counts as *unprompted* |
+| **Second match** | Offered once, in these words, after the first ends: *"Another?"* Yes or no; if yes, its length |
+| **Questions asked** | Every "how do I…" and "what does…", verbatim, with the minute |
+| **Mis-clicks** | What they meant, what happened, the minute |
+| **Feel** (`docs/03` §6, `docs/02` pillar 4), 1 to 5 with a line each | units answer when told · camera · sound under many workers · the age-up moment · reading a fight · the hints (helped / ignored / annoyed) · the tooltips (used / not) |
+| **Moments** | Verbatim: what they said out loud, what made them laugh, what made them swear |
+| **Performance** | `F4` at the biggest fight: fps, frame p99, tick p99, and which phase led; any stutter the player remarked on, with the minute |
+| **Bugs** | What, when, and the replay's path |
+| **After** | Three questions, verbatim answers: *What did this get right about the original?* · *What was missing?* · *Would you play it again tomorrow?* |
+
+**The tally across six.** Median unprompted session length; how many
+reached the Bronze Age; how many said yes to a second match. The
+criterion is met when at least four of the six play for thirty minutes or
+more without being prompted, and at least three of them start a second
+match. Fewer than that, and the questions and mis-clicks columns say what
+to fix before the next six; a session ended by the build is a bug first
+and a data point second. The sheets and the tally go in `docs/10` as the
+`RM-M7-01` record, with the build's hash, and `RM-M7` joins
+`TRACEABILITY_LANDED` only then.
 
 ---
 

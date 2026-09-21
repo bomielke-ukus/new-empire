@@ -51,6 +51,12 @@ struct Args {
     select_kind: Option<String>,
     sweep: Option<u32>,
     hover: Option<(f32, f32)>,
+    /// Hover the middle of the button with this label, for a tooltip.
+    hover_button: Option<String>,
+    /// Show the first-time hint the moment would bring up.
+    hint: bool,
+    /// Show the performance readout with fixed sample numbers.
+    perf: bool,
     dpi: f32,
     ui_scale: f32,
     controls: bool,
@@ -85,6 +91,9 @@ fn parse() -> Result<Args, String> {
         select_kind: None,
         sweep: None,
         hover: None,
+        hover_button: None,
+        hint: false,
+        perf: false,
         dpi: 1.0,
         ui_scale: 1.0,
         controls: false,
@@ -136,6 +145,9 @@ fn parse() -> Result<Args, String> {
             "--select-tc" => a.select_tc = val == "1" || val == "true",
             "--select-kind" => a.select_kind = Some(val.clone()),
             "--sweep" => a.sweep = Some(val.parse().map_err(|e| format!("{key}: {e}"))?),
+            "--hover-button" => a.hover_button = Some(val.clone()),
+            "--hint" => a.hint = val == "1" || val == "true",
+            "--perf" => a.perf = val == "1" || val == "true",
             "--hover" => {
                 let (x, y) = val.split_once(',').ok_or("--hover wants X,Y")?;
                 a.hover = Some((num(x)?, num(y)?));
@@ -275,6 +287,14 @@ fn run() -> Result<(), String> {
         for _ in 0..a.ticks {
             sim.step();
             feedback.observe(&sim);
+            // A note for whoever is picking a golden's tick.
+            if sim
+                .events()
+                .iter()
+                .any(|e| matches!(e, sim::Event::Felled { .. }))
+            {
+                eprintln!("felled at tick {}", sim.tick());
+            }
         }
         (sim, a.seed)
     };
@@ -408,29 +428,65 @@ fn run() -> Result<(), String> {
     }
     if a.hud {
         let settings = Settings::default();
-        let hud = Hud::build(
-            &atlas,
-            &HudInput {
-                sim: &sim,
-                player: 0,
-                camera: &cam,
-                selected: &selected,
-                build_mode: ghost.map(|g| g.kind),
-                fps: 60.0,
-                paused: false,
-                speed: 1.0,
-                status: &format!("TICK {}", sim.tick()),
-                hover: a.hover,
-                banner,
-                ui_scale: a.dpi * a.ui_scale,
-                help: a.controls,
-                targeting: false,
-                defences: false,
-                settings: &settings,
-                notices: &[],
-            },
-        );
+        // The hint the moment would bring up, given the idle wait.
+        let hint = a.hint.then(|| {
+            let villager_selected = selected.iter().any(|s| {
+                let w = sim.world();
+                w.owner[*s as usize] == 0 && w.kind[*s as usize] == kinds::VILLAGER
+            });
+            let c = view::hints::conditions(&sim, 0, villager_selected, false);
+            let mut hints = view::Hints::new(true, &std::collections::BTreeMap::new());
+            let last = view::hints::IDLE_TICKS + 1;
+            for t in 0..=last {
+                hints.update(&c, t);
+            }
+            hints
+                .showing(last)
+                .map(|h| h.text(&view::hints::Keys::default()))
+        });
+        let hint = hint.flatten();
+        let perf = a.perf.then(view::Readout::sample);
+        let status = format!("TICK {}", sim.tick());
+        let input = |hover: Option<(f32, f32)>| HudInput {
+            sim: &sim,
+            player: 0,
+            camera: &cam,
+            selected: &selected,
+            build_mode: ghost.map(|g| g.kind),
+            fps: 60.0,
+            paused: false,
+            speed: 1.0,
+            status: &status,
+            hover,
+            banner,
+            ui_scale: a.dpi * a.ui_scale,
+            help: a.controls,
+            targeting: false,
+            defences: false,
+            settings: &settings,
+            notices: &[],
+            hint: hint.as_deref(),
+            flash: [false; 4],
+            perf: perf.as_ref(),
+        };
+        let mut hover = a.hover;
+        if let Some(label) = &a.hover_button {
+            // Build once to find the button, then hover its middle.
+            let first = Hud::build(&atlas, &input(None));
+            let b = first
+                .buttons
+                .iter()
+                .find(|b| &b.label == label)
+                .ok_or_else(|| format!("no button labelled {label}"))?;
+            let s = a.dpi * a.ui_scale;
+            hover = Some(((b.x + b.w * 0.5) * s, (b.y + b.h * 0.5) * s));
+        }
+        let hud = Hud::build(&atlas, &input(hover));
         scene.ui = hud.sprites;
+        // The marks at the screen's edge for an attack out of view.
+        scene
+            .ui
+            .extend(feedback.edge_indicators(&sim, &atlas, &cam, viewer, a.dpi * a.ui_scale));
     }
     let mut img = raster::Image::new(a.width, a.height, [12, 10, 14, 255]);
     let lights = viewer.and_then(|p| sim.fog(p)).map(FogLights::from_fog);
@@ -443,7 +499,12 @@ fn run() -> Result<(), String> {
         let s = a.dpi * a.ui_scale;
         let rect =
             MinimapRect::bottom_right((a.width as f32, a.height as f32), 256.0 * s, 16.0 * s);
-        raster::draw_minimap(&mut img, &Minimap::render_for(&sim, viewer), rect);
+        let marks = feedback.minimap_marks(&sim, viewer);
+        raster::draw_minimap(
+            &mut img,
+            &Minimap::render_marked(&sim, viewer, &marks),
+            rect,
+        );
     }
     save(&a.out, img.width, img.height, &img.to_bytes())?;
     println!(
@@ -474,6 +535,8 @@ fn run() -> Result<(), String> {
 fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
     use sim::{Command, CommandKind};
     let (sx, sy) = sim.starts()[0];
+    // A note for whoever is picking a golden's camera.
+    eprintln!("start ({sx}, {sy})");
     let tc_pos = sim::nav::centre((sx, sy));
     let world = sim.world();
     let villagers: Vec<_> = world
@@ -516,6 +579,65 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
                     kind: kinds::VILLAGER,
                 }));
             }
+        }
+        "fell" => {
+            // Nodes being used up, beside the Town Center: eight villagers on
+            // one tree, three on a berry bush, three on a gold vein. The tree
+            // falls; the bush and the vein are drawn smaller as they go.
+            let node = |sim: &mut sim::Simulation, kind, x, y| {
+                sim.issue(Command {
+                    player: 0,
+                    kind: CommandKind::Spawn {
+                        kind,
+                        pos: sim::nav::centre((x, y)),
+                    },
+                });
+            };
+            node(sim, kinds::TREE, sx + 4, sy - 3);
+            node(sim, kinds::BERRY_BUSH, sx - 4, sy + 3);
+            node(sim, kinds::GOLD_MINE, sx + 4, sy + 4);
+            for k in 0..11 {
+                node(sim, kinds::VILLAGER, sx - 5 + k % 6, sy - 6 + k / 6);
+            }
+            for _ in 0..3 {
+                sim.step();
+            }
+            let world = sim.world();
+            // The node spawned on that tile, not the map's own elsewhere.
+            let find = |kind, x, y| {
+                let at = sim::nav::centre((x, y));
+                world
+                    .slots()
+                    .filter(|s| world.kind[s.index()] == kind && world.pos[s.index()] == at)
+                    .map(|s| world.id_at(s))
+                    .last()
+                    .expect("spawned")
+            };
+            let mut new_villagers: Vec<_> = world
+                .slots()
+                .filter(|s| world.owner[s.index()] == 0 && world.kind[s.index()] == kinds::VILLAGER)
+                .map(|s| world.id_at(s))
+                .filter(|id| !villagers.contains(id))
+                .collect();
+            let (tree, bush, vein) = (
+                find(kinds::TREE, sx + 4, sy - 3),
+                find(kinds::BERRY_BUSH, sx - 4, sy + 3),
+                find(kinds::GOLD_MINE, sx + 4, sy + 4),
+            );
+            let gang: Vec<_> = new_villagers.drain(..8).collect();
+            let foragers = std::mem::take(&mut new_villagers);
+            sim.issue(cmd(CommandKind::Gather {
+                ids: gang,
+                node: tree,
+            }));
+            sim.issue(cmd(CommandKind::Gather {
+                ids: foragers,
+                node: bush,
+            }));
+            sim.issue(cmd(CommandKind::Gather {
+                ids: villagers.clone(),
+                node: vein,
+            }));
         }
         "build" => {
             sim.issue(cmd(CommandKind::Build {

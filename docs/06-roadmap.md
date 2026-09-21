@@ -29,8 +29,9 @@ every per-tick hash matches, on all three platforms.
 **Size:** Medium.
 
 **Status:** landed. `simrunner determinism --ticks 10000` passes locally
-(4 players, 400 units, ~4,500 commands, ~28 µs/tick); CI runs it on Linux,
-Windows and macOS and asserts the three final hashes are identical. The
+(4 players, 400 units, ~4,500 commands, ~28 µs/tick); CI runs it on Linux
+and macOS and asserts the final hashes are identical (Windows was a third
+leg until 2026-09-21). The
 window opens and clears to a colour, and drives the sim at 20 Hz from a
 fixed-timestep clock (Space pauses, `+`/`-` change speed). Not yet verified
 on a real GPU from this environment — first thing to check on a desktop.
@@ -194,7 +195,10 @@ touching a terminal.
 
 **Status: landed 2026-09-19**, with the same caveat as the milestones before
 it: the shell is verified by the app's own handlers and the software
-rasteriser, and the same run by hand on the Mac is owed. The game opens on
+rasteriser. The owner played the downloadable build on the Mac on
+2026-09-20 (the Mac build workflow, `docs/10`) and reported that it plays
+well; the save, load and replay steps by hand there are not separately
+confirmed. The game opens on
 a title screen; a skirmish is set up (map size, one to seven opponents each
 at a difficulty with the Hardest bonus declared beside it, population cap,
 seed, the map previewed) and played against opponents thinking in the
@@ -219,6 +223,34 @@ the game's name (`docs/07` Q5).
 ## M7 — The feel pass ← **vertical slice complete**
 
 *The milestone that decides whether this is the game you remember.*
+
+**Status: in progress since 2026-09-20.** Chunk 1, the audio engine,
+landed: four buses, the units answering orders and selection, the world
+heard where it is through the fog, buttons and refusals, the bell and the
+fanfares, every sound a synthesised placeholder until the recordings
+exist (`docs/07` Q7), the volumes on the settings screen. Chunk 2, the
+score and the beds, landed 2026-09-21: a stem per age cross-fading on
+age-up, the combat stem over a fight in view, an ambient bed per kind of
+ground under the camera, placeholders all. Chunk 3, the visual
+feedback, landed 2026-09-21: the flinch and the spark, the kill puff,
+the collapse cloud, the hammer's dust, three construction stages, nodes
+thinning and trees falling, the chevron at the screen's edge for an
+attack out of view. Chunk 4, tooltips, hints and the rest of the
+notifications, landed the same day: every unit, building and
+technology tooltip with cost, time, counters and key (`UX-TIP-01`),
+five first-time hints each shown at most twice, the idle chime, the
+resource flash for a refused click, the minimap's flash and ping. Chunk
+5, the performance pass, landed the same day: the tick measured by phase
+against the budgets of `docs/04` §12 on two new benchmark scenarios (400
+soldiers fighting; eight Hard opponents on a full world, their thinking
+timed), the fog of war made incremental and the target search bucketed,
+which halved the tick on the eight-player maps, the ceilings lowered to
+match, an `F4` readout in the app for the measurement on a real Mac, and
+the `RM-M7-01` observation sheet (`docs/09` §9.1). The plan and the
+record are in `docs/10` §4d. What remains of M7 is the owner's: the Mac
+measurement, the six players, and the real sprite art and its animations,
+which wait on the art pipeline (`docs/08` §9 step 3) and need a modeller
+and Blender.
 
 - Full audio: acknowledgments, work loops, positional world SFX, ambience,
   age fanfares, music stems, combat ducking

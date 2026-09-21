@@ -4,6 +4,9 @@
 
 use super::*;
 use ai::Difficulty;
+use audio::score::{BED_GAIN, COMBAT_IN_MS, CROSSFADE_MS};
+use audio::{Bed, Fade, Layer, Play};
+use sim::Task;
 use sim::{Command, Formation, Item, MapKind, MapSpec, Order, SimConfig, Stance};
 use view::shell::{Field, MapSize};
 use view::{Control, NoticeKind, Settings, ShellButton};
@@ -211,8 +214,14 @@ fn app() -> App {
     app.camera = Camera::new(48, 48, (1280.0, 720.0));
     app.clock.set_paused(true);
     app.settings.edge_scroll = false;
-    app.settings_path = scratch("helper-settings").join("settings.ron");
+    // A settings file of its own per test: the tests run in parallel, and
+    // two of them saving and reading one file race.
+    static SETTINGS_FILES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = SETTINGS_FILES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    app.settings_path = scratch(&format!("helper-settings-{n}")).join("settings.ron");
     app.apply_settings();
+    // Every sound asked for is recorded, so a test can hear it.
+    app.speaker = Speaker::Recorder(Default::default());
     // Straight into a match, as the shell would after START. The world is
     // empty until a test spawns into it, which the shell would call a
     // decided match; the results panel is put away so the world takes
@@ -222,6 +231,11 @@ fn app() -> App {
     app.saves_dir = scratch("helper-saves");
     app.replays_dir = scratch("helper-replays");
     app
+}
+
+/// What has played since the last time this was asked.
+fn plays(app: &mut App) -> Vec<Play> {
+    app.speaker.take()
 }
 
 /// A scratch directory for this process, under the system's temp dir.
@@ -1626,4 +1640,365 @@ fn button_enabled(app: &App, label: &str) -> bool {
         .buttons
         .iter()
         .any(|b| b.label == label && b.enabled)
+}
+
+/// The units answer as they are told: a click on one of the player's
+/// villagers is its selection call and a right-click order its bark,
+/// each in the same input call, before a tick has passed; a panel
+/// button clicks and a greyed one buzzes; and twelve villagers on one
+/// tree are at most four chop voices at once, each at its own pitch.
+///
+/// REQ: UX-AUDIO-01
+/// REQ: UX-AUDIO-02
+#[test]
+fn units_answer_at_once_buttons_click_and_a_woodline_is_four_voices() {
+    let mut app = app();
+    two_sides(&mut app);
+    app.clock.set_paused(true);
+    let v = spawn(&mut app, kinds::VILLAGER, 16, 10);
+    app.camera.look_at_tile(16.5, 10.5);
+    draw(&mut app);
+    let _ = plays(&mut app);
+    // Click the middle of its sprite as drawn.
+    let slot = app.sim.world().slot(v).unwrap().index() as u32;
+    let sprite = app
+        .scene
+        .sprites
+        .iter()
+        .find(|s| s.slot == slot && !s.screen)
+        .cloned()
+        .expect("the villager is drawn");
+    let (x0, y0) = app.camera.to_window(sprite.x, sprite.y);
+    let z = app.camera.zoom();
+    let (px, py) = (x0 + sprite.w * z * 0.5, y0 + sprite.h * z * 0.6);
+    app.left_press(px, py);
+    app.left_release(px, py);
+    assert_eq!(app.selection.ids, vec![v], "the click selected it");
+    let heard = plays(&mut app);
+    assert!(
+        heard
+            .iter()
+            .any(|p| p.cue == Cue::Select(Class::Villager) && p.bus == Bus::Voice),
+        "{heard:?}"
+    );
+    let tick = app.sim.tick();
+    let (qx, qy) = on_screen(&app, 20.5, 12.5, 0.0);
+    app.right_press(qx, qy);
+    let heard = plays(&mut app);
+    assert_eq!(app.sim.tick(), tick, "no tick has passed");
+    assert!(
+        heard.iter().any(|p| p.cue == Cue::Ack(Class::Villager)),
+        "the bark: {heard:?}"
+    );
+    // The panel: HOUSE is affordable and clicks; a building the age
+    // refuses buzzes and does not click.
+    draw(&mut app);
+    let house = button(&app, "HOUSE");
+    click(&mut app, &house);
+    let heard = plays(&mut app);
+    assert!(
+        heard
+            .iter()
+            .any(|p| p.cue == Cue::Click && p.bus == Bus::Ui),
+        "{heard:?}"
+    );
+    app.do_action(Action::Cancel);
+    let _ = plays(&mut app);
+    draw(&mut app);
+    let greyed = app
+        .hud
+        .buttons
+        .iter()
+        .find(|b| !b.enabled)
+        .cloned()
+        .expect("something the Stone Age refuses");
+    click(&mut app, &greyed);
+    let heard = plays(&mut app);
+    assert!(heard.iter().any(|p| p.cue == Cue::Invalid), "{heard:?}");
+    assert!(
+        !heard.iter().any(|p| p.cue == Cue::Click),
+        "a refusal is not a click"
+    );
+    // The woodline: twelve on one tree.
+    let tree = spawn(&mut app, kinds::TREE, 24, 24);
+    let ids: Vec<EntityId> = (0..12)
+        .map(|k| spawn(&mut app, kinds::VILLAGER, 20 + k % 4, 20 + k / 4))
+        .collect();
+    app.issue(CommandKind::Gather { ids, node: tree });
+    step(&mut app, 200);
+    // Voices are busy in wall time; let the last ones end.
+    std::thread::sleep(Duration::from_millis(300));
+    let _ = plays(&mut app);
+    // The app's own tick, which is where the events are heard.
+    for _ in 0..sim::WORK_PERIOD {
+        app.tick_once(Instant::now());
+    }
+    let heard = plays(&mut app);
+    let chops: Vec<&Play> = heard
+        .iter()
+        .filter(|p| p.cue == Cue::Work(Task::Chop))
+        .collect();
+    assert!(
+        !chops.is_empty() && chops.len() <= audio::MAX_VOICES,
+        "{} chops in one period: {heard:?}",
+        chops.len()
+    );
+    assert!(chops.iter().all(|p| p.bus == Bus::World));
+    assert!(
+        chops.len() == 1 || chops.iter().any(|p| (p.rate - chops[0].rate).abs() > 1e-4),
+        "the pitches differ"
+    );
+}
+
+/// The four bus volumes are on the settings screen in steps of ten, kept
+/// in the file and applied to the mixer at once.
+#[test]
+fn bus_volumes_are_set_on_the_settings_screen_and_kept() {
+    let mut app = app();
+    app.shell = Shell::Title;
+    press(&mut app, ShellAction::Settings);
+    press(&mut app, ShellAction::Volume(Bus::Music, -1));
+    press(&mut app, ShellAction::Volume(Bus::Music, -1));
+    assert_eq!(app.settings.volume(Bus::Music), 50);
+    assert!((app.mixer.volume(Bus::Music) - 0.5).abs() < 1e-6);
+    let text = std::fs::read_to_string(&app.settings_path).unwrap();
+    assert_eq!(Settings::from_ron(&text).unwrap().volume(Bus::Music), 50);
+    for _ in 0..12 {
+        press(&mut app, ShellAction::Volume(Bus::Ui, -1));
+    }
+    assert_eq!(app.settings.volume(Bus::Ui), 0, "floors at silent");
+    assert_eq!(app.mixer.volume(Bus::Ui), 0.0);
+    press(&mut app, ShellAction::Volume(Bus::Ui, 1));
+    assert_eq!(app.settings.volume(Bus::Ui), 10);
+    press(&mut app, ShellAction::ResetSettings);
+    assert_eq!(app.settings.volume(Bus::Music), 70, "the default");
+}
+
+/// The score follows the match: the Stone stem fades in at the start and
+/// the field's bed sits under it; the Tool Age cross-fades the stems over
+/// four seconds; six units fighting in view bring the combat stem in; and
+/// the title has none of it.
+#[test]
+fn the_score_follows_the_age_and_the_fight_and_the_beds_the_ground() {
+    let mut app = app();
+    two_sides(&mut app);
+    app.clock.set_paused(true);
+    draw(&mut app);
+    let fades = app.speaker.take_fades();
+    assert!(
+        fades.contains(&Fade {
+            layer: Layer::Stem(Age::Stone),
+            level: 1.0,
+            ms: CROSSFADE_MS
+        }),
+        "{fades:?}"
+    );
+    let field = fades
+        .iter()
+        .find(|f| f.layer == Layer::Bed(Bed::Field))
+        .expect("the field under the camera");
+    assert!(
+        field.level > 0.0 && field.level <= BED_GAIN,
+        "{}",
+        field.level
+    );
+    assert!(
+        !fades
+            .iter()
+            .any(|f| f.layer == Layer::Bed(Bed::Surf) && f.level > 0.0),
+        "no water here"
+    );
+    draw(&mut app);
+    assert!(app.speaker.take_fades().is_empty(), "steady");
+    // The Tool Age: the two buildings it asks for, then the research.
+    let tc = spawn(&mut app, kinds::TOWN_CENTER, 12, 12);
+    spawn(&mut app, kinds::STOREHOUSE, 16, 8);
+    spawn(&mut app, kinds::BARRACKS, 16, 16);
+    let age = tech::all()
+        .iter()
+        .find(|t| t.advances_age() == Some(Age::Tool))
+        .expect("the Tool Age advance");
+    app.issue(CommandKind::Research {
+        building: tc,
+        tech: age.id,
+    });
+    step(&mut app, age.seconds as u32 * 20 + 40);
+    assert_eq!(app.sim.player(ME).unwrap().age, Age::Tool);
+    draw(&mut app);
+    let fades = app.speaker.take_fades();
+    assert!(
+        fades.contains(&Fade {
+            layer: Layer::Stem(Age::Stone),
+            level: 0.0,
+            ms: CROSSFADE_MS
+        }),
+        "{fades:?}"
+    );
+    assert!(fades.contains(&Fade {
+        layer: Layer::Stem(Age::Tool),
+        level: 1.0,
+        ms: CROSSFADE_MS
+    }));
+    // Six clubmen sent at an enemy in view.
+    app.camera.look_at_tile(30.0, 30.0);
+    let mine: Vec<EntityId> = (0..6)
+        .map(|k| spawn(&mut app, kinds::CLUBMAN, 28 + k, 28))
+        .collect();
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Spawn {
+            kind: kinds::CLUBMAN,
+            pos: Vec2Fx::from_int(31, 31),
+        },
+    });
+    step(&mut app, 3);
+    let theirs = {
+        let w = app.sim.world();
+        w.slots()
+            .find(|s| w.kind[s.index()] == kinds::CLUBMAN && w.owner[s.index()] == 1)
+            .map(|s| w.id_at(s))
+            .expect("the enemy")
+    };
+    app.issue(CommandKind::Attack {
+        ids: mine,
+        target: theirs,
+    });
+    step(&mut app, 10);
+    draw(&mut app);
+    let fades = app.speaker.take_fades();
+    assert!(
+        fades.contains(&Fade {
+            layer: Layer::Combat,
+            level: 1.0,
+            ms: COMBAT_IN_MS
+        }),
+        "{fades:?}"
+    );
+    // The title: everything out.
+    app.shell = Shell::Title;
+    draw(&mut app);
+    let fades = app.speaker.take_fades();
+    for layer in [
+        Layer::Stem(Age::Tool),
+        Layer::Combat,
+        Layer::Bed(Bed::Field),
+    ] {
+        assert!(
+            fades.iter().any(|f| f.layer == layer && f.level == 0.0),
+            "{layer:?} out: {fades:?}"
+        );
+    }
+}
+
+/// A hint comes in context and is drawn, its count goes to the settings
+/// file at once, the second time is the last, and HINTS OFF on the
+/// settings screen ends them; a refused click that is short of a resource
+/// flashes it on the bar and says so, where a refusal for another reason
+/// only buzzes.
+#[test]
+fn hints_are_counted_in_the_file_and_a_short_click_flashes_the_bar() {
+    let mut app = app();
+    two_sides(&mut app);
+    app.clock.set_paused(true);
+    let v = spawn(&mut app, kinds::VILLAGER, 12, 12);
+    // A villager is selected and nobody gathers, and the side has no
+    // house at all: of the two hints due, being housed is the urgent one.
+    app.selection.set(vec![v]);
+    draw(&mut app);
+    let hint = app.hud.hint.clone().expect("a hint");
+    assert!(hint.contains("HOUSED"), "{hint}");
+    let text = std::fs::read_to_string(&app.settings_path).unwrap();
+    assert!(text.contains("housed"), "counted at once: {text}");
+    assert_eq!(app.settings.hints_shown.get("housed"), Some(&1));
+    draw(&mut app);
+    assert!(app.hud.hint.is_some(), "still up");
+    // Off on the settings screen: gone, and none come.
+    app.shell_action(ShellAction::ToggleHints);
+    assert!(!app.settings.hints);
+    draw(&mut app);
+    assert_eq!(app.hud.hint, None);
+    app.shell_action(ShellAction::ToggleHints);
+    assert!(app.settings.hints);
+    // A player with wood and nothing else: the Town Center, refused for
+    // a Government Centre, only buzzes; a villager at the Town Center,
+    // short of food, flashes FOOD on the bar and plays the line.
+    let mut poor = Simulation::new(
+        1,
+        SimConfig {
+            map: MapSpec {
+                kind: MapKind::Flat,
+                size: 48,
+                players: 2,
+            },
+            starting_stockpile: [0, 250, 0, 0],
+            wander: false,
+            ..SimConfig::default()
+        },
+    );
+    for (player, kind, x, y) in [
+        (0, kinds::VILLAGER, 10, 10),
+        (0, kinds::TOWN_CENTER, 14, 14),
+        (1, kinds::VILLAGER, 40, 40),
+    ] {
+        poor.issue(Command {
+            player,
+            kind: CommandKind::Spawn {
+                kind,
+                pos: Vec2Fx::from_int(x, y),
+            },
+        });
+    }
+    for _ in 0..3 {
+        poor.step();
+    }
+    app.sim = poor;
+    app.prev_pos.clone_from(&app.sim.world().pos);
+    let own = |app: &App, kind: u16| {
+        let w = app.sim.world();
+        w.slots()
+            .find(|s| w.kind[s.index()] == kind && w.owner[s.index()] == 0)
+            .map(|s| w.id_at(s))
+            .unwrap()
+    };
+    let (v, tc) = (own(&app, kinds::VILLAGER), own(&app, kinds::TOWN_CENTER));
+    app.selection.set(vec![v]);
+    draw(&mut app);
+    let _ = plays(&mut app);
+    let tc_button = app
+        .hud
+        .buttons
+        .iter()
+        .find(|b| b.label == "TOWN CTR")
+        .cloned()
+        .expect("the town center button");
+    assert!(
+        !tc_button.enabled && tc_button.lacks == [false; 4],
+        "{:?}",
+        tc_button.lacks
+    );
+    click(&mut app, &tc_button);
+    let heard = plays(&mut app);
+    assert!(heard.iter().any(|p| p.cue == Cue::Invalid), "{heard:?}");
+    assert!(app.flash.is_none(), "no flash for a rule");
+    app.selection.set(vec![tc]);
+    draw(&mut app);
+    let _ = plays(&mut app);
+    let train = app
+        .hud
+        .buttons
+        .iter()
+        .find(|b| b.label == "VILLAGER")
+        .cloned()
+        .expect("the villager button");
+    assert!(
+        !train.enabled && train.lacks == [true, false, false, false],
+        "{:?}",
+        train.lacks
+    );
+    click(&mut app, &train);
+    let heard = plays(&mut app);
+    assert!(heard.iter().any(|p| p.cue == Cue::Poor), "{heard:?}");
+    assert_eq!(app.flash.map(|(_, l)| l), Some([true, false, false, false]));
+    draw(&mut app);
+    assert!(app.hud.sprites.len() > 40, "the bar drew with its flash");
 }

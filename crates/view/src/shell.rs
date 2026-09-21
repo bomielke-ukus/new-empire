@@ -9,6 +9,7 @@
 //! the Hardest gather bonus (`docs/02` §12), is set and declared.
 
 pub use ai::Difficulty;
+use audio::Bus;
 use sim::{
     ConfigError, MapKind, MapSpec, SimConfig, HARDEST_GATHER_BONUS_PCT, MAX_PLAYERS, POP_CAP_RANGE,
 };
@@ -259,6 +260,10 @@ pub enum ShellAction {
     Rebind(Control),
     /// Settings: everything back to the defaults.
     ResetSettings,
+    /// Settings: a bus's volume, a step of ten percent up or down.
+    Volume(Bus, i32),
+    /// Settings: the first-time hints on or off.
+    ToggleHints,
 }
 
 /// A clickable region on a shell screen.
@@ -737,42 +742,90 @@ pub fn settings_screen(
     let mut s = Sheet::new(atlas, input);
     s.backdrop();
     let rows = 4 + Control::ALL.len();
-    let pw = 560.0_f32.min(s.vw - 16.0);
+    // Wide enough for the audio column beside the keys.
+    let pw = 800.0_f32.min(s.vw - 16.0);
     let ph = 40.0 + rows as f32 * ROW_H + 14.0 + 12.0 + 26.0 + 16.0 + 8.0;
     let x = ((s.vw - pw) / 2.0).round();
     let y = ((s.vh - ph) / 2.0).max(4.0).round();
     s.panel(x, y, pw, ph);
     s.centred(x + pw / 2.0, y + 10.0, "SETTINGS", Ink::Gold, 2.0);
     let (label_x, minus_x, value_x, value_w) = (x + 16.0, x + 236.0, x + 260.0, 140.0);
-    let plus_x = value_x + value_w + 4.0;
     let mut ry = y + 40.0;
     // One row: the label, a step button, the value, a step or CHANGE
-    // button. Takes the row's top and hands back the next one's.
+    // button. `column` is (the label's shift, the buttons' shift, how
+    // much narrower the value is), for the audio column. Takes the
+    // row's top and hands back the next one's.
     let row = |s: &mut Sheet<'_>,
                ry: f32,
+               column: (f32, f32, f32),
                label: &str,
                value: &str,
                minus: (ShellAction, &str),
                plus: (ShellAction, &str, bool)|
      -> f32 {
+        let (label_shift, shift, value_w) = (column.0, column.1, value_w - column.2);
         let ty = ry + (ROW_H - 7.0) / 2.0 - 1.0;
-        s.p.text(label_x, ty, label, false, 1.0);
+        s.p.text(label_x + label_shift, ty, label, false, 1.0);
         let by = ry + (ROW_H - STEP_H) / 2.0;
         if !minus.1.is_empty() {
-            s.button((minus_x, by, STEP_W, STEP_H), minus.0, minus.1, true, "");
+            s.button(
+                (minus_x + shift, by, STEP_W, STEP_H),
+                minus.0,
+                minus.1,
+                true,
+                "",
+            );
         }
-        s.centred(value_x + value_w / 2.0, ty, value, Ink::Gold, 1.0);
+        s.centred(value_x + shift + value_w / 2.0, ty, value, Ink::Gold, 1.0);
         let (pw_, label_) = if plus.1.len() > 1 {
             (70.0, plus.1)
         } else {
             (STEP_W, plus.1)
         };
-        s.button((plus_x, by, pw_, STEP_H), plus.0, label_, plus.2, "");
+        s.button(
+            (value_x + shift + value_w + 4.0, by, pw_, STEP_H),
+            plus.0,
+            label_,
+            plus.2,
+            "",
+        );
         ry + ROW_H
     };
+    let full = (0.0, 0.0, 0.0);
+    // The audio column: its step buttons end at the panel's margin, the
+    // value narrowed to a percentage, the label close beside them and
+    // clear of the CHANGE buttons.
+    let narrow = 60.0;
+    let shift = pw - 16.0 - STEP_W - 4.0 - narrow - (value_x - x);
+    let audio = (shift + 120.0, shift, value_w - narrow);
+    let mut ay = ry;
+    let vy = ay + (ROW_H - 7.0) / 2.0 - 1.0;
+    s.p.text_in(label_x + audio.0, vy, "VOLUME", Ink::Gold, 1.0);
+    ay += ROW_H;
+    for bus in Bus::ALL {
+        ay = row(
+            &mut s,
+            ay,
+            audio,
+            bus.name(),
+            &format!("{}%", settings.volume(bus)),
+            (ShellAction::Volume(bus, -1), "-"),
+            (ShellAction::Volume(bus, 1), "+", true),
+        );
+    }
+    row(
+        &mut s,
+        ay,
+        audio,
+        "HINTS",
+        if settings.hints { "ON" } else { "OFF" },
+        (ShellAction::ToggleHints, "-"),
+        (ShellAction::ToggleHints, "+", true),
+    );
     ry = row(
         &mut s,
         ry,
+        full,
         "HUD SIZE",
         &format!("{}%", (settings.ui_scale * 100.0).round() as i32),
         (ShellAction::SettingScale(-1), "-"),
@@ -781,6 +834,7 @@ pub fn settings_screen(
     ry = row(
         &mut s,
         ry,
+        full,
         "EDGE SCROLL",
         if settings.edge_scroll { "ON" } else { "OFF" },
         (ShellAction::ToggleEdgeScroll, "-"),
@@ -789,6 +843,7 @@ pub fn settings_screen(
     ry = row(
         &mut s,
         ry,
+        full,
         "WINDOW",
         if settings.fullscreen {
             "FULLSCREEN"
@@ -810,6 +865,7 @@ pub fn settings_screen(
         ry = row(
             &mut s,
             ry,
+            full,
             c.name(),
             &value,
             (ShellAction::Rebind(c), ""),
@@ -1331,6 +1387,11 @@ mod tests {
         assert!(find(&plain, ShellAction::SettingScale(1)).enabled);
         assert!(find(&plain, ShellAction::ToggleEdgeScroll).enabled);
         assert!(find(&plain, ShellAction::ToggleFullscreen).enabled);
+        for b in Bus::ALL {
+            assert!(find(&plain, ShellAction::Volume(b, -1)).enabled, "{b:?}");
+            assert!(find(&plain, ShellAction::Volume(b, 1)).enabled, "{b:?}");
+        }
+        assert!(find(&plain, ShellAction::ToggleHints).enabled);
         for c in Control::ALL {
             assert!(find(&plain, ShellAction::Rebind(c)).enabled, "{c:?}");
         }

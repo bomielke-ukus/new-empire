@@ -4,6 +4,7 @@ members = [
     "crates/sim",
     "crates/fogged",
     "crates/ai",
+    "crates/audio",
     "crates/view",
     "crates/render",
     "crates/app",

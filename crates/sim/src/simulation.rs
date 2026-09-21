@@ -16,9 +16,9 @@
 //!
 //! Nothing here reads a clock or a float; see the crate docs.
 
-use crate::battle::{Event, Projectile};
+use crate::battle::{Event, Projectile, Task, WORK_PERIOD};
 use crate::combat;
-use crate::command::{Command, CommandKind, CommandQueue, PlayerId, Source};
+use crate::command::{Command, CommandKind, CommandQueue, PlayerId, Source, MAX_PLAYERS};
 use crate::entity::{EntityId, KindId, Slot, World, WorldViolation};
 use crate::flow;
 use crate::fog::{self, Fog, Memory};
@@ -244,28 +244,180 @@ pub struct TickStats {
     pub kills: u32,
 }
 
+/// Where a tick's time went, in nanoseconds per phase, as read from the
+/// clock the caller gave [`Simulation::step_timed`]. Diagnostics, not
+/// state: the simulation never reads a clock itself, so `step` stays
+/// bit-identical everywhere, and a caller that wants to know where the
+/// budget of `docs/04` §12 goes brings its own stopwatch.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct Timings {
+    /// Applying the tick's commands.
+    pub commands: u64,
+    /// Farms, gates and the order state machines: gathering, building,
+    /// attacking, fleeing.
+    pub orders: u64,
+    /// The navigation refresh and the flow fields.
+    pub paths: u64,
+    /// Wandering, walking, separation and the push off blocked tiles.
+    pub movement: u64,
+    /// Target acquisition, strikes, projectiles and deaths.
+    pub combat: u64,
+    /// Construction, production, research and the population recount.
+    pub economy: u64,
+    /// The fog of war.
+    pub fog: u64,
+}
+
+impl Timings {
+    /// The phases, in the order [`Timings::as_array`] lists them.
+    pub const PHASES: [&'static str; 7] = [
+        "commands", "orders", "paths", "movement", "combat", "economy", "fog",
+    ];
+
+    /// The phases as an array, in [`Timings::PHASES`] order.
+    pub fn as_array(&self) -> [u64; 7] {
+        [
+            self.commands,
+            self.orders,
+            self.paths,
+            self.movement,
+            self.combat,
+            self.economy,
+            self.fog,
+        ]
+    }
+
+    /// The whole tick.
+    pub fn total(&self) -> u64 {
+        self.as_array().iter().sum()
+    }
+
+    /// Adds another tick's phases to these.
+    pub fn add(&mut self, other: &Timings) {
+        self.commands += other.commands;
+        self.orders += other.orders;
+        self.paths += other.paths;
+        self.movement += other.movement;
+        self.combat += other.combat;
+        self.economy += other.economy;
+        self.fog += other.fog;
+    }
+}
+
+/// A stopwatch over the phases of a tick: the caller's clock, read between
+/// them, with the differences credited to whichever phase just ran. With no
+/// clock it does nothing, which is the shipping path.
+struct Lap<'a> {
+    clock: Option<&'a mut dyn FnMut() -> u64>,
+    last: u64,
+}
+
+impl<'a> Lap<'a> {
+    fn start(mut clock: Option<&'a mut dyn FnMut() -> u64>) -> Lap<'a> {
+        let last = clock.as_mut().map_or(0, |c| c());
+        Lap { clock, last }
+    }
+
+    fn mark(&mut self, into: &mut u64) {
+        if let Some(c) = self.clock.as_mut() {
+            let now = c();
+            *into += now.saturating_sub(self.last);
+            self.last = now;
+        }
+    }
+}
+
+/// What one slot's sight disc was last stamped as: whose fog, from which
+/// tile, how far. Nothing, for a slot that sees nothing: free, dying,
+/// garrisoned, or nobody's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Sight {
+    owner: u8,
+    x: i32,
+    y: i32,
+    r: u8,
+}
+
+impl Sight {
+    const NONE: Sight = Sight {
+        owner: u8::MAX,
+        x: 0,
+        y: 0,
+        r: 0,
+    };
+}
+
 /// Reusable buffers. Deliberately invisible to equality and serialisation.
 #[derive(Default)]
 pub(crate) struct Scratch {
     sectors: flow::Sectors,
     fields: flow::Fields,
-    head: Vec<u32>,
-    next: Vec<u32>,
+    /// The mobile units bucketed by tile ([`Simulation::bucket_mobiles`]):
+    /// the first slot in each cell, and each slot's next in its cell.
+    pub(crate) head: Vec<u32>,
+    pub(crate) next: Vec<u32>,
     pub(crate) stats: TickStats,
     /// Sight discs by radius, built on first use.
     stamps: Vec<Vec<(i32, i32)>>,
+    /// The fog's incremental bookkeeping (`docs/04` §12): what each slot's
+    /// disc was last stamped as, so only a change costs anything.
+    sight: Vec<Sight>,
+    /// Whether `sight` and `cover` describe the fog grids: false for a
+    /// fresh match and a loaded save, and the next update rebuilds them.
+    sight_valid: bool,
+    /// Per tile, the slot of the immobile thing standing on it, or
+    /// `u32::MAX`: how a tile that comes into view finds what to remember.
+    cover: Vec<u32>,
+    /// Per fog, one bit per tile that came into view this tick.
+    fresh: Vec<Vec<u64>>,
+    /// Anchor tiles where something immobile was placed, finished, felled
+    /// or destroyed this tick: the memories there are redone.
+    pub(crate) touched: Vec<(i32, i32)>,
+    /// Sides that advanced an age this tick: their buildings are
+    /// remembered anew wherever they are seen.
+    aged: u8,
 }
 
 impl Scratch {
-    /// The disc of offsets a thing with `radius` tiles of sight covers.
-    fn stamp(&mut self, radius: i32) -> &[(i32, i32)] {
-        let r = radius.clamp(0, fog::MAX_SIGHT) as usize;
-        while self.stamps.len() <= r {
-            let next = self.stamps.len() as i32;
-            self.stamps.push(fog::stamp(next));
+    /// Notes an immobile thing standing on its footprint, for the fog.
+    fn place(&mut self, ax: i32, ay: i32, fp: i32, slot: usize, w: i32, h: i32) {
+        self.touched.push((ax, ay));
+        if self.cover.len() != (w * h) as usize {
+            return;
         }
-        &self.stamps[r]
+        for (x, y) in nav::footprint_tiles(ax, ay, fp) {
+            if x >= 0 && y >= 0 && x < w && y < h {
+                self.cover[(y * w + x) as usize] = slot as u32;
+            }
+        }
     }
+
+    /// Notes an immobile thing leaving its footprint, for the fog.
+    fn vacate(&mut self, ax: i32, ay: i32, fp: i32, slot: usize, w: i32, h: i32) {
+        self.touched.push((ax, ay));
+        if self.cover.len() != (w * h) as usize {
+            return;
+        }
+        for (x, y) in nav::footprint_tiles(ax, ay, fp) {
+            if x >= 0 && y >= 0 && x < w && y < h {
+                let t = (y * w + x) as usize;
+                if self.cover[t] == slot as u32 {
+                    self.cover[t] = u32::MAX;
+                }
+            }
+        }
+    }
+}
+
+/// The disc of offsets a thing with `radius` tiles of sight covers, from
+/// the cache of them.
+fn stamp_of(stamps: &mut Vec<Vec<(i32, i32)>>, radius: i32) -> &[(i32, i32)] {
+    let r = radius.clamp(0, fog::MAX_SIGHT) as usize;
+    while stamps.len() <= r {
+        let next = stamps.len() as i32;
+        stamps.push(fog::stamp(next));
+    }
+    &stamps[r]
 }
 
 impl Clone for Scratch {
@@ -985,30 +1137,54 @@ impl Simulation {
 
     /// Advances the match by one tick. Fixed system order, no exceptions.
     pub fn step(&mut self) {
+        self.run_tick(None);
+    }
+
+    /// [`Simulation::step`] with a stopwatch: `clock` is read between the
+    /// phases and the differences come back as [`Timings`]. The clock is
+    /// the caller's, in whatever unit it likes (nanoseconds by convention),
+    /// so this crate never touches wall time and the tick is the same tick
+    /// either way. This is how the budget of `docs/04` §12 is measured.
+    pub fn step_timed(&mut self, clock: &mut dyn FnMut() -> u64) -> Timings {
+        self.run_tick(Some(clock))
+    }
+
+    fn run_tick(&mut self, clock: Option<&mut dyn FnMut() -> u64>) -> Timings {
         self.scratch.stats = TickStats::default();
         self.events.clear();
         if self.last_alarm.len() != self.players.len() {
             self.last_alarm.resize(self.players.len(), 0);
         }
+        let mut t = Timings::default();
+        let mut lap = Lap::start(clock);
         self.apply_commands();
+        lap.mark(&mut t.commands);
         self.farms();
         self.gates();
+        lap.mark(&mut t.orders);
         self.nav.refresh();
+        lap.mark(&mut t.paths);
         self.orders();
+        lap.mark(&mut t.orders);
         self.nav.refresh();
         self.plan_paths();
+        lap.mark(&mut t.paths);
         self.wander();
         self.movement();
         self.separation();
         self.keep_off_blocked();
+        lap.mark(&mut t.movement);
         self.acquire();
         self.strike();
         self.fly();
         self.deaths();
+        lap.mark(&mut t.combat);
         self.construction();
         self.production();
         self.recount_population();
+        lap.mark(&mut t.economy);
         self.fog_of_war_update();
+        lap.mark(&mut t.fog);
         self.tick += 1;
         #[cfg(feature = "debug-checks")]
         // Failing loudly is the whole point of this build configuration; the
@@ -1017,6 +1193,7 @@ impl Simulation {
         if let Err(v) = self.check() {
             panic!("invariant broken at tick {}: {v}", self.tick);
         }
+        t
     }
 
     /// Canonical hash of everything that matters. Equal hashes on two
@@ -1135,6 +1312,47 @@ impl Simulation {
                 players: self.players.len(),
             });
         }
+        // The incremental fog agrees with a recount from the world: every
+        // tile has exactly the observers the discs give it.
+        if self.scratch.sight_valid {
+            let (w, h) = (self.map.width(), self.map.height());
+            let mut want = vec![vec![0u16; (w * h) as usize]; self.players.len()];
+            for s in self.world.slots() {
+                let i = s.index();
+                let owner = self.world.owner[i] as usize;
+                if owner >= want.len() || self.world.dying[i] > 0 || self.world.inside[i].is_some()
+                {
+                    continue;
+                }
+                let k = kinds::info(self.world.kind[i]);
+                let (cx, cy) = nav::tile_of(self.world.pos[i]);
+                let mut r = k.combat.line_of_sight + k.footprint as i32 / 2;
+                if self.map.elevation(cx, cy) > 0 {
+                    r += 1;
+                }
+                for (dx, dy) in fog::stamp(r) {
+                    let (x, y) = (cx + dx, cy + dy);
+                    if x >= 0 && y >= 0 && x < w && y < h {
+                        want[owner][(y * w + x) as usize] += 1;
+                    }
+                }
+            }
+            for (player, f) in self.fog.iter().enumerate() {
+                for y in 0..h {
+                    for x in 0..w {
+                        let (have, want) = (f.observers(x, y), want[player][(y * w + x) as usize]);
+                        if have != want {
+                            return Err(Violation::FogDrift {
+                                player: player as u8,
+                                tile: (x, y),
+                                have,
+                                want,
+                            });
+                        }
+                    }
+                }
+            }
+        }
         for (player, p) in self.players.iter().enumerate() {
             for (resource, &amount) in p.stockpile.iter().enumerate() {
                 if amount < 0 {
@@ -1202,6 +1420,12 @@ impl Simulation {
             let (ax, ay) = nav::anchor_tile(pos, info.footprint as i32);
             self.nav.block_footprint(ax, ay, info.footprint as i32);
         }
+        if !info.mobile {
+            let fp = info.footprint as i32;
+            let (ax, ay) = nav::anchor_tile(pos, fp);
+            let (w, h) = (self.map.width(), self.map.height());
+            self.scratch.place(ax, ay, fp, id.index(), w, h);
+        }
         if info.trains {
             self.world.production[id.index()] = Some(Production::default());
         }
@@ -1248,6 +1472,12 @@ impl Simulation {
                 let back = cost.map(|c| c - c * done as i32 / total as i32);
                 p.refund(&back);
             }
+        }
+        if !info.mobile {
+            let fp = info.footprint as i32;
+            let (ax, ay) = nav::anchor_tile(self.world.pos[i], fp);
+            let (w, h) = (self.map.width(), self.map.height());
+            self.scratch.vacate(ax, ay, fp, i, w, h);
         }
         self.world.despawn(id)
     }
@@ -1757,6 +1987,21 @@ impl Simulation {
                 if matches!(self.world.carry[i], Some((r, _)) if r != resource) {
                     self.world.carry[i] = None;
                 }
+                // The swing, for the ear: once every WORK_PERIOD ticks per
+                // worker, staggered by slot (`TA-AUDIO-02`).
+                if (self.tick + i as u64).is_multiple_of(WORK_PERIOD) {
+                    let task = match resource {
+                        Resource::Wood => Task::Chop,
+                        Resource::Stone | Resource::Gold => Task::Mine,
+                        Resource::Food if self.world.kind[n] == kinds::FARM => Task::Farm,
+                        Resource::Food => Task::Forage,
+                    };
+                    self.events.push(Event::Work {
+                        task,
+                        owner: me,
+                        pos: self.world.pos[i],
+                    });
+                }
                 let modifiers = self.modifiers(me);
                 let rate = modifiers.gather_rate(resource) / TICKS_PER_SECOND as i32;
                 self.world.work[i] += rate;
@@ -1777,6 +2022,11 @@ impl Simulation {
                 // An exhausted node is gone; an exhausted farm stays, empty,
                 // for `farms` to reseed when its owner can pay.
                 if self.world.resource[n] <= 0 && self.world.kind[n] != kinds::FARM {
+                    self.events.push(Event::Felled {
+                        kind: self.world.kind[n],
+                        pos: self.world.pos[n],
+                        toward: self.world.pos[i],
+                    });
                     self.remove(node);
                 }
                 if carried >= capacity {
@@ -1803,6 +2053,12 @@ impl Simulation {
                 if self.within_reach(i, ds) {
                     if let Some((r, amount)) = self.world.carry[i].take() {
                         self.players[me as usize].deposit(r, amount);
+                        self.events.push(Event::Deposited {
+                            owner: me,
+                            resource: r,
+                            amount,
+                            pos: self.world.pos[i],
+                        });
                     }
                     self.world.order[i] = Order::Gather {
                         node,
@@ -2404,7 +2660,12 @@ impl Simulation {
         }
     }
 
-    fn separation(&mut self) {
+    /// Buckets every mobile unit that is up and out by the tile it stands
+    /// on, into `scratch.head` and `scratch.next`, and returns them in slot
+    /// order. The neighbour searches read it: separation, and a unit
+    /// looking for the nearest enemy. It is built where it is used, since
+    /// units move between the two.
+    pub(crate) fn bucket_mobiles(&mut self) -> Vec<usize> {
         let w = self.nav.width();
         let h = self.nav.height();
         let cells = (w * h) as usize;
@@ -2432,6 +2693,12 @@ impl Simulation {
                 self.scratch.head[c] = i as u32;
             }
         }
+        mobile
+    }
+
+    fn separation(&mut self) {
+        let w = self.nav.width();
+        let mobile = self.bucket_mobiles();
 
         let min_dist = UNIT_RADIUS * 2;
         let limit = min_dist.raw() as u64 * min_dist.raw() as u64;
@@ -2586,6 +2853,14 @@ impl Simulation {
                 if let Some(b) = builders.iter_mut().find(|(id, _)| *id == site) {
                     b.1 += 1;
                 }
+                // The hammer, for the ear (`TA-AUDIO-02`).
+                if (self.tick + s.index() as u64).is_multiple_of(WORK_PERIOD) {
+                    self.events.push(Event::Work {
+                        task: Task::Build,
+                        owner: self.world.owner[s.index()],
+                        pos: self.world.pos[s.index()],
+                    });
+                }
             }
         }
         for (k, site) in sites.iter().enumerate() {
@@ -2608,6 +2883,15 @@ impl Simulation {
             if done >= total {
                 self.world.construction[i] = None;
                 self.world.health[i] = Fx::from_int(info.max_health);
+                // Finished: whoever sees it remembers it built, not a site.
+                self.scratch
+                    .touched
+                    .push(nav::anchor_tile(self.world.pos[i], info.footprint as i32));
+                self.events.push(Event::Completed {
+                    kind: self.world.kind[i],
+                    owner,
+                    pos: self.world.pos[i],
+                });
                 if let Some((_, base)) = info.resource {
                     // A finished farm is seeded for free; only reseeds cost.
                     self.world.resource[i] = modifiers.farm_yield(base);
@@ -2723,6 +3007,12 @@ impl Simulation {
                 p.queue.remove(0);
             }
             self.players[owner as usize].pop += info.pop_cost;
+            self.events.push(Event::Trained {
+                kind,
+                owner,
+                pos: nav::centre(exit),
+                idle: matches!(rally, None | Some(Rally::None)),
+            });
             self.apply_rally(unit, rally);
         }
     }
@@ -2737,7 +3027,9 @@ impl Simulation {
             return;
         };
         p.mark_researched(id);
+        self.events.push(Event::Researched { owner, tech: id });
         let mut upgrades = Vec::new();
+        let mut advanced = false;
         for effect in t.effects {
             match *effect {
                 Effect::GatherRate(r, pct) => p.modifiers.gather_rate_pct[r.index()] += pct,
@@ -2745,7 +3037,10 @@ impl Simulation {
                 Effect::FarmYield(n) => p.modifiers.farm_yield_bonus += n,
                 Effect::VillagerSpeed(pct) => p.modifiers.villager_speed_pct += pct,
                 Effect::BuildSpeed(pct) => p.modifiers.build_speed_pct += pct,
-                Effect::AdvanceAge(age) => p.age = age,
+                Effect::AdvanceAge(age) => {
+                    p.age = age;
+                    advanced = true;
+                }
                 Effect::Attack(c, n) => p.modifiers.attack_bonus[c.index()] += n,
                 Effect::Armour(c, m, pi) => {
                     p.modifiers.melee_armour_bonus[c.index()] += m;
@@ -2754,6 +3049,10 @@ impl Simulation {
                 Effect::Range(c, n) => p.modifiers.range_bonus[c.index()] += n,
                 Effect::UpgradeLine(from, to) => upgrades.push((from, to)),
             }
+        }
+        if advanced && (owner as usize) < MAX_PLAYERS {
+            // Its buildings are seen in the new age from now on.
+            self.scratch.aged |= 1 << owner;
         }
         for (from, to) in upgrades {
             self.upgrade_line(owner, from, to);
@@ -2834,17 +3133,21 @@ impl Simulation {
     /// explored and drops what was remembered on them; then every static
     /// thing standing on a seen tile is remembered anew. Recomputing costs
     /// the sum of the sight discs, not the map (`docs/07` D23).
+    /// The fog of war, kept incrementally (`docs/04` §12). A unit that has
+    /// not moved costs nothing; one that has trades its old sight disc for
+    /// its new one; and the memories are touched only where a tile came
+    /// into view, where the thing standing on a tile changed, or where a
+    /// side advanced an age. The result is, tile for tile and memory for
+    /// memory, what recomputing everything from the world gives, which
+    /// [`Simulation::check`] asserts and the corpus digests pin. A fresh
+    /// match and a loaded save start from that recomputation.
     fn fog_of_war_update(&mut self) {
         let players = self.players.len();
-        if self.fog.len() != players
-            || self
-                .fog
-                .iter()
-                .any(|f| f.width() != self.map.width() || f.height() != self.map.height())
-        {
-            self.fog = (0..players)
-                .map(|_| Fog::new(self.map.width(), self.map.height()))
-                .collect();
+        let (w, h) = (self.map.width(), self.map.height());
+        let tiles = (w.max(0) * h.max(0)) as usize;
+        if self.fog.len() != players || self.fog.iter().any(|f| f.width() != w || f.height() != h) {
+            self.fog = (0..players).map(|_| Fog::new(w, h)).collect();
+            self.scratch.sight_valid = false;
         }
         let Simulation {
             fog,
@@ -2854,51 +3157,187 @@ impl Simulation {
             players: sides,
             ..
         } = self;
-        for f in fog.iter_mut() {
-            f.clear_visible();
-        }
-        for s in world.slots() {
-            let i = s.index();
-            let owner = world.owner[i] as usize;
-            if owner >= players || world.dying[i] > 0 || world.inside[i].is_some() {
-                continue;
-            }
-            let k = kinds::info(world.kind[i]);
-            let (cx, cy) = nav::tile_of(world.pos[i]);
-            // A building sees from its edge; high ground sees a tile further.
-            let mut r = k.combat.line_of_sight + k.footprint as i32 / 2;
-            if map.elevation(cx, cy) > 0 {
-                r += 1;
-            }
-            for &(dx, dy) in scratch.stamp(r) {
-                fog[owner].see(cx + dx, cy + dy);
-            }
-        }
-        for s in world.slots() {
-            let i = s.index();
-            let k = kinds::info(world.kind[i]);
-            if k.mobile || world.dying[i] > 0 {
-                continue;
-            }
-            // Seeing any tile of it is seeing it; the memory sits at its
-            // anchor and is dropped when the anchor is seen again.
-            let fp = k.footprint as i32;
-            let (ax, ay) = nav::anchor_tile(world.pos[i], fp);
-            let tiles = nav::footprint_tiles(ax, ay, fp);
-            let m = Memory {
-                id: world.id_at(s),
-                kind: world.kind[i],
-                owner: world.owner[i],
-                age: sides
-                    .get(world.owner[i] as usize)
-                    .map_or(0, |p| p.age.index() as u8),
-                site: world.construction[i].is_some(),
-            };
+        let Scratch {
+            stamps,
+            sight,
+            sight_valid,
+            cover,
+            fresh,
+            touched,
+            aged,
+            ..
+        } = scratch;
+        let capacity = world.capacity();
+        if !*sight_valid || cover.len() != tiles || fresh.len() != players {
+            // From the world: every disc is stamped this tick and every
+            // seen tile comes up fresh, so what was noted during the tick
+            // is moot.
             for f in fog.iter_mut() {
-                if tiles.iter().any(|t| f.visible(t.0, t.1)) {
-                    f.remember(ax, ay, m);
+                f.clear_visible();
+            }
+            sight.clear();
+            sight.resize(capacity, Sight::NONE);
+            cover.clear();
+            cover.resize(tiles, u32::MAX);
+            for s in world.slots() {
+                let i = s.index();
+                let k = kinds::info(world.kind[i]);
+                if k.mobile {
+                    continue;
+                }
+                let fp = k.footprint as i32;
+                let (ax, ay) = nav::anchor_tile(world.pos[i], fp);
+                for (x, y) in nav::footprint_tiles(ax, ay, fp) {
+                    if x >= 0 && y >= 0 && x < w && y < h {
+                        cover[(y * w + x) as usize] = i as u32;
+                    }
                 }
             }
+            fresh.clear();
+            fresh.resize(players, vec![0u64; tiles.div_ceil(64)]);
+            touched.clear();
+            *aged = 0;
+            *sight_valid = true;
+        } else {
+            sight.resize(capacity, Sight::NONE);
+            for words in fresh.iter_mut() {
+                words.fill(0);
+            }
+        }
+
+        // The discs, for what changed since last tick.
+        for (i, stamped) in sight.iter_mut().enumerate() {
+            let now = if world.is_live(i) {
+                let owner = world.owner[i] as usize;
+                if owner >= players || world.dying[i] > 0 || world.inside[i].is_some() {
+                    Sight::NONE
+                } else {
+                    let k = kinds::info(world.kind[i]);
+                    let (x, y) = nav::tile_of(world.pos[i]);
+                    // A building sees from its edge; high ground sees a
+                    // tile further.
+                    let mut r = k.combat.line_of_sight + k.footprint as i32 / 2;
+                    if map.elevation(x, y) > 0 {
+                        r += 1;
+                    }
+                    Sight {
+                        owner: owner as u8,
+                        x,
+                        y,
+                        r: r.clamp(0, fog::MAX_SIGHT) as u8,
+                    }
+                }
+            } else {
+                Sight::NONE
+            };
+            let was = *stamped;
+            if now == was {
+                continue;
+            }
+            if was != Sight::NONE {
+                let f = &mut fog[was.owner as usize];
+                for &(dx, dy) in stamp_of(stamps, was.r as i32) {
+                    f.unsee(was.x + dx, was.y + dy);
+                }
+            }
+            if now != Sight::NONE {
+                let f = &mut fog[now.owner as usize];
+                let words = &mut fresh[now.owner as usize];
+                for &(dx, dy) in stamp_of(stamps, now.r as i32) {
+                    let (x, y) = (now.x + dx, now.y + dy);
+                    if f.see(x, y) {
+                        let t = (y * w + x) as usize;
+                        words[t / 64] |= 1u64 << (t % 64);
+                    }
+                }
+            }
+            *stamped = now;
+        }
+
+        // The memories. What stands on a tile is remembered at its anchor
+        // by every side that sees any tile of it, as it is now; a side
+        // that sees the anchor of nothing remembers nothing there.
+        let standing = |i: usize| {
+            world.is_live(i) && !kinds::info(world.kind[i]).mobile && world.dying[i] == 0
+        };
+        let memory_of = |i: usize| Memory {
+            id: world.id_at(Slot::new(i)),
+            kind: world.kind[i],
+            owner: world.owner[i],
+            age: sides
+                .get(world.owner[i] as usize)
+                .map_or(0, |p| p.age.index() as u8),
+            site: world.construction[i].is_some(),
+        };
+        let anchor_of = |i: usize| {
+            let fp = kinds::info(world.kind[i]).footprint as i32;
+            (nav::anchor_tile(world.pos[i], fp), fp)
+        };
+        // Tiles that came into view.
+        for (p, words) in fresh.iter().enumerate() {
+            for (wi, &word) in words.iter().enumerate() {
+                let mut bits = word;
+                while bits != 0 {
+                    let t = wi * 64 + bits.trailing_zeros() as usize;
+                    bits &= bits - 1;
+                    let c = cover[t];
+                    if c == u32::MAX || !standing(c as usize) {
+                        continue;
+                    }
+                    let ((ax, ay), _) = anchor_of(c as usize);
+                    fog[p].remember(ax, ay, memory_of(c as usize));
+                }
+            }
+        }
+        // Anchors where something was placed, finished, felled or
+        // destroyed this tick.
+        for &(ax, ay) in touched.iter() {
+            let c = if ax >= 0 && ay >= 0 && ax < w && ay < h {
+                cover[(ay * w + ax) as usize]
+            } else {
+                u32::MAX
+            };
+            let there = (c != u32::MAX && standing(c as usize))
+                .then(|| anchor_of(c as usize))
+                .filter(|(a, _)| *a == (ax, ay));
+            match there {
+                Some((_, fp)) => {
+                    let m = memory_of(c as usize);
+                    let footprint = nav::footprint_tiles(ax, ay, fp);
+                    for f in fog.iter_mut() {
+                        if footprint.iter().any(|t| f.visible(t.0, t.1)) {
+                            f.remember(ax, ay, m);
+                        }
+                    }
+                }
+                None => {
+                    for f in fog.iter_mut() {
+                        if f.visible(ax, ay) {
+                            f.forget(ax, ay);
+                        }
+                    }
+                }
+            }
+        }
+        touched.clear();
+        // Sides that advanced.
+        if *aged != 0 {
+            for s in world.slots() {
+                let i = s.index();
+                let owner = world.owner[i] as usize;
+                if owner >= MAX_PLAYERS || *aged & (1 << owner) == 0 || !standing(i) {
+                    continue;
+                }
+                let ((ax, ay), fp) = anchor_of(i);
+                let m = memory_of(i);
+                let footprint = nav::footprint_tiles(ax, ay, fp);
+                for f in fog.iter_mut() {
+                    if footprint.iter().any(|t| f.visible(t.0, t.1)) {
+                        f.remember(ax, ay, m);
+                    }
+                }
+            }
+            *aged = 0;
         }
     }
 
@@ -3050,6 +3489,17 @@ pub enum Violation {
         /// How many players.
         players: usize,
     },
+    /// The incremental fog disagrees with a recount from the world.
+    FogDrift {
+        /// Whose fog.
+        player: PlayerId,
+        /// Which tile.
+        tile: (i32, i32),
+        /// Observers the fog counts there.
+        have: u16,
+        /// Observers the world's discs give it.
+        want: u16,
+    },
 }
 
 impl core::fmt::Display for Violation {
@@ -3112,6 +3562,16 @@ impl core::fmt::Display for Violation {
                     "{fogs} fog grids for {players} players, or the wrong size"
                 )
             }
+            Violation::FogDrift {
+                player,
+                tile,
+                have,
+                want,
+            } => write!(
+                f,
+                "player {player}'s fog counts {have} observers at {tile:?} where the \
+                 world's sight discs give {want}: the incremental fog has drifted"
+            ),
         }
     }
 }
@@ -3882,5 +4342,64 @@ mod tests {
         assert_eq!(snapshot(&sim, kinds::TREE), trees);
         assert_ne!(snapshot(&sim, kinds::GAZELLE), gazelles);
         assert!(sim.rng_draws() > 0);
+    }
+}
+
+#[cfg(test)]
+mod timing_tests {
+    use super::*;
+    use crate::MapKind;
+
+    /// The stopwatch is diagnostics: a timed tick and a plain tick are the
+    /// same tick, and the phases the clock was read between add up to the
+    /// clock's span.
+    #[test]
+    fn a_timed_step_is_the_same_step_and_the_phases_sum_to_the_span() {
+        let config = SimConfig {
+            map: MapSpec {
+                kind: MapKind::Inland,
+                size: 64,
+                players: 2,
+            },
+            ..SimConfig::default()
+        };
+        let mut plain = Simulation::new(7, config.clone());
+        let mut timed = Simulation::new(7, config);
+        let mut ticks = 0u64;
+        let mut reads = 0u64;
+        for _ in 0..50 {
+            plain.step();
+            // A fake clock that advances by one per read: every read
+            // between two phases credits one unit, and the tick reads it
+            // nine times after the start, since orders and paths are each
+            // credited twice (the navigation refresh runs before and after
+            // the order state machines).
+            let mut clock = || {
+                reads += 1;
+                reads
+            };
+            let t = timed.step_timed(&mut clock);
+            ticks += 1;
+            assert_eq!(t.total(), 9);
+            assert_eq!(t.orders, 2);
+            assert_eq!(t.paths, 2);
+            assert_eq!(t.as_array().iter().filter(|&&n| n > 0).count(), 7);
+        }
+        assert_eq!(ticks, 50);
+        assert_eq!(plain.state_hash(), timed.state_hash());
+        assert_eq!(plain.tick(), timed.tick());
+        let mut sum = Timings::default();
+        sum.add(&Timings {
+            commands: 1,
+            fog: 2,
+            ..Timings::default()
+        });
+        sum.add(&Timings {
+            commands: 3,
+            ..Timings::default()
+        });
+        assert_eq!(sum.commands, 4);
+        assert_eq!(sum.fog, 2);
+        assert_eq!(sum.total(), 6);
     }
 }
