@@ -1,0 +1,88 @@
+name: Playtest build
+
+# A build to hand to playtesters: "New Empire.app" for Apple Silicon, zipped
+# with the player's READ ME FIRST.txt and published as a GitHub Release,
+# which anyone can download without an account. Run it under the Actions
+# tab with a name such as playtest-1, or push a tag of that name; the name
+# becomes the tag and the release. Ad-hoc signed, not notarised: the note
+# in the zip says how to get past Gatekeeper.
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "The release and its tag, e.g. playtest-1"
+        required: true
+        default: playtest-1
+  push:
+    tags: ["playtest-*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  release:
+    name: New Empire.app as a release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: the release name
+        id: name
+        env:
+          INPUT_NAME: ${{ github.event.inputs.name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          name="${INPUT_NAME:-$REF_NAME}"
+          case "$name" in
+            playtest-*) ;;
+            *) echo "the name must start with playtest-, got '$name'"; exit 1 ;;
+          esac
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - name: build and bundle
+        run: scripts/bundle-mac.sh target/bundle
+      - name: the bundle is what a Mac expects
+        run: |
+          app="target/bundle/New Empire/New Empire.app"
+          lipo -archs "$app/Contents/MacOS/new-empire" | tee /dev/stderr | grep -q arm64
+          plutil -lint "$app/Contents/Info.plist"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          test -f "target/bundle/New Empire/READ ME FIRST.txt"
+          test -f "target/bundle/New Empire.zip"
+          unzip -l "target/bundle/New Empire.zip" | tee /dev/stderr | grep -q "READ ME FIRST.txt"
+      - name: release notes
+        env:
+          NAME: ${{ steps.name.outputs.name }}
+        run: |
+          {
+            echo "New Empire, playtest build \`$NAME\`, for Apple Silicon Macs, from commit ${GITHUB_SHA::7}."
+            echo
+            echo "Download **New-Empire-macOS-$NAME.zip** below and unzip it: a \`New Empire\` folder with the app and a note. The note is the whole briefing; it is repeated here."
+            echo
+            echo '```'
+            cat "packaging/macos/READ ME FIRST.txt"
+            echo '```'
+          } > target/bundle/notes.md
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ steps.name.outputs.name }}
+        run: |
+          asset="target/bundle/New-Empire-macOS-$NAME.zip"
+          cp "target/bundle/New Empire.zip" "$asset"
+          if gh release view "$NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $NAME exists: replacing its asset"
+            gh release upload "$NAME" "$asset" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$NAME" "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "New Empire $NAME (macOS, Apple Silicon)" \
+              --notes-file target/bundle/notes.md \
+              --prerelease
+          fi
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$NAME" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,53 @@
+NEW EMPIRE - PLAYTEST BUILD
+===========================
+
+Thank you for playing. This is an early build of a real-time strategy
+game in the spirit of the 1997 original. The art and every sound are
+stand-ins; the game underneath is what we want you to play.
+
+OPENING IT (once)
+
+  The app is not notarised by Apple, so the first launch is refused.
+
+  macOS 15 or later: double-click New Empire.app and click Done. Open
+  System Settings > Privacy & Security, scroll down to the note that
+  "New Empire" was blocked, and click Open Anyway. Confirm once more.
+
+  Older macOS: Control-click New Empire.app and choose Open.
+
+  Or, in Terminal, from the folder this file is in:
+      xattr -dr com.apple.quarantine "New Empire.app"
+
+  After that it opens like any other app. Apple Silicon Macs only.
+
+PLAYING
+
+  Play until you want to stop.
+
+  NEW GAME, then START, gives you a match against one computer opponent.
+  F1 shows every control. Right-click sends villagers to work and units
+  to attack. There is no tutorial: the game should teach itself, and
+  where it does not, that is exactly what we want to hear.
+
+WHAT TO SEND BACK
+
+  - What you thought, in your own words: what felt right, what was
+    missing, what made you swear.
+  - Every match is recorded automatically. The recordings are in
+        ~/Library/Application Support/new-empire/replays/
+    Send the file for any match you talk about and we can watch what
+    you saw.
+  - If anything goes wrong, what you did just before.
+
+NOTHING LEAVES YOUR MAC
+
+  The game has no network code. Settings, saves and recordings live in
+  ~/Library/Application Support/new-empire/ and nowhere else. Delete
+  that folder to remove every trace.
+
+FOR THE OBSERVER
+
+  Fresh player, fresh settings: delete settings.ron from that folder
+  before each session, so the first-time hints show. F4 opens the
+  performance readout; read it during the biggest fight. The sheet is
+  docs/09 section 9.1 in the repository.

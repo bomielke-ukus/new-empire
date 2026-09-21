@@ -871,9 +871,12 @@ stop."* The observer does not answer questions about how to play; every
 question is written down verbatim, because each one is a hint or a tooltip
 the game failed to give.
 
-**Setup.** The Mac build from the `Mac build` workflow, the artifact named
-on the sheet; a fresh `settings.ron` (hints on, the default volumes, the
-default keys); the setup screen's defaults (one Standard opponent). The
+**Setup.** The playtest release named on the sheet (README, "Playtest
+builds"): the `Playtest build` workflow publishes `New Empire.app` zipped
+with the player's `READ ME FIRST.txt`, which says how to open it, where
+the recordings are and what to send back; a fresh `settings.ron` (hints
+on, the default volumes, the default keys); the setup screen's defaults
+(one Standard opponent). The
 match records itself, so a bug has a replay: note its path from the
 Replays screen at the end. The observer opens `F4` once during the biggest
 fight to read the frame and tick times, then closes it.
@@ -882,7 +885,7 @@ fight to read the frame and tick times, then closes it.
 
 | | |
 |---|---|
-| Date, build | `New-Empire-macOS-<sha>` |
+| Date, build | The release name (`playtest-1`) and its commit |
 | Machine | Mac model, macOS version, display and scale |
 | Player | Years they played the original; when they last did |
 | **Timeline** (mm:ss from "play") | first villager ordered · first building placed · first fight · Tool Age · Bronze Age · first pause or save · session end |
