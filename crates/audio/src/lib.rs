@@ -94,6 +94,10 @@ pub enum Cue {
     Alarm,
     /// Something of the side's is gone.
     Loss,
+    /// A new unit stands idle where it was trained (`docs/03` §6.3).
+    Idle,
+    /// The side cannot afford what it asked for.
+    Poor,
 }
 
 /// The classes a unit that answers can be.
@@ -137,7 +141,14 @@ impl Cue {
         for a in Age::ALL {
             out.push(Cue::Fanfare(a));
         }
-        out.extend([Cue::Click, Cue::Invalid, Cue::Alarm, Cue::Loss]);
+        out.extend([
+            Cue::Click,
+            Cue::Invalid,
+            Cue::Alarm,
+            Cue::Loss,
+            Cue::Idle,
+            Cue::Poor,
+        ]);
         out
     }
 
@@ -156,7 +167,9 @@ impl Cue {
             | Cue::Click
             | Cue::Invalid
             | Cue::Alarm
-            | Cue::Loss => Bus::Ui,
+            | Cue::Loss
+            | Cue::Idle
+            | Cue::Poor => Bus::Ui,
         }
     }
 
@@ -185,6 +198,8 @@ impl Cue {
             Cue::Invalid => "invalid".to_string(),
             Cue::Alarm => "alarm".to_string(),
             Cue::Loss => "loss".to_string(),
+            Cue::Idle => "idle".to_string(),
+            Cue::Poor => "poor".to_string(),
         }
     }
 

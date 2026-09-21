@@ -262,6 +262,8 @@ pub enum ShellAction {
     ResetSettings,
     /// Settings: a bus's volume, a step of ten percent up or down.
     Volume(Bus, i32),
+    /// Settings: the first-time hints on or off.
+    ToggleHints,
 }
 
 /// A clickable region on a shell screen.
@@ -811,6 +813,15 @@ pub fn settings_screen(
             (ShellAction::Volume(bus, 1), "+", true),
         );
     }
+    row(
+        &mut s,
+        ay,
+        audio,
+        "HINTS",
+        if settings.hints { "ON" } else { "OFF" },
+        (ShellAction::ToggleHints, "-"),
+        (ShellAction::ToggleHints, "+", true),
+    );
     ry = row(
         &mut s,
         ry,
@@ -1380,6 +1391,7 @@ mod tests {
             assert!(find(&plain, ShellAction::Volume(b, -1)).enabled, "{b:?}");
             assert!(find(&plain, ShellAction::Volume(b, 1)).enabled, "{b:?}");
         }
+        assert!(find(&plain, ShellAction::ToggleHints).enabled);
         for c in Control::ALL {
             assert!(find(&plain, ShellAction::Rebind(c)).enabled, "{c:?}");
         }

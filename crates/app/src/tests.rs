@@ -1885,3 +1885,116 @@ fn the_score_follows_the_age_and_the_fight_and_the_beds_the_ground() {
         );
     }
 }
+
+/// A hint comes in context and is drawn, its count goes to the settings
+/// file at once, the second time is the last, and HINTS OFF on the
+/// settings screen ends them; a refused click that is short of a resource
+/// flashes it on the bar and says so, where a refusal for another reason
+/// only buzzes.
+#[test]
+fn hints_are_counted_in_the_file_and_a_short_click_flashes_the_bar() {
+    let mut app = app();
+    two_sides(&mut app);
+    app.clock.set_paused(true);
+    let v = spawn(&mut app, kinds::VILLAGER, 12, 12);
+    // A villager is selected and nobody gathers, and the side has no
+    // house at all: of the two hints due, being housed is the urgent one.
+    app.selection.set(vec![v]);
+    draw(&mut app);
+    let hint = app.hud.hint.clone().expect("a hint");
+    assert!(hint.contains("HOUSED"), "{hint}");
+    let text = std::fs::read_to_string(&app.settings_path).unwrap();
+    assert!(text.contains("housed"), "counted at once: {text}");
+    assert_eq!(app.settings.hints_shown.get("housed"), Some(&1));
+    draw(&mut app);
+    assert!(app.hud.hint.is_some(), "still up");
+    // Off on the settings screen: gone, and none come.
+    app.shell_action(ShellAction::ToggleHints);
+    assert!(!app.settings.hints);
+    draw(&mut app);
+    assert_eq!(app.hud.hint, None);
+    app.shell_action(ShellAction::ToggleHints);
+    assert!(app.settings.hints);
+    // A player with wood and nothing else: the Town Center, refused for
+    // a Government Centre, only buzzes; a villager at the Town Center,
+    // short of food, flashes FOOD on the bar and plays the line.
+    let mut poor = Simulation::new(
+        1,
+        SimConfig {
+            map: MapSpec {
+                kind: MapKind::Flat,
+                size: 48,
+                players: 2,
+            },
+            starting_stockpile: [0, 250, 0, 0],
+            wander: false,
+            ..SimConfig::default()
+        },
+    );
+    for (player, kind, x, y) in [
+        (0, kinds::VILLAGER, 10, 10),
+        (0, kinds::TOWN_CENTER, 14, 14),
+        (1, kinds::VILLAGER, 40, 40),
+    ] {
+        poor.issue(Command {
+            player,
+            kind: CommandKind::Spawn {
+                kind,
+                pos: Vec2Fx::from_int(x, y),
+            },
+        });
+    }
+    for _ in 0..3 {
+        poor.step();
+    }
+    app.sim = poor;
+    app.prev_pos.clone_from(&app.sim.world().pos);
+    let own = |app: &App, kind: u16| {
+        let w = app.sim.world();
+        w.slots()
+            .find(|s| w.kind[s.index()] == kind && w.owner[s.index()] == 0)
+            .map(|s| w.id_at(s))
+            .unwrap()
+    };
+    let (v, tc) = (own(&app, kinds::VILLAGER), own(&app, kinds::TOWN_CENTER));
+    app.selection.set(vec![v]);
+    draw(&mut app);
+    let _ = plays(&mut app);
+    let tc_button = app
+        .hud
+        .buttons
+        .iter()
+        .find(|b| b.label == "TOWN CTR")
+        .cloned()
+        .expect("the town center button");
+    assert!(
+        !tc_button.enabled && tc_button.lacks == [false; 4],
+        "{:?}",
+        tc_button.lacks
+    );
+    click(&mut app, &tc_button);
+    let heard = plays(&mut app);
+    assert!(heard.iter().any(|p| p.cue == Cue::Invalid), "{heard:?}");
+    assert!(app.flash.is_none(), "no flash for a rule");
+    app.selection.set(vec![tc]);
+    draw(&mut app);
+    let _ = plays(&mut app);
+    let train = app
+        .hud
+        .buttons
+        .iter()
+        .find(|b| b.label == "VILLAGER")
+        .cloned()
+        .expect("the villager button");
+    assert!(
+        !train.enabled && train.lacks == [true, false, false, false],
+        "{:?}",
+        train.lacks
+    );
+    click(&mut app, &train);
+    let heard = plays(&mut app);
+    assert!(heard.iter().any(|p| p.cue == Cue::Poor), "{heard:?}");
+    assert_eq!(app.flash.map(|(_, l)| l), Some([true, false, false, false]));
+    draw(&mut app);
+    assert!(app.hud.sprites.len() > 40, "the bar drew with its flash");
+}

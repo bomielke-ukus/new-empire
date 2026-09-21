@@ -10,6 +10,7 @@
 use sim::{kinds, EntityId, Event, KindId, Replay, ReplayError, Simulation, Task, Vec2Fx};
 
 use crate::hud::{BOTTOM_PANEL, TOP_BAR};
+use crate::minimap::Mark;
 use crate::{fog, fx_to_f32, iso, palette, Atlas, Camera, Scene, SpriteInstance};
 
 /// The spark lasts this long: 200 ms.
@@ -32,6 +33,8 @@ pub const INDICATOR_TICKS: u64 = 60;
 pub const INDICATOR_AREA: f32 = 12.0;
 /// How far in from the view's edge the mark sits, at 1×.
 const INDICATOR_INSET: f32 = 14.0;
+/// A loss pings the minimap for this long: three seconds.
+pub const PING_TICKS: u64 = 60;
 
 #[derive(Clone, Debug)]
 struct Impact {
@@ -95,6 +98,8 @@ pub struct CombatFeedback {
     puffs: Vec<Puff>,
     falls: Vec<Fall>,
     attacks: Vec<Attack>,
+    /// The side's own that fell, for the minimap's ping.
+    losses: Vec<Attack>,
     last_tick: Option<u64>,
 }
 
@@ -117,6 +122,8 @@ impl CombatFeedback {
             .retain(|f| tick.saturating_sub(f.tick) < FALL_TICKS);
         self.attacks
             .retain(|a| tick.saturating_sub(a.tick) < INDICATOR_TICKS);
+        self.losses
+            .retain(|a| tick.saturating_sub(a.tick) < PING_TICKS);
         let world = sim.world();
         for event in sim.events() {
             match *event {
@@ -153,9 +160,16 @@ impl CombatFeedback {
                         });
                     }
                 }
-                Event::Death { kind, pos, .. } => {
+                Event::Death { kind, owner, pos } => {
                     let info = kinds::info(kind);
                     let at = tile(pos);
+                    if owner != kinds::GAIA {
+                        self.losses.push(Attack {
+                            owner,
+                            pos: at,
+                            tick,
+                        });
+                    }
                     if info.mobile {
                         // The blow that did it gives the puff its direction.
                         let dir = self
@@ -368,6 +382,40 @@ impl CombatFeedback {
         scene
             .sprites
             .sort_by(|a, b| a.depth.total_cmp(&b.depth).then(a.slot.cmp(&b.slot)));
+    }
+
+    /// The minimap's marks for the viewer (`docs/03` §6.3): an attack on
+    /// their own flashes red for three seconds, a loss of theirs pings
+    /// white, large then small.
+    pub fn minimap_marks(&self, sim: &Simulation, viewer: Option<u8>) -> Vec<Mark> {
+        let Some(me) = viewer else {
+            return Vec::new();
+        };
+        let tick = sim.tick();
+        let mut out = Vec::new();
+        for a in self.attacks.iter().filter(|a| a.owner == me) {
+            let age = tick.saturating_sub(a.tick);
+            if age < INDICATOR_TICKS && (age / 4).is_multiple_of(2) {
+                out.push(Mark {
+                    x: a.pos.0.floor() as i32,
+                    y: a.pos.1.floor() as i32,
+                    colour: [255, 40, 40, 255],
+                    size: 3,
+                });
+            }
+        }
+        for l in self.losses.iter().filter(|l| l.owner == me) {
+            let age = tick.saturating_sub(l.tick);
+            if age < PING_TICKS {
+                out.push(Mark {
+                    x: l.pos.0.floor() as i32,
+                    y: l.pos.1.floor() as i32,
+                    colour: [255, 255, 255, 255],
+                    size: if age < PING_TICKS / 2 { 3 } else { 1 },
+                });
+            }
+        }
+        out
     }
 
     /// The marks at the screen's edge: a red chevron where the line from

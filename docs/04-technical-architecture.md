@@ -1418,3 +1418,49 @@ siege are still owed, and a human will find this opponent predictable.
 - **Not done.** Death animations and the villager's hammering animation
   are art; the collapse is a cloud over the rubble, not an animation;
   the placeholder motes are squares.
+
+---
+
+## 38. Implementation notes from M7, chunk 4: tooltips, hints and the rest of the notifications
+
+- **Tooltips are data on the button** (`UX-TIP-01`, `hud.rs`). Every
+  unit, building and technology button carries `tip`, its lines: the
+  name with its key, the cost and the time, and then what it is. A
+  unit's lines give its hit points and armour, its attack and range,
+  what it counters (the classes it has a bonus against, with the
+  bonus) and what counters it (every kind with a bonus against its
+  class). A building's give what it trains, whether it takes gathered
+  resources, what it houses or shelters, what it shoots and how many
+  technologies it researches, and the age it comes with. A
+  technology's give its effects in words and what it needs. Hovering
+  draws the box above the panel by the button, the reason last on a
+  red ground when the button is greyed; the line under the grid stays
+  as it was. The button also carries `lacks`, which resources the
+  stockpile is short of for its cost, so a refused click can say
+  which.
+- **Hints** (`docs/03` §7, `crates/view/src/hints.rs`). Five, in the
+  order they win when several are due: under attack, housed, idle
+  villagers, the next age within reach, right-click to gather. `Hints`
+  is a pure state machine over `Conditions` the app reads from the
+  match each frame (`hints::conditions`, plus whether a villager is
+  selected and whether the bell has rung in the last ten seconds). One
+  hint at a time, up for ten seconds, twenty seconds before the next,
+  idle villagers only after five seconds of idleness; each hint at most
+  twice, ever, counted in `settings.ron` (`hints_shown`) the moment it
+  starts; `hints: false` in the file, or HINTS OFF on the settings
+  screen, ends them. A replay shows none. The line is drawn centred
+  above the panel with a gold mark, clear of the notices on the left,
+  and names the keys as the player has them bound.
+- **The rest of `docs/03` §6.3.** A unit trained at a building with no
+  rally stands idle at its door: `Event::Trained` says so and the
+  viewer's own get the chime (`Cue::Idle`). A greyed button clicked
+  when short of a resource flashes that resource red on the bar for a
+  second and a half and plays the "cannot afford" line (`Cue::Poor`);
+  a button refused for any other reason keeps its buzz. The minimap
+  takes marks (`Minimap::render_marked`): an attack on the viewer's own
+  flashes red for three seconds, a loss of theirs pings white, large
+  then small; the app re-renders the minimap eight times a second while
+  a mark is up instead of twice.
+- **Not done.** No panel highlight for a finished technology; no
+  Wonder, so no Wonder announcement; the hints are five lines, not a
+  campaign.

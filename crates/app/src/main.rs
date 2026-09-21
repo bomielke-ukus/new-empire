@@ -34,6 +34,7 @@ use sound::Speaker;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use view::hints::{self, Hints, Keys};
 use view::hud::{Action, BOTTOM_PANEL, TOP_BAR};
 use view::minimap::{Minimap, MinimapRect};
 use view::shell::{self, Results, Side};
@@ -264,7 +265,19 @@ struct App {
     ground: Ground,
     /// The tick and the time of the last survey of the view.
     surveyed: Option<(u64, u64)>,
+    /// The first-time hints (`docs/03` §7).
+    hints: Hints,
+    /// The tick the side was last told it was under attack, for the hint.
+    attacked_at: Option<u64>,
+    /// What the last refused click was short of, and when: the resource
+    /// bar flashes it (`docs/03` §6.3).
+    flash: Option<(Instant, [bool; 4])>,
 }
+
+/// The bar flashes what a refused click was short of for this long.
+const FLASH_MS: u128 = 1500;
+/// The attack is news for the hint this long after the bell.
+const ATTACK_NEWS_TICKS: u64 = 200;
 
 /// The view is surveyed for the score and the beds every this many
 /// ticks of the match, or this many milliseconds when it stands still.
@@ -459,6 +472,9 @@ impl App {
             fighting: 0,
             ground: Ground::default(),
             surveyed: None,
+            hints: Hints::new(true, &std::collections::BTreeMap::new()),
+            attacked_at: None,
+            flash: None,
         }
     }
 
@@ -466,6 +482,11 @@ impl App {
     /// that does not parse is left alone and reported; the defaults
     /// stand in.
     fn load_settings(&mut self) {
+        self.read_settings();
+        self.hints = Hints::new(self.settings.hints, &self.settings.hints_shown);
+    }
+
+    fn read_settings(&mut self) {
         match std::fs::read_to_string(&self.settings_path) {
             Ok(text) => match Settings::from_ron(&text) {
                 Ok(s) => self.settings = s,
@@ -487,6 +508,7 @@ impl App {
     /// pan keys the camera reads while held, and the window mode.
     fn apply_settings(&mut self) {
         self.ui_scale_user = self.settings.ui_scale;
+        self.hints.enabled = self.settings.hints;
         for bus in Bus::ALL {
             let volume = f32::from(self.settings.volume(bus)) / 100.0;
             self.mixer.set_volume(bus, volume);
@@ -913,6 +935,7 @@ impl App {
             match *e {
                 sim::Event::Alarm { player, pos } if player == me => {
                     self.alarm_at = Some(now);
+                    self.attacked_at = Some(tick);
                     self.notices.push(Notice {
                         kind: NoticeKind::Attack,
                         text: "UNDER ATTACK".to_string(),
@@ -948,6 +971,27 @@ impl App {
             half: ((r - l) * 0.5, (b - t) * 0.5),
         });
         self.hear_the_match();
+        // The first-time hints: read the moment, and a hint that starts is
+        // counted in the settings file, since each shows at most twice.
+        if self.playback.is_none() {
+            let tick = self.sim.tick();
+            let me = self.hud_player();
+            let c = hints::conditions(
+                &self.sim,
+                me,
+                !self.selection.own_villagers(&self.sim, ME).is_empty(),
+                self.attacked_at
+                    .is_some_and(|t| tick.saturating_sub(t) < ATTACK_NEWS_TICKS),
+            );
+            if let Some(h) = self.hints.update(&c, tick) {
+                *self
+                    .settings
+                    .hints_shown
+                    .entry(h.id().to_string())
+                    .or_insert(0) += 1;
+                self.save_settings();
+            }
+        }
         let ticks = self.clock.advance(now);
         for _ in 0..ticks {
             if self.playback_over() {
@@ -1078,6 +1122,15 @@ impl App {
             self.sim.seed(),
             self.sim.tick()
         );
+        let keys = Keys {
+            next_idle: view::settings::pretty(self.settings.key(Control::NextIdle)),
+            pause: view::settings::pretty(self.settings.key(Control::Pause)),
+        };
+        let hint = self
+            .hints
+            .showing(self.sim.tick())
+            .filter(|_| self.playback.is_none())
+            .map(|h| h.text(&keys));
         let hud = Hud::build(
             &self.atlas,
             &HudInput {
@@ -1098,6 +1151,11 @@ impl App {
                 help: self.show_help,
                 settings: &self.settings,
                 notices: self.notices.shown(),
+                hint: hint.as_deref(),
+                flash: self
+                    .flash
+                    .filter(|(at, _)| at.elapsed().as_millis() < FLASH_MS)
+                    .map_or([false; 4], |(_, lacks)| lacks),
             },
         );
         scene.ui.extend(hud.sprites.iter().cloned());
@@ -1143,8 +1201,11 @@ impl App {
         self.update_cursor();
         let rect = self.minimap_rect();
         if let Some(gpu) = &mut self.gpu {
-            if self.last_minimap.elapsed().as_millis() >= 500 {
-                let m = Minimap::render_for(&self.sim, self.viewer);
+            // Twice a second, or eight times while a mark flashes on it.
+            let marks = self.feedback.minimap_marks(&self.sim, self.viewer);
+            let every = if marks.is_empty() { 500 } else { 125 };
+            if self.last_minimap.elapsed().as_millis() >= every {
+                let m = Minimap::render_marked(&self.sim, self.viewer, &marks);
                 gpu.renderer.upload_minimap(&gpu.device, &gpu.queue, &m);
                 self.last_minimap = now;
             }
@@ -1439,6 +1500,10 @@ impl App {
                 self.settings.step_volume(bus, steps);
                 self.apply_and_save_settings();
             }
+            ShellAction::ToggleHints => {
+                self.settings.hints = !self.settings.hints;
+                self.apply_and_save_settings();
+            }
             ShellAction::ToggleEdgeScroll => {
                 self.settings.edge_scroll = !self.settings.edge_scroll;
                 self.apply_and_save_settings();
@@ -1528,6 +1593,9 @@ impl App {
     /// the player's start, the clock fresh, and everything of the last
     /// match cleared.
     fn enter_match(&mut self) {
+        self.hints.reset();
+        self.attacked_at = None;
+        self.flash = None;
         let (viewport, dpi) = (self.camera.viewport, self.camera.dpi);
         let map = self.sim.map();
         self.camera = Camera::new(map.width(), map.height(), viewport);
@@ -1727,8 +1795,14 @@ impl App {
                     self.do_action(b.action);
                 } else if self.playback.is_none() {
                     // A greyed button buzzes: the refusal is heard as well
-                    // as read (`docs/03` §8).
-                    self.cue(Cue::Invalid, None);
+                    // as read (`docs/03` §8). Short of a resource, the bar
+                    // flashes it and the line says so (`docs/03` §6.3).
+                    if b.lacks.iter().any(|l| *l) {
+                        self.flash = Some((Instant::now(), b.lacks));
+                        self.cue(Cue::Poor, None);
+                    } else {
+                        self.cue(Cue::Invalid, None);
+                    }
                 }
             }
             return;

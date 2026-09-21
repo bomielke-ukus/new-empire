@@ -145,6 +145,10 @@ pub struct Settings {
     pub bindings: BTreeMap<Control, String>,
     /// Each bus's volume in percent, in [`Bus::ALL`] order.
     pub volumes: [u8; 4],
+    /// Whether the first-time hints show (`docs/03` §7).
+    pub hints: bool,
+    /// How often each hint has been shown, by its name; at most twice.
+    pub hints_shown: BTreeMap<String, u8>,
 }
 
 /// The volumes out of the box: everything full, the music under it.
@@ -163,6 +167,8 @@ impl Default for Settings {
                 .map(|c| (*c, c.default_key().to_string()))
                 .collect(),
             volumes: DEFAULT_VOLUMES,
+            hints: true,
+            hints_shown: BTreeMap::new(),
         }
     }
 }
@@ -355,6 +361,12 @@ mod tests {
         assert!(old.edge_scroll);
         assert_eq!(old.key(Control::Pause), "Space");
         assert_eq!(old.volumes, DEFAULT_VOLUMES, "a file from before the buses");
+        assert!(
+            old.hints && old.hints_shown.is_empty(),
+            "and before the hints"
+        );
+        s.hints = false;
+        s.hints_shown.insert("gather".to_string(), 2);
         s.step_volume(Bus::Music, -2);
         assert_eq!(s.volume(Bus::Music), 50);
         s.step_volume(Bus::Music, -9);

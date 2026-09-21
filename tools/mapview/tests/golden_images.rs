@@ -329,6 +329,55 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The tooltip (`UX-TIP-01`): the barracks selected and the clubman's
+        // button hovered, its cost, time, counters and key in a box above
+        // the panel.
+        name: "tooltip-hud",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "army",
+            "--stockpile",
+            "5000",
+            "--ticks",
+            "40",
+            "--select-kind",
+            "barracks",
+            "--hover-button",
+            "CLUBMAN",
+            "--hud",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // A first-time hint (`docs/03` §7): the side is housed, and the line
+        // says what to do about it, centred above the panel.
+        name: "hint-hud",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "gather",
+            "--ticks",
+            "600",
+            "--select",
+            "3",
+            "--hud",
+            "1",
+            "--hint",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // Two sites rising (`docs/03` §6.2): the storehouse at its pegs, the
         // house's lower half up with its builders hammering.
         name: "site-stages",

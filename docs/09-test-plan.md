@@ -618,6 +618,30 @@ battle out of view, the chevron on the left edge); `battle-hud`,
 `battle-40v40` and `siege-hud` rebaked for the flinches and the puffs,
 `gather-hud` for the bush thinning.
 
+**M7 chunk 4, tooltips, hints and the rest of the notifications.**
+`crates/view/src/hud.rs` unit test: with a barracks selected the
+clubman's button carries its name and key, cost and time, what it
+counters and what counters it, every trainable unit's at least five
+lines; hovering it draws the box; the house's names what it houses and
+the age advance's what it reaches; the age button knows it is short of
+food and nothing else; a hint given draws its line and the built HUD
+names it; a flash draws its boxes (`UX-TIP-01`).
+`crates/view/src/hints.rs`: nothing is due on a quiet moment; a
+selected villager with nobody gathering brings the gather hint, up ten
+seconds; the next waits twenty more; an attack wins over idle
+villagers, and the idle hint follows once the attack is no longer
+news; a hint comes twice and never a third time; the counts survive a
+new match and turn off means none. `minimap.rs`: a mark colours its
+square. `crates/audio/src/events.rs`: a villager trained at a Town
+Center with no rally raises the idle chime. `crates/app/src/tests.rs`:
+a housed side with a villager selected gets the housed hint at once,
+counted in the settings file; HINTS OFF ends it and on restores them;
+a Town Center refused for a Government Centre buzzes and flashes
+nothing; a villager refused for food plays the line and flashes FOOD.
+Golden images `tooltip-hud` (the clubman's tooltip over the army
+panel) and `hint-hud` (the housed hint over the gather scene);
+`edge-mark` rebaked for the minimap's flash.
+
 ### Data files — M3 onward
 
 The startup validator from `docs/04` §9 run as a test: every referenced ID
@@ -641,7 +665,7 @@ one with a `REQ: <id>` marker. `scripts/check-traceability.sh` pairs them up.
 As of this acceptance chunk: **127 declared, 83 claimed by tests, 0 gaps in
 landed work.** M4 closure enables `RM-M4`, `GD-COMBAT` and `GD-STANCE`
 enforcement; M5 added `GD-FOG`, `TA-AI`, `GD-AI` and `RM-M5`; M6 added
-`TA-SAVE`, `RM-M6`, `UX-NOTIFY`, `UX-AUDIO` and `TA-AUDIO`. Run the script for current counts. A claim can cover only part
+`TA-SAVE`, `RM-M6`, `UX-NOTIFY`, `UX-AUDIO`, `TA-AUDIO` and `UX-TIP`. Run the script for current counts. A claim can cover only part
 of a requirement: `RM-M4-01` has a separately recorded native readability approval, and
 `TA-PATH-06` still owes player-versus-AI priority in M5.
 

@@ -51,6 +51,10 @@ struct Args {
     select_kind: Option<String>,
     sweep: Option<u32>,
     hover: Option<(f32, f32)>,
+    /// Hover the middle of the button with this label, for a tooltip.
+    hover_button: Option<String>,
+    /// Show the first-time hint the moment would bring up.
+    hint: bool,
     dpi: f32,
     ui_scale: f32,
     controls: bool,
@@ -85,6 +89,8 @@ fn parse() -> Result<Args, String> {
         select_kind: None,
         sweep: None,
         hover: None,
+        hover_button: None,
+        hint: false,
         dpi: 1.0,
         ui_scale: 1.0,
         controls: false,
@@ -136,6 +142,8 @@ fn parse() -> Result<Args, String> {
             "--select-tc" => a.select_tc = val == "1" || val == "true",
             "--select-kind" => a.select_kind = Some(val.clone()),
             "--sweep" => a.sweep = Some(val.parse().map_err(|e| format!("{key}: {e}"))?),
+            "--hover-button" => a.hover_button = Some(val.clone()),
+            "--hint" => a.hint = val == "1" || val == "true",
             "--hover" => {
                 let (x, y) = val.split_once(',').ok_or("--hover wants X,Y")?;
                 a.hover = Some((num(x)?, num(y)?));
@@ -416,28 +424,58 @@ fn run() -> Result<(), String> {
     }
     if a.hud {
         let settings = Settings::default();
-        let hud = Hud::build(
-            &atlas,
-            &HudInput {
-                sim: &sim,
-                player: 0,
-                camera: &cam,
-                selected: &selected,
-                build_mode: ghost.map(|g| g.kind),
-                fps: 60.0,
-                paused: false,
-                speed: 1.0,
-                status: &format!("TICK {}", sim.tick()),
-                hover: a.hover,
-                banner,
-                ui_scale: a.dpi * a.ui_scale,
-                help: a.controls,
-                targeting: false,
-                defences: false,
-                settings: &settings,
-                notices: &[],
-            },
-        );
+        // The hint the moment would bring up, given the idle wait.
+        let hint = a.hint.then(|| {
+            let villager_selected = selected.iter().any(|s| {
+                let w = sim.world();
+                w.owner[*s as usize] == 0 && w.kind[*s as usize] == kinds::VILLAGER
+            });
+            let c = view::hints::conditions(&sim, 0, villager_selected, false);
+            let mut hints = view::Hints::new(true, &std::collections::BTreeMap::new());
+            let last = view::hints::IDLE_TICKS + 1;
+            for t in 0..=last {
+                hints.update(&c, t);
+            }
+            hints
+                .showing(last)
+                .map(|h| h.text(&view::hints::Keys::default()))
+        });
+        let hint = hint.flatten();
+        let status = format!("TICK {}", sim.tick());
+        let input = |hover: Option<(f32, f32)>| HudInput {
+            sim: &sim,
+            player: 0,
+            camera: &cam,
+            selected: &selected,
+            build_mode: ghost.map(|g| g.kind),
+            fps: 60.0,
+            paused: false,
+            speed: 1.0,
+            status: &status,
+            hover,
+            banner,
+            ui_scale: a.dpi * a.ui_scale,
+            help: a.controls,
+            targeting: false,
+            defences: false,
+            settings: &settings,
+            notices: &[],
+            hint: hint.as_deref(),
+            flash: [false; 4],
+        };
+        let mut hover = a.hover;
+        if let Some(label) = &a.hover_button {
+            // Build once to find the button, then hover its middle.
+            let first = Hud::build(&atlas, &input(None));
+            let b = first
+                .buttons
+                .iter()
+                .find(|b| &b.label == label)
+                .ok_or_else(|| format!("no button labelled {label}"))?;
+            let s = a.dpi * a.ui_scale;
+            hover = Some(((b.x + b.w * 0.5) * s, (b.y + b.h * 0.5) * s));
+        }
+        let hud = Hud::build(&atlas, &input(hover));
         scene.ui = hud.sprites;
         // The marks at the screen's edge for an attack out of view.
         scene
@@ -455,7 +493,12 @@ fn run() -> Result<(), String> {
         let s = a.dpi * a.ui_scale;
         let rect =
             MinimapRect::bottom_right((a.width as f32, a.height as f32), 256.0 * s, 16.0 * s);
-        raster::draw_minimap(&mut img, &Minimap::render_for(&sim, viewer), rect);
+        let marks = feedback.minimap_marks(&sim, viewer);
+        raster::draw_minimap(
+            &mut img,
+            &Minimap::render_marked(&sim, viewer, &marks),
+            rect,
+        );
     }
     save(&a.out, img.width, img.height, &img.to_bytes())?;
     println!(

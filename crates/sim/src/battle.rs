@@ -149,6 +149,8 @@ pub enum Event {
         owner: PlayerId,
         /// Where it stands.
         pos: Vec2Fx,
+        /// Whether it stands there idle: the building has no rally.
+        idle: bool,
     },
     /// A technology finished for a player; an age advance is one.
     Researched {

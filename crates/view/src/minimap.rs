@@ -35,6 +35,20 @@ fn mark(kind: KindId, owner: PlayerId) -> [u8; 4] {
     }
 }
 
+/// A mark drawn over the minimap: the flash of an attack, the ping of a
+/// loss (`docs/03` §6.3).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Mark {
+    /// Tile.
+    pub x: i32,
+    /// Tile.
+    pub y: i32,
+    /// RGBA.
+    pub colour: [u8; 4],
+    /// Side of the square, in tiles.
+    pub size: i32,
+}
+
 impl Minimap {
     /// Renders terrain, scenery and units, all of them: the view with no
     /// fog.
@@ -46,6 +60,28 @@ impl Minimap {
     /// seen black, ground seen once dimmed with what was remembered on
     /// it, ground in sight live. `None` shows everything.
     pub fn render_for(sim: &Simulation, viewer: Option<u8>) -> Minimap {
+        Minimap::render_marked(sim, viewer, &[])
+    }
+
+    /// [`Minimap::render_for`] with marks drawn over it, each a square
+    /// centred on its tile.
+    pub fn render_marked(sim: &Simulation, viewer: Option<u8>, marks: &[Mark]) -> Minimap {
+        let mut m = Minimap::render_plain(sim, viewer);
+        for mark in marks {
+            let r = (mark.size.max(1) - 1) / 2;
+            for dy in -r..=mark.size.max(1) - 1 - r {
+                for dx in -r..=mark.size.max(1) - 1 - r {
+                    let (x, y) = (mark.x + dx, mark.y + dy);
+                    if x >= 0 && y >= 0 && (x as u32) < m.width && (y as u32) < m.height {
+                        m.pixels[(y as u32 * m.width + x as u32) as usize] = mark.colour;
+                    }
+                }
+            }
+        }
+        m
+    }
+
+    fn render_plain(sim: &Simulation, viewer: Option<u8>) -> Minimap {
         let map = sim.map();
         let fog = viewer.and_then(|p| sim.fog(p));
         let (w, h) = (map.width() as u32, map.height() as u32);

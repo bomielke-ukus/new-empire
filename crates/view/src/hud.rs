@@ -97,6 +97,12 @@ pub struct Button {
     pub enabled: bool,
     /// Why not, when it does not; the cost and full name when it does.
     pub reason: String,
+    /// The tooltip (`UX-TIP-01`): the name and key, the cost and time,
+    /// what it counters and what counters it; empty for a plain command.
+    pub tip: Vec<String>,
+    /// Which resources the player is short of for it, in
+    /// [`Resource::ALL`] order: the bar flashes them on a click.
+    pub lacks: [bool; 4],
 }
 
 impl Button {
@@ -179,6 +185,11 @@ pub struct HudInput<'a> {
     pub settings: &'a Settings,
     /// The notification stack, oldest first.
     pub notices: &'a [Notice],
+    /// The first-time hint up now, if one is (`docs/03` §7).
+    pub hint: Option<&'a str>,
+    /// Resources the bar flashes red, in [`Resource::ALL`] order: what
+    /// the last refused click was short of (`docs/03` §6.3).
+    pub flash: [bool; 4],
 }
 
 /// How long the "F1 CONTROLS" hint stays in the resource bar: the first
@@ -304,6 +315,8 @@ pub struct Hud {
     pub sprites: Vec<SpriteInstance>,
     /// Clickable buttons.
     pub buttons: Vec<Button>,
+    /// The hint drawn, if one was.
+    pub hint: Option<String>,
 }
 
 /// Draws screen-space primitives into a sprite list.
@@ -649,6 +662,8 @@ struct Def {
     hotkey: char,
     enabled: bool,
     reason: String,
+    tip: Vec<String>,
+    lacks: [bool; 4],
 }
 
 impl Def {
@@ -662,6 +677,8 @@ impl Def {
             action,
             label: label.into(),
             cost: String::new(),
+            tip: Vec::new(),
+            lacks: [false; 4],
             hotkey,
             enabled: true,
             reason: reason.into(),
@@ -679,6 +696,142 @@ impl Def {
             self.reason = why;
         }
         self
+    }
+
+    /// The tooltip's lines.
+    fn tipped(mut self, tip: Vec<String>) -> Def {
+        self.tip = tip;
+        self
+    }
+
+    /// What the stockpile is short of for the cost.
+    fn lacking(mut self, cost: &Cost, stockpile: &[i32; 4]) -> Def {
+        for (i, c) in cost.iter().enumerate() {
+            self.lacks[i] = *c > stockpile[i];
+        }
+        self
+    }
+}
+
+/// A unit's tooltip (`UX-TIP-01`): name and key, cost and time, what it
+/// is, what it counters and what counters it.
+fn unit_tip(kind: KindId, key: char) -> Vec<String> {
+    let u = kinds::info(kind);
+    let c = &u.combat;
+    let mut t = vec![
+        format!("{} ({key})", u.name.to_uppercase()),
+        format!("COST {}. TIME {}S", cost_words(&u.cost), u.build_seconds),
+        format!(
+            "{} HP. ARMOUR {}/{}",
+            u.max_health, c.melee_armour, c.pierce_armour
+        ),
+    ];
+    if c.attack > 0 {
+        let mut a = format!("ATTACK {} {}", c.attack, c.damage.name().to_uppercase());
+        if c.range > 0 {
+            a.push_str(&format!(", RANGE {}", c.range));
+        }
+        t.push(a);
+    }
+    let counters: Vec<String> = c
+        .bonuses
+        .iter()
+        .map(|(class, b)| format!("{} (+{b})", class.plural().to_uppercase()))
+        .collect();
+    t.push(if counters.is_empty() {
+        "COUNTERS: NOTHING IN PARTICULAR".to_string()
+    } else {
+        format!("COUNTERS: {}", counters.join(", "))
+    });
+    let weak: Vec<String> = kinds::all()
+        .iter()
+        .filter(|k| k.combat.bonuses.iter().any(|(class, _)| *class == u.class))
+        .map(|k| unit_plural(k.id))
+        .collect();
+    t.push(if weak.is_empty() {
+        "COUNTERED BY: NOTHING IN PARTICULAR".to_string()
+    } else {
+        format!("COUNTERED BY: {}", weak.join(", "))
+    });
+    t
+}
+
+/// A building's tooltip (`UX-TIP-01`): name and key, cost and time, what
+/// it does, the age it comes with.
+fn building_tip(kind: KindId, key: char) -> Vec<String> {
+    let b = kinds::info(kind);
+    let mut t = vec![
+        format!("{} ({key})", b.name.to_uppercase()),
+        format!("COST {}. TIME {}S", cost_words(&b.cost), b.build_seconds),
+        format!("{} HP", b.max_health),
+    ];
+    let trains: Vec<String> = kinds::all()
+        .iter()
+        .filter(|k| k.trained_at == Some(kind))
+        .map(|k| unit_plural(k.id))
+        .collect();
+    if !trains.is_empty() {
+        t.push(format!("TRAINS {}", trains.join(", ")));
+    }
+    if b.dropoff {
+        t.push("TAKES GATHERED RESOURCES".to_string());
+    }
+    if b.pop_provided > 0 {
+        t.push(format!("HOUSES {}", b.pop_provided));
+    }
+    if b.garrison > 0 {
+        t.push(format!("SHELTERS {}", b.garrison));
+    }
+    if b.combat.attack > 0 {
+        t.push(format!(
+            "SHOOTS {} {}, RANGE {}",
+            b.combat.attack,
+            b.combat.damage.name().to_uppercase(),
+            b.combat.range
+        ));
+    }
+    let techs = tech::at_building(kind).count();
+    if techs > 0 {
+        t.push(format!("RESEARCHES {techs} TECHNOLOGIES"));
+    }
+    t.push(format!("FROM THE {}", b.age.name().to_uppercase()));
+    t
+}
+
+/// A technology's tooltip: name and key, cost and time, what it does.
+fn tech_tip(t: &TechInfo, key: char) -> Vec<String> {
+    let mut lines = vec![
+        format!("{} ({key})", t.name.to_uppercase()),
+        format!("COST {}. TIME {}S", cost_words(&t.cost), t.seconds),
+    ];
+    lines.extend(t.effects.iter().map(effect_words));
+    if !t.requires.is_empty() {
+        let names: Vec<String> = t
+            .requires
+            .iter()
+            .filter_map(|r| tech::info(*r).map(|i| i.name.to_uppercase()))
+            .collect();
+        lines.push(format!("NEEDS {}", names.join(", ")));
+    }
+    lines
+}
+
+/// One effect in words.
+fn effect_words(e: &sim::Effect) -> String {
+    use sim::Effect;
+    match *e {
+        Effect::GatherRate(r, pct) => format!("{} GATHERING +{pct}%", r.name().to_uppercase()),
+        Effect::CarryCapacity(n) => format!("VILLAGERS CARRY +{n}"),
+        Effect::FarmYield(n) => format!("FARMS YIELD +{n}"),
+        Effect::VillagerSpeed(pct) => format!("VILLAGERS +{pct}% SPEED"),
+        Effect::BuildSpeed(pct) => format!("BUILDING +{pct}% FASTER"),
+        Effect::AdvanceAge(a) => format!("REACHES THE {}", a.name().to_uppercase()),
+        Effect::Attack(c, n) => format!("{} +{n} ATTACK", c.plural().to_uppercase()),
+        Effect::Armour(c, m, p) => format!("{} +{m}/+{p} ARMOUR", c.plural().to_uppercase()),
+        Effect::Range(c, n) => format!("{} +{n} RANGE", c.plural().to_uppercase()),
+        Effect::UpgradeLine(from, to) => {
+            format!("{} BECOME {}", unit_plural(from), unit_plural(to))
+        }
     }
 }
 
@@ -816,6 +969,8 @@ fn commands(
                     format!("{}: {}{how}", k.name.to_uppercase(), cost_words(&k.cost)),
                 )
                 .costing(&k.cost)
+                .lacking(&k.cost, &pl.stockpile)
+                .tipped(building_tip(k.id, build_hotkey(k.id)))
                 .gated(check),
             );
         }
@@ -844,6 +999,8 @@ fn commands(
                     format!("{}: {}", k.name.to_uppercase(), cost_words(&k.cost)),
                 )
                 .costing(&k.cost)
+                .lacking(&k.cost, &pl.stockpile)
+                .tipped(building_tip(k.id, build_hotkey(k.id)))
                 .gated(check),
             );
         }
@@ -876,6 +1033,8 @@ fn commands(
                         unit_tooltip(k),
                     )
                     .costing(&u.cost)
+                    .lacking(&u.cost, &pl.stockpile)
+                    .tipped(unit_tip(k, train_hotkey(k)))
                     .gated(check),
                 );
             }
@@ -893,6 +1052,8 @@ fn commands(
                         format!("{}: {}", t.name.to_uppercase(), cost_words(&t.cost)),
                     )
                     .costing(&t.cost)
+                    .lacking(&t.cost, &pl.stockpile)
+                    .tipped(tech_tip(t, 'U'))
                     .gated(check),
                 );
             }
@@ -912,6 +1073,8 @@ fn commands(
                     format!("{}: {}", t.name.to_uppercase(), cost_words(&t.cost)),
                 )
                 .costing(&t.cost)
+                .lacking(&t.cost, &pl.stockpile)
+                .tipped(tech_tip(t, TECH_KEYS[n % TECH_KEYS.len()]))
                 .gated(check),
             );
         }
@@ -1011,7 +1174,15 @@ struct Seg {
 /// The resource bar. Reflows rather than overlaps: at widths where the
 /// large text and worker counts no longer fit beside the status, the counts
 /// go, then the text shrinks, then the status goes.
-fn top_bar(p: &mut Painter<'_>, sim: &Simulation, me: u8, vw: f32, status: &str, hint: bool) {
+fn top_bar(
+    p: &mut Painter<'_>,
+    sim: &Simulation,
+    me: u8,
+    vw: f32,
+    status: &str,
+    hint: bool,
+    flash: [bool; 4],
+) {
     p.rect(0.0, 0.0, vw, TOP_BAR, BROWN_DARK, 0);
     p.rect(0.0, TOP_BAR - 2.0, vw, 2.0, BLACK, 0);
     let world = sim.world();
@@ -1028,7 +1199,8 @@ fn top_bar(p: &mut Painter<'_>, sim: &Simulation, me: u8, vw: f32, status: &str,
             segs.push(Seg {
                 text: format!("{} {}", r.name().to_uppercase(), pl.stockpile[r.index()]),
                 sub: Some(format!("({workers})")),
-                boxed: None,
+                // Short of it for the last click: it flashes.
+                boxed: flash[r.index()].then_some(RED),
             });
         }
         let housed = pl.pop >= pl.pop_cap;
@@ -1169,6 +1341,7 @@ impl Hud {
             vw,
             &status,
             !input.help && controls_hint(sim),
+            input.flash,
         );
 
         // ----- bottom panel
@@ -1426,6 +1599,8 @@ impl Hud {
                 hotkey: d.hotkey,
                 enabled: d.enabled,
                 reason: d.reason,
+                tip: d.tip,
+                lacks: d.lacks,
             };
             let lit = hover.is_some_and(|(hx, hy)| b.contains(hx, hy));
             p.button(&b, lit);
@@ -1454,6 +1629,59 @@ impl Hud {
         };
         let line_y = py + 10.0 + GRID_ROWS as f32 * (BUTTON_H + BUTTON_GAP) + 2.0;
         p.text(grid_x, line_y, &fit(&line, grid_w), false, 1.0);
+        // The tooltip (`UX-TIP-01`): a box above the panel by the hovered
+        // button, its lines the button's, the reason last when it is
+        // greyed. Tooltips are the manual.
+        if let Some(b) = hovered.filter(|b| !b.tip.is_empty()) {
+            let mut lines = b.tip.clone();
+            if !b.enabled {
+                lines.push(b.reason.clone());
+            }
+            let lines: Vec<String> = lines.iter().map(|l| fit(l, 320.0)).collect();
+            let w = lines
+                .iter()
+                .map(|l| font::width(l) as f32)
+                .fold(0.0, f32::max)
+                + 12.0;
+            let h = lines.len() as f32 * 10.0 + 8.0;
+            let x = b.x.clamp(4.0, (vw - w - 4.0).max(4.0)).round();
+            let y = (py - h - 4.0).round();
+            p.rect(x - 1.0, y - 1.0, w + 2.0, h + 2.0, BLACK, 0);
+            p.rect(x, y, w, h, BROWN_DARK, 0);
+            for (i, l) in lines.iter().enumerate() {
+                let ly = y + 4.0 + i as f32 * 10.0;
+                if i == 0 {
+                    p.text_in(x + 6.0, ly, l, Ink::Gold, 1.0);
+                } else if !b.enabled && i == lines.len() - 1 {
+                    p.rect(
+                        x + 4.0,
+                        ly - 1.0,
+                        font::width(l) as f32 + 4.0,
+                        9.0,
+                        RED_DARK,
+                        0,
+                    );
+                    p.text(x + 6.0, ly, l, false, 1.0);
+                } else {
+                    p.text(x + 6.0, ly, l, false, 1.0);
+                }
+            }
+        }
+        // The first-time hint (`docs/03` §7): one line, centred above the
+        // panel, gold-marked, out of the way of the notices on the left.
+        let hint = input
+            .hint
+            .filter(|_| !input.help)
+            .map(|h| fit(h, vw - 40.0));
+        if let Some(h) = &hint {
+            let w = font::width(h) as f32 + 28.0;
+            let x = ((vw - w) / 2.0).round();
+            let y = py - 30.0;
+            p.rect(x - 1.0, y - 1.0, w + 2.0, 18.0, BLACK, 0);
+            p.rect(x, y, w, 16.0, BROWN_DARK, 0);
+            p.rect(x + 4.0, y + 4.0, 8.0, 8.0, GOLD_DARK, 0);
+            p.text(x + 18.0, y + 4.0, h, false, 1.0);
+        }
 
         // Health bars over selected damaged units and construction bars over sites.
         for s in &selected {
@@ -1517,6 +1745,8 @@ impl Hud {
                     hotkey: ' ',
                     enabled: true,
                     reason: "CLICK TO LOOK".to_string(),
+                    tip: Vec::new(),
+                    lacks: [false; 4],
                 });
             }
         }
@@ -1599,7 +1829,11 @@ impl Hud {
                 b.h *= s;
             }
         }
-        Hud { sprites, buttons }
+        Hud {
+            sprites,
+            buttons,
+            hint,
+        }
     }
 }
 
@@ -1697,6 +1931,174 @@ mod tests {
         }
     }
 
+    /// Every unit, building and technology button carries its tooltip:
+    /// the name and key, the cost and time, and for a unit what it
+    /// counters and what counters it; hovering draws the box, with the
+    /// reason last on a greyed button. A hint draws its line and the bar
+    /// flashes what a refused click was short of.
+    ///
+    /// REQ: UX-TIP-01
+    #[test]
+    fn every_button_has_its_tooltip_and_hints_and_flashes_draw() {
+        let mut sim = Simulation::new(5, SimConfig::default());
+        let atlas = Atlas::placeholder();
+        let camera = Camera::new(sim.map().width(), sim.map().height(), (1280.0, 720.0));
+        let villager = first_owned(&sim, kinds::VILLAGER);
+        let tc = first_owned(&sim, kinds::TOWN_CENTER);
+        // A barracks of ours, complete, for the roster.
+        sim.issue(sim::Command {
+            player: 0,
+            kind: sim::CommandKind::Spawn {
+                kind: kinds::BARRACKS,
+                pos: sim::nav::centre((20, 20)),
+            },
+        });
+        for _ in 0..3 {
+            sim.step();
+        }
+        let barracks = first_owned(&sim, kinds::BARRACKS);
+        let base = HudInput {
+            sim: &sim,
+            player: 0,
+            camera: &camera,
+            selected: &[],
+            build_mode: None,
+            fps: 60.0,
+            paused: false,
+            speed: 1.0,
+            status: "T0",
+            hover: None,
+            banner: None,
+            ui_scale: 1.0,
+            help: false,
+            targeting: false,
+            defences: false,
+            settings: &DEFAULT_SETTINGS,
+            notices: &[],
+            hint: None,
+            flash: [false; 4],
+        };
+        let has = |lines: &[String], what: &str| lines.iter().any(|l| l.contains(what));
+        let b = Hud::build(
+            &atlas,
+            &HudInput {
+                selected: &[barracks],
+                ..base
+            },
+        );
+        let club = b
+            .buttons
+            .iter()
+            .find(|b| b.action == Action::Train(kinds::CLUBMAN))
+            .expect("the clubman");
+        assert!(has(&club.tip, "CLUBMAN ("), "{:?}", club.tip);
+        assert!(
+            has(&club.tip, "COST ") && has(&club.tip, "TIME "),
+            "{:?}",
+            club.tip
+        );
+        assert!(
+            has(&club.tip, "COUNTERS:") && has(&club.tip, "COUNTERED BY:"),
+            "{:?}",
+            club.tip
+        );
+        assert!(
+            has(&club.tip, &format!("({})", club.hotkey)),
+            "the key: {:?}",
+            club.tip
+        );
+        for t in b
+            .buttons
+            .iter()
+            .filter(|b| matches!(b.action, Action::Train(_)))
+        {
+            assert!(t.tip.len() >= 5, "{}: {:?}", t.label, t.tip);
+        }
+        // Hovering draws the box.
+        let plain = b.sprites.len();
+        let hovered = Hud::build(
+            &atlas,
+            &HudInput {
+                selected: &[barracks],
+                hover: Some((club.x + 2.0, club.y + 2.0)),
+                ..base
+            },
+        );
+        assert!(hovered.sprites.len() > plain + 20, "the tooltip's lines");
+        // Buildings and technologies too, with the reason last when greyed.
+        let v = Hud::build(
+            &atlas,
+            &HudInput {
+                selected: &[villager],
+                ..base
+            },
+        );
+        let house = v
+            .buttons
+            .iter()
+            .find(|b| b.action == Action::Build(kinds::HOUSE))
+            .unwrap();
+        assert!(
+            has(&house.tip, "HOUSE (H)") && has(&house.tip, "HOUSES "),
+            "{:?}",
+            house.tip
+        );
+        assert!(has(&house.tip, "COST ") && has(&house.tip, "TIME "));
+        let greyed = v
+            .buttons
+            .iter()
+            .find(|b| !b.enabled && !b.tip.is_empty())
+            .expect("greyed");
+        assert!(!greyed.reason.is_empty());
+        let t = Hud::build(
+            &atlas,
+            &HudInput {
+                selected: &[tc],
+                ..base
+            },
+        );
+        let age = t
+            .buttons
+            .iter()
+            .find(|b| matches!(b.action, Action::Research(_)))
+            .expect("the age");
+        assert!(
+            has(&age.tip, "COST ") && has(&age.tip, "TIME ") && has(&age.tip, "REACHES THE"),
+            "{:?}",
+            age.tip
+        );
+        // What a click is short of: the stockpile is 200 food and wood, so
+        // the 400-food age is short of food and nothing else.
+        assert_eq!(age.lacks, [true, false, false, false], "{:?}", age.lacks);
+        assert_eq!(house.lacks, [false; 4]);
+        // The hint and the flash draw.
+        let hinted = Hud::build(
+            &atlas,
+            &HudInput {
+                hint: Some("VILLAGERS ARE IDLE: PRESS . TO FIND THEM"),
+                ..base
+            },
+        );
+        assert_eq!(
+            hinted.hint.as_deref(),
+            Some("VILLAGERS ARE IDLE: PRESS . TO FIND THEM")
+        );
+        let none = Hud::build(&atlas, &base);
+        assert!(hinted.sprites.len() > none.sprites.len() + 20);
+        assert_eq!(none.hint, None);
+        let flashed = Hud::build(
+            &atlas,
+            &HudInput {
+                flash: [true, true, false, false],
+                ..base
+            },
+        );
+        assert!(
+            flashed.sprites.len() > none.sprites.len(),
+            "two boxes behind the bar"
+        );
+    }
+
     fn first_owned(sim: &Simulation, kind: KindId) -> u32 {
         sim.world()
             .slots()
@@ -1735,6 +2137,8 @@ mod tests {
             defences: false,
             settings: &DEFAULT_SETTINGS,
             notices: &[],
+            hint: None,
+            flash: [false; 4],
         };
         let none = Hud::build(&atlas, &base);
         assert!(none.buttons.is_empty());
@@ -1891,6 +2295,8 @@ mod tests {
                     defences: false,
                     settings: &DEFAULT_SETTINGS,
                     notices: &[],
+                    hint: None,
+                    flash: [false; 4],
                 },
             )
         };
@@ -1933,6 +2339,8 @@ mod tests {
                 defences: false,
                 settings: &DEFAULT_SETTINGS,
                 notices: &[],
+                hint: None,
+                flash: [false; 4],
             },
         );
         assert_ne!(lit.sprites, b.sprites, "the hovered button draws lit");
@@ -1996,6 +2404,8 @@ mod tests {
             defences: false,
             settings: &DEFAULT_SETTINGS,
             notices: &[],
+            hint: None,
+            flash: [false; 4],
         };
         let closed = Hud::build(&atlas, &base);
         let open = Hud::build(&atlas, &HudInput { help: true, ..base });
@@ -2049,6 +2459,8 @@ mod tests {
                     defences: false,
                     settings: &DEFAULT_SETTINGS,
                     notices: &[],
+                    hint: None,
+                    flash: [false; 4],
                 },
             );
             // Every glyph in the top bar stays inside the window.
@@ -2130,6 +2542,8 @@ mod tests {
             defences: false,
             settings: &DEFAULT_SETTINGS,
             notices: &[],
+            hint: None,
+            flash: [false; 4],
         };
         let none = Hud::build(&atlas, &base);
         let some = Hud::build(

@@ -12,6 +12,7 @@ pub mod combat_view;
 pub mod feedback;
 pub mod fog;
 pub mod font;
+pub mod hints;
 pub mod hud;
 pub mod iso;
 pub mod minimap;
@@ -28,6 +29,7 @@ pub mod terrain;
 
 pub use camera::Camera;
 pub use fog::FogLights;
+pub use hints::{Conditions, Hint, Hints};
 pub use hud::{Action, Button, Hud, HudInput};
 pub use notify::{Notice, NoticeKind, Notices};
 pub use scene::{Ghost, Scene, SceneOptions, SpriteInstance, Sweep, SWEEP_MS};

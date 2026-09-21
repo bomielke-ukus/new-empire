@@ -2766,6 +2766,7 @@ impl Simulation {
                 kind,
                 owner,
                 pos: nav::centre(exit),
+                idle: matches!(rally, None | Some(Rally::None)),
             });
             self.apply_rally(unit, rally);
         }

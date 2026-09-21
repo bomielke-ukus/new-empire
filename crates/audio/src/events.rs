@@ -56,9 +56,15 @@ pub fn cues(sim: &Simulation, viewer: Option<u8>) -> Vec<Placed> {
                     out.push((Cue::Completed, Some(tile(pos))));
                 }
             }
-            Event::Trained { pos, .. } => {
+            Event::Trained {
+                owner, pos, idle, ..
+            } => {
                 if visible(pos) {
                     out.push((Cue::Trained, Some(tile(pos))));
+                }
+                // A new unit standing idle at its door is the side's news.
+                if idle && mine(owner) {
+                    out.push((Cue::Idle, None));
                 }
             }
             Event::Deposited { pos, .. } => {
@@ -262,6 +268,7 @@ mod tests {
         assert!(heard.contains(&Cue::Work(Task::Build)), "hammering");
         assert!(heard.contains(&Cue::Completed), "the house finished");
         assert!(heard.contains(&Cue::Trained), "the villager stepped out");
+        assert!(heard.contains(&Cue::Idle), "and stands idle: the chime");
         // A plain technology is a note; the age, with the two buildings it
         // asks for standing, is a fanfare.
         if let Some(plain) = tech::all().iter().find(|t| {

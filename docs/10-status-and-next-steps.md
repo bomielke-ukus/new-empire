@@ -73,7 +73,13 @@ it hits and leaves a spark; a kill throws dust the way the blow went; a
 building coming down raises a cloud over its rubble; a site rises in
 three stages under hammering villagers; a bush thins and a vein shrinks
 as they are used; a tree falls toward whoever felled it; an attack on
-your own out of view is a red chevron at the screen's edge.
+your own out of view is a red chevron at the screen's edge, and a
+flash on the minimap; a loss pings the minimap. Every unit, building
+and technology button has a tooltip with its cost, time, what it
+counters and what counters it, and its key. Five first-time hints come
+in context, each at most twice, and SETTINGS turns them off. A refused
+click flashes the resource it is short of; a new unit standing idle
+chimes.
 
 ```sh
 cargo run --release -p new-empire           # the game window
@@ -1095,17 +1101,40 @@ what was done:
 - Tests as `docs/09` records them; goldens `site-stages`,
   `felled-tree`, `edge-mark` added, three rebaked.
 
+### Work record: M7 chunk 4 — tooltips, hints and the rest of the notifications (2026-09-21)
+
+- `crates/view/src/hud.rs`: `Button::tip` and `Button::lacks`; unit,
+  building and technology tooltips built from the kind and technology
+  tables (`unit_tip`, `building_tip`, `tech_tip`, `effect_words`); the
+  tooltip box drawn above the panel by the hovered button, the reason
+  last when greyed; `HudInput::hint` and `HudInput::flash`; the hint
+  line centred above the panel; the bar's resources boxed red when
+  flashed; `Hud::hint` for the tests.
+- `crates/view/src/hints.rs`: `Hint`, `Keys`, `Conditions`, `Hints`
+  and `conditions` (`docs/04` §38). Settings gained `hints` and
+  `hints_shown`; the settings screen a HINTS row; `ShellAction::ToggleHints`.
+- `crates/view/src/minimap.rs`: `Mark` and `render_marked`;
+  `feedback.rs` keeps the viewer's losses and gives `minimap_marks`.
+- `crates/audio`: `Cue::Idle` and `Cue::Poor` with placeholders;
+  `Event::Trained` carries `idle`, and the idle chime is the owner's.
+- `crates/app`: the hints read from the match each frame, a hint's
+  count written to the settings file as it starts, the attack a passing
+  condition for ten seconds after the bell; a greyed click short of a
+  resource flashes it and plays the line; the minimap re-rendered with
+  its marks eight times a second while one is up.
+- `mapview`: `--hover-button LABEL` and `--hint 1`; the minimap drawn
+  with its marks. Goldens `tooltip-hud` and `hint-hud` added,
+  `edge-mark` rebaked. `TRACEABILITY_LANDED` gained `UX-TIP`.
+
 ### Resume here next session
 
-**M7 is in progress; chunk 4, tooltips, hints and notification polish,
-is next** (§4d): every unit and building tooltip with cost, build
-time, counters and hotkey (`UX-TIP-01`); contextual hints shown at
-most twice and disableable; the rest of `docs/03` §6.3, the
-idle-at-rally chime, cannot-afford with the resource flashing, the
-minimap flash and ping. Then the performance pass and the playtest
-handoff. The real sprite art is the owner's decision (§4d, `docs/08`
-§9 step 3), and the name (`docs/07` Q5) still bites. The parallel
-track (§4b) runs on its own branch.
+**M7 is in progress; chunk 5, the performance pass and the playtest
+handoff, is next** (§4d): the scenarios against `docs/04` §12 on
+known hardware, cliffs fixed and ceilings lowered; the `RM-M7-01`
+observation sheet in `docs/09`; the Mac measurement and the six
+players are the owner's. The real sprite art is the owner's decision
+(§4d, `docs/08` §9 step 3), and the name (`docs/07` Q5) still bites.
+The parallel track (§4b) runs on its own branch.
 
 ## 4. What M4 completed — Combat
 
@@ -1256,11 +1285,12 @@ verified headless before anyone hears or sees it on the Mac:
    construction stages, bushes thinning and veins shrinking, trees
    falling toward their fellers, the red chevron at the screen's edge
    for an attack on the player's own out of view; three golden images.
-4. **Tooltips, hints and notification polish.** Every unit and building
-   tooltip with cost, build time, counters and hotkey (`UX-TIP-01`);
-   contextual hints shown at most twice and disableable; the rest of
-   `docs/03` §6.3: the idle-at-rally chime, cannot-afford with the
-   resource flashing, the minimap flash and ping.
+4. **Tooltips, hints and notification polish.** **Done 2026-09-21**,
+   record above: every unit, building and technology tooltip with cost,
+   time, what it counters and what counters it, and the key
+   (`UX-TIP-01`); five contextual hints, each at most twice, counted in
+   the settings file, HINTS OFF on the settings screen; the idle chime,
+   cannot-afford with the resource flashing, the minimap flash and ping.
 5. **The performance pass and the playtest handoff.** The scenarios
    against `docs/04` §12 on known hardware, cliffs fixed and ceilings
    lowered; the `RM-M7-01` observation sheet in `docs/09`; the Mac
@@ -1299,9 +1329,8 @@ Stated so they are not rediscovered.
   §6.2, `docs/06` M7): the placeholders have a fall and a corpse and no
   more; a building's collapse is a cloud over the rubble, not an
   animation.
-- **The notification cues are partial**: the bell, the loss and the
-  research note play; the idle-at-rally chime, cannot-afford and the
-  minimap flash and ping are chunk 4.
+- **Two notification rows stay open**: no panel highlight for a
+  finished technology, and no Wonder to announce.
 - **The Mac build is not notarised, Apple Silicon only, and has no icon.**
   Notarising needs an Apple Developer account and a signing identity in
   the workflow's secrets; an Intel slice needs a second target and `lipo`;

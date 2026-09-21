@@ -71,6 +71,13 @@ fn clips_for(cue: Cue) -> Vec<Clip> {
             .tone(140.0, 70.0, 220, Wave::Sine, 0.6)
             .burst(120, 400.0, 0.3)
             .done()],
+        Cue::Idle => vec![chime(&[1320.0], 160, 0.25)],
+        // Two notes falling: the placeholder for "cannot afford".
+        Cue::Poor => vec![Synth::new()
+            .tone(330.0, 300.0, 90, Wave::Triangle, 0.4)
+            .gap(40)
+            .tone(260.0, 230.0, 150, Wave::Triangle, 0.4)
+            .done()],
     }
 }
 

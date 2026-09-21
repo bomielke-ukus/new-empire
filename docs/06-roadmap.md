@@ -235,10 +235,14 @@ ground under the camera, placeholders all. Chunk 3, the visual
 feedback, landed 2026-09-21: the flinch and the spark, the kill puff,
 the collapse cloud, the hammer's dust, three construction stages, nodes
 thinning and trees falling, the chevron at the screen's edge for an
-attack out of view. The plan and the record are in `docs/10` §4d.
-Tooltips and hints, the performance pass and the playtest follow in
-that order; the real sprite art and its animations wait on the art
-pipeline (`docs/08` §9 step 3), which needs a modeller and Blender.
+attack out of view. Chunk 4, tooltips, hints and the rest of the
+notifications, landed the same day: every unit, building and
+technology tooltip with cost, time, counters and key (`UX-TIP-01`),
+five first-time hints each shown at most twice, the idle chime, the
+resource flash for a refused click, the minimap's flash and ping. The
+plan and the record are in `docs/10` §4d. The performance pass and the
+playtest follow; the real sprite art and its animations wait on the
+art pipeline (`docs/08` §9 step 3), which needs a modeller and Blender.
 
 - Full audio: acknowledgments, work loops, positional world SFX, ambience,
   age fanfares, music stems, combat ducking

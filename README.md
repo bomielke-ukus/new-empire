@@ -127,7 +127,12 @@ the way the blow went; a building coming down raises a cloud over its
 rubble; a site rises in three stages under the hammers; a bush thins and
 a vein shrinks as they are used; a tree falls toward whoever felled it;
 and an attack on your own out of view is a red chevron at the screen's
-edge.
+edge and a flash on the minimap.
+
+Hover any unit, building or technology button for its tooltip: cost,
+time, what it counters and what counters it, and its key. Five first-time
+hints come in context, each at most twice, and SETTINGS turns them off. A
+click you cannot afford flashes the resource you are short of.
 
 Play: left-click or drag to select, double-click for all of a kind on screen,
 `Shift` adds, `Ctrl`+`0-9` saves a control group and `0-9` recalls it, `.`
