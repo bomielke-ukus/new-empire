@@ -172,7 +172,7 @@ main job over time, and what turns the soak from a one-off run into a ratchet.
 
 ### 4.5 Rendering
 
-Thirteen scenes rendered through `tools/mapview` and compared against committed
+Twenty-four scenes rendered through `tools/mapview` and compared against committed
 PNGs with a tolerance. The test drives the binary rather than the rendering
 library, because the command line is what CI invokes and what a developer
 types.
@@ -741,18 +741,70 @@ AI trips wait, and that all are served a few ticks on.
 
 ## 8. Performance
 
-`simrunner bench --json` reports p50/p99/max per tick; `scripts/check-perf.sh`
-fails against ceilings in `perf/budgets.ron`, set at three times the observed
-p99. Measured spread on a developer machine was 1.1×–1.2×; CI is worse, which
-is what the headroom is for.
+`simrunner bench --json` reports p50/p99/max per tick over five scenarios;
+`scripts/check-perf.sh` fails against ceilings in `perf/budgets.ron`, set
+at three times the observed p99. `simrunner bench --stats` adds where each
+tick went, by the phases of `docs/04` §12: commands, orders, paths,
+movement, combat, economy, fog, and the opponents' thinking where there
+are opponents. The phases come from `Simulation::step_timed`, the same
+tick as `step` with the caller's clock read between its systems, so the
+simulation never touches wall time and the gate's numbers are taken
+without the stopwatch. `F4` in the app shows the same table live, with
+the frame, for the measurement on a real Mac.
 
-**The number worth knowing.** `marching-8p` — eight players keeping about 320
-mobile units under way, with **no combat and no AI** — spent roughly 6.5 ms
-at p99 on M2's per-unit A\*, nearly all of it planning paths, against the
-6 ms `docs/04` §12 budgets for pathfinding at 200 population and 400
-entities. M4 chunk 1's sector graph and flow fields brought it to about
-2.4 ms p99 (p50 from 0.9 ms to 0.6 ms), and `crowded` from 2.9 ms to 1.9 ms,
-on the same machine; the ceilings were lowered to match.
+**The two loads the budget was written for** (`docs/04` §11) are in the
+bench since M7 chunk 5: `battle-400`, two hundred soldiers a side sent in
+on a flat map, and `opponents-8p`, eight Hard computer opponents on a
+168-tile map, each handed forty units at tick 0, thinking live in the
+measured pass and checked against what they said when recorded.
+
+**Where the tick goes.** p99 per phase in microseconds, best-of-three on
+the 2.1 GHz Xeon the shared runner resembles, M7 chunk 5, against the
+rows of §12 (commands and orders count with combat; the frame is not in
+the tick):
+
+| Phase | §12 budget | economy-2p | marching-8p | crowded | battle-400 | opponents-8p |
+|---|---|---|---|---|---|---|
+| paths | 6 000 | 3 | 2 017 | 1 350 | 92 | 276 |
+| movement | 3 000 | 38 | 184 | 224 | 134 | 88 |
+| combat + orders + commands | 3 000 | 35 | 176 | 630 | 190 | 138 |
+| economy | 2 000 | 4 | 35 | 45 | 4 | 24 |
+| fog | 1 000 | 7 | 148 | 179 | 22 | 30 |
+| thinking | 4 000 | — | — | — | — | 242 |
+| **whole tick** | **19 000** | 75 | 2 208 | 2 257 | 359 | 917 |
+
+Every row is inside its budget on that machine, by four times at the
+narrowest (paths, marching); the whole tick has eight times its headroom
+on the busiest scenario. The shape is the one §12 expects: paths lead
+where crowds march, combat and thinking where opponents fight. The
+measurement that counts is the owner's on the Mac; this one says nothing
+is quadratic.
+
+**What the pass changed.** Two things were found by the phase table and
+fixed exactly, the corpus digests and the versus record unchanged:
+
+| Change | marching-8p fog, mean | crowded fog, mean | opponents-8p combat, mean | crowded tick, p50 |
+|---|---|---|---|---|
+| Before | 569 µs | 668 µs | 247 µs | 1 024 µs |
+| Fog incremental (`docs/04` §39) | 61 µs | 53 µs | 247 µs | 438 µs |
+| Nearest-enemy search through the tile buckets | 61 µs | 63 µs | 51 µs | 417 µs |
+
+The fog had been the largest phase in every scenario, recomputed from
+scratch every tick whether or not anything moved; the target search had
+scanned every entity, trees included, for every unit looking for one.
+The measurement itself was corrected too: every number before this pass
+included a full state hash per tick, because the bench had run replays
+through `Replay::run`, which hashes for the digest. The ceilings were
+reset to three times the tick alone.
+
+**The number worth knowing, historically.** `marching-8p` — eight players
+keeping about 320 mobile units under way, with **no combat and no AI** —
+spent roughly 6.5 ms at p99 on M2's per-unit A\*, nearly all of it
+planning paths, against the 6 ms `docs/04` §12 budgets for pathfinding at
+200 population and 400 entities. M4 chunk 1's sector graph and flow fields
+brought it to about 2.4 ms p99 (p50 from 0.9 ms to 0.6 ms), and `crowded`
+from 2.9 ms to 1.9 ms, on the same machine (hash included); the ceilings
+were lowered to match.
 
 Where the time went, and goes, is worth recording because the first flow
 field was *slower* than the A\* it replaced (7.2 ms p99):
@@ -769,7 +821,8 @@ field was *slower* than the A\* it replaced (7.2 ms p99):
 
 `simrunner bench --stats` prints the diagnostics that found each of these:
 fields built and tiles flooded (sum and peak per tick), corridor searches,
-whole-map fallbacks, steers, live fields and own-goal fallbacks.
+whole-map fallbacks, steers, live fields and own-goal fallbacks, and now
+the phase table under them.
 
 The ceilings are cliff detectors, not precision instruments. Verify §12
 properly on known hardware at milestone review; a shared runner cannot answer
@@ -792,7 +845,7 @@ simultaneous workers, the age-up presentation. `docs/02` pillar 4 says the feel
 
 **M7 playtest** (`RM-M7-01`). At least six people who played the original, a
 structured observation sheet, and the criterion operationalised: unprompted
-session length, and whether they start a second match.
+session length, and whether they start a second match. The sheet is §9.1.
 
 **Real hardware.** The golden images run on a software rasteriser, which proves
 the renderer and proves nothing about a GPU driver. `crates/render/tests/headless.rs`
@@ -801,6 +854,57 @@ renders a frame, on a software Vulkan driver in the Linux job and on Metal on
 the macOS runner. What it cannot prove is the window, the swapchain and the
 input path, so one pass on real Mac hardware per milestone stays, recording
 the macOS version, hardware and display/GPU setup.
+
+### 9.1 The `RM-M7-01` observation sheet
+
+`docs/06` M7 is done when "someone who loved the original plays a full
+match and does not want to stop". Nothing in CI has an opinion about that,
+so this is the sheet an observer fills in, one per player, and the tally
+that decides. It is written so that two observers would record the same
+session the same way.
+
+**Who.** Six people who played the original in its day and have not seen
+this build. One at a time, alone at the machine, the observer beside them
+with the sheet, a clock and a pen, silent unless the build breaks. Nobody
+is coached: the first and only instruction is *"Play until you want to
+stop."* The observer does not answer questions about how to play; every
+question is written down verbatim, because each one is a hint or a tooltip
+the game failed to give.
+
+**Setup.** The Mac build from the `Mac build` workflow, the artifact named
+on the sheet; a fresh `settings.ron` (hints on, the default volumes, the
+default keys); the setup screen's defaults (one Standard opponent). The
+match records itself, so a bug has a replay: note its path from the
+Replays screen at the end. The observer opens `F4` once during the biggest
+fight to read the frame and tick times, then closes it.
+
+**The sheet.**
+
+| | |
+|---|---|
+| Date, build | `New-Empire-macOS-<sha>` |
+| Machine | Mac model, macOS version, display and scale |
+| Player | Years they played the original; when they last did |
+| **Timeline** (mm:ss from "play") | first villager ordered · first building placed · first fight · Tool Age · Bronze Age · first pause or save · session end |
+| **Session end** | mm:ss, and who ended it: the player unprompted / the observer (time, room) / the build (crash, hang, unplayable). Only the first counts as *unprompted* |
+| **Second match** | Offered once, in these words, after the first ends: *"Another?"* Yes or no; if yes, its length |
+| **Questions asked** | Every "how do I…" and "what does…", verbatim, with the minute |
+| **Mis-clicks** | What they meant, what happened, the minute |
+| **Feel** (`docs/03` §6, `docs/02` pillar 4), 1 to 5 with a line each | units answer when told · camera · sound under many workers · the age-up moment · reading a fight · the hints (helped / ignored / annoyed) · the tooltips (used / not) |
+| **Moments** | Verbatim: what they said out loud, what made them laugh, what made them swear |
+| **Performance** | `F4` at the biggest fight: fps, frame p99, tick p99, and which phase led; any stutter the player remarked on, with the minute |
+| **Bugs** | What, when, and the replay's path |
+| **After** | Three questions, verbatim answers: *What did this get right about the original?* · *What was missing?* · *Would you play it again tomorrow?* |
+
+**The tally across six.** Median unprompted session length; how many
+reached the Bronze Age; how many said yes to a second match. The
+criterion is met when at least four of the six play for thirty minutes or
+more without being prompted, and at least three of them start a second
+match. Fewer than that, and the questions and mis-clicks columns say what
+to fix before the next six; a session ended by the build is a bug first
+and a data point second. The sheets and the tally go in `docs/10` as the
+`RM-M7-01` record, with the build's hash, and `RM-M7` joins
+`TRACEABILITY_LANDED` only then.
 
 ---
 

@@ -378,6 +378,27 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The performance readout (`F4`) with fixed sample numbers: the
+        // frame, the tick, its phases and the budgets of `docs/04` §12.
+        name: "perf-readout",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "gather",
+            "--ticks",
+            "200",
+            "--hud",
+            "1",
+            "--perf",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // Two sites rising (`docs/03` §6.2): the storehouse at its pegs, the
         // house's lower half up with its builders hammering.
         name: "site-stages",

@@ -190,6 +190,8 @@ pub struct HudInput<'a> {
     /// Resources the bar flashes red, in [`Resource::ALL`] order: what
     /// the last refused click was short of (`docs/03` §6.3).
     pub flash: [bool; 4],
+    /// The performance readout, when it is up (`F4`).
+    pub perf: Option<&'a crate::perf::Readout>,
 }
 
 /// How long the "F1 CONTROLS" hint stays in the resource bar: the first
@@ -1813,6 +1815,38 @@ impl Hud {
             );
         }
 
+        // The performance readout, a table in the top-left corner under
+        // the resource bar: the frame, the tick, the tick's phases and the
+        // budgets they are held to.
+        if let Some(perf) = input.perf {
+            let lines = perf.lines();
+            let line = 11.0;
+            let cols = [0.0, 118.0, 168.0, 212.0];
+            let pw = 272.0;
+            let ph = 30.0 + lines.len() as f32 * line + 6.0;
+            let x = 8.0;
+            let y = TOP_BAR + 8.0;
+            p.rect(x, y, pw, ph, BLACK, 0);
+            p.rect(x + 2.0, y + 2.0, pw - 4.0, ph - 4.0, BROWN_DARK, 0);
+            p.rect(x + 2.0, y + 2.0, pw - 4.0, 2.0, GOLD, 0);
+            p.text_in(x + 8.0, y + 8.0, "PERFORMANCE", Ink::Gold, 1.0);
+            let hint = "F4 CLOSES";
+            p.text(
+                x + pw - 8.0 - font::width(hint) as f32,
+                y + 8.0,
+                hint,
+                false,
+                1.0,
+            );
+            for (i, cells) in lines.iter().enumerate() {
+                let ly = y + 24.0 + i as f32 * line;
+                let ink = if i == 0 { Ink::Gold } else { Ink::White };
+                for (c, cell) in cells.iter().enumerate() {
+                    p.text_in(x + 8.0 + cols[c], ly, cell, ink, 1.0);
+                }
+            }
+        }
+
         // Everything above is in HUD pixels; the window wants device pixels.
         let mut sprites = p.out;
         if s != 1.0 {
@@ -1977,6 +2011,7 @@ mod tests {
             notices: &[],
             hint: None,
             flash: [false; 4],
+            perf: None,
         };
         let has = |lines: &[String], what: &str| lines.iter().any(|l| l.contains(what));
         let b = Hud::build(
@@ -2090,6 +2125,7 @@ mod tests {
             &atlas,
             &HudInput {
                 flash: [true, true, false, false],
+                perf: None,
                 ..base
             },
         );
@@ -2139,6 +2175,7 @@ mod tests {
             notices: &[],
             hint: None,
             flash: [false; 4],
+            perf: None,
         };
         let none = Hud::build(&atlas, &base);
         assert!(none.buttons.is_empty());
@@ -2297,6 +2334,7 @@ mod tests {
                     notices: &[],
                     hint: None,
                     flash: [false; 4],
+                    perf: None,
                 },
             )
         };
@@ -2341,6 +2379,7 @@ mod tests {
                 notices: &[],
                 hint: None,
                 flash: [false; 4],
+                perf: None,
             },
         );
         assert_ne!(lit.sprites, b.sprites, "the hovered button draws lit");
@@ -2406,6 +2445,7 @@ mod tests {
             notices: &[],
             hint: None,
             flash: [false; 4],
+            perf: None,
         };
         let closed = Hud::build(&atlas, &base);
         let open = Hud::build(&atlas, &HudInput { help: true, ..base });
@@ -2461,6 +2501,7 @@ mod tests {
                     notices: &[],
                     hint: None,
                     flash: [false; 4],
+                    perf: None,
                 },
             );
             // Every glyph in the top bar stays inside the window.
@@ -2544,6 +2585,7 @@ mod tests {
             notices: &[],
             hint: None,
             flash: [false; 4],
+            perf: None,
         };
         let none = Hud::build(&atlas, &base);
         let some = Hud::build(

@@ -26,8 +26,7 @@ Six milestones landed; the vertical slice wants only the feel pass, M7.
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
 | M6 — Game shell | **Landed 2026-09-19** | Configure, play, save, reload and watch a replay without a terminal: the run in `crates/app/src/tests.rs`; the owner played the Mac build 2026-09-20 |
-| M7 — The feel pass | **In progress since 2026-09-20** | Chunk 1, audio, landed; music, visual feedback, tooltips and hints, the performance pass and the playtest follow (§4d) |
-| M7 — The feel pass | Not started | Someone who loved the original plays a match and does not want to stop |
+| M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest and the real sprite art are the owner's (§4d) |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
 The Mac checks of 2026-09-12 exercised the economy and age progression
@@ -1126,15 +1125,43 @@ what was done:
   with its marks. Goldens `tooltip-hud` and `hint-hud` added,
   `edge-mark` rebaked. `TRACEABILITY_LANDED` gained `UX-TIP`.
 
+### Work record: M7 chunk 5 — the performance pass and the playtest handoff (2026-09-21)
+
+- `crates/sim`: `Simulation::step_timed` and `Timings` (`docs/04` §39);
+  the fog of war incremental (`Scratch::sight`, `cover`, `fresh`,
+  `touched`, `aged`; `Fog::see` reporting the first observer, `unsee`,
+  `forget`, `observers`); `Violation::FogDrift` and the recount in
+  `check`; `bucket_mobiles` shared by separation and `acquire`;
+  `nearest_enemy` through the buckets; the acquisition filter reordered.
+  The corpus digests and the versus record are unchanged: the
+  optimisations are exact.
+- `tools/simrunner`: `Style::Melee` and `Style::Opponents`; the
+  `battle-400` and `opponents-8p` benchmarks; `Scenario::play` (the
+  recording replayed, the opponents live where there are any, checked
+  against what they said when recorded); `bench` stepping the
+  simulation itself instead of `Replay::run`, whose per-tick state hash
+  every earlier number had included; `--stats` printing the phase table.
+  `perf/budgets.ron` reset to three times the new p99s, with the two new
+  rows; the CI job summary prints the phases.
+- `crates/view/src/perf.rs`: `Series`, `Meter`, `Readout` and the lines
+  of the box; `HudInput::perf` and the box in the top-left corner.
+- `crates/app`: `F4` toggles the readout (unbindable; a binding on `F4`
+  wins); the frame recorded each frame, the tick through `step_timed`,
+  the opponents' thinking timed.
+- `mapview --perf 1`; golden `perf-readout` added.
+- `docs/09` §8 rewritten with the phase table against `docs/04` §12 and
+  the method; §9.1 the `RM-M7-01` observation sheet.
+
 ### Resume here next session
 
-**M7 is in progress; chunk 5, the performance pass and the playtest
-handoff, is next** (§4d): the scenarios against `docs/04` §12 on
-known hardware, cliffs fixed and ceilings lowered; the `RM-M7-01`
-observation sheet in `docs/09`; the Mac measurement and the six
-players are the owner's. The real sprite art is the owner's decision
-(§4d, `docs/08` §9 step 3), and the name (`docs/07` Q5) still bites.
-The parallel track (§4b) runs on its own branch.
+**M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
+the measurement on the Mac with `F4` open during a big fight, recorded
+against `docs/09` §8's table; the six players through the `RM-M7-01`
+sheet (`docs/09` §9.1), whose tally decides the milestone and admits
+`RM-M7` to `TRACEABILITY_LANDED`; and the real sprite art (`docs/08` §9
+step 3), which needs a modeller and Blender. The name (`docs/07` Q5)
+still bites. The parallel track (§4b) runs on its own branch. After M7,
+`docs/06` M8.
 
 ## 4. What M4 completed — Combat
 
@@ -1291,10 +1318,16 @@ verified headless before anyone hears or sees it on the Mac:
    (`UX-TIP-01`); five contextual hints, each at most twice, counted in
    the settings file, HINTS OFF on the settings screen; the idle chime,
    cannot-afford with the resource flashing, the minimap flash and ping.
-5. **The performance pass and the playtest handoff.** The scenarios
-   against `docs/04` §12 on known hardware, cliffs fixed and ceilings
-   lowered; the `RM-M7-01` observation sheet in `docs/09`; the Mac
-   measurement and the six players are the owner's.
+5. **The performance pass and the playtest handoff.** **Done
+   2026-09-21**, record above: the tick measured by phase against
+   `docs/04` §12 (`Simulation::step_timed`, `simrunner bench --stats`,
+   `F4` in the app); two scenarios the budget was written for, four
+   hundred soldiers fighting and eight Hard opponents on a full world
+   with their thinking timed; the fog of war made incremental and the
+   target search bucketed, bit-identical to before and about half the
+   tick on the eight-player maps; the ceilings reset to what the tick
+   alone costs; the `RM-M7-01` observation sheet (`docs/09` §9.1). The
+   Mac measurement and the six players are the owner's.
 
 **Not in these chunks:** the real sprite art for two civilisations across
 three ages and its animations (`docs/06` M7 bullets 2 and 3). They are
@@ -1325,6 +1358,13 @@ Stated so they are not rediscovered.
   replace them by name.
 - **The beds are not positional** (`docs/05` §5.1 asks it): they follow
   the view as a whole. **No stem plays on the title screen.**
+- **The performance numbers are from a shared-runner-class machine**
+  (`docs/09` §8): every §12 row is inside its budget there, but the
+  measurement on the Mac is the owner's (`F4`). Rendering is read, not
+  gated. `orders` on a full economy is the next phase worth a look.
+- **`RM-M7-01` is unrun.** The sheet is written (`docs/09` §9.1); the
+  six players are the owner's, and `RM-M7` stays out of the traceability
+  gate until their tally is in.
 - **Death animations and the hammering animation are art** (`docs/03`
   §6.2, `docs/06` M7): the placeholders have a fall and a corpse and no
   more; a building's collapse is a cloud over the rubble, not an

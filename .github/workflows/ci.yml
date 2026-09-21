@@ -141,11 +141,12 @@ jobs:
           {
             echo '### Simulation performance'
             echo
-            echo 'Per-tick timings, best of three. The trend matters more than'
-            echo 'the absolute numbers: shared runners are noisy.'
+            echo 'Per-tick timings, best of three, then where each tick went'
+            echo 'by phase (docs/04 §12). The trend matters more than the'
+            echo 'absolute numbers: shared runners are noisy.'
             echo
             echo '```'
-            cargo run --release --quiet -p simrunner -- bench || true
+            cargo run --release --quiet -p simrunner -- bench --stats || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

@@ -214,7 +214,11 @@ fn app() -> App {
     app.camera = Camera::new(48, 48, (1280.0, 720.0));
     app.clock.set_paused(true);
     app.settings.edge_scroll = false;
-    app.settings_path = scratch("helper-settings").join("settings.ron");
+    // A settings file of its own per test: the tests run in parallel, and
+    // two of them saving and reading one file race.
+    static SETTINGS_FILES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = SETTINGS_FILES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    app.settings_path = scratch(&format!("helper-settings-{n}")).join("settings.ron");
     app.apply_settings();
     // Every sound asked for is recorded, so a test can hear it.
     app.speaker = Speaker::Recorder(Default::default());

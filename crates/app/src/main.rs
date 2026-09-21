@@ -175,6 +175,10 @@ struct App {
     ui_scale_user: f32,
     /// The controls overlay is open (`F1` or `?`).
     show_help: bool,
+    /// The performance readout is up (`F4`).
+    show_perf: bool,
+    /// What the frames and the ticks cost, for the readout.
+    meter: view::Meter,
     /// The age the player was in last frame, to notice an advance.
     last_age: Age,
     /// When the last advance completed, and to what, for the celebration.
@@ -425,6 +429,8 @@ impl App {
             alarm_at: None,
             ui_scale_user: 1.0,
             show_help: false,
+            show_perf: false,
+            meter: view::Meter::default(),
             last_age: Age::Stone,
             age_up: None,
             scene: Scene::default(),
@@ -886,6 +892,8 @@ impl App {
     fn frame(&mut self) {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
+        self.meter
+            .frame(now.duration_since(self.last_frame).as_nanos() as u64);
         self.last_frame = now;
         match self.shell {
             Shell::Match => self.frame_match(now, dt),
@@ -910,16 +918,25 @@ impl App {
                 p.next += 1;
             }
         }
+        let mut thinking = 0u64;
         for bot in &mut self.opponents {
+            let t = Instant::now();
             let commands = {
                 let view = FoggedView::new(&self.sim, bot.player());
                 bot.think(&view)
             };
+            thinking += t.elapsed().as_nanos() as u64;
             for c in commands {
                 self.sim.issue_from(c, Source::Ai);
             }
         }
-        self.sim.step();
+        // The tick under the stopwatch, for the readout: the same tick,
+        // with the app's clock read between its phases.
+        let epoch = self.started;
+        let timings = self
+            .sim
+            .step_timed(&mut || epoch.elapsed().as_nanos() as u64);
+        self.meter.tick(&timings, thinking);
         self.feedback.observe(&self.sim);
         // What the tick sounded like, through the viewer's fog
         // (`TA-AUDIO-02`).
@@ -1131,6 +1148,10 @@ impl App {
             .showing(self.sim.tick())
             .filter(|_| self.playback.is_none())
             .map(|h| h.text(&keys));
+        let readout = self.show_perf.then(|| {
+            self.meter
+                .readout(self.fps, self.sim.world().len(), scene.sprites.len())
+        });
         let hud = Hud::build(
             &self.atlas,
             &HudInput {
@@ -1156,6 +1177,7 @@ impl App {
                     .flash
                     .filter(|(at, _)| at.elapsed().as_millis() < FLASH_MS)
                     .map_or([false; 4], |(_, lacks)| lacks),
+                perf: readout.as_ref(),
             },
         );
         scene.ui.extend(hud.sprites.iter().cloned());
@@ -2180,6 +2202,12 @@ impl App {
         // Camera movement is handled through held keys, regardless of the
         // selection. Never let a pan key also dispatch a command.
         if self.input.is_pan_key(code) {
+            return false;
+        }
+        // The performance readout is a meter, not a control: `F4` unless
+        // the player has bound `F4` to something.
+        if code == KeyCode::F4 && self.settings.control("F4").is_none() {
+            self.show_perf = !self.show_perf;
             return false;
         }
         let ctrl = self.modifiers.control_key();

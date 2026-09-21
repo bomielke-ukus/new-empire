@@ -44,6 +44,7 @@ cargo run --release -p simrunner -- determinism --ticks 10000
                                              # M0 acceptance: run a synthetic
                                              # match twice, compare every tick
 cargo run --release -p simrunner -- bench            # per-tick timings
+cargo run --release -p simrunner -- bench --stats    # and where each tick went, by phase (docs/04 §12)
 cargo run --release -p simrunner -- golden           # replay the corpus, compare digests
 cargo run --release -p simrunner -- verify FILE      # a replay or a save: it must replay identically
 cargo run --release -p simrunner -- ai --matches 3 --difficulty hard,easy --stats   # computer opponents, headless
@@ -96,7 +97,9 @@ In the match: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
 `+`/`-` to zoom, from 0.5× to 3×, about the cursor; click the minimap to
 jump; `Space` pause; `[` `]` speed; `F3` toggles edge scrolling; `F2`
 cycles the HUD size (1×, 1.5×, 2×); `Home` jumps to your Town Center;
-`F1` or `?` opens a controls overlay listing all of this, and the resource
+`F4` opens a performance readout: the frame and the tick, the tick's
+phases and the budgets they are held to (`docs/04` §12), for measuring on
+real hardware. `F1` or `?` opens a controls overlay listing all of this, and the resource
 bar points at it for the first minute of a match. WASD is reserved for
 camera movement. Every one of these general keys can be rebound on the
 title's SETTINGS screen, which also holds the HUD size, edge scrolling, the

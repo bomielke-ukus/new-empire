@@ -561,57 +561,55 @@ fn bench(f: &Flags) -> ExitCode {
         let replay = s.synthesise();
         // Best-of-N: shared CI runners are noisy, and the fastest run is the
         // one least contaminated by whatever else the machine was doing.
-        let mut best: Option<(Duration, Vec<u128>)> = None;
+        let mut best: Option<(u128, Vec<u128>)> = None;
         for _ in 0..repeats {
-            let mut per_tick = Vec::with_capacity(replay.ticks as usize);
-            let t0 = Instant::now();
-            let mut last = Instant::now();
-            let sim = match replay.run(|_, _| {
-                let now = Instant::now();
-                per_tick.push(now.duration_since(last).as_nanos());
-                last = now;
-            }) {
-                Ok(s) => s,
-                Err(e) => return fail(&e.to_string()),
+            let per_tick = match s.play(&replay, None) {
+                Ok(v) => v,
+                Err(e) => return fail(&e),
             };
-            let total = t0.elapsed();
-            let _ = sim;
+            let total: u128 = per_tick.iter().sum();
             if best.as_ref().is_none_or(|(b, _)| total < *b) {
                 best = Some((total, per_tick));
             }
         }
         if f.stats {
-            // One more run, reading the tick diagnostics, to say where the
-            // time goes: fields built, tiles flooded, corridor searches.
-            let mut sim = sim::Simulation::new(replay.seed, replay.config.clone());
-            let mut next = 0;
+            // One more pass under the stopwatch, to say where the time
+            // goes: the phases of `docs/04` §12, the opponents' thinking,
+            // and the path diagnostics (fields built, tiles flooded,
+            // corridor searches).
             let mut sum = [0u64; 9];
             let mut peak = [0u32; 9];
-            while sim.tick() < replay.ticks {
-                while let Some((tick, command)) = replay.commands.get(next) {
-                    if *tick != sim.tick() {
-                        break;
+            let mut phases: Vec<[u64; 7]> = Vec::with_capacity(replay.ticks as usize);
+            let mut thinking: Vec<u64> = Vec::with_capacity(replay.ticks as usize);
+            let mut entities = (0usize, 0usize);
+            let outcome = s.play(
+                &replay,
+                Some(&mut |sim: &sim::Simulation, t: sim::Timings, think: u64| {
+                    let st = sim.stats();
+                    let row = [
+                        st.path_searches,
+                        st.path_nodes,
+                        st.path_deferred,
+                        st.path_failures,
+                        st.corridors,
+                        st.full_fields,
+                        st.steers,
+                        st.fields_live,
+                        st.own_fallbacks,
+                    ];
+                    for k in 0..9 {
+                        sum[k] += row[k] as u64;
+                        peak[k] = peak[k].max(row[k]);
                     }
-                    sim.issue(command.clone());
-                    next += 1;
-                }
-                sim.step();
-                let st = sim.stats();
-                let row = [
-                    st.path_searches,
-                    st.path_nodes,
-                    st.path_deferred,
-                    st.path_failures,
-                    st.corridors,
-                    st.full_fields,
-                    st.steers,
-                    st.fields_live,
-                    st.own_fallbacks,
-                ];
-                for k in 0..9 {
-                    sum[k] += row[k] as u64;
-                    peak[k] = peak[k].max(row[k]);
-                }
+                    phases.push(t.as_array());
+                    thinking.push(think);
+                    let live = sim.world().len();
+                    entities.0 += live;
+                    entities.1 = entities.1.max(live);
+                }),
+            );
+            if let Err(e) = outcome {
+                return fail(&e);
             }
             println!(
                 "{:<20} builds {} (peak {}) flooded {} (peak {}) deferred {} failures {} \
@@ -631,6 +629,44 @@ fn bench(f: &Flags) -> ExitCode {
                 peak[7],
                 sum[8]
             );
+            let ticks = phases.len().max(1);
+            println!(
+                "{:<20} entities {} (mean {}); per tick, in microseconds:",
+                s.name,
+                entities.1,
+                entities.0 / ticks
+            );
+            let mut columns: Vec<(&str, Vec<u64>)> = sim::Timings::PHASES
+                .iter()
+                .enumerate()
+                .map(|(k, name)| (*name, phases.iter().map(|p| p[k]).collect()))
+                .collect();
+            if thinking.iter().any(|&n| n > 0) {
+                columns.push(("thinking", thinking.clone()));
+            }
+            let whole: u64 = columns.iter().map(|(_, c)| c.iter().sum::<u64>()).sum();
+            println!(
+                "{:>20} {:>10} {:>10} {:>10} {:>7}",
+                "phase", "mean", "p99", "max", "share"
+            );
+            for (name, column) in &mut columns {
+                let total: u64 = column.iter().sum();
+                column.sort_unstable();
+                let p99 = column[((column.len() - 1) as f64 * 0.99) as usize];
+                let max = *column.last().unwrap_or(&0);
+                println!(
+                    "{:>20} {:>10.1} {:>10.1} {:>10.1} {:>6.1}%",
+                    name,
+                    total as f64 / ticks as f64 / 1000.0,
+                    p99 as f64 / 1000.0,
+                    max as f64 / 1000.0,
+                    if whole == 0 {
+                        0.0
+                    } else {
+                        total as f64 * 100.0 / whole as f64
+                    }
+                );
+            }
         }
         let (total, mut per_tick) = best.expect("repeats >= 1");
         per_tick.sort_unstable();
@@ -645,7 +681,7 @@ fn bench(f: &Flags) -> ExitCode {
             name: s.name,
             ticks: replay.ticks,
             players: s.config.map.players,
-            total_ms: total.as_secs_f64() * 1000.0,
+            total_ms: total as f64 / 1_000_000.0,
             p50_ns: pick(0.50),
             p99_ns: pick(0.99),
             max_ns: per_tick.last().copied().unwrap_or(0),

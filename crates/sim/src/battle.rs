@@ -272,28 +272,55 @@ impl Simulation {
 
     /// The nearest enemy within `radius` of `i`, ties by slot: mobile units,
     /// or with `buildings` the enemy's buildings and sites instead.
+    ///
+    /// Units are found through the tile buckets, which the caller has
+    /// built for this pass ([`Simulation::bucket_mobiles`]), so a unit
+    /// looking round itself reads the cells its radius reaches and not
+    /// every entity on the map. Buildings are few and are scanned.
     fn nearest_enemy(&self, i: usize, radius: Fx, buildings: bool) -> Option<EntityId> {
         let me = self.world.owner[i];
         let pos = self.world.pos[i];
         let limit = radius.raw() as u64 * radius.raw() as u64;
         let mut best: Option<(u64, usize)> = None;
-        for s in self.world.slots() {
-            let j = s.index();
+        let mut consider = |j: usize| {
             let owner = self.world.owner[j];
             if owner == me
                 || owner == GAIA
                 || self.world.dying[j] != 0
                 || self.world.inside[j].is_some()
             {
-                continue;
+                return;
             }
             let k = kinds::info(self.world.kind[j]);
             if k.mobile == buildings || k.class == kinds::Class::Other {
-                continue;
+                return;
             }
             let d = pos.distance_sq_raw(self.world.pos[j]);
-            if d <= limit && best.is_none_or(|(bd, _)| d < bd) {
+            if d <= limit && best.is_none_or(|(bd, bj)| (d, j) < (bd, bj)) {
                 best = Some((d, j));
+            }
+        };
+        if buildings {
+            for s in self.world.slots() {
+                consider(s.index());
+            }
+        } else {
+            // Anything within the radius stands on a tile within that many
+            // whole tiles of this one.
+            let w = self.nav.width();
+            let r = radius.ceil().max(0);
+            let (tx, ty) = nav::tile_of(pos);
+            for cy in (ty - r)..=(ty + r) {
+                for cx in (tx - r)..=(tx + r) {
+                    if !self.nav.in_bounds(cx, cy) {
+                        continue;
+                    }
+                    let mut j = self.scratch.head[(cy * w + cx) as usize];
+                    while j != u32::MAX {
+                        consider(j as usize);
+                        j = self.scratch.next[j as usize];
+                    }
+                }
             }
         }
         best.map(|(_, j)| self.world.id_at(Slot::new(j)))
@@ -621,15 +648,19 @@ impl Simulation {
     /// this way; buildings are taken where an attack-move ends.
     pub(crate) fn acquire(&mut self) {
         let tick = self.tick;
+        // Where everyone stands now, for the searches below.
+        self.bucket_mobiles();
+        // Cheapest test first: the cadence and the stance are a load each,
+        // and `can_fight` counts a building's garrison.
         let slots: Vec<Slot> = self
             .world
             .slots()
             .filter(|s| {
                 let i = s.index();
-                self.world.owner[i] != GAIA
-                    && self.can_fight(i)
+                (i as u64 + tick).is_multiple_of(ACQUIRE_EVERY)
+                    && self.world.owner[i] != GAIA
                     && self.world.stance[i] != Stance::Passive
-                    && (i as u64 + tick).is_multiple_of(ACQUIRE_EVERY)
+                    && self.can_fight(i)
             })
             .collect();
         for slot in slots {
@@ -883,6 +914,8 @@ impl Simulation {
         self.world.order[i] = Order::Idle;
         self.world.reload[i] = 0;
         self.world.dying[i] = RUBBLE_TICKS;
+        // Whoever sees the rubble no longer remembers a building.
+        self.scratch.touched.push((ax, ay));
         for s in self.world.slots().collect::<Vec<_>>() {
             let j = s.index();
             if matches!(self.world.order[j], Order::Build { site, .. } if site == id) {

@@ -239,10 +239,18 @@ attack out of view. Chunk 4, tooltips, hints and the rest of the
 notifications, landed the same day: every unit, building and
 technology tooltip with cost, time, counters and key (`UX-TIP-01`),
 five first-time hints each shown at most twice, the idle chime, the
-resource flash for a refused click, the minimap's flash and ping. The
-plan and the record are in `docs/10` §4d. The performance pass and the
-playtest follow; the real sprite art and its animations wait on the
-art pipeline (`docs/08` §9 step 3), which needs a modeller and Blender.
+resource flash for a refused click, the minimap's flash and ping. Chunk
+5, the performance pass, landed the same day: the tick measured by phase
+against the budgets of `docs/04` §12 on two new benchmark scenarios (400
+soldiers fighting; eight Hard opponents on a full world, their thinking
+timed), the fog of war made incremental and the target search bucketed,
+which halved the tick on the eight-player maps, the ceilings lowered to
+match, an `F4` readout in the app for the measurement on a real Mac, and
+the `RM-M7-01` observation sheet (`docs/09` §9.1). The plan and the
+record are in `docs/10` §4d. What remains of M7 is the owner's: the Mac
+measurement, the six players, and the real sprite art and its animations,
+which wait on the art pipeline (`docs/08` §9 step 3) and need a modeller
+and Blender.
 
 - Full audio: acknowledgments, work loops, positional world SFX, ambience,
   age fanfares, music stems, combat ducking

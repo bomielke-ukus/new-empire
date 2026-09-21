@@ -55,6 +55,8 @@ struct Args {
     hover_button: Option<String>,
     /// Show the first-time hint the moment would bring up.
     hint: bool,
+    /// Show the performance readout with fixed sample numbers.
+    perf: bool,
     dpi: f32,
     ui_scale: f32,
     controls: bool,
@@ -91,6 +93,7 @@ fn parse() -> Result<Args, String> {
         hover: None,
         hover_button: None,
         hint: false,
+        perf: false,
         dpi: 1.0,
         ui_scale: 1.0,
         controls: false,
@@ -144,6 +147,7 @@ fn parse() -> Result<Args, String> {
             "--sweep" => a.sweep = Some(val.parse().map_err(|e| format!("{key}: {e}"))?),
             "--hover-button" => a.hover_button = Some(val.clone()),
             "--hint" => a.hint = val == "1" || val == "true",
+            "--perf" => a.perf = val == "1" || val == "true",
             "--hover" => {
                 let (x, y) = val.split_once(',').ok_or("--hover wants X,Y")?;
                 a.hover = Some((num(x)?, num(y)?));
@@ -441,6 +445,7 @@ fn run() -> Result<(), String> {
                 .map(|h| h.text(&view::hints::Keys::default()))
         });
         let hint = hint.flatten();
+        let perf = a.perf.then(view::Readout::sample);
         let status = format!("TICK {}", sim.tick());
         let input = |hover: Option<(f32, f32)>| HudInput {
             sim: &sim,
@@ -462,6 +467,7 @@ fn run() -> Result<(), String> {
             notices: &[],
             hint: hint.as_deref(),
             flash: [false; 4],
+            perf: perf.as_ref(),
         };
         let mut hover = a.hover;
         if let Some(label) = &a.hover_button {

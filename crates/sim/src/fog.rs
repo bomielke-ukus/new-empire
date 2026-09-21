@@ -55,8 +55,10 @@ pub struct Memory {
 pub struct Fog {
     width: i32,
     height: i32,
-    /// Units and buildings of the player seeing each tile now. Derived
-    /// every tick; not hashed.
+    /// Units and buildings of the player seeing each tile now, kept
+    /// incrementally by the simulation (a unit that has not moved costs
+    /// nothing; one that has trades its old disc for its new one). Derived
+    /// from the world, so not hashed; a loaded save rebuilds it.
     visibility: Vec<u16>,
     /// One bit per tile: seen at least once.
     explored: Vec<u64>,
@@ -164,18 +166,39 @@ impl Fog {
         self.visibility.fill(0);
     }
 
-    /// One more observer of the tile: it is seen now, so it is explored,
-    /// and what was remembered there is superseded by what is there.
-    pub fn see(&mut self, x: i32, y: i32) {
-        if let Some(i) = self.idx(x, y) {
-            self.visibility[i] = self.visibility[i].saturating_add(1);
-            let (word, bit) = (i / 64, 1u64 << (i % 64));
-            self.explored[word] |= bit;
-            if self.marked[word] & bit != 0 {
-                self.marked[word] &= !bit;
-                self.remembered.remove(&(i as u32));
-            }
+    /// One more observer of the tile. The first one is the moment it
+    /// comes into view: it is explored from then on, and what was
+    /// remembered there is superseded by what is there. Returns true for
+    /// that first observer, so the caller knows the tile is newly seen.
+    pub fn see(&mut self, x: i32, y: i32) -> bool {
+        let Some(i) = self.idx(x, y) else {
+            return false;
+        };
+        let was = self.visibility[i];
+        self.visibility[i] = was.saturating_add(1);
+        if was != 0 {
+            return false;
         }
+        let (word, bit) = (i / 64, 1u64 << (i % 64));
+        self.explored[word] |= bit;
+        if self.marked[word] & bit != 0 {
+            self.marked[word] &= !bit;
+            self.remembered.remove(&(i as u32));
+        }
+        true
+    }
+
+    /// One observer fewer. Out of sight of the last one, the tile is
+    /// explored and remembered as it was.
+    pub fn unsee(&mut self, x: i32, y: i32) {
+        if let Some(i) = self.idx(x, y) {
+            self.visibility[i] = self.visibility[i].saturating_sub(1);
+        }
+    }
+
+    /// How many of the player's units and buildings see the tile now.
+    pub fn observers(&self, x: i32, y: i32) -> u16 {
+        self.idx(x, y).map_or(0, |i| self.visibility[i])
     }
 
     /// Something static stands on a seen tile: remember it.
@@ -183,6 +206,17 @@ impl Fog {
         if let Some(i) = self.idx(x, y) {
             self.marked[i / 64] |= 1u64 << (i % 64);
             self.remembered.insert(i as u32, m);
+        }
+    }
+
+    /// What stood on a seen tile is gone: nothing is remembered there.
+    pub fn forget(&mut self, x: i32, y: i32) {
+        if let Some(i) = self.idx(x, y) {
+            let (word, bit) = (i / 64, 1u64 << (i % 64));
+            if self.marked[word] & bit != 0 {
+                self.marked[word] &= !bit;
+                self.remembered.remove(&(i as u32));
+            }
         }
     }
 }
@@ -278,5 +312,49 @@ mod tests {
         let mut h4 = StateHasher::new();
         f.hash_state(&mut h4);
         assert_eq!(h3.finish(), h4.finish(), "visibility is not");
+    }
+
+    /// The incremental bookkeeping: only the first observer of a tile is
+    /// its coming into view, the last one leaving is its going out, and a
+    /// memory made while it is in view survives further observers.
+    #[test]
+    fn observers_are_counted_and_only_the_first_supersedes_a_memory() {
+        let m = Memory {
+            id: EntityId::from_parts(4, 1),
+            kind: 100,
+            owner: 255,
+            age: 0,
+            site: false,
+        };
+        let mut f = Fog::new(8, 4);
+        f.remember(3, 2, m);
+        assert!(f.see(3, 2), "the first observer");
+        assert_eq!(f.remembered(3, 2), None, "superseded by what is there");
+        f.remember(3, 2, m);
+        assert!(!f.see(3, 2), "the second is not news");
+        assert_eq!(f.observers(3, 2), 2);
+        f.unsee(3, 2);
+        assert_eq!(f.state(3, 2), Visibility::Visible);
+        assert_eq!(
+            f.remembered(3, 2),
+            None,
+            "still in sight: what is there is there"
+        );
+        f.unsee(3, 2);
+        assert_eq!(f.state(3, 2), Visibility::Explored);
+        assert_eq!(
+            f.remembered(3, 2).map(|m| m.kind),
+            Some(100),
+            "out of sight: the memory"
+        );
+        f.unsee(3, 2);
+        assert_eq!(f.observers(3, 2), 0, "saturates at nobody");
+        f.forget(3, 2);
+        assert_eq!(f.remembered(3, 2), None);
+        f.forget(0, 0);
+        assert!(
+            !f.see(-1, 0) && f.observers(-1, 0) == 0,
+            "off the map is nothing"
+        );
     }
 }

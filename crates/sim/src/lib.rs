@@ -62,7 +62,7 @@ pub use orders::{
 pub use replay::{Divergence, Replay, ReplayError, Trace, VerifyError};
 pub use rng::Rng;
 pub use simulation::{
-    ConfigError, PlaceError, ResearchError, TickStats, TrainError, Violation,
+    ConfigError, PlaceError, ResearchError, TickStats, Timings, TrainError, Violation,
     HARDEST_GATHER_BONUS_PCT, MAX_GATHER_BONUS_PCT, STATE_VERSION,
 };
 pub use simulation::{

@@ -253,6 +253,16 @@ impl World {
         self.alive.len()
     }
 
+    /// True if slot `index` holds a live entity.
+    pub fn is_live(&self, index: usize) -> bool {
+        self.alive.get(index).copied().unwrap_or(false)
+    }
+
+    /// The slot at `index`, if it holds a live entity.
+    pub fn slot_at(&self, index: usize) -> Option<Slot> {
+        self.is_live(index).then_some(Slot(index))
+    }
+
     /// Creates an entity and returns its handle.
     pub fn spawn(&mut self, kind: KindId, owner: PlayerId, pos: Vec2Fx, health: Fx) -> EntityId {
         self.spawn_with_resource(kind, owner, pos, health, 0)

@@ -356,6 +356,11 @@ Rendering is independent and targets ≤ 8 ms/frame for 60 fps with headroom.
 The original's ~30/30/30 split between rendering, pathing/AI and simulation is
 the sanity check: if our numbers drift far from that shape, something is wrong.
 
+How the tick is measured against these rows, and what it measured in M7,
+is §39: `Simulation::step_timed` credits each phase of the tick from a
+clock the caller supplies, `simrunner bench --stats` tabulates the phases
+over the benchmark scenarios, and `F4` in the app shows them live.
+
 ---
 
 ## 13. Invariants the arithmetic must hold
@@ -1464,3 +1469,75 @@ siege are still owed, and a human will find this opponent predictable.
 - **Not done.** No panel highlight for a finished technology; no
   Wonder, so no Wonder announcement; the hints are five lines, not a
   campaign.
+
+## 39. Implementation notes from M7, chunk 5: the performance pass
+
+- **The tick is measured by phase, from outside.** `Simulation::step_timed`
+  runs the same tick as `step` with a stopwatch the caller supplies (a
+  closure returning nanoseconds) read between the phases, and returns
+  `Timings`: commands, orders, paths, movement, combat, economy, fog. The
+  crate still never touches `Instant`; the stopwatch is the runner's or
+  the app's, and a tick with one is bit-identical to a tick without (a
+  test pins it). `simrunner bench --stats` tabulates the phases over a
+  scenario (mean, p99, max and share per phase, with the opponents'
+  thinking as an eighth row where there are opponents) after the untimed
+  passes that set the gate's numbers, so the stopwatch's own cost is not
+  in the gate. `F4` in the app shows the same table live, with the frame.
+- **Two scenarios the budget was written for** (§11, §12). `battle-400`:
+  two hundred soldiers a side on a flat map, spawned facing each other
+  and sent in by attack-move. `opponents-8p`: eight Hard computer
+  opponents on a 168-tile map, each handed forty units at tick 0 so the
+  world is §12-sized from the start, the opponents thinking live in the
+  measured pass (a recording holds what they said, not the time it took
+  them to say it) and checked against what they said when recorded.
+- **The old numbers carried a state hash.** `Replay::run` hashes the
+  whole world after every tick for the digest, and the benchmark had run
+  replays through it, so every "per-tick" figure since M0 included a full
+  hash of the state. The bench now steps the simulation itself; the
+  ceilings were reset to what the tick alone costs.
+- **The fog of war is incremental** (§12 asked for it; §6). The update had
+  cleared every player's visibility and re-stamped every unit's sight
+  disc every tick, then walked every immobile entity against every fog
+  to refresh its memory: linear in entities times players whether or not
+  anything moved, and the largest phase in every scenario (50–55% of
+  the tick on the eight-player maps, 35% in a fight). Now each slot
+  remembers what it last stamped (`Scratch::sight`: whose fog, from which
+  tile, how far), and a tick unstamps and restamps only the slots whose
+  stamp changed; `Fog::see` reports the first observer of a tile, and
+  only that first observer supersedes a memory. The memories are then
+  redone only where needed: tiles that came into view (per-fog bitmaps,
+  through a per-tile `cover` index of what immobile thing stands there),
+  anchors where something was placed, finished, felled or destroyed
+  (`Scratch::touched`, pushed by `spawn`, `remove`, construction
+  completion and `demolish`), and every building of a side that advanced
+  an age (`Scratch::aged`). A fresh match and a loaded save rebuild from
+  the world. The result is bit for bit what the old recomputation gave:
+  the corpus digests and the twenty recorded AI matches are unchanged,
+  and `check` recounts every fog from the world's discs and fails on any
+  drift (`Violation::FogDrift`), which the soak and the corpus run every
+  tick. Fog went from 569 µs a tick to 61 µs on `marching-8p`, from 668
+  to 53 on `crowded`, from 255 to 17 on `opponents-8p`, and the whole tick
+  on the eight-player maps roughly halved.
+- **The nearest-enemy search reads the tile buckets.** `nearest_enemy`
+  had scanned every entity on the map for every unit looking for a
+  target (every fourth tick each), trees included; on a full map that is
+  the quadratic term in the combat phase. Separation already buckets the
+  mobile units by tile each pass (`Simulation::bucket_mobiles`, now
+  shared); `acquire` builds the buckets again from where units stand
+  after movement and reads only the cells the radius reaches, with the
+  tie broken by slot as the scan broke it. Buildings, sought when an
+  attack-move ends, are few and still scanned. The acquisition filter
+  tests the cadence and the stance before `can_fight`, which counts a
+  building's garrison.
+- **Where the time goes now**, per tick on the 2.1 GHz Xeon the shared
+  runner resembles, against the rows of §12 (commands and orders share
+  the combat row): see `docs/09` §8 for the table. Every row is inside
+  its budget on that machine; paths remain the largest phase where
+  crowds march (60% of `marching-8p`) and combat with thinking where
+  opponents fight. The measurement on a real Mac is the owner's, with
+  `F4`.
+- **Not done.** The beds are still not positional (§5 note in `docs/10`);
+  rendering is measured only as the frame in `F4`, not gated, since the
+  software rasteriser proves nothing about the GPU; `orders` on a full
+  economy is the next phase worth a look (villagers seeking nodes and
+  drop-offs scan), inside budget and left alone.
