@@ -1479,6 +1479,10 @@ impl Hud {
                     Order::Build { .. } => "GOING TO BUILD",
                     Order::Repair { working: true, .. } => "REPAIRING",
                     Order::Repair { .. } => "GOING TO REPAIR",
+                    Order::Attack {
+                        then: sim::Then::Hunt(_),
+                        ..
+                    } => "HUNTING",
                     Order::Attack { .. } => "ATTACKING",
                     Order::AttackMove { .. } => "ATTACK-MOVING",
                     Order::Patrol { .. } => "PATROLLING",

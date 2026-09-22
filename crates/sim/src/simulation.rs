@@ -1597,7 +1597,10 @@ impl Simulation {
                     return;
                 };
                 let owner = self.world.owner[ts.index()];
-                if owner == p || owner == GAIA {
+                // Nature's are not attacked, except an animal that is food
+                // (`GD-ECON-06`): a hunt, and a villager's ends in gathering.
+                let hunt = owner == GAIA && kinds::huntable(self.world.kind[ts.index()]);
+                if owner == p || (owner == GAIA && !hunt) {
                     return;
                 }
                 for id in ids {
@@ -1606,7 +1609,12 @@ impl Simulation {
                         if kinds::info(self.world.kind[i]).combat.attack == 0 {
                             continue;
                         }
-                        self.engage(i, target, Then::Idle, None);
+                        let then = if hunt && self.world.kind[i] == kinds::VILLAGER {
+                            Then::Hunt(target)
+                        } else {
+                            Then::Idle
+                        };
+                        self.engage(i, target, then, None);
                     }
                 }
             }
@@ -2430,12 +2438,14 @@ impl Simulation {
     /// True if `p`'s villagers may gather from entity `n` right now: a
     /// static node with something left, not a site, and — for a farm —
     /// theirs. Gaia's nodes are everyone's; a farm is its owner's.
-    fn gatherable_by(&self, n: usize, p: PlayerId) -> bool {
+    pub(crate) fn gatherable_by(&self, n: usize, p: PlayerId) -> bool {
         let k = self.world.kind[n];
-        kinds::gatherable(k)
+        // A node while it stands, or a carcass while it lies (`GD-ECON-06`).
+        let node = kinds::gatherable(k) && self.world.dying[n] == 0;
+        let carcass = kinds::huntable(k) && self.world.dying[n] > 0;
+        (node || carcass)
             && self.world.resource[n] > 0
             && self.world.construction[n].is_none()
-            && self.world.dying[n] == 0
             && (k != kinds::FARM || self.world.owner[n] == p)
     }
 

@@ -1,7 +1,7 @@
 //! Turns simulation state into a sorted list of sprite instances.
 
 use sim::kinds;
-use sim::{GatherPhase, NavState, Order, Simulation, Vec2Fx, DECAY_TICKS, RUBBLE_TICKS, TICK_MS};
+use sim::{GatherPhase, NavState, Order, Simulation, Vec2Fx, RUBBLE_TICKS, TICK_MS};
 
 /// How long the age-up sweep takes to cross a settlement, in ms.
 pub const SWEEP_MS: u32 = 1800;
@@ -215,7 +215,8 @@ impl Scene {
                 if world.dying[i] > 0 {
                     // Falls, then lies: the death animation's length decides
                     // when the corpse frame takes over.
-                    let dead_ms = (DECAY_TICKS - world.dying[i]) as u32 * TICK_MS;
+                    let dead_ms =
+                        sim::decay_ticks(kind).saturating_sub(world.dying[i]) as u32 * TICK_MS;
                     let death_ms = atlas
                         .anim_info(look, Anim::Death)
                         .map_or(0, |a| a.frames * a.frame_ms);
@@ -239,11 +240,12 @@ impl Scene {
             };
             let time_ms = if world.dying[i] > 0 {
                 let span = if info.mobile {
-                    DECAY_TICKS
+                    sim::decay_ticks(kind)
                 } else {
                     RUBBLE_TICKS
                 };
-                (span - world.dying[i]) as u32 * TICK_MS + (alpha * TICK_MS as f32) as u32
+                span.saturating_sub(world.dying[i]) as u32 * TICK_MS
+                    + (alpha * TICK_MS as f32) as u32
             } else if anim == Anim::Work && info.combat.attack > 0 && world.reload[i] > 0 {
                 info.combat
                     .reload_ticks

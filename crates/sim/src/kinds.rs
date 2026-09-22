@@ -641,11 +641,19 @@ pub fn trained_at(building: KindId) -> impl Iterator<Item = &'static KindInfo> {
 }
 
 /// True if a villager can gather from this kind: a static node with a
-/// resource. Animals need hunting, which arrives with combat. Farms count,
-/// but only their owner may work them; the simulation checks that.
+/// resource. Animals are [`huntable`] instead: killed first, then their
+/// carcass is gathered. Farms count, but only their owner may work them;
+/// the simulation checks that.
 pub fn gatherable(kind: KindId) -> bool {
     let k = info(kind);
     k.resource.is_some() && !k.mobile
+}
+
+/// True for an animal that is food once killed (`GD-ECON-06`): the
+/// carcass lies where it fell, gatherable while it lasts.
+pub fn huntable(kind: KindId) -> bool {
+    let k = info(kind);
+    k.resource.is_some() && k.mobile
 }
 
 /// Buildings that count toward advancing an age (`docs/02` §4): what a

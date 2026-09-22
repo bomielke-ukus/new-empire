@@ -1203,6 +1203,21 @@ each its own commit.
   all queue; the units answer. One test.
 - `mapview --scenario waypoints`; golden `waypoints`.
 
+### Work record: playtest-2 — hunting (2026-09-22)
+
+- `crates/sim`: `kinds::huntable`; an attack on nature's animal is
+  allowed, a villager's with `Then::Hunt` so the kill turns into
+  gathering the carcass; a hit animal runs six tiles from the hunter
+  through its wander; a dead animal lies `CARCASS_TICKS` (three minutes,
+  `decay_ticks(kind)`) with its food on it, `gatherable_by` while it
+  lies; nature's animals are still never acquired on a unit's own.
+  `docs/02` `GD-ECON-06`, `docs/07` D15 closed; `behaviour_hunting.rs`.
+- `crates/view`: the corpse span per kind; HUNTING in the status line.
+- `crates/app`: right-click on an animal with villagers selected hunts
+  it (crosshair); a carcass is a gather target.
+- Not done: the opponent does not hunt; no boar (`docs/02` §3.2), which
+  fights back and is M8's.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1392,8 +1407,6 @@ complete without them, and the owner decides when and by whom.
 
 Stated so they are not rediscovered.
 
-- **Hunting** (`docs/07` D15) waits for a carcass: animals cannot be
-  attacked yet.
 - **Attack-move is `M`**, where `docs/03` says `A`; `A` pans the camera.
 - **The panels' command letters are not rebindable** (`GD-A11Y-02`):
   the settings screen rebinds the seventeen general keys only. Full

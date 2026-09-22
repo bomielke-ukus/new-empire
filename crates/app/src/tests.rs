@@ -1658,6 +1658,90 @@ fn shift_right_click_queues_a_waypoint_and_the_unit_takes_it_after() {
     );
 }
 
+/// Right-click on an animal with villagers selected hunts it
+/// (`GD-ECON-06`): the cursor says so and the click sends them.
+///
+/// REQ: GD-ECON-06
+#[test]
+fn villagers_hunt_an_animal_on_a_right_click() {
+    let mut app = app();
+    app.sim = Simulation::new(
+        3,
+        SimConfig {
+            map: MapSpec {
+                kind: MapKind::Inland,
+                size: 64,
+                players: 2,
+            },
+            wander: false,
+            ..SimConfig::default()
+        },
+    );
+    let w = app.sim.world();
+    let vill = w
+        .slots()
+        .find(|s| w.owner[s.index()] == 0 && w.kind[s.index()] == kinds::VILLAGER)
+        .map(|s| w.id_at(s))
+        .unwrap();
+    let vp = w.pos[w.slot(vill).unwrap().index()];
+    // The nearest gazelle, walked into sight first: what the fog hides
+    // cannot be clicked.
+    let gazelle = w
+        .slots()
+        .filter(|s| w.kind[s.index()] == kinds::GAZELLE)
+        .min_by_key(|s| vp.distance_sq_raw(w.pos[s.index()]))
+        .map(|s| w.id_at(s))
+        .unwrap();
+    let gp = w.pos[w.slot(gazelle).unwrap().index()];
+    let (gx, gy) = (view::fx_to_f32(gp.x), view::fx_to_f32(gp.y));
+    app.sim.issue(Command {
+        player: 0,
+        kind: CommandKind::Move {
+            ids: vec![vill],
+            target: gp,
+        },
+    });
+    for _ in 0..1200 {
+        let t = sim::nav::tile_of(gp);
+        if app.sim.fog(0).unwrap().visible(t.0, t.1) {
+            break;
+        }
+        app.sim.step();
+    }
+    app.sim.issue(Command {
+        player: 0,
+        kind: CommandKind::Stop { ids: vec![vill] },
+    });
+    step(&mut app, 3);
+    app.camera = Camera::new(64, 64, (1280.0, 720.0));
+    app.camera.look_at_tile(gx, gy);
+    app.selection.set(vec![vill]);
+    draw(&mut app);
+    let (px, py) = on_screen(&app, gx, gy, 8.0);
+    assert!(
+        matches!(app.hovered_target(px, py), Some(Target::Hunt)),
+        "the cursor offers the hunt: {:?}",
+        app.hovered_target(px, py)
+    );
+    let commands = app.sim.replay().commands.len();
+    app.right_press(px, py);
+    assert_eq!(app.sim.replay().commands.len(), commands + 1);
+    let replay = app.sim.replay();
+    assert!(matches!(
+        replay.commands.last().unwrap().1.kind,
+        CommandKind::Attack { target, .. } if target == gazelle
+    ));
+    step(&mut app, 3);
+    let vi = app.sim.world().slot(vill).unwrap().index();
+    assert!(matches!(
+        app.sim.world().order[vi],
+        Order::Attack {
+            then: sim::Then::Hunt(_),
+            ..
+        }
+    ));
+}
+
 fn on_screen(app: &App, x: f32, y: f32, lift: f32) -> (f32, f32) {
     let g = view::iso::project(x, y, view::iso::ground_height(app.sim.map(), x, y));
     app.camera.to_window(g.0, g.1 - lift)

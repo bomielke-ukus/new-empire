@@ -129,6 +129,8 @@ pub enum Then {
     AttackMove(Vec2Fx),
     /// Carry on patrolling between two points.
     Patrol(Vec2Fx, Vec2Fx, u8),
+    /// Gather the carcass of the animal hunted (`GD-ECON-06`).
+    Hunt(EntityId),
 }
 
 /// A unit's current job.
@@ -268,6 +270,10 @@ impl HashState for Order {
                     Then::AttackMove(p) => {
                         h.write_u8(2);
                         h.write(p);
+                    }
+                    Then::Hunt(animal) => {
+                        h.write_u8(4);
+                        h.write(animal);
                     }
                     Then::Patrol(a, b, leg) => {
                         h.write_u8(3);
