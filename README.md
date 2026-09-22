@@ -129,7 +129,8 @@ bar points at it for the first minute of a match. `A` is attack-move; WASD
 pans only if you bind it, which takes `A` back. Every one of these general keys can be rebound on the
 title's SETTINGS screen, which also holds the HUD size, edge scrolling, the
 window mode and the four sound volumes, kept in `settings.ron` in the game's data directory (or
-`NEW_EMPIRE_SETTINGS`); the command letters on the panels are fixed. The
+`NEW_EMPIRE_SETTINGS`). Its PANEL LETTERS page moves any command letter
+on the panels to another key; the buttons then show the new key. The
 game honours the display's scale factor, so 1× is the same apparent size
 on a Retina screen as on any other.
 

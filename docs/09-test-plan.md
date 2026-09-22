@@ -172,7 +172,7 @@ main job over time, and what turns the soak from a one-off run into a ratchet.
 
 ### 4.5 Rendering
 
-Twenty-four scenes rendered through `tools/mapview` and compared against committed
+Twenty-six scenes rendered through `tools/mapview` and compared against committed
 PNGs with a tolerance. The test drives the binary rather than the rendering
 library, because the command line is what CI invokes and what a developer
 types.
@@ -520,7 +520,11 @@ defaults give every control its own key and none a panel letter; a key
 another control holds, a panel letter, Escape and a digit are refused
 with the reason and change nothing; the file round-trips, an older file
 lacking a field loads with the default, the HUD size cycles and wraps,
-and keys read as the screen shows them (`GD-A11Y-02`).
+and keys read as the screen shows them (`GD-A11Y-02`). A panel letter
+moves to another key, a key another letter holds is swapped so no two
+share one, a general key, Escape and a digit are refused, a general
+control may take the key a letter left and not one a letter holds, and a
+letter moved back to its own key leaves the file.
 `crates/app/src/keys.rs`: every default key's name resolves to its key
 and back. The shell test lists every control with its CHANGE button, the
 one being rebound greyed and saying so, and the error line. The HUD test

@@ -212,6 +212,24 @@ pub fn controls_hint(sim: &Simulation) -> bool {
 pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
     let s = |k: &str, a: &str| (k.to_string(), a.to_string());
     let key = |c: Control| pretty(settings.key(c));
+    // Panel letters as the player has them bound (`GD-A11Y-02`): each
+    // one-letter word of a key column is a letter to look up.
+    let lk = |k: &str| -> String {
+        k.split(' ')
+            .map(|t| {
+                let (core, tail) = t.strip_suffix(',').map_or((t, ""), |c| (c, ","));
+                let mut cs = core.chars();
+                match (cs.next(), cs.next()) {
+                    (Some(c), None) if command_letters().contains(&c) => {
+                        format!("{}{tail}", settings.letter_shown(c))
+                    }
+                    _ => t.to_string(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let l = |k: &str, a: &str| (lk(k), a.to_string());
     // The general keys are the player's bindings, so the overlay cannot
     // disagree with the settings screen.
     let pan: Vec<String> = [
@@ -245,14 +263,14 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
         s("CTRL+0-9", "SAVE A GROUP, 0-9 RECALLS"),
         (key(Control::NextIdle), "NEXT IDLE VILLAGER".to_string()),
         s("RIGHT", "MOVE, GATHER, BUILD, RALLY"),
-        s("T", "STOP"),
-        s("C P G B L", "TRAIN AT A BARRACKS, RANGE, STABLE"),
+        l("T", "STOP"),
+        l("C P G B L", "TRAIN AT A BARRACKS, RANGE, STABLE"),
         s("RIGHT", "ON AN ENEMY: ATTACK"),
         s("RIGHT", "ON A TOWER OR TOWN CENTER: GARRISON"),
-        s("T", "AT A BUILDING: ALL OUT"),
-        s("A, P", "ATTACK-MOVE, PATROL, THEN CLICK"),
-        s("Q E I K", "STANCE, AGGRESSIVE TO PASSIVE"),
-        s("Z", "NEXT FORMATION"),
+        l("T", "AT A BUILDING: ALL OUT"),
+        l("A, P", "ATTACK-MOVE, PATROL, THEN CLICK"),
+        l("Q E I K", "STANCE, AGGRESSIVE TO PASSIVE"),
+        l("Z", "NEXT FORMATION"),
         (key(Control::Dismiss), "DISMISS".to_string()),
         (key(Control::Pause), "PAUSE".to_string()),
         (
@@ -312,6 +330,7 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
     orders.push(s("R", "AUTO-RESEED ON, OFF"));
     orders.push(s("X", "UNQUEUE, OR CANCEL PLACING"));
     orders.push(s("SHIFT", "KEEP PLACING"));
+    let orders = orders.into_iter().map(|(k, a)| (lk(&k), a)).collect();
     [general, orders]
 }
 
@@ -404,6 +423,17 @@ impl<'a> Painter<'a> {
 
     /// A labelled button. Greyed when disabled; lit when hovered.
     pub fn button(&mut self, b: &Button, hover: bool) {
+        let key = if b.hotkey == ' ' {
+            String::new()
+        } else {
+            b.hotkey.to_string()
+        };
+        self.button_keyed(b, hover, &key);
+    }
+
+    /// A labelled button showing `key` in its corner, the key its letter
+    /// is bound to (`GD-A11Y-02`); nothing for none.
+    pub fn button_keyed(&mut self, b: &Button, hover: bool, key: &str) {
         let (fill, ink) = if !b.enabled {
             (GREY_DARK, Ink::White)
         } else if hover {
@@ -417,10 +447,10 @@ impl<'a> Painter<'a> {
         let label = fit(&b.label, b.w - 8.0);
         self.text_in(b.x + 4.0, b.y + 5.0, &label, ink, 1.0);
         // A button without a key (the Town Center) shows none.
-        let key = if b.hotkey == ' ' {
+        let key = if key.is_empty() {
             String::new()
         } else {
-            format!("({})", b.hotkey)
+            format!("({key})")
         };
         let kw = font::width(&key) as f32;
         let cost = fit(&b.cost, b.w - kw - 10.0);
@@ -1617,9 +1647,21 @@ impl Hud {
             input.targeting,
             input.defences,
         );
-        for (n, d) in defs.into_iter().take(GRID_COLS * GRID_ROWS).enumerate() {
+        for (n, mut d) in defs.into_iter().take(GRID_COLS * GRID_ROWS).enumerate() {
             let col = (n % GRID_COLS) as f32;
             let row = (n / GRID_COLS) as f32;
+            // The key the letter is bound to, on the button and in the
+            // tooltip's first line (`GD-A11Y-02`).
+            let shown = if d.hotkey == ' ' {
+                String::new()
+            } else {
+                input.settings.letter_shown(d.hotkey)
+            };
+            if let Some(first) = d.tip.first_mut() {
+                if let Some(name) = first.strip_suffix(&format!("({})", d.hotkey)) {
+                    *first = format!("{name}({shown})");
+                }
+            }
             let b = Button {
                 x: grid_x + col * (bw + BUTTON_GAP),
                 y: py + 10.0 + row * (BUTTON_H + BUTTON_GAP),
@@ -1635,7 +1677,7 @@ impl Hud {
                 lacks: d.lacks,
             };
             let lit = hover.is_some_and(|(hx, hy)| b.contains(hx, hy));
-            p.button(&b, lit);
+            p.button_keyed(&b, lit, &shown);
             buttons.push(b);
         }
         // The line under the grid: the hovered button's story, else what

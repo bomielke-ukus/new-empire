@@ -218,7 +218,25 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
             )
         }
         "settings" => (
-            shell::settings_screen(&atlas, &input, &Settings::default(), None, None),
+            shell::settings_screen(
+                &atlas,
+                &input,
+                &Settings::default(),
+                shell::SettingsPage::Keys,
+                None,
+                None,
+            ),
+            None,
+        ),
+        "settings-letters" => (
+            shell::settings_screen(
+                &atlas,
+                &input,
+                &Settings::default(),
+                shell::SettingsPage::Letters,
+                None,
+                None,
+            ),
             None,
         ),
         other => return Err(format!("--screen {other}: title, setup, load or settings")),

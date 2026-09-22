@@ -149,6 +149,11 @@ pub struct Settings {
     pub hints: bool,
     /// How often each hint has been shown, by its name; at most twice.
     pub hints_shown: BTreeMap<String, u8>,
+    /// Panel letters moved to other keys (`GD-A11Y-02`), by the letter,
+    /// each to a key by the name `winit` prints. A letter left out
+    /// answers to its own key. Every letter keeps its meaning on every
+    /// panel; only the key that presses it moves.
+    pub letters: BTreeMap<char, String>,
 }
 
 /// The volumes out of the box: everything full, the music under it.
@@ -169,6 +174,7 @@ impl Default for Settings {
             volumes: DEFAULT_VOLUMES,
             hints: true,
             hints_shown: BTreeMap::new(),
+            letters: BTreeMap::new(),
         }
     }
 }
@@ -196,22 +202,71 @@ impl Settings {
         if key.starts_with("Digit") {
             return Err("DIGITS ARE THE CONTROL GROUPS".to_string());
         }
-        if let Some(rest) = key.strip_prefix("Key") {
-            let mut chars = rest.chars();
-            if let (Some(letter), None) = (chars.next(), chars.next()) {
-                // The pan keys may take a panel's letter: they are held,
-                // not pressed, and they win in the key handler, so binding
-                // WASD to pan takes `A` from attack-move (`docs/07` D26).
-                if command_letters().contains(&letter) && !control.pans() {
-                    return Err(format!("{letter} IS A COMMAND KEY ON THE PANELS"));
-                }
-            }
+        // The pan keys may take a panel letter's key: they are held, not
+        // pressed, and they win in the key handler, so binding WASD to pan
+        // takes `A` from attack-move (`docs/07` D26) until the letter is
+        // moved to another key.
+        if self.letter_for(key).is_some() && !control.pans() {
+            return Err(format!("{} IS A COMMAND KEY ON THE PANELS", pretty(key)));
         }
         if let Some(other) = self.control(key).filter(|o| *o != control) {
             return Err(format!("{} IS {}", pretty(key), other.name()));
         }
         self.bindings.insert(control, key.to_string());
         Ok(())
+    }
+
+    /// The key a panel letter answers to (`GD-A11Y-02`).
+    pub fn letter_key(&self, letter: char) -> String {
+        self.letters
+            .get(&letter)
+            .cloned()
+            .unwrap_or_else(|| format!("Key{letter}"))
+    }
+
+    /// The panel letter a key presses, if any.
+    pub fn letter_for(&self, key: &str) -> Option<char> {
+        command_letters()
+            .into_iter()
+            .find(|l| self.letter_key(*l) == key)
+    }
+
+    /// A panel letter's key as a screen shows it.
+    pub fn letter_shown(&self, letter: char) -> String {
+        pretty(&self.letter_key(letter))
+    }
+
+    /// Moves a panel letter to a key. A key another letter holds is
+    /// swapped with it, so every letter keeps a key of its own and no
+    /// panel can have two commands on one key. Refused, with the reason:
+    /// Escape, a digit, and a key a general control holds.
+    pub fn bind_letter(&mut self, letter: char, key: &str) -> Result<(), String> {
+        if !command_letters().contains(&letter) {
+            return Err(format!("{letter} IS NOT A PANEL LETTER"));
+        }
+        if key == "Escape" {
+            return Err("ESCAPE IS THE MENU".to_string());
+        }
+        if key.starts_with("Digit") {
+            return Err("DIGITS ARE THE CONTROL GROUPS".to_string());
+        }
+        if let Some(c) = self.control(key) {
+            return Err(format!("{} IS {}", pretty(key), c.name()));
+        }
+        let old = self.letter_key(letter);
+        if let Some(other) = self.letter_for(key).filter(|o| *o != letter) {
+            self.set_letter(other, &old);
+        }
+        self.set_letter(letter, key);
+        Ok(())
+    }
+
+    fn set_letter(&mut self, letter: char, key: &str) {
+        if key == format!("Key{letter}") {
+            self.letters.remove(&letter);
+        } else {
+            self.letters.insert(letter, key.to_string());
+        }
     }
 
     /// A bus's volume, percent.
@@ -390,5 +445,55 @@ mod tests {
         assert_eq!(pretty("Space"), "SPACE");
         assert_eq!(pretty("F12"), "F12");
         assert_eq!(pretty("Digit4"), "4");
+    }
+
+    /// Every panel letter can be moved to another key (`GD-A11Y-02`): a
+    /// key another letter holds is swapped, so no two letters share one;
+    /// a general key, Escape and a digit are refused; and the general
+    /// keys may then take a key a letter has left.
+    ///
+    /// REQ: GD-A11Y-02
+    #[test]
+    fn panel_letters_move_to_other_keys_and_swap_rather_than_collide() {
+        let mut s = Settings::default();
+        assert_eq!(s.letter_key('H'), "KeyH");
+        assert_eq!(s.letter_for("KeyH"), Some('H'));
+        assert_eq!(s.bind_letter('H', "F6"), Ok(()));
+        assert_eq!(s.letter_for("F6"), Some('H'));
+        assert_eq!(s.letter_for("KeyH"), None, "H's old key is free");
+        assert_eq!(s.letter_shown('H'), "F6");
+        // Onto a key another letter holds: the two swap.
+        assert_eq!(s.bind_letter('B', "F6"), Ok(()));
+        assert_eq!(s.letter_key('B'), "F6");
+        assert_eq!(s.letter_key('H'), "KeyB");
+        let keys: std::collections::BTreeSet<String> = command_letters()
+            .into_iter()
+            .map(|l| s.letter_key(l))
+            .collect();
+        assert_eq!(keys.len(), command_letters().len(), "one key per letter");
+        assert_eq!(
+            s.bind_letter('H', "Space"),
+            Err("SPACE IS PAUSE".to_string())
+        );
+        assert!(s.bind_letter('H', "Escape").is_err());
+        assert!(s.bind_letter('H', "Digit4").is_err());
+        assert!(s.bind_letter('W', "F7").is_err(), "W is no panel's");
+        // A general key may take the key a letter left behind, and not
+        // one a letter still holds.
+        s.bind_letter('X', "F8").unwrap();
+        assert_eq!(s.bind(Control::Faster, "KeyX"), Ok(()));
+        assert!(s
+            .bind(Control::Faster, "F8")
+            .unwrap_err()
+            .contains("COMMAND KEY"));
+        // Moved back to its own key, a letter leaves the file.
+        s.bind_letter('X', "KeyX").unwrap_err();
+        s.bind(Control::Faster, "BracketRight").unwrap();
+        s.bind_letter('X', "KeyX").unwrap();
+        assert!(!s.letters.contains_key(&'X'));
+        let text = s.to_ron().unwrap();
+        assert_eq!(Settings::from_ron(&text).unwrap(), s);
+        s.reset();
+        assert!(s.letters.is_empty());
     }
 }

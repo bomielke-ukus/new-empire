@@ -1289,6 +1289,35 @@ positional ambient beds, each its own commit.
 - `crates/app`: R on selected farms sets them all to the opposite of the
   first's. One app test.
 
+### Work record: playtest-4 — rebindable panel letters (2026-09-22)
+
+`docs/02` `GD-A11Y-02` asks for full key rebinding; until now the
+settings screen moved the seventeen general keys and the panels' command
+letters were fixed.
+
+- `crates/view` settings: `Settings::letters` maps a letter to the key
+  it has moved to; a letter left out answers to its own key, so older
+  files load unchanged. `letter_key`, `letter_for`, `letter_shown`,
+  `bind_letter`. A letter keeps its meaning on every panel; only its key
+  moves. Onto a key another letter holds, the two swap, so no panel can
+  have two commands on one key. Escape, a digit and a key a general
+  control holds are refused with the reason. A general control is
+  refused a key a letter answers to (the pan keys excepted, as before,
+  `docs/07` D26), and may take one a letter has left. One unit test.
+- `crates/view` shell: the settings screen has two pages, the general
+  keys and PANEL LETTERS (A to Z in two columns, each with CHANGE),
+  switched by a button at its top right. Capture is per control or per
+  letter (`Capture`).
+- `crates/view` HUD: a button's key corner, its tooltip's first line and
+  the controls overlay's letter rows show the key the letter answers to.
+- `crates/app`: a key press finds its letter through the settings; `F4`
+  opens the timings only while no letter has moved onto it. One app test:
+  H moved to F6 on the screen and kept in the file, Space refused for B
+  with the reason, then in a match F6 places a house, H does nothing, and
+  the button's tooltip and the overlay say F6.
+- `tools/mapview`: a `settings-letters` screen and golden; the settings
+  screen golden rebaked for the PANEL LETTERS button.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1478,10 +1507,6 @@ complete without them, and the owner decides when and by whom.
 
 Stated so they are not rediscovered.
 
-- **The panels' command letters are not rebindable** (`GD-A11Y-02`):
-  the settings screen rebinds the seventeen general keys only. Full
-  rebinding needs a per-command capture flow and the HUD's tables read
-  through the bindings.
 - **Every sound is a placeholder** (`docs/07` Q7): synthesised tones and
   noise, the stems and the beds included. Recordings under
   `assets/sounds/<cue>/`, `stem-<age>/`, `stem-combat/` and `bed-<kind>/`

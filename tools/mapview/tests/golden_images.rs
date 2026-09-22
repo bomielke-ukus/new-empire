@@ -77,6 +77,19 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The settings screen's second page (`GD-A11Y-02`): every panel
+        // letter with the key it answers to and a CHANGE button.
+        name: "settings-letters",
+        args: &[
+            "--screen",
+            "settings-letters",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The actual acceptance replay, during contact between the two armies.
         name: "battle-40v40",
         args: &[

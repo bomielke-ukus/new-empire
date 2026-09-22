@@ -36,7 +36,9 @@ pub use notify::{Notice, NoticeKind, Notices};
 pub use perf::{Meter, Readout};
 pub use scene::{Ghost, Scene, SceneOptions, SpriteInstance, Sweep, SWEEP_MS};
 pub use settings::{Control, Settings};
-pub use shell::{LoadRow, Screen, Setup, ShellAction, ShellButton, ShellInput};
+pub use shell::{
+    Capture, LoadRow, Screen, SettingsPage, Setup, ShellAction, ShellButton, ShellInput,
+};
 pub use sprites::{Anim, Atlas, Frame, Ink};
 pub use terrain::{ChunkMesh, TerrainVertex, CHUNK_TILES};
 

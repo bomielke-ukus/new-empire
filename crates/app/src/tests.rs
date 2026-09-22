@@ -776,7 +776,7 @@ fn settings_are_edited_on_their_screen_kept_at_once_and_read_back() {
     assert!(app.settings.fullscreen);
     // Rebind PAUSE: CHANGE, then the key; the row says it is waiting.
     press(&mut app, ShellAction::Rebind(Control::Pause));
-    assert_eq!(app.capturing, Some(Control::Pause));
+    assert_eq!(app.capturing, Some(view::Capture::Control(Control::Pause)));
     draw(&mut app);
     assert!(!shell_button(&app, ShellAction::Rebind(Control::Pause)).enabled);
     assert!(!app.keyboard_input(KeyCode::F6, ElementState::Pressed, false));
@@ -1801,6 +1801,57 @@ fn r_on_a_farm_flips_that_farm_and_on_the_town_center_every_farm() {
         "all off"
     );
     assert!(pl.reseed_exceptions.is_empty());
+}
+
+/// A panel letter is moved on the settings screen's second page, kept in
+/// the file, and answers in a match to its new key and not its old one;
+/// the button shows the new key (`GD-A11Y-02`).
+///
+/// REQ: GD-A11Y-02
+#[test]
+fn a_panel_letter_moved_on_the_settings_screen_answers_to_its_new_key() {
+    let mut app = app();
+    let path = app.settings_path.clone();
+    app.shell = Shell::Title;
+    press(&mut app, ShellAction::Settings);
+    press(
+        &mut app,
+        ShellAction::SettingsPage(view::SettingsPage::Letters),
+    );
+    press(&mut app, ShellAction::RebindLetter('H'));
+    assert_eq!(app.capturing, Some(view::Capture::Letter('H')));
+    assert!(!app.keyboard_input(KeyCode::F6, ElementState::Pressed, false));
+    assert_eq!(app.capturing, None);
+    assert_eq!(app.settings.letter_key('H'), "F6");
+    assert!(std::fs::read_to_string(&path).unwrap().contains("F6"));
+    // A key a general control holds is refused, with the reason.
+    press(&mut app, ShellAction::RebindLetter('B'));
+    app.keyboard_input(KeyCode::Space, ElementState::Pressed, false);
+    assert!(app.settings_error.as_deref().unwrap().contains("PAUSE"));
+    assert_eq!(app.settings.letter_key('B'), "KeyB");
+
+    // In a match: F6 places a house, H does nothing, the button says F6.
+    app.shell = Shell::Match;
+    let v = spawn(&mut app, kinds::VILLAGER, 10, 10);
+    app.selection.set(vec![v]);
+    draw(&mut app);
+    let house = app
+        .hud
+        .buttons
+        .iter()
+        .find(|b| b.action == Action::Build(kinds::HOUSE))
+        .unwrap()
+        .clone();
+    assert_eq!(house.hotkey, 'H', "the letter stays the command's");
+    assert!(house.tip[0].ends_with("(F6)"), "{:?}", house.tip);
+    app.keyboard_input(KeyCode::KeyH, ElementState::Pressed, false);
+    assert_eq!(app.build_mode, None, "H is free now");
+    app.keyboard_input(KeyCode::F6, ElementState::Pressed, false);
+    assert_eq!(app.build_mode, Some(kinds::HOUSE));
+    let [_, orders] = view::hud::controls(&app.settings);
+    assert!(orders
+        .iter()
+        .any(|(k, what)| k == "F6" && what.contains("HOUSE")));
 }
 
 fn on_screen(app: &App, x: f32, y: f32, lift: f32) -> (f32, f32) {

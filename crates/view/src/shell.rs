@@ -215,6 +215,25 @@ fn cycle<T: Copy + PartialEq>(all: &[T], current: T, delta: i32) -> T {
     all[((i + delta).rem_euclid(n)) as usize]
 }
 
+/// Which page of the settings screen is up.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SettingsPage {
+    /// The settings, the volumes and the general keys.
+    #[default]
+    Keys,
+    /// The command panels' letters (`GD-A11Y-02`).
+    Letters,
+}
+
+/// What the settings screen is waiting for a new key for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Capture {
+    /// A general control.
+    Control(Control),
+    /// A panel letter.
+    Letter(char),
+}
+
 /// What a shell button does when clicked.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ShellAction {
@@ -258,6 +277,10 @@ pub enum ShellAction {
     ToggleFullscreen,
     /// Settings: wait for a new key for this control.
     Rebind(Control),
+    /// Settings: wait for a new key for this panel letter.
+    RebindLetter(char),
+    /// Settings: show this page.
+    SettingsPage(SettingsPage),
     /// Settings: everything back to the defaults.
     ResetSettings,
     /// Settings: a bus's volume, a step of ten percent up or down.
@@ -728,6 +751,89 @@ fn kind_name(kind: MapKind) -> String {
     }
 }
 
+/// The settings screen's second page (`GD-A11Y-02`): every letter the
+/// command panels use, the key it is bound to, and CHANGE; the footer
+/// shared with the first page.
+fn letters_page(
+    s: &mut Sheet<'_>,
+    settings: &Settings,
+    capturing: Option<Capture>,
+    error: Option<&str>,
+    (x, y, pw, ph): (f32, f32, f32, f32),
+) {
+    let letters: Vec<char> = crate::hud::command_letters().into_iter().collect();
+    let per_column = letters.len().div_ceil(2);
+    let col_w = (pw - 32.0) / 2.0;
+    s.p.text_in(
+        x + 16.0,
+        y + 40.0 + (ROW_H - 7.0) / 2.0 - 1.0,
+        "PANEL LETTERS",
+        Ink::Gold,
+        1.0,
+    );
+    for (n, &letter) in letters.iter().enumerate() {
+        let cx = x + 16.0 + (n / per_column) as f32 * col_w;
+        let ry = y + 40.0 + ROW_H * (1 + n % per_column) as f32;
+        let ty = ry + (ROW_H - 7.0) / 2.0 - 1.0;
+        s.p.text(cx, ty, &format!("LETTER {letter}"), false, 1.0);
+        let waiting = capturing == Some(Capture::Letter(letter));
+        let value = if waiting {
+            "PRESS A KEY".to_string()
+        } else {
+            settings.letter_shown(letter)
+        };
+        s.centred(cx + 160.0, ty, &value, Ink::Gold, 1.0);
+        s.button(
+            (cx + 230.0, ry + (ROW_H - STEP_H) / 2.0, 70.0, STEP_H),
+            ShellAction::RebindLetter(letter),
+            "CHANGE",
+            !waiting,
+            "",
+        );
+    }
+    let ry = y + 40.0 + ROW_H * (per_column + 1) as f32 + 4.0;
+    let note = if capturing.is_some() {
+        "PRESS THE NEW KEY. ESC KEEPS THE OLD ONE."
+    } else {
+        "A LETTER KEEPS ITS MEANING ON EVERY PANEL. A KEY ANOTHER LETTER HOLDS IS SWAPPED."
+    };
+    s.centred(x + pw / 2.0, ry, note, Ink::White, 1.0);
+    if let Some(e) = error {
+        let text = fit(&e.to_uppercase(), pw - 32.0);
+        let tw = font::width(&text) as f32;
+        let ex = (x + (pw - tw) / 2.0).round() - 4.0;
+        s.p.rect(ex, ry + 12.0, tw + 8.0, 11.0, RED_DARK, 0);
+        s.p.text(ex + 4.0, ry + 14.0, &text, false, 1.0);
+    }
+    footer(s, x, y, pw, ph);
+}
+
+/// BACK, DEFAULTS and the line between them, at the foot of either page.
+fn footer(s: &mut Sheet<'_>, x: f32, y: f32, pw: f32, ph: f32) {
+    let by = y + ph - 16.0 - 26.0;
+    s.button(
+        (x + 16.0, by, 120.0, 26.0),
+        ShellAction::Back,
+        "BACK",
+        true,
+        "",
+    );
+    s.button(
+        (x + pw - 16.0 - 120.0, by, 120.0, 26.0),
+        ShellAction::ResetSettings,
+        "DEFAULTS",
+        true,
+        "",
+    );
+    s.centred(
+        x + pw / 2.0,
+        by + 10.0,
+        "CHANGES ARE KEPT AT ONCE. ESC: BACK",
+        Ink::White,
+        1.0,
+    );
+}
+
 /// The settings screen (`GD-A11Y-02`): the HUD size, edge scrolling, the
 /// window mode, and every general key with a CHANGE button. `capturing`
 /// is the control waiting for its new key; `error` is why the last key
@@ -736,7 +842,8 @@ pub fn settings_screen(
     atlas: &Atlas,
     input: &ShellInput,
     settings: &Settings,
-    capturing: Option<Control>,
+    page: SettingsPage,
+    capturing: Option<Capture>,
     error: Option<&str>,
 ) -> Screen {
     let mut s = Sheet::new(atlas, input);
@@ -749,6 +856,26 @@ pub fn settings_screen(
     let y = ((s.vh - ph) / 2.0).max(4.0).round();
     s.panel(x, y, pw, ph);
     s.centred(x + pw / 2.0, y + 10.0, "SETTINGS", Ink::Gold, 2.0);
+    // The other page, from the top right.
+    let (other, other_label) = match page {
+        SettingsPage::Keys => (SettingsPage::Letters, "PANEL LETTERS"),
+        SettingsPage::Letters => (SettingsPage::Keys, "GENERAL KEYS"),
+    };
+    s.button(
+        (x + pw - 16.0 - 130.0, y + 8.0, 130.0, 20.0),
+        ShellAction::SettingsPage(other),
+        other_label,
+        true,
+        "",
+    );
+    if page == SettingsPage::Letters {
+        letters_page(&mut s, settings, capturing, error, (x, y, pw, ph));
+        return s.finish(None);
+    }
+    let capturing = match capturing {
+        Some(Capture::Control(c)) => Some(c),
+        _ => None,
+    };
     let (label_x, minus_x, value_x, value_w) = (x + 16.0, x + 236.0, x + 260.0, 140.0);
     let mut ry = y + 40.0;
     // One row: the label, a step button, the value, a step or CHANGE
@@ -875,7 +1002,7 @@ pub fn settings_screen(
     let note = if capturing.is_some() {
         "PRESS THE NEW KEY. ESC KEEPS THE OLD ONE."
     } else {
-        "DIGITS AND ESC CANNOT BE TAKEN; ONLY THE PAN KEYS MAY TAKE A PANEL'S LETTER."
+        "DIGITS AND ESC CANNOT BE TAKEN; ONLY A PAN KEY MAY TAKE A PANEL LETTER."
     };
     s.centred(x + pw / 2.0, ry + 4.0, note, Ink::White, 1.0);
     if let Some(e) = error {
@@ -885,28 +1012,7 @@ pub fn settings_screen(
         s.p.rect(ex, ry + 16.0, tw + 8.0, 11.0, RED_DARK, 0);
         s.p.text(ex + 4.0, ry + 18.0, &text, false, 1.0);
     }
-    let by = y + ph - 16.0 - 26.0;
-    s.button(
-        (x + 16.0, by, 120.0, 26.0),
-        ShellAction::Back,
-        "BACK",
-        true,
-        "",
-    );
-    s.button(
-        (x + pw - 16.0 - 120.0, by, 120.0, 26.0),
-        ShellAction::ResetSettings,
-        "DEFAULTS",
-        true,
-        "",
-    );
-    s.centred(
-        x + pw / 2.0,
-        by + 10.0,
-        "CHANGES ARE KEPT AT ONCE. ESC: BACK",
-        Ink::White,
-        1.0,
-    );
+    footer(&mut s, x, y, pw, ph);
     s.finish(None)
 }
 
@@ -1382,7 +1488,7 @@ mod tests {
     fn the_settings_screen_lists_every_control_with_its_key() {
         let atlas = Atlas::placeholder();
         let mut settings = Settings::default();
-        let plain = settings_screen(&atlas, &input(), &settings, None, None);
+        let plain = settings_screen(&atlas, &input(), &settings, SettingsPage::Keys, None, None);
         assert!(find(&plain, ShellAction::SettingScale(-1)).enabled);
         assert!(find(&plain, ShellAction::SettingScale(1)).enabled);
         assert!(find(&plain, ShellAction::ToggleEdgeScroll).enabled);
@@ -1406,6 +1512,7 @@ mod tests {
                     ..input()
                 },
                 &settings,
+                SettingsPage::Keys,
                 None,
                 None
             ),
@@ -1414,7 +1521,14 @@ mod tests {
                 ..input()
             }
         ));
-        let waiting = settings_screen(&atlas, &input(), &settings, Some(Control::Pause), None);
+        let waiting = settings_screen(
+            &atlas,
+            &input(),
+            &settings,
+            SettingsPage::Keys,
+            Some(Capture::Control(Control::Pause)),
+            None,
+        );
         assert!(!find(&waiting, ShellAction::Rebind(Control::Pause)).enabled);
         assert!(find(&waiting, ShellAction::Rebind(Control::Faster)).enabled);
         settings.bind(Control::Pause, "F6").unwrap();
@@ -1422,10 +1536,32 @@ mod tests {
             &atlas,
             &input(),
             &settings,
+            SettingsPage::Keys,
             None,
             Some("H IS A COMMAND KEY ON THE PANELS"),
         );
         assert!(refused.sprites.len() > plain.sprites.len() + 20);
+        // The second page: a CHANGE per panel letter, the one waiting
+        // greyed, and the way back to the first.
+        assert!(find(&plain, ShellAction::SettingsPage(SettingsPage::Letters)).enabled);
+        let letters = settings_screen(
+            &atlas,
+            &input(),
+            &settings,
+            SettingsPage::Letters,
+            Some(Capture::Letter('H')),
+            None,
+        );
+        for l in crate::hud::command_letters() {
+            assert_eq!(
+                find(&letters, ShellAction::RebindLetter(l)).enabled,
+                l != 'H',
+                "{l}"
+            );
+        }
+        assert!(find(&letters, ShellAction::SettingsPage(SettingsPage::Keys)).enabled);
+        assert!(find(&letters, ShellAction::Back).enabled);
+        assert!(inside(&letters, &input()));
     }
 
     /// The load screen lists a button per save, newest first as given,

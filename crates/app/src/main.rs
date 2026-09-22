@@ -39,8 +39,9 @@ use view::hud::{Action, BOTTOM_PANEL, TOP_BAR};
 use view::minimap::{Minimap, MinimapRect};
 use view::shell::{self, Results, Side};
 use view::{
-    Atlas, Camera, Control, FogLights, Ghost, Hud, HudInput, LoadRow, Notice, NoticeKind, Notices,
-    Scene, SceneOptions, Screen, Settings, Setup, ShellAction, ShellInput, Sweep, SWEEP_MS,
+    Atlas, Camera, Capture, Control, FogLights, Ghost, Hud, HudInput, LoadRow, Notice, NoticeKind,
+    Notices, Scene, SceneOptions, Screen, Settings, SettingsPage, Setup, ShellAction, ShellInput,
+    Sweep, SWEEP_MS,
 };
 
 /// How long "SAVED ..." stays up, in ms.
@@ -244,8 +245,11 @@ struct App {
     settings: Settings,
     /// Where they are kept.
     settings_path: PathBuf,
-    /// The control waiting for its new key on the settings screen.
-    capturing: Option<Control>,
+    /// The control or panel letter waiting for its new key on the
+    /// settings screen.
+    capturing: Option<Capture>,
+    /// Which page of the settings screen is up.
+    settings_page: SettingsPage,
     /// Why the last key was refused, or the file could not be written.
     settings_error: Option<String>,
     /// The notification stack (`docs/03` §6.3).
@@ -467,6 +471,7 @@ impl App {
             settings: Settings::default(),
             settings_path: data_dir("NEW_EMPIRE_SETTINGS", "settings.ron"),
             capturing: None,
+            settings_page: SettingsPage::Keys,
             settings_error: None,
             notices: Notices::default(),
             last_researched: 0,
@@ -561,14 +566,16 @@ impl App {
         self.save_settings();
     }
 
-    /// The settings screen's new key for the control being rebound: a
-    /// pan key must be one the camera can read while held.
-    fn capture_key(&mut self, control: Control, code: KeyCode) {
+    /// The settings screen's new key for the control or panel letter
+    /// being rebound: a pan key must be one the camera can read while held.
+    fn capture_key(&mut self, what: Capture, code: KeyCode) {
         let name = keys::name(code);
-        let bound = if control.pans() && keys::code(&name).is_none() {
-            Err(format!("{} CANNOT PAN", view::settings::pretty(&name)))
-        } else {
-            self.settings.bind(control, &name)
+        let bound = match what {
+            Capture::Control(control) if control.pans() && keys::code(&name).is_none() => {
+                Err(format!("{} CANNOT PAN", view::settings::pretty(&name)))
+            }
+            Capture::Control(control) => self.settings.bind(control, &name),
+            Capture::Letter(letter) => self.settings.bind_letter(letter, &name),
         };
         self.capturing = None;
         match bound {
@@ -1273,6 +1280,7 @@ impl App {
                 &self.atlas,
                 &input,
                 &self.settings,
+                self.settings_page,
                 self.capturing,
                 self.settings_error.as_deref(),
             ),
@@ -1511,7 +1519,17 @@ impl App {
             ShellAction::Watch(row) => self.watch_replay(row),
             ShellAction::Settings => {
                 self.shell = Shell::Settings;
+                self.settings_page = SettingsPage::Keys;
                 self.capturing = None;
+                self.settings_error = None;
+            }
+            ShellAction::SettingsPage(page) => {
+                self.settings_page = page;
+                self.capturing = None;
+                self.settings_error = None;
+            }
+            ShellAction::RebindLetter(letter) => {
+                self.capturing = Some(Capture::Letter(letter));
                 self.settings_error = None;
             }
             ShellAction::SettingScale(delta) => {
@@ -1535,7 +1553,7 @@ impl App {
                 self.apply_and_save_settings();
             }
             ShellAction::Rebind(control) => {
-                self.capturing = Some(control);
+                self.capturing = Some(Capture::Control(control));
                 self.settings_error = None;
             }
             ShellAction::ResetSettings => {
@@ -2225,7 +2243,7 @@ impl App {
             Shell::Settings => {
                 match (self.capturing, code) {
                     (Some(_), KeyCode::Escape) => self.capturing = None,
-                    (Some(control), code) => self.capture_key(control, code),
+                    (Some(what), code) => self.capture_key(what, code),
                     (None, KeyCode::Escape) => self.shell_action(ShellAction::Back),
                     _ => {}
                 }
@@ -2252,7 +2270,10 @@ impl App {
         }
         // The performance readout is a meter, not a control: `F4` unless
         // the player has bound `F4` to something.
-        if code == KeyCode::F4 && self.settings.control("F4").is_none() {
+        if code == KeyCode::F4
+            && self.settings.control("F4").is_none()
+            && self.settings.letter_for("F4").is_none()
+        {
             self.show_perf = !self.show_perf;
             return false;
         }
@@ -2382,7 +2403,9 @@ impl App {
                     }
                 }
                 code => {
-                    if let Some(ch) = letter(code) {
+                    // A panel letter by the key the player bound it to
+                    // (`GD-A11Y-02`).
+                    if let Some(ch) = self.settings.letter_for(&keys::name(code)) {
                         if self.playback.is_none() {
                             self.hotkey(ch);
                         }
@@ -2455,39 +2478,6 @@ fn gatherable_by_me(sim: &Simulation, i: usize) -> bool {
 fn huntable_by_me(sim: &Simulation, i: usize) -> bool {
     let world = sim.world();
     world.owner[i] == kinds::GAIA && world.dying[i] == 0 && kinds::huntable(world.kind[i])
-}
-
-/// The letter a key carries, for command hotkeys.
-fn letter(code: KeyCode) -> Option<char> {
-    Some(match code {
-        KeyCode::KeyA => 'A',
-        KeyCode::KeyB => 'B',
-        KeyCode::KeyC => 'C',
-        KeyCode::KeyD => 'D',
-        KeyCode::KeyE => 'E',
-        KeyCode::KeyF => 'F',
-        KeyCode::KeyG => 'G',
-        KeyCode::KeyH => 'H',
-        KeyCode::KeyI => 'I',
-        KeyCode::KeyJ => 'J',
-        KeyCode::KeyK => 'K',
-        KeyCode::KeyL => 'L',
-        KeyCode::KeyM => 'M',
-        KeyCode::KeyN => 'N',
-        KeyCode::KeyO => 'O',
-        KeyCode::KeyP => 'P',
-        KeyCode::KeyQ => 'Q',
-        KeyCode::KeyR => 'R',
-        KeyCode::KeyS => 'S',
-        KeyCode::KeyT => 'T',
-        KeyCode::KeyU => 'U',
-        KeyCode::KeyV => 'V',
-        KeyCode::KeyW => 'W',
-        KeyCode::KeyX => 'X',
-        KeyCode::KeyY => 'Y',
-        KeyCode::KeyZ => 'Z',
-        _ => return None,
-    })
 }
 
 impl ApplicationHandler for App {
