@@ -20,16 +20,33 @@ fn camera_keys_pan_without_building_or_spending_and_release_stops_panning() {
         app.selection.set(selection);
         let selection = app.selection.ids.clone();
         draw(&mut app);
-        for code in [
-            KeyCode::KeyW,
-            KeyCode::KeyA,
-            KeyCode::KeyS,
-            KeyCode::KeyD,
+        // The arrows pan out of the box; WASD once bound to it, which is
+        // what the second half of the list is, so both are checked.
+        for (n, code) in [
             KeyCode::ArrowUp,
             KeyCode::ArrowLeft,
             KeyCode::ArrowDown,
             KeyCode::ArrowRight,
-        ] {
+            KeyCode::KeyW,
+            KeyCode::KeyA,
+            KeyCode::KeyS,
+            KeyCode::KeyD,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if n == 4 {
+                for (control, key) in [
+                    (Control::PanUp, "KeyW"),
+                    (Control::PanLeft, "KeyA"),
+                    (Control::PanDown, "KeyS"),
+                    (Control::PanRight, "KeyD"),
+                ] {
+                    app.settings.bind(control, key).unwrap();
+                }
+                app.apply_settings();
+                draw(&mut app);
+            }
             let commands = app.sim.replay().commands.len();
             let stockpile = app.sim.player(ME).unwrap().stockpile;
             app.camera.look_at_tile(24.0, 24.0);
@@ -804,7 +821,7 @@ fn settings_are_edited_on_their_screen_kept_at_once_and_read_back() {
     assert!(!app.clock.paused(), "Space is nobody's now");
     let [general, _] = view::hud::controls(&app.settings);
     assert!(general.contains(&("F6".to_string(), "PAUSE".to_string())));
-    assert!(general.iter().any(|(k, _)| k == "WASD"));
+    assert!(general.iter().any(|(k, _)| k == "ARROWS"));
     // A missing file is not an error; a broken one reports and defaults.
     let mut none = App::new();
     none.settings_path = dir.join("nothing.ron");
@@ -1415,9 +1432,17 @@ fn soldiers_attack_move_patrol_and_change_stance_from_the_panel() {
     app.camera.look_at_tile(12.0, 10.0);
     draw(&mut app);
 
-    // Attack-move: the button arms targeting, a click on the ground fires.
+    // Attack-move is `A` (`UX-CMD-02`), which no longer pans: the arrows
+    // do by default. The key arms targeting, as the button does.
+    assert!(!app.input.is_pan_key(KeyCode::KeyA), "A is not a pan key");
+    assert!(app.input.is_pan_key(KeyCode::ArrowLeft));
+    assert!(app.hotkey('A'), "A arms attack-move");
+    assert_eq!(app.targeting, Some(Targeting::AttackMove));
+    app.targeting = None;
+    // The button arms targeting, a click on the ground fires.
     let commands = app.sim.replay().commands.len();
     let attack_move = button(&app, "ATTACK MOVE");
+    assert_eq!(attack_move.hotkey, 'A');
     click(&mut app, &attack_move);
     assert_eq!(app.targeting, Some(Targeting::AttackMove));
     draw(&mut app);

@@ -1218,6 +1218,15 @@ each its own commit.
 - Not done: the opponent does not hunt; no boar (`docs/02` §3.2), which
   fights back and is M8's.
 
+### Work record: playtest-2 — attack-move on `A` (2026-09-22)
+
+The owner's call (`docs/07` D26): the arrow keys pan by default, `A` is
+attack-move as `docs/03` `UX-CMD-02` always said, and WASD is a binding
+away on the settings screen, which then takes `A` back from attack-move.
+`Settings` defaults, the HUD's key on ATTACK MOVE, the controls overlay
+and the settings screen follow; goldens rebaked. The panel's command
+letters are still not rebindable (`GD-A11Y-02`).
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1407,7 +1416,6 @@ complete without them, and the owner decides when and by whom.
 
 Stated so they are not rediscovered.
 
-- **Attack-move is `M`**, where `docs/03` says `A`; `A` pans the camera.
 - **The panels' command letters are not rebindable** (`GD-A11Y-02`):
   the settings screen rebinds the seventeen general keys only. Full
   rebinding needs a per-command capture flow and the HUD's tables read

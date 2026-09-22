@@ -108,7 +108,7 @@ everyone's. Saves go under `NEW_EMPIRE_SAVES` and recordings under
 `~/Library/Application Support/new-empire/{saves,replays}`,
 `%APPDATA%\new-empire\{saves,replays}`).
 
-In the match: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
+In the match: edge-scroll, the arrow keys or middle-drag to pan; wheel or
 `+`/`-` to zoom, from 0.5× to 3×, about the cursor; click the minimap to
 jump; `Space` pause; `[` `]` speed; `F3` toggles edge scrolling; `F2`
 cycles the HUD size (1×, 1.5×, 2×); `Home` jumps to your Town Center;
@@ -125,8 +125,8 @@ it, at build speed, for half its cost in proportion to the damage, paid
 as the repair starts. `F4` opens a performance readout: the frame and the tick, the tick's
 phases and the budgets they are held to (`docs/04` §12), for measuring on
 real hardware. `F1` or `?` opens a controls overlay listing all of this, and the resource
-bar points at it for the first minute of a match. WASD is reserved for
-camera movement. Every one of these general keys can be rebound on the
+bar points at it for the first minute of a match. `A` is attack-move; WASD
+pans only if you bind it, which takes `A` back. Every one of these general keys can be rebound on the
 title's SETTINGS screen, which also holds the HUD size, edge scrolling, the
 window mode and the four sound volumes, kept in `settings.ron` in the game's data directory (or
 `NEW_EMPIRE_SETTINGS`); the command letters on the panels are fixed. The
