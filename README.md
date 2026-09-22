@@ -7,7 +7,7 @@ engaging, without its 1997 frustrations.
 **Status: M6 (the game shell) in progress — the game opens on a title
 screen; a skirmish is set up against one to seven computer opponents at
 four difficulties, played to a results screen, saved and loaded. The
-opponents scout, build, advance and attack, seeing only what they have
+opponents scout, build, hunt, repair, advance and attack, seeing only what they have
 scouted; every match is recorded and can be watched back; the general
 keys, HUD size, edge scrolling and window mode are settings; a stack of
 notices in the corner jumps the camera to what happened. M7, the feel

@@ -5,13 +5,15 @@
 //! share, a house ahead of the population cap, a villager from the Town
 //! Center while under the target, a Storehouse by the wood and a Barracks
 //! for the age gate, the age advance when the simulation allows it, and
-//! farms once the bushes are gone. It knows only what the view tells it,
-//! and every order goes through the same commands a player has.
+//! farms once the bushes are gone. It hunts the animals near its
+//! drop-offs and repairs its damaged buildings, as a player's villagers do
+//! (`GD-AI-02`). It knows only what the view tells it, and every order
+//! goes through the same commands a player has.
 
 use fogged::kinds::{self, Cost, Resource};
 use fogged::tech;
 use fogged::{
-    Age, CommandKind, EntityId, FoggedView, Item, Job, KindId, Rally, Rng, Sighting, Vec2Fx,
+    Age, CommandKind, EntityId, FoggedView, Fx, Item, Job, KindId, Rally, Rng, Sighting, Vec2Fx,
 };
 
 use crate::Difficulty;
@@ -47,7 +49,33 @@ pub struct BuildOrder {
     pub towers: u32,
     /// Barracks wanted: a second one trains the army twice as fast.
     pub barracks: u32,
+    /// Villagers out hunting at once, at most (`GD-AI-02`). A save from
+    /// before there was hunting reads the Standard number.
+    #[serde(default = "standard_hunters")]
+    pub hunters: u32,
 }
+
+fn standard_hunters() -> u32 {
+    2
+}
+
+/// How far from a drop-off an animal may be for the opponent to hunt it,
+/// in tiles: the herd each start is given, about ten tiles out, and not
+/// the ones across the map.
+pub const HUNT_RANGE: i32 = 12;
+
+/// Food left in the bushes and farms near home below which the opponent
+/// starts on the herd: about two bushes' worth, so the hunt begins as the
+/// home bushes give out and ends when the farms are in.
+pub const HUNT_WHEN_FOOD_BELOW: i32 = 300;
+
+/// A building is repaired once it is below this share of its health, in
+/// quarters: a scratch is not worth a villager's walk.
+const REPAIR_BELOW_QUARTERS: i32 = 3;
+
+/// An enemy soldier this close to a damaged building, in tiles, and the
+/// repair waits: villagers sent into a fight are villagers lost.
+const REPAIR_SAFE_RADIUS: i32 = 8;
 
 /// The buildings that count toward the next age, in the order they are
 /// wanted, by age index. The Storehouse also drops off wood and stone and
@@ -84,6 +112,7 @@ impl BuildOrder {
                 scouts: false,
                 towers: 0,
                 barracks: 1,
+                hunters: 1,
             },
             Difficulty::Standard => BuildOrder {
                 villagers: [8, 16, 22, 26],
@@ -103,6 +132,7 @@ impl BuildOrder {
                 scouts: true,
                 towers: 0,
                 barracks: 1,
+                hunters: 2,
             },
             Difficulty::Hard | Difficulty::Hardest => BuildOrder {
                 villagers: [10, 20, 28, 32],
@@ -122,6 +152,7 @@ impl BuildOrder {
                 scouts: true,
                 towers: 1,
                 barracks: 2,
+                hunters: 3,
             },
         }
     }
@@ -156,6 +187,9 @@ struct Node {
     pos: Vec2Fx,
     /// What is left, if in sight.
     left: Option<i32>,
+    /// A hunted animal's carcass: food while it lasts, and gone soon after
+    /// it is left, so nothing lasting is planned round it.
+    carcass: bool,
 }
 
 fn tile(p: Vec2Fx) -> (i32, i32) {
@@ -261,15 +295,15 @@ impl Economy {
                     .any(|dy| (dx != 0 || dy != 0) && view.passable(x + dx, y + dy) == Some(true))
             })
         };
-        // What is known to gather from: nodes in sight, own finished farms,
-        // and nodes remembered out of sight. Animals are food on the hoof;
-        // the opponent does not hunt yet, so it leaves them.
+        // What is known to gather from: nodes in sight, carcasses, own
+        // finished farms, and nodes remembered out of sight. A live animal
+        // is not a node: it is hunted first (below).
         let mut nodes: Vec<Node> = seen
             .iter()
             .filter_map(|s| {
                 let info = kinds::info(s.kind);
                 let (resource, left) = s.resource?;
-                let gatherable = !info.mobile
+                let gatherable = (!info.mobile || s.carcass)
                     && left > 0
                     && (s.owner == kinds::GAIA || (s.owner == view.player() && !s.site))
                     && !avoided(s.id)
@@ -279,6 +313,7 @@ impl Economy {
                     resource,
                     pos: s.pos,
                     left: Some(left),
+                    carcass: s.carcass,
                 })
             })
             .collect();
@@ -295,6 +330,7 @@ impl Economy {
                         resource,
                         pos,
                         left: None,
+                        carcass: false,
                     });
                 }
             }
@@ -345,12 +381,65 @@ impl Economy {
         }
         let mut have = [0u32; 4];
         for v in &villagers {
-            if let Job::Gathering(r) = v.job {
-                have[r.index()] += 1;
+            match v.job {
+                Job::Gathering(r) => have[r.index()] += 1,
+                // A hunter is a food gatherer who has not reached the food.
+                Job::Hunting(_) => have[Resource::Food.index()] += 1,
+                _ => {}
             }
         }
         let want = |r: usize| (n * shares[r] + 50) / 100;
         let known = |r: Resource| nodes.iter().any(|n| n.resource == r);
+
+        // ----- The hunt (`GD-AI-02`, `GD-ECON-06`): live animals in sight
+        // within reach of a drop-off, nobody after them yet. Meat is
+        // gathered no faster than berries and the walk is longer, so the
+        // herd is kept for when the bushes and farms near home run low: the
+        // bridge from the bushes to the farms, not a rival to them. A new
+        // hunt starts only while no carcass lies waiting near home, so one
+        // animal is taken before the next is killed and left to rot.
+        let dropoffs: Vec<Vec2Fx> = mine
+            .iter()
+            .filter(|s| !s.site && kinds::info(s.kind).dropoff)
+            .map(|s| s.pos)
+            .collect();
+        let reach = Fx::from_int(HUNT_RANGE).raw() as u64;
+        let near_home = |pos: Vec2Fx| {
+            dropoffs
+                .iter()
+                .any(|d| d.distance_sq_raw(pos) <= reach * reach)
+        };
+        let mut hunted: Vec<EntityId> = villagers
+            .iter()
+            .filter_map(|v| match v.job {
+                Job::Hunting(a) => Some(a),
+                _ => None,
+            })
+            .collect();
+        let mut hunters = hunted.len() as u32;
+        let carcass_waiting = nodes.iter().any(|n| n.carcass && near_home(n.pos));
+        let lasting_food_near: i32 = nodes
+            .iter()
+            .filter(|n| n.resource == Resource::Food && !n.carcass && near_home(n.pos))
+            .filter_map(|n| n.left)
+            .sum();
+        let hunting = !carcass_waiting && lasting_food_near < HUNT_WHEN_FOOD_BELOW;
+        let prey: Vec<&Sighting> = seen
+            .iter()
+            .filter(|s| {
+                s.owner == kinds::GAIA
+                    && !s.carcass
+                    && kinds::huntable(s.kind)
+                    && near_home(s.pos)
+                    && !avoided(s.id)
+            })
+            .collect();
+        let quarry = |hunted: &[EntityId], from: Vec2Fx| -> Option<EntityId> {
+            prey.iter()
+                .filter(|s| !hunted.contains(&s.id))
+                .min_by_key(|s| (s.pos.distance_sq_raw(from), s.id))
+                .map(|s| s.id)
+        };
 
         // ----- A site nobody is building: its builder gave up or died.
         // The nearest villager not on a site of its own takes it over.
@@ -423,7 +512,7 @@ impl Economy {
         // coming in buys nothing.
         let food_nodes = nodes
             .iter()
-            .filter(|n| n.resource == Resource::Food && n.left.is_some())
+            .filter(|n| n.resource == Resource::Food && n.left.is_some() && !n.carcass)
             .count() as u32;
         let farms_wanted = want(Resource::Food.index()).div_ceil(2);
         let farm_sites = mine
@@ -546,6 +635,58 @@ impl Economy {
             }
         }
 
+        // ----- Repairs (`GD-AI-02`, `GD-BUILD-02`): the most damaged of
+        // our buildings below three quarters of its health, with no enemy
+        // soldier near it, gets a villager, the Town Center two. The
+        // repair is charged when it starts; it is counted against the
+        // stock now, so the army does not spend the same wood.
+        let safe = Fx::from_int(REPAIR_SAFE_RADIUS).raw() as u64;
+        let threatened = |pos: Vec2Fx| {
+            seen.iter().any(|s| {
+                let info = kinds::info(s.kind);
+                s.owner != view.player()
+                    && s.owner != kinds::GAIA
+                    && info.mobile
+                    && info.combat.attack > 0
+                    && s.pos.distance_sq_raw(pos) <= safe * safe
+            })
+        };
+        let damaged = mine
+            .iter()
+            .filter(|s| {
+                let max = kinds::info(s.kind).max_health;
+                !s.site
+                    && !kinds::info(s.kind).mobile
+                    && s.health.floor() * 4 < max * REPAIR_BELOW_QUARTERS
+                    && !threatened(s.pos)
+            })
+            .filter_map(|s| view.repair_cost(s.id).map(|c| (*s, c)))
+            .min_by_key(|(s, _)| {
+                let max = kinds::info(s.kind).max_health.max(1);
+                (s.health.floor() * 1000 / max, s.id)
+            });
+        if let Some((b, cost)) = damaged {
+            let at_it = villagers
+                .iter()
+                .filter(|v| v.job == Job::Repairing(b.id))
+                .count();
+            let wanted = if b.kind == kinds::TOWN_CENTER { 2 } else { 1 };
+            if at_it < wanted && (at_it > 0 || afford(stock, &cost)) {
+                if at_it == 0 {
+                    spend(stock, &cost);
+                }
+                for _ in at_it..wanted {
+                    if let Some(r) = builder(&villagers, b.pos, None, &taken) {
+                        out.push(CommandKind::Repair {
+                            ids: vec![r],
+                            building: b.id,
+                        });
+                        taken.push(r);
+                    }
+                }
+            }
+        }
+
         // ----- Idle villagers to the resource furthest below its share.
         let mut idle: Vec<&Sighting> = villagers
             .iter()
@@ -565,10 +706,48 @@ impl Economy {
             let Some(r) = pick else {
                 break;
             };
+            if r == Resource::Food && hunters < order.hunters && hunting {
+                if let Some(animal) = quarry(&hunted, v.pos) {
+                    out.push(CommandKind::Attack {
+                        ids: vec![v.id],
+                        target: animal,
+                    });
+                    self.sent.push((v.id, animal));
+                    hunted.push(animal);
+                    hunters += 1;
+                    have[r.index()] += 1;
+                    continue;
+                }
+            }
             if let Some(node) = nearest(r, v.pos) {
                 out.push(go(v.id, &node));
                 self.sent.push((v.id, node.id));
                 have[r.index()] += 1;
+            }
+        }
+
+        // ----- One food gatherer a thought sent after an animal, while the
+        // hunt is short of hunters and nothing already killed lies waiting.
+        if hunters < order.hunters && hunting && want(Resource::Food.index()) > 0 {
+            let party = prey
+                .iter()
+                .filter(|a| !hunted.contains(&a.id))
+                .flat_map(|a| {
+                    villagers
+                        .iter()
+                        .filter(|v| {
+                            v.job == Job::Gathering(Resource::Food) && !taken.contains(&v.id)
+                        })
+                        .map(move |v| (v.pos.distance_sq_raw(a.pos), v.id, a.id))
+                })
+                .min();
+            if let Some((_, v, animal)) = party {
+                out.push(CommandKind::Attack {
+                    ids: vec![v],
+                    target: animal,
+                });
+                self.sent.push((v, animal));
+                taken.push(v);
             }
         }
 
@@ -605,12 +784,15 @@ impl Economy {
                 let i = r.index();
                 (want(i) as i32 - have[i] as i32, shares[i], 3 - i)
             });
-        if let (Some(tc), Some(node)) = (
-            tc,
-            wanted
-                .and_then(|r| nearest(r, home_pos))
-                .filter(|n| n.left.is_some()),
-        ) {
+        // Not onto a carcass: it is gone in minutes once left.
+        let lasting = |r: Resource| {
+            nodes
+                .iter()
+                .filter(|n| n.resource == r && n.left.is_some() && !n.carcass)
+                .min_by_key(|n| (n.pos.distance_sq_raw(home_pos), n.id))
+                .copied()
+        };
+        if let (Some(tc), Some(node)) = (tc, wanted.and_then(lasting)) {
             if self.rally != Some(node.id) {
                 out.push(CommandKind::SetRally {
                     building: tc.id,
@@ -636,9 +818,9 @@ pub(crate) fn builder(
         Job::Idle => 0,
         Job::Gathering(r) if Some(r) == prefer => 1,
         Job::Gathering(Resource::Wood) => 2,
-        Job::Gathering(_) => 3,
+        Job::Gathering(_) | Job::Hunting(_) => 3,
         Job::Busy => 4,
-        Job::Building(_) | Job::Unknown => 9,
+        Job::Building(_) | Job::Repairing(_) | Job::Unknown => 9,
     };
     villagers
         .iter()

@@ -35,6 +35,11 @@ pub enum Job {
     Gathering(kinds::Resource),
     /// Constructing a site: walking to it or working on it.
     Building(EntityId),
+    /// Repairing one of the side's buildings: walking to it or working on
+    /// it (`GD-BUILD-02`).
+    Repairing(EntityId),
+    /// Hunting an animal, to gather its carcass after (`GD-ECON-06`).
+    Hunting(EntityId),
     /// Anything else: walking, fighting, sheltering.
     Busy,
     /// Someone else's: not known.
@@ -82,6 +87,9 @@ pub struct Sighting {
     /// For a node or a farm: what it yields and how much is left, as a
     /// player sees by clicking on it.
     pub resource: Option<(kinds::Resource, i32)>,
+    /// A hunted animal lying where it fell, its food still on it: a node
+    /// for as long as it lasts (`GD-ECON-06`).
+    pub carcass: bool,
 }
 
 /// A building or node seen once and now out of sight, as it was.
@@ -183,7 +191,8 @@ impl<'a> FoggedView<'a> {
 
     /// Everything the player can see: their own units and buildings
     /// wherever they are, and anyone else's on a tile in sight. Corpses and
-    /// rubble are not listed.
+    /// rubble are not listed; a carcass with food on it is, as the player
+    /// sees it lying there.
     pub fn sightings(&self) -> Vec<Sighting> {
         let world = self.sim.world();
         let Some(fog) = self.fog() else {
@@ -193,11 +202,12 @@ impl<'a> FoggedView<'a> {
             .slots()
             .filter_map(|s| {
                 let i = s.index();
-                if world.dying[i] > 0 {
+                let kind = world.kind[i];
+                let carcass = world.dying[i] > 0 && kinds::huntable(kind) && world.resource[i] > 0;
+                if world.dying[i] > 0 && !carcass {
                     return None;
                 }
                 let mine = world.owner[i] == self.player;
-                let kind = world.kind[i];
                 let fp = kinds::info(kind).footprint as i32;
                 let (x, y) = sim::nav::anchor_tile(world.pos[i], fp);
                 if !mine && !fog.in_sight(kind, x, y) {
@@ -210,6 +220,12 @@ impl<'a> FoggedView<'a> {
                         sim::Order::Idle => Job::Idle,
                         sim::Order::Gather { resource, .. } => Job::Gathering(resource),
                         sim::Order::Build { site, .. } => Job::Building(site),
+                        sim::Order::Repair { building, .. } => Job::Repairing(building),
+                        sim::Order::Attack {
+                            target,
+                            then: sim::Then::Hunt(_),
+                            ..
+                        } => Job::Hunting(target),
                         _ => Job::Busy,
                     }
                 };
@@ -225,9 +241,28 @@ impl<'a> FoggedView<'a> {
                     resource: kinds::info(kind)
                         .resource
                         .map(|(r, _)| (r, world.resource[i])),
+                    carcass,
                 })
             })
             .collect()
+    }
+
+    /// What repairing one of the player's own buildings would cost now
+    /// (`GD-BUILD-02`): half its cost in proportion to the damage, which is
+    /// what the repair is charged when it starts. Nothing for anything not
+    /// the player's, not finished, or not damaged.
+    pub fn repair_cost(&self, id: EntityId) -> Option<kinds::Cost> {
+        let world = self.sim.world();
+        let i = world.slot(id)?.index();
+        if world.owner[i] != self.player || !self.sim.repairable(i) {
+            return None;
+        }
+        let info = kinds::info(world.kind[i]);
+        Some(sim::repair_due(
+            &info.cost,
+            Fx::from_int(info.max_health) - world.health[i],
+            info.max_health,
+        ))
     }
 
     /// Buildings and nodes seen once and now out of sight, as they were.

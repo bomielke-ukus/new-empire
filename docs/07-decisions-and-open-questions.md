@@ -117,7 +117,9 @@ trees, stone and gold cover "gather all four resources" for the slice.
 
 **Closed 2026-09-22.** Hunting landed with the playtest-2 fixes
 (`docs/02` `GD-ECON-06`): the gazelle runs when hit, its carcass lies
-three minutes, the hunter gathers it unasked. The opponent does not hunt.
+three minutes, the hunter gathers it unasked. The same day the clock was
+made to run only while nobody gathers the carcass ("decays if left"), and
+the opponent was taught to hunt and to repair (`GD-AI-02`).
 
 ### D16 — Art is modelled and rendered, not drawn or prompted
 **Date:** 2026-09-05 · **Decided by:** Bo

@@ -90,8 +90,9 @@ late-game economies dependent on a shrinking forest.
   notification fires when wood is too low to reseed.
 - **[GD-ECON-06] Hunting.** An animal is food only once killed: villagers or soldiers attack
   it, it runs when hit, and the carcass lies where it fell with its yield on it, gatherable
-  by any villager until it is taken or, after three minutes, gone. A villager that makes the
-  kill gathers the carcass without being told.
+  by any villager until it is taken. It decays if left: after three minutes with nobody
+  gathering it, it is gone, and the clock stands still while someone is. A villager that
+  makes the kill gathers the carcass without being told.
 
 ### 3.4 Population
 
@@ -353,6 +354,11 @@ that cheats produces an opponent you cannot learn from.
 | **Standard** | Solid build order, scouts, expands, counters unit composition, raids |
 | **Hard** | Faster decisions, multi-pronged attacks, targets economy, walls chokes |
 | **Hardest** | Hard, plus explicit resource bonuses — declared honestly in the UI |
+
+**[GD-AI-02]** The AI's villagers do what a player's do, with the same orders: they
+gather, build, farm, **hunt the animals near their drop-offs** once the bushes and farms
+near home run low, and **repair damaged buildings** once no enemy is near them, paying
+for the repair as a player does.
 
 The AI is built as: a **build-order planner** (age goals, ratios), an **economy
 manager** (villager assignment, drop-off placement), a **military manager**
