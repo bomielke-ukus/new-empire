@@ -194,6 +194,13 @@ pub enum Order {
         /// Standing next to it and working.
         working: bool,
     },
+    /// Repair a finished, damaged building of the player's (`GD-BUILD-02`).
+    Repair {
+        /// The building.
+        building: EntityId,
+        /// Standing next to it and working.
+        working: bool,
+    },
 }
 
 /// Stages of the gather cycle.
@@ -238,6 +245,11 @@ impl HashState for Order {
             Order::Build { site, working } => {
                 h.write_u8(3);
                 h.write(site);
+                h.write_bool(*working);
+            }
+            Order::Repair { building, working } => {
+                h.write_u8(9);
+                h.write(building);
                 h.write_bool(*working);
             }
             Order::Attack {

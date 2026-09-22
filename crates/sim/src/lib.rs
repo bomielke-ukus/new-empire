@@ -66,7 +66,7 @@ pub use simulation::{
     HARDEST_GATHER_BONUS_PCT, MAX_GATHER_BONUS_PCT, STATE_VERSION,
 };
 pub use simulation::{
-    SimConfig, Simulation, DEFAULT_STOCKPILE, POP_CAP_RANGE, TICKS_PER_SECOND, TICK_MS,
+    repair_due, SimConfig, Simulation, DEFAULT_STOCKPILE, POP_CAP_RANGE, TICKS_PER_SECOND, TICK_MS,
 };
 pub use tech::{Age, Effect, TechId, TechInfo};
 pub use vec2::Vec2Fx;

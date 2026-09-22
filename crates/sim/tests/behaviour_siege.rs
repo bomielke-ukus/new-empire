@@ -630,3 +630,129 @@ fn a_siege_replays_identically() {
     }
     assert_eq!(again.state_hash(), a, "the replay agrees");
 }
+
+/// A finished building short of health is mended by villagers at build
+/// speed, and the repair is paid when it starts: half the building's cost
+/// in proportion to the health missing, nothing more after.
+/// REQ: GD-BUILD-02
+#[test]
+fn villagers_repair_a_damaged_building_for_half_its_cost_in_proportion() {
+    let mut sim = arena();
+    let house = building(&mut sim, 0, kinds::HOUSE, 20, 20);
+    let axe = building(&mut sim, 1, kinds::AXEMAN, 24, 20);
+    let info = kinds::info(kinds::HOUSE);
+    let max = Fx::from_int(info.max_health);
+    attack(&mut sim, 1, vec![axe], house);
+    assert!(
+        run_until(&mut sim, 1200, |s| health(s, house)
+            < Fx::from_int(info.max_health / 2)),
+        "the axeman took it below half"
+    );
+    sim.issue(cmd(1, CommandKind::Despawn { id: axe }));
+    run(&mut sim, 2);
+    let vill = building(&mut sim, 0, kinds::VILLAGER, 16, 20);
+    let hurt = health(&sim, house);
+    let due = sim::repair_due(&info.cost, max - hurt, info.max_health);
+    assert!(
+        due[1] > 0 && due[1] <= info.cost[1] / 2 + 1,
+        "half the wood in proportion, rounded up: {due:?} of {:?}",
+        info.cost
+    );
+    let wood_before = sim.player(0).unwrap().stockpile[1];
+    sim.issue(cmd(
+        0,
+        CommandKind::Repair {
+            ids: vec![vill],
+            building: house,
+        },
+    ));
+    assert!(
+        run_until(&mut sim, 400, |s| matches!(
+            s.world().order[index_of(s, vill)],
+            Order::Repair { working: true, .. }
+        )),
+        "the villager reached the house and set to work"
+    );
+    run(&mut sim, 1);
+    assert_eq!(
+        sim.player(0).unwrap().stockpile[1],
+        wood_before - due[1],
+        "paid when it started"
+    );
+    assert!(health(&sim, house) > hurt, "and it is mending");
+    // At build speed: one villager brings a whole life back in the build
+    // time, so half of it in less.
+    assert!(
+        run_until(&mut sim, info.build_ticks() + 10, |s| health(s, house) >= max),
+        "full within the build time"
+    );
+    run(&mut sim, 2);
+    assert_eq!(
+        sim.world().order[index_of(&sim, vill)],
+        Order::Idle,
+        "done, and idle"
+    );
+    assert_eq!(
+        sim.player(0).unwrap().stockpile[1],
+        wood_before - due[1],
+        "nothing more was charged"
+    );
+    assert_eq!(sim.world().work[index_of(&sim, house)], Fx::ZERO);
+    sim.check().unwrap();
+}
+
+/// A side that cannot pay for a repair gets none: the villager walks up,
+/// finds the stockpile short, and stands down with the building as it was.
+/// REQ: GD-BUILD-02
+#[test]
+fn a_repair_the_side_cannot_pay_does_not_start() {
+    let mut sim = Simulation::new(
+        9,
+        SimConfig {
+            map: sim::MapSpec {
+                kind: sim::MapKind::Flat,
+                size: 64,
+                players: 2,
+            },
+            wander: false,
+            starting_stockpile: [0; 4],
+            ..SimConfig::default()
+        },
+    );
+    let house = building(&mut sim, 0, kinds::HOUSE, 20, 20);
+    let axe = building(&mut sim, 1, kinds::AXEMAN, 24, 20);
+    let info = kinds::info(kinds::HOUSE);
+    attack(&mut sim, 1, vec![axe], house);
+    assert!(run_until(&mut sim, 1200, |s| health(s, house)
+        < Fx::from_int(info.max_health / 2)));
+    sim.issue(cmd(1, CommandKind::Despawn { id: axe }));
+    run(&mut sim, 2);
+    let vill = building(&mut sim, 0, kinds::VILLAGER, 16, 20);
+    let hurt = health(&sim, house);
+    sim.issue(cmd(
+        0,
+        CommandKind::Repair {
+            ids: vec![vill],
+            building: house,
+        },
+    ));
+    assert!(
+        run_until(&mut sim, 20, |s| matches!(
+            s.world().order[index_of(s, vill)],
+            Order::Repair { .. }
+        )),
+        "the order was taken"
+    );
+    assert!(
+        run_until(&mut sim, 400, |s| s.world().order[index_of(s, vill)] == Order::Idle),
+        "the villager stood down"
+    );
+    let d = pos_of(&sim, vill) - pos_of(&sim, house);
+    assert!(
+        d.length() < Fx::from_int(4),
+        "having walked up first: {d:?}"
+    );
+    assert_eq!(health(&sim, house), hurt, "nothing mended");
+    assert_eq!(sim.player(0).unwrap().stockpile, [0; 4], "nothing charged");
+    sim.check().unwrap();
+}

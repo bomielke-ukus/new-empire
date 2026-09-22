@@ -1157,6 +1157,28 @@ what was done:
   `playtest-*` tag; `scripts/bundle-mac.sh` stages that folder for both
   workflows (README, "Playtest builds").
 
+### Work record: playtest-2 — repair (2026-09-22)
+
+The owner's choice while away from the Mac (`docs/10` §5 debts a 1997
+player trips over): repair, waypoints, hunting, and attack-move on `A`,
+each its own commit.
+
+- `crates/sim`: `Order::Repair` and `CommandKind::Repair`; `tick_work`
+  walks a villager up to a site or a damaged building alike (`Job`);
+  `repairs()` after construction: at build speed, as many repairers
+  counting as of builders, paid when it starts by `repair_due` (half the
+  cost in proportion to the health missing, rounded up), the paid mark
+  kept in the building's `work` while anyone is at it, the repairers
+  stood down when the side cannot pay or the building is whole;
+  `Simulation::repairable`. Demolition stops repairers as it stops
+  builders. `docs/02` `GD-BUILD-02`, claimed by two tests in
+  `behaviour_siege.rs`.
+- `crates/view`: REPAIRING / GOING TO REPAIR in the status line.
+- `crates/app`: right-click on a damaged building of the player's with
+  villagers selected repairs it (`UX-CMD-01`'s row), the cursor a cross
+  over it (the system has no wrench); the villagers answer.
+- Not done: the AI does not repair.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1348,8 +1370,6 @@ Stated so they are not rediscovered.
 
 - **Hunting** (`docs/07` D15) waits for a carcass: animals cannot be
   attacked yet.
-- **Repair** (`docs/03` §3) is unimplemented: a damaged building stays
-  damaged until it falls. Villagers "repair" in `docs/02` §5.1.
 - **Waypoints** (`UX-CMD-04`) are untouched; Shift only keeps placement
   and targeting armed.
 - **Attack-move is `M`**, where `docs/03` says `A`; `A` pans the camera.

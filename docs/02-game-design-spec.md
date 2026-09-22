@@ -215,6 +215,12 @@ Kept close to the original because it is the series' signature:
 **[GD-BUILD-01]** Buildings under construction show a build progress silhouette, take damage
 normally, and can be finished by any villager.
 
+**[GD-BUILD-02]** Villagers repair a finished, damaged building of their own at build speed,
+as many of them counting as of builders. A repair is paid when it starts, half the
+building's cost in proportion to the health missing at that moment, and does not start
+if the side cannot pay; a repair interrupted and taken up again pays again for what
+remains.
+
 ---
 
 ## 7. Technology

@@ -112,7 +112,9 @@ In the match: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
 `+`/`-` to zoom, from 0.5× to 3×, about the cursor; click the minimap to
 jump; `Space` pause; `[` `]` speed; `F3` toggles edge scrolling; `F2`
 cycles the HUD size (1×, 1.5×, 2×); `Home` jumps to your Town Center;
-`F4` opens a performance readout: the frame and the tick, the tick's
+Right-click a damaged building of yours with villagers selected to repair
+it, at build speed, for half its cost in proportion to the damage, paid
+as the repair starts. `F4` opens a performance readout: the frame and the tick, the tick's
 phases and the budgets they are held to (`docs/04` §12), for measuring on
 real hardware. `F1` or `?` opens a controls overlay listing all of this, and the resource
 bar points at it for the first minute of a match. WASD is reserved for

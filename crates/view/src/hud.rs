@@ -1477,6 +1477,8 @@ impl Hud {
                     Order::Gather { .. } => "GOING TO GATHER",
                     Order::Build { working: true, .. } => "BUILDING",
                     Order::Build { .. } => "GOING TO BUILD",
+                    Order::Repair { working: true, .. } => "REPAIRING",
+                    Order::Repair { .. } => "GOING TO REPAIR",
                     Order::Attack { .. } => "ATTACKING",
                     Order::AttackMove { .. } => "ATTACK-MOVING",
                     Order::Patrol { .. } => "PATROLLING",

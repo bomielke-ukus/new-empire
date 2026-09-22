@@ -87,6 +87,14 @@ pub enum CommandKind {
         /// The site.
         site: EntityId,
     },
+    /// Send villagers to repair a finished, damaged building of the
+    /// player's (`GD-BUILD-02`).
+    Repair {
+        /// Villagers.
+        ids: Vec<EntityId>,
+        /// The building.
+        building: EntityId,
+    },
     /// Queue a unit at a building. The cost is paid on queueing.
     Train {
         /// The building.
@@ -194,6 +202,7 @@ impl CommandKind {
             | CommandKind::Gather { ids, .. }
             | CommandKind::Build { ids, .. }
             | CommandKind::Assist { ids, .. }
+            | CommandKind::Repair { ids, .. }
             | CommandKind::Attack { ids, .. }
             | CommandKind::AttackMove { ids, .. }
             | CommandKind::Patrol { ids, .. }
@@ -265,6 +274,7 @@ impl Command {
             | CommandKind::Gather { ids, .. }
             | CommandKind::Build { ids, .. }
             | CommandKind::Assist { ids, .. }
+            | CommandKind::Repair { ids, .. }
             | CommandKind::Attack { ids, .. }
             | CommandKind::AttackMove { ids, .. }
             | CommandKind::Patrol { ids, .. }
@@ -328,6 +338,11 @@ impl HashState for CommandKind {
                 h.write_u8(6);
                 h.write(ids);
                 h.write(site);
+            }
+            CommandKind::Repair { ids, building } => {
+                h.write_u8(20);
+                h.write(ids);
+                h.write(building);
             }
             CommandKind::Train { building, kind } => {
                 h.write_u8(7);
@@ -704,6 +719,10 @@ mod tests {
             CommandKind::Assist {
                 ids: vec![id],
                 site: id,
+            },
+            CommandKind::Repair {
+                ids: vec![id],
+                building: id,
             },
             CommandKind::Train {
                 building: id,

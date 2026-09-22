@@ -7,7 +7,7 @@ use ai::Difficulty;
 use audio::score::{BED_GAIN, COMBAT_IN_MS, CROSSFADE_MS};
 use audio::{Bed, Fade, Layer, Play};
 use sim::Task;
-use sim::{Command, Formation, Item, MapKind, MapSpec, Order, SimConfig, Stance};
+use sim::{Command, Formation, Fx, Item, MapKind, MapSpec, Order, SimConfig, Stance};
 use view::shell::{Field, MapSize};
 use view::{Control, NoticeKind, Settings, ShellButton};
 
@@ -1506,6 +1506,84 @@ fn soldiers_attack_move_patrol_and_change_stance_from_the_panel() {
 }
 
 /// The window position of a ground point, lifted `lift` pixels.
+/// Right-click on a damaged building of the player's with villagers
+/// selected repairs it (`UX-CMD-01`'s row): the cursor says so, the click
+/// issues it, and the villager walks up and mends.
+///
+/// REQ: GD-BUILD-02
+#[test]
+fn villagers_repair_a_damaged_building_on_a_right_click() {
+    let mut app = app();
+    let house = spawn(&mut app, kinds::HOUSE, 12, 12);
+    let vill = spawn(&mut app, kinds::VILLAGER, 8, 12);
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Spawn {
+            kind: kinds::AXEMAN,
+            pos: Vec2Fx::from_int(15, 12),
+        },
+    });
+    step(&mut app, 3);
+    let axe = app
+        .sim
+        .world()
+        .slots()
+        .find(|s| app.sim.world().owner[s.index()] == 1)
+        .map(|s| app.sim.world().id_at(s))
+        .unwrap();
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Attack {
+            ids: vec![axe],
+            target: house,
+        },
+    });
+    let max = Fx::from_int(kinds::info(kinds::HOUSE).max_health);
+    let hi = app.sim.world().slot(house).unwrap().index();
+    for _ in 0..1200 {
+        if app.sim.world().health[hi] < max / 2 {
+            break;
+        }
+        app.sim.step();
+    }
+    let hurt = app.sim.world().health[hi];
+    assert!(hurt < max, "the axeman did damage");
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Despawn { id: axe },
+    });
+    step(&mut app, 3);
+
+    app.camera.look_at_tile(12.0, 12.0);
+    app.selection.set(vec![vill]);
+    draw(&mut app);
+    let (px, py) = on_screen(&app, 12.5, 12.5, 12.0);
+    assert!(
+        matches!(app.hovered_target(px, py), Some(Target::Repair)),
+        "the cursor offers repair over the damaged house"
+    );
+    let commands = app.sim.replay().commands.len();
+    app.right_press(px, py);
+    assert_eq!(app.sim.replay().commands.len(), commands + 1);
+    assert!(matches!(
+        app.sim.replay().commands.last().unwrap().1.kind,
+        CommandKind::Repair { .. }
+    ));
+    for _ in 0..600 {
+        app.sim.step();
+        if app.sim.world().health[hi] >= max {
+            break;
+        }
+    }
+    assert_eq!(app.sim.world().health[hi], max, "mended");
+    let vi = app.sim.world().slot(vill).unwrap().index();
+    step(&mut app, 2);
+    assert_eq!(app.sim.world().order[vi], Order::Idle);
+    // Whole again, the house is no longer a repair target.
+    draw(&mut app);
+    assert!(!matches!(app.hovered_target(px, py), Some(Target::Repair)));
+}
+
 fn on_screen(app: &App, x: f32, y: f32, lift: f32) -> (f32, f32) {
     let g = view::iso::project(x, y, view::iso::ground_height(app.sim.map(), x, y));
     app.camera.to_window(g.0, g.1 - lift)

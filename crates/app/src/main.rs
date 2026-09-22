@@ -623,6 +623,7 @@ impl App {
             | CommandKind::Stop { ids }
             | CommandKind::Gather { ids, .. }
             | CommandKind::Build { ids, .. }
+            | CommandKind::Repair { ids, .. }
             | CommandKind::Assist { ids, .. }
             | CommandKind::Attack { ids, .. }
             | CommandKind::AttackMove { ids, .. }
@@ -1702,6 +1703,8 @@ impl App {
             (None, Some((px, py))) if !self.over_hud(px, py) => match self.hovered_target(px, py) {
                 Some(Target::Gather) => CursorIcon::Grab,
                 Some(Target::Assist) => CursorIcon::Pointer,
+                // The spec's wrench; the system's nearest is the cross.
+                Some(Target::Repair) => CursorIcon::Cell,
                 Some(Target::Attack) => CursorIcon::Crosshair,
                 Some(Target::Garrison) => CursorIcon::Copy,
                 _ => CursorIcon::Default,
@@ -1723,6 +1726,9 @@ impl App {
         }
         if villagers && world.owner[i] == ME && world.construction[i].is_some() {
             return Some(Target::Assist);
+        }
+        if villagers && world.owner[i] == ME && self.sim.repairable(i) {
+            return Some(Target::Repair);
         }
         if enemy_of_me(&self.sim, i) && !self.selection.own_fighters(&self.sim, ME).is_empty() {
             return Some(Target::Attack);
@@ -1992,6 +1998,15 @@ impl App {
                 self.issue(CommandKind::Assist {
                     ids: villagers,
                     site: id,
+                });
+                return;
+            }
+            // A damaged building of the player's: repair it (`UX-CMD-01`,
+            // `GD-BUILD-02`).
+            if !villagers.is_empty() && world.owner[i] == ME && self.sim.repairable(i) {
+                self.issue(CommandKind::Repair {
+                    ids: villagers,
+                    building: id,
                 });
                 return;
             }
@@ -2352,6 +2367,7 @@ impl App {
 enum Target {
     Gather,
     Assist,
+    Repair,
     Attack,
     Garrison,
     #[allow(dead_code)]

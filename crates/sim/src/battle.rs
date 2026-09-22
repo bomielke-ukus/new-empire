@@ -918,7 +918,9 @@ impl Simulation {
         self.scratch.touched.push((ax, ay));
         for s in self.world.slots().collect::<Vec<_>>() {
             let j = s.index();
-            if matches!(self.world.order[j], Order::Build { site, .. } if site == id) {
+            if matches!(self.world.order[j], Order::Build { site, .. } if site == id)
+                || matches!(self.world.order[j], Order::Repair { building, .. } if building == id)
+            {
                 self.world.order[j] = Order::Idle;
                 self.world.nav[j] = None;
             }

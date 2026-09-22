@@ -43,6 +43,10 @@ fn every_command_from_a_player_the_match_does_not_have() {
                 ids: real.clone(),
                 site: real[1],
             },
+            CommandKind::Repair {
+                ids: real.clone(),
+                building: real[1],
+            },
             CommandKind::Train {
                 building: real[0],
                 kind: 1,
