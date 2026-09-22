@@ -1269,6 +1269,26 @@ letters are still not rebindable (`GD-A11Y-02`).
   and hunting kept, six of the seeds that moved all ended by elimination
   again at about their old times.
 
+### Work record: playtest-4 — per-farm reseed (2026-09-22)
+
+The owner's go on the four gaps `playtest-4` closes: per-farm reseed,
+rebindable panel letters, a panel highlight for finished research, and
+positional ambient beds, each its own commit.
+
+- `crates/sim`: `docs/02` `GD-ECON-05` asks for a reseed switch "per-farm
+  and globally". `Player::auto_reseed` stays the side's switch and a new
+  farm's setting; `Player::reseed_exceptions` holds the farms whose own
+  switch differs, hashed only when non-empty so recorded matches stand;
+  `farm_reseeds`, `set_farm_reseed`, `set_auto_reseed` (which clears the
+  exceptions, so every farm follows). `CommandKind::SetFarmReseed`; a farm
+  removed leaves the list. One sim test.
+- `crates/view`: a farm's panel shows and flips its own switch
+  (`Action::ToggleFarmReseed`); the Town Center's and the Market's the
+  side's. The "wood too low to reseed" notice counts only farms whose
+  own switch is on.
+- `crates/app`: R on selected farms sets them all to the opposite of the
+  first's. One app test.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1486,8 +1506,6 @@ Stated so they are not rediscovered.
   the workflow's secrets; an Intel slice needs a second target and `lipo`;
   the icon waits on the name (`docs/07` Q5).
 - The age-up **fanfare** waits for audio (M7). The sweep and banner exist.
-- **Auto-reseed is per player**, not per farm as `docs/02` [GD-ECON-05]
-  asks. A per-farm flag needs a per-entity toggle in the world store.
 - **Age variants exist for placeholders only.** Rendered sets carry no
   variants yet; `Atlas::variant` answers with the base kind for them. The
   sprite manifest needs a per-age entry when the art stream models the

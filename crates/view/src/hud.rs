@@ -55,8 +55,11 @@ pub enum Action {
     CancelTrain(EntityId),
     /// Queue a technology (an age advance included) at the selected building.
     Research(TechId),
-    /// Flip the player's farm auto-reseed.
+    /// Flip the player's farm auto-reseed: the side's switch, which every
+    /// farm then follows.
     ToggleReseed,
+    /// Flip the selected farms' own switches (`GD-ECON-05`).
+    ToggleFarmReseed,
     /// Start picking a point to attack-move to (`UX-CMD-02`).
     AttackMove,
     /// Start picking a point to patrol to (`UX-CMD-03`).
@@ -1082,18 +1085,30 @@ fn commands(
                 .gated(check),
             );
         }
-        if matches!(kind, kinds::FARM | kinds::MARKET | kinds::TOWN_CENTER) {
-            let label = if pl.auto_reseed {
-                "RESEED ON"
-            } else {
-                "RESEED OFF"
-            };
+        if kind == kinds::FARM {
+            // This farm's own switch (`GD-ECON-05`).
+            let on = pl.farm_reseeds(id);
             defs.push(Def::on(
-                Action::ToggleReseed,
-                label,
+                Action::ToggleFarmReseed,
+                if on { "RESEED ON" } else { "RESEED OFF" },
                 'R',
                 format!(
-                    "FARMS RESEED FOR {} WHEN EMPTY",
+                    "THIS FARM RESEEDS FOR {} WHEN EMPTY",
+                    cost_words(&kinds::FARM_RESEED_COST)
+                ),
+            ));
+        } else if matches!(kind, kinds::MARKET | kinds::TOWN_CENTER) {
+            // The side's switch, which sets every farm's.
+            defs.push(Def::on(
+                Action::ToggleReseed,
+                if pl.auto_reseed {
+                    "RESEED ON"
+                } else {
+                    "RESEED OFF"
+                },
+                'R',
+                format!(
+                    "EVERY FARM RESEEDS FOR {} WHEN EMPTY",
                     cost_words(&kinds::FARM_RESEED_COST)
                 ),
             ));
@@ -1138,14 +1153,14 @@ fn farm_needs_wood(sim: &Simulation, me: u8) -> bool {
     let Some(pl) = sim.player(me) else {
         return false;
     };
-    pl.auto_reseed
-        && !pl.can_afford(&kinds::FARM_RESEED_COST)
+    !pl.can_afford(&kinds::FARM_RESEED_COST)
         && world.slots().any(|s| {
             let i = s.index();
             world.owner[i] == me
                 && world.kind[i] == kinds::FARM
                 && world.construction[i].is_none()
                 && world.resource[i] <= 0
+                && pl.farm_reseeds(world.id_at(s))
         })
 }
 
@@ -2245,6 +2260,10 @@ mod tests {
         assert_eq!(age.label, "TOOL AGE");
         assert!(age.reason.contains("BUILDINGS"), "{}", age.reason);
         assert_eq!(find(&t, Action::ToggleReseed).unwrap().label, "RESEED ON");
+        assert!(
+            find(&t, Action::ToggleFarmReseed).is_none(),
+            "the Town Center holds the side's switch, not a farm's"
+        );
         assert!(
             !t.buttons
                 .iter()

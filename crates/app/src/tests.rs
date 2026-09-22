@@ -1767,6 +1767,42 @@ fn villagers_hunt_an_animal_on_a_right_click() {
     ));
 }
 
+/// A farm's panel holds its own reseed switch (`GD-ECON-05`): R on a
+/// selected farm flips that farm and no other, and the Town Center's R
+/// sets them all.
+///
+/// REQ: GD-ECON-05
+#[test]
+fn r_on_a_farm_flips_that_farm_and_on_the_town_center_every_farm() {
+    let mut app = app();
+    let tc = spawn(&mut app, kinds::TOWN_CENTER, 20, 20);
+    let a = spawn(&mut app, kinds::FARM, 12, 12);
+    let b = spawn(&mut app, kinds::FARM, 16, 12);
+    app.selection.set(vec![a]);
+    draw(&mut app);
+    assert_eq!(button(&app, "RESEED ON").action, Action::ToggleFarmReseed);
+    assert!(app.hotkey('R'));
+    step(&mut app, 4);
+    let pl = app.sim.player(ME).unwrap();
+    assert!(!pl.farm_reseeds(a), "the selected farm is off");
+    assert!(pl.farm_reseeds(b), "the other is not");
+    assert!(pl.auto_reseed, "nor the side");
+    draw(&mut app);
+    assert!(app.hud.buttons.iter().any(|b| b.label == "RESEED OFF"));
+
+    app.selection.set(vec![tc]);
+    draw(&mut app);
+    assert_eq!(button(&app, "RESEED ON").action, Action::ToggleReseed);
+    assert!(app.hotkey('R'));
+    step(&mut app, 4);
+    let pl = app.sim.player(ME).unwrap();
+    assert!(
+        !pl.auto_reseed && !pl.farm_reseeds(a) && !pl.farm_reseeds(b),
+        "all off"
+    );
+    assert!(pl.reseed_exceptions.is_empty());
+}
+
 fn on_screen(app: &App, x: f32, y: f32, lift: f32) -> (f32, f32) {
     let g = view::iso::project(x, y, view::iso::ground_height(app.sim.map(), x, y));
     app.camera.to_window(g.0, g.1 - lift)

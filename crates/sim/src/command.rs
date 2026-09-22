@@ -128,6 +128,14 @@ pub enum CommandKind {
         /// The technology.
         tech: TechId,
     },
+    /// Whether some of the player's farms reseed themselves when empty,
+    /// each farm's own switch (`GD-ECON-05`).
+    SetFarmReseed {
+        /// The farms.
+        farms: Vec<EntityId>,
+        /// On or off.
+        enabled: bool,
+    },
     /// Whether the player's exhausted farms are reseeded automatically.
     SetAutoReseed {
         /// On or off.
@@ -323,6 +331,7 @@ impl Command {
             | CommandKind::SetStance { ids, .. }
             | CommandKind::SetFormation { ids, .. }
             | CommandKind::Garrison { ids, .. } => ids.len(),
+            CommandKind::SetFarmReseed { farms, .. } => farms.len(),
             CommandKind::Ungarrison { .. }
             | CommandKind::Spawn { .. }
             | CommandKind::Despawn { .. }
@@ -442,6 +451,11 @@ impl HashState for CommandKind {
             CommandKind::Ungarrison { building } => {
                 h.write_u8(18);
                 h.write(building);
+            }
+            CommandKind::SetFarmReseed { farms, enabled } => {
+                h.write_u8(22);
+                h.write(farms);
+                h.write_bool(*enabled);
             }
             CommandKind::SetAutoReseed { enabled } => {
                 h.write_u8(11);
@@ -774,6 +788,10 @@ mod tests {
                 ids: vec![id],
                 target: Vec2Fx::from_int(1, 1),
             })),
+            CommandKind::SetFarmReseed {
+                farms: vec![id],
+                enabled: false,
+            },
             CommandKind::Train {
                 building: id,
                 kind: 1,

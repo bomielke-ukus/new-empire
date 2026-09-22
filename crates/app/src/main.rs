@@ -2121,6 +2121,25 @@ impl App {
                     });
                 }
             }
+            Action::ToggleFarmReseed => {
+                // The selected farms, all to the opposite of the first's.
+                let farms: Vec<EntityId> = self
+                    .selection
+                    .ids
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        let w = self.sim.world();
+                        w.slot(*id).is_some_and(|s| {
+                            w.owner[s.index()] == ME && w.kind[s.index()] == kinds::FARM
+                        })
+                    })
+                    .collect();
+                if let (Some(first), Some(pl)) = (farms.first(), self.sim.player(ME)) {
+                    let enabled = !pl.farm_reseeds(*first);
+                    self.issue(CommandKind::SetFarmReseed { farms, enabled });
+                }
+            }
             Action::ToggleReseed => {
                 let on = self.sim.player(ME).is_some_and(|p| p.auto_reseed);
                 self.issue(CommandKind::SetAutoReseed { enabled: !on });
