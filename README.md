@@ -69,7 +69,8 @@ Every push to `main`, and a manual run of the **Mac build** workflow under
 the repository's Actions tab, builds `New Empire.app` for Apple Silicon and
 attaches it to the run as the artifact `New-Empire-macOS-<commit>`, kept
 for thirty days. On the Mac: open the run, download the artifact, and
-unzip the `New Empire.zip` inside it to get `New Empire.app`. The bundle
+unzip the `New Empire.zip` inside it: a `New Empire` folder with
+`New Empire.app` and the player's `READ ME FIRST.txt`. The bundle
 is ad-hoc signed and not notarised, so the first launch is refused. On
 macOS 15 and later: open it once, click Done, then in System Settings,
 Privacy & Security, scroll to the note that "New Empire" was blocked and
@@ -78,6 +79,20 @@ After that it opens normally. Saves, recordings and settings go to
 `~/Library/Application Support/new-empire/` as with any other build.
 `scripts/bundle-mac.sh` builds the same bundle from a checkout on a Mac,
 into `target/bundle/`.
+
+### Playtest builds
+
+A build to hand to playtesters is a GitHub Release, which anyone can
+download without an account. Under the Actions tab run **Playtest build**
+with a name such as `playtest-1`, or push a tag of that name. The
+workflow builds `New Empire.app` on an Apple Silicon runner, zips it in a
+folder with `packaging/macos/READ ME FIRST.txt`, and publishes the zip as
+`New-Empire-macOS-playtest-1.zip` on the pre-release
+`github.com/bomielke-ukus/new-empire/releases/tag/playtest-1`, with the
+note as the release text. Send the player that link. The note says how
+to get past Gatekeeper, where the recordings are, that nothing leaves
+the Mac, and what to send back; `docs/09` §9.1 is the observer's sheet.
+Running the workflow again with the same name replaces the zip.
 
 The game opens on a title screen: `Enter` or NEW GAME opens the skirmish
 setup (map size, opponents and their difficulties, population cap, seed,
@@ -170,7 +185,7 @@ Workspace layout:
 | `tools/render` | Blender scripts for the frozen camera and light rig, and the render driver |
 | `tools/gen` | Generators for committed tables (trig) |
 | `scripts` | CI checks, and the Mac bundle |
-| `packaging/macos` | The `Info.plist` template `scripts/bundle-mac.sh` fills in |
+| `packaging/macos` | The `Info.plist` template `scripts/bundle-mac.sh` fills in, and the player's `READ ME FIRST.txt` |
 | `assets/palette` | The 256-colour indexed palette, with the reserved player-colour ramp |
 | `assets/render` | The frozen render rig every sprite is rendered through |
 | `assets/sprites` | Rendered art (needs Blender, so committed rather than regenerated) |

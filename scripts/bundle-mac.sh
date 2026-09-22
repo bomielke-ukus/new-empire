@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Assembles "New Empire.app": the release game binary, its sprite sets and
 # a manifest, so the game runs from a double-click on a Mac that has no
-# toolchain. The Mac build workflow runs this and attaches the zip; it also
-# works from a checkout on a Mac.
+# toolchain; then a "New Empire" folder holding the app and the player's
+# READ ME FIRST.txt, zipped. The Mac build workflow attaches that zip to
+# its run and the Playtest build workflow publishes it as a release; it
+# also works from a checkout on a Mac.
 #
 #   scripts/bundle-mac.sh [OUT_DIR]      # default: target/bundle
 #
@@ -50,10 +52,26 @@ if command -v codesign >/dev/null 2>&1; then
   codesign --force --deep --sign - "$app"
   codesign --verify --deep --strict "$app"
 fi
+# What the player unzips: a folder with the app and the note that says how
+# to open it and what to send back. `ditto` copies the signed bundle whole;
+# `cp -R` is the Linux stand-in for the dry run.
+echo "== staging the folder the player unzips =="
+stage="$out/New Empire"
+rm -rf "$stage"
+mkdir -p "$stage"
+if command -v ditto >/dev/null 2>&1; then
+  ditto "$app" "$stage/New Empire.app"
+else
+  cp -R "$app" "$stage/New Empire.app"
+fi
+cp "packaging/macos/READ ME FIRST.txt" "$stage/READ ME FIRST.txt"
+test -f "$stage/READ ME FIRST.txt"
+test -f "$stage/New Empire.app/Contents/MacOS/new-empire"
+
 if command -v ditto >/dev/null 2>&1; then
   echo "== zipping =="
   rm -f "$out/New Empire.zip"
-  ditto -c -k --keepParent "$app" "$out/New Empire.zip"
+  ditto -c -k --keepParent "$stage" "$out/New Empire.zip"
 fi
 
-echo "bundled: $app (version $version, build $build)"
+echo "bundled: $app (version $version, build $build); the player's folder is $stage"

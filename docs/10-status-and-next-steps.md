@@ -1151,6 +1151,11 @@ what was done:
 - `mapview --perf 1`; golden `perf-readout` added.
 - `docs/09` §8 rewritten with the phase table against `docs/04` §12 and
   the method; §9.1 the `RM-M7-01` observation sheet.
+- After the merge: the `Playtest build` workflow, a GitHub Release with
+  `New Empire.app` zipped beside the player's `READ ME FIRST.txt`
+  (`packaging/macos`), cut by name from the Actions tab or a
+  `playtest-*` tag; `scripts/bundle-mac.sh` stages that folder for both
+  workflows (README, "Playtest builds").
 
 ### Resume here next session
 
