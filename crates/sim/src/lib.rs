@@ -42,7 +42,9 @@ mod trig_table;
 pub mod vec2;
 
 pub use angle::Angle;
-pub use battle::{Event, Projectile, Task, DECAY_TICKS, RUBBLE_TICKS, WORK_PERIOD};
+pub use battle::{
+    decay_ticks, Event, Projectile, Task, CARCASS_TICKS, DECAY_TICKS, RUBBLE_TICKS, WORK_PERIOD,
+};
 pub use combat::{Armour, Elevation};
 pub use command::{
     Command, CommandError, CommandKind, CommandQueue, PlayerId, Source, COMMAND_DELAY,
@@ -56,17 +58,17 @@ pub use kinds::{Class, Combat, DamageType};
 pub use map::{Terrain, TileMap, MAX_ELEVATION};
 pub use mapgen::{MapKind, MapSpec};
 pub use orders::{
-    Formation, GatherPhase, Item, Modifiers, Nav, NavState, Order, Player, Production, QueueItem,
-    Rally, Stance, Then,
+    Formation, GatherPhase, Item, Modifiers, Nav, NavState, Order, Pending, Player, Production,
+    QueueItem, Rally, Stance, Then,
 };
 pub use replay::{Divergence, Replay, ReplayError, Trace, VerifyError};
 pub use rng::Rng;
 pub use simulation::{
-    ConfigError, PlaceError, ResearchError, TickStats, Timings, TrainError, Violation,
-    HARDEST_GATHER_BONUS_PCT, MAX_GATHER_BONUS_PCT, STATE_VERSION,
+    repair_due, SimConfig, Simulation, DEFAULT_STOCKPILE, POP_CAP_RANGE, TICKS_PER_SECOND, TICK_MS,
 };
 pub use simulation::{
-    SimConfig, Simulation, DEFAULT_STOCKPILE, POP_CAP_RANGE, TICKS_PER_SECOND, TICK_MS,
+    ConfigError, PlaceError, ResearchError, TickStats, Timings, TrainError, Violation,
+    HARDEST_GATHER_BONUS_PCT, MAX_GATHER_BONUS_PCT, STATE_VERSION,
 };
 pub use tech::{Age, Effect, TechId, TechInfo};
 pub use vec2::Vec2Fx;

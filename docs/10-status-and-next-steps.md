@@ -1157,6 +1157,76 @@ what was done:
   `playtest-*` tag; `scripts/bundle-mac.sh` stages that folder for both
   workflows (README, "Playtest builds").
 
+### Work record: playtest-2 — repair (2026-09-22)
+
+The owner's choice while away from the Mac (`docs/10` §5 debts a 1997
+player trips over): repair, waypoints, hunting, and attack-move on `A`,
+each its own commit.
+
+- `crates/sim`: `Order::Repair` and `CommandKind::Repair`; `tick_work`
+  walks a villager up to a site or a damaged building alike (`Job`);
+  `repairs()` after construction: at build speed, as many repairers
+  counting as of builders, paid when it starts by `repair_due` (half the
+  cost in proportion to the health missing, rounded up), the paid mark
+  kept in the building's `work` while anyone is at it, the repairers
+  stood down when the side cannot pay or the building is whole;
+  `Simulation::repairable`. Demolition stops repairers as it stops
+  builders. `docs/02` `GD-BUILD-02`, claimed by two tests in
+  `behaviour_siege.rs`.
+- `crates/view`: REPAIRING / GOING TO REPAIR in the status line.
+- `crates/app`: right-click on a damaged building of the player's with
+  villagers selected repairs it (`UX-CMD-01`'s row), the cursor a cross
+  over it (the system has no wrench); the villagers answer.
+- Not done: the AI does not repair.
+
+### Work record: playtest-2 — waypoints (2026-09-22)
+
+- `crates/sim`: `CommandKind::Queued(Box<CommandKind>)`, a waypoint
+  holding any job-giving command (`queueable`; a stop or a nested
+  waypoint fails validation, `CommandError::NotQueueable`); `Pending`
+  (an order and its trip) and the entity store's `queue` column, read
+  through `queue_at` and grown on demand by `queue_mut` so a save from
+  before loads, hashed only when non-empty so the corpus digests stand.
+  `apply_queued` applies the command inside as if given outright, which
+  resolves it fully (the site placed and paid, each unit's slot in the
+  formation and its trip), then takes what was set for a busy unit off
+  again onto its queue and puts its job back; `advance_queues` at the end
+  of the orders pass starts the next job the tick a unit falls idle, a
+  patrol from where it stands. A job given outright, or a stop, clears
+  the queue. `behaviour_waypoints.rs`: three tests claim `UX-CMD-04`.
+- `crates/view`: `scene::order_point` and the marks (`UX-CMD-11`): a
+  dotted line from the unit through where each job is headed, a flag
+  over each queued one, a queued building its own site; the status line
+  reads "MOVING, THEN 2 MORE".
+- `crates/app`: Shift held while any order is given makes it a waypoint
+  (`issue`), so right-click, the targeting clicks and building placement
+  all queue; the units answer. One test.
+- `mapview --scenario waypoints`; golden `waypoints`.
+
+### Work record: playtest-2 — hunting (2026-09-22)
+
+- `crates/sim`: `kinds::huntable`; an attack on nature's animal is
+  allowed, a villager's with `Then::Hunt` so the kill turns into
+  gathering the carcass; a hit animal runs six tiles from the hunter
+  through its wander; a dead animal lies `CARCASS_TICKS` (three minutes,
+  `decay_ticks(kind)`) with its food on it, `gatherable_by` while it
+  lies; nature's animals are still never acquired on a unit's own.
+  `docs/02` `GD-ECON-06`, `docs/07` D15 closed; `behaviour_hunting.rs`.
+- `crates/view`: the corpse span per kind; HUNTING in the status line.
+- `crates/app`: right-click on an animal with villagers selected hunts
+  it (crosshair); a carcass is a gather target.
+- Not done: the opponent does not hunt; no boar (`docs/02` §3.2), which
+  fights back and is M8's.
+
+### Work record: playtest-2 — attack-move on `A` (2026-09-22)
+
+The owner's call (`docs/07` D26): the arrow keys pan by default, `A` is
+attack-move as `docs/03` `UX-CMD-02` always said, and WASD is a binding
+away on the settings screen, which then takes `A` back from attack-move.
+`Settings` defaults, the HUD's key on ATTACK MOVE, the controls overlay
+and the settings screen follow; goldens rebaked. The panel's command
+letters are still not rebindable (`GD-A11Y-02`).
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1346,13 +1416,6 @@ complete without them, and the owner decides when and by whom.
 
 Stated so they are not rediscovered.
 
-- **Hunting** (`docs/07` D15) waits for a carcass: animals cannot be
-  attacked yet.
-- **Repair** (`docs/03` §3) is unimplemented: a damaged building stays
-  damaged until it falls. Villagers "repair" in `docs/02` §5.1.
-- **Waypoints** (`UX-CMD-04`) are untouched; Shift only keeps placement
-  and targeting armed.
-- **Attack-move is `M`**, where `docs/03` says `A`; `A` pans the camera.
 - **The panels' command letters are not rebindable** (`GD-A11Y-02`):
   the settings screen rebinds the seventeen general keys only. Full
   rebinding needs a per-command capture flow and the HUD's tables read

@@ -580,6 +580,27 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
                 }));
             }
         }
+        "waypoints" => {
+            // One villager with three jobs queued (`UX-CMD-04`): a walk, a
+            // bush to gather, a house to build; the last two as waypoints.
+            let bush = nearest(kinds::BERRY_BUSH).ok_or("no bush")?;
+            let v = villagers[0];
+            sim.issue(cmd(CommandKind::Move {
+                ids: vec![v],
+                target: sim::Vec2Fx::from_int(sx + 5, sy - 2),
+            }));
+            sim.issue(cmd(CommandKind::Queued(Box::new(CommandKind::Gather {
+                ids: vec![v],
+                node: bush,
+            }))));
+            sim.issue(cmd(CommandKind::Queued(Box::new(CommandKind::Build {
+                kind: kinds::HOUSE,
+                x: sx + 5,
+                y: sy + 3,
+                ids: vec![v],
+            }))));
+            eprintln!("waypoints: villager slot {}", v.index());
+        }
         "fell" => {
             // Nodes being used up, beside the Town Center: eight villagers on
             // one tree, three on a berry bush, three on a gold vein. The tree

@@ -129,6 +129,8 @@ pub enum Then {
     AttackMove(Vec2Fx),
     /// Carry on patrolling between two points.
     Patrol(Vec2Fx, Vec2Fx, u8),
+    /// Gather the carcass of the animal hunted (`GD-ECON-06`).
+    Hunt(EntityId),
 }
 
 /// A unit's current job.
@@ -194,6 +196,13 @@ pub enum Order {
         /// Standing next to it and working.
         working: bool,
     },
+    /// Repair a finished, damaged building of the player's (`GD-BUILD-02`).
+    Repair {
+        /// The building.
+        building: EntityId,
+        /// Standing next to it and working.
+        working: bool,
+    },
 }
 
 /// Stages of the gather cycle.
@@ -240,6 +249,11 @@ impl HashState for Order {
                 h.write(site);
                 h.write_bool(*working);
             }
+            Order::Repair { building, working } => {
+                h.write_u8(9);
+                h.write(building);
+                h.write_bool(*working);
+            }
             Order::Attack {
                 target,
                 then,
@@ -256,6 +270,10 @@ impl HashState for Order {
                     Then::AttackMove(p) => {
                         h.write_u8(2);
                         h.write(p);
+                    }
+                    Then::Hunt(animal) => {
+                        h.write_u8(4);
+                        h.write(animal);
                     }
                     Then::Patrol(a, b, leg) => {
                         h.write_u8(3);
@@ -307,6 +325,25 @@ pub enum NavState {
     Arrived,
     /// Gave up: unreachable or hopelessly stuck.
     Failed,
+}
+
+/// A job waiting behind a unit's current one (`UX-CMD-04`): the order
+/// and the trip the command would have set had the unit been free, kept
+/// as they were resolved (the unit's slot in its formation included) and
+/// started when the unit is.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Pending {
+    /// The job.
+    pub order: Order,
+    /// Its trip, for the jobs that come with one.
+    pub nav: Option<Nav>,
+}
+
+impl HashState for Pending {
+    fn hash_state(&self, h: &mut StateHasher) {
+        h.write(&self.order);
+        h.write(&self.nav);
+    }
 }
 
 /// Where a unit is walking, and the waypoints it will take.

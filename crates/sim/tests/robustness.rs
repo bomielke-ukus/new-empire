@@ -43,6 +43,14 @@ fn every_command_from_a_player_the_match_does_not_have() {
                 ids: real.clone(),
                 site: real[1],
             },
+            CommandKind::Repair {
+                ids: real.clone(),
+                building: real[1],
+            },
+            CommandKind::Queued(Box::new(CommandKind::Move {
+                ids: real.clone(),
+                target: Vec2Fx::from_int(5, 5),
+            })),
             CommandKind::Train {
                 building: real[0],
                 kind: 1,

@@ -21,6 +21,21 @@ use serde::{Deserialize, Serialize};
 
 /// Ticks a corpse stays on the ground: thirty seconds.
 pub const DECAY_TICKS: u16 = 600;
+
+/// How long a hunted animal's carcass lies before it is gone, gatherable
+/// while it lasts (`GD-ECON-06`): three minutes, enough for a couple of
+/// villagers to take it all, and not for one to dawdle.
+pub const CARCASS_TICKS: u16 = 3600;
+
+/// How long a dead mobile unit of `kind` lies: a carcass for a huntable
+/// animal, a corpse for anything else.
+pub fn decay_ticks(kind: KindId) -> u16 {
+    if kinds::huntable(kind) {
+        CARCASS_TICKS
+    } else {
+        DECAY_TICKS
+    }
+}
 /// Ticks rubble stays on the ground: sixty seconds (`docs/03` §6.2). The
 /// footprint is open from the first of them.
 pub const RUBBLE_TICKS: u16 = 1200;
@@ -369,6 +384,15 @@ impl Simulation {
             }
             Then::AttackMove(target) => Order::AttackMove { target },
             Then::Patrol(from, to, leg) => Order::Patrol { from, to, leg },
+            // The kill made: gather the carcass, if it lies there still.
+            Then::Hunt(animal) => match self.world.slot(animal) {
+                Some(a) if self.gatherable_by(a.index(), self.world.owner[i]) => Order::Gather {
+                    node: animal,
+                    resource: Resource::Food,
+                    phase: crate::orders::GatherPhase::ToNode,
+                },
+                _ => Order::Idle,
+            },
         };
     }
 
@@ -790,7 +814,25 @@ impl Simulation {
             damage,
         });
         let owner = self.world.owner[t];
-        if owner == GAIA || owner == by {
+        if owner == GAIA {
+            // A hunted animal runs, straight away from the hunter, as far
+            // as its wander takes it.
+            if kinds::huntable(self.world.kind[t]) && self.world.health[t] > Fx::ZERO {
+                let away = pos - from;
+                let dir = if away.length().is_zero() {
+                    Vec2Fx::new(Fx::ONE, Fx::ZERO)
+                } else {
+                    away.scale_ratio(Fx::ONE, away.length())
+                };
+                let target = self.clamp_to_map(pos + dir.scale_ratio(Fx::from_int(6), Fx::ONE));
+                let tile = nav::tile_of(target);
+                if self.nav.passable(tile.0, tile.1) {
+                    self.world.move_target[t] = Some(target);
+                }
+            }
+            return;
+        }
+        if owner == by {
             return;
         }
         // Raise the alarm, once in a while.
@@ -881,7 +923,9 @@ impl Simulation {
                 pos: self.world.pos[i],
             });
             if k.mobile {
-                self.world.dying[i] = DECAY_TICKS;
+                // A hunted animal lies as a carcass, its food still on it.
+                self.world.dying[i] = decay_ticks(self.world.kind[i]);
+                self.world.move_target[i] = None;
                 self.world.order[i] = Order::Idle;
                 self.world.nav[i] = None;
                 self.world.move_target[i] = None;
@@ -918,7 +962,9 @@ impl Simulation {
         self.scratch.touched.push((ax, ay));
         for s in self.world.slots().collect::<Vec<_>>() {
             let j = s.index();
-            if matches!(self.world.order[j], Order::Build { site, .. } if site == id) {
+            if matches!(self.world.order[j], Order::Build { site, .. } if site == id)
+                || matches!(self.world.order[j], Order::Repair { building, .. } if building == id)
+            {
                 self.world.order[j] = Order::Idle;
                 self.world.nav[j] = None;
             }

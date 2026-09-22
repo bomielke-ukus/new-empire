@@ -220,7 +220,9 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
     .into_iter()
     .map(key)
     .collect();
-    let pan = if pan.iter().all(|k| k.chars().count() == 1) {
+    let pan = if pan == ["UP", "LEFT", "DOWN", "RIGHT"] {
+        "ARROWS".to_string()
+    } else if pan.iter().all(|k| k.chars().count() == 1) {
         pan.concat()
     } else {
         pan.join(" ")
@@ -236,7 +238,7 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
         s("MINIMAP", "CLICK JUMPS, RIGHT-CLICK SENDS"),
         s("CLICK", "SELECT, DRAG FOR A BOX"),
         s("DBL CLICK", "ALL OF A KIND ON SCREEN"),
-        s("SHIFT", "ADD TO THE SELECTION"),
+        s("SHIFT", "ADD TO THE SELECTION; QUEUE AN ORDER"),
         s("CTRL+0-9", "SAVE A GROUP, 0-9 RECALLS"),
         (key(Control::NextIdle), "NEXT IDLE VILLAGER".to_string()),
         s("RIGHT", "MOVE, GATHER, BUILD, RALLY"),
@@ -245,7 +247,7 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
         s("RIGHT", "ON AN ENEMY: ATTACK"),
         s("RIGHT", "ON A TOWER OR TOWN CENTER: GARRISON"),
         s("T", "AT A BUILDING: ALL OUT"),
-        s("M, P", "ATTACK-MOVE, PATROL, THEN CLICK"),
+        s("A, P", "ATTACK-MOVE, PATROL, THEN CLICK"),
         s("Q E I K", "STANCE, AGGRESSIVE TO PASSIVE"),
         s("Z", "NEXT FORMATION"),
         (key(Control::Dismiss), "DISMISS".to_string()),
@@ -532,7 +534,7 @@ fn build_hotkey(kind: KindId) -> char {
 /// general control may not take (`settings::Settings::bind`).
 pub fn command_letters() -> std::collections::BTreeSet<char> {
     let mut keys: std::collections::BTreeSet<char> =
-        ['T', 'V', 'X', 'R', 'U', 'M', 'P', DEFENCES_KEY].into();
+        ['T', 'V', 'X', 'R', 'U', 'A', 'P', DEFENCES_KEY].into();
     keys.extend(TECH_KEYS);
     for k in kinds::all() {
         keys.insert(build_hotkey(k.id));
@@ -902,7 +904,7 @@ fn commands(
         defs.push(Def::on(
             Action::AttackMove,
             "ATTACK MOVE",
-            'M',
+            'A',
             "ADVANCE TO A POINT, FIGHTING ANYTHING ON THE WAY",
         ));
         defs.push(Def::on(
@@ -1477,6 +1479,12 @@ impl Hud {
                     Order::Gather { .. } => "GOING TO GATHER",
                     Order::Build { working: true, .. } => "BUILDING",
                     Order::Build { .. } => "GOING TO BUILD",
+                    Order::Repair { working: true, .. } => "REPAIRING",
+                    Order::Repair { .. } => "GOING TO REPAIR",
+                    Order::Attack {
+                        then: sim::Then::Hunt(_),
+                        ..
+                    } => "HUNTING",
                     Order::Attack { .. } => "ATTACKING",
                     Order::AttackMove { .. } => "ATTACK-MOVING",
                     Order::Patrol { .. } => "PATROLLING",
@@ -1484,7 +1492,14 @@ impl Hud {
                     Order::Garrison { .. } => "GOING INSIDE",
                 };
                 if !job.is_empty() {
-                    p.text(10.0, ty, job, false, 1.0);
+                    // What is queued behind it (`UX-CMD-04`).
+                    let queued = world.queue_at(i).len();
+                    let line = if queued > 0 {
+                        format!("{job}, THEN {queued} MORE")
+                    } else {
+                        job.to_string()
+                    };
+                    p.text(10.0, ty, &line, false, 1.0);
                     ty += 12.0;
                 }
                 if let Some(q) = world.production[i].as_ref() {
@@ -2418,7 +2433,7 @@ mod tests {
         }
         assert!(keys.iter().any(|k| k.contains('Q') && k.contains('Z')));
         let gen_keys: Vec<&str> = general.iter().map(|(k, _)| k.as_str()).collect();
-        for key in ["WASD", "F2", "ESC", "SPACE", "T"] {
+        for key in ["ARROWS", "F2", "ESC", "SPACE", "T"] {
             assert!(gen_keys.contains(&key), "{key} missing");
         }
 

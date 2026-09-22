@@ -79,7 +79,9 @@ above (always on for damaged units, toggleable to always-on for all).
 
 ### Current economy-sandbox shortcuts
 
-WASD and arrows are reserved for camera movement. Build shortcuts with
+The arrow keys pan the camera by default, and `A` is attack-move
+(`UX-CMD-02`); WASD can be bound to panning on the settings screen, which
+then takes `A` from attack-move (decided 2026-09-22, `docs/07` D26). Build shortcuts with
 villagers selected are H (House), O (Storehouse), B (Barracks), F (Farm),
 M (Market), N (Archery Range), L (Stable), P (Temple), Y (Academy),
 G (Siege Workshop), and C (Government Centre), subject to age and resource
@@ -150,8 +152,8 @@ between them, and a ghost of the queued building.
 
 ## 4. Camera
 
-- Edge scroll (with a configurable dead zone and off switch), `WASD` / arrows,
-  and middle-mouse drag.
+- Edge scroll (with a configurable dead zone and off switch), the arrow keys
+  (WASD a binding away), and middle-mouse drag.
 - **[UX-CAM-01] Discrete zoom levels only** — 1×, 1.5×, 2× — so pixel art stays crisp. No
   free-scroll zoom; it makes sprite art look bad.
 - Minimap click to jump, drag to scrub.

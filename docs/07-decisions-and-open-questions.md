@@ -115,6 +115,10 @@ now.
 Animals need to be killed before they are food, and killing is M4. Berries,
 trees, stone and gold cover "gather all four resources" for the slice.
 
+**Closed 2026-09-22.** Hunting landed with the playtest-2 fixes
+(`docs/02` `GD-ECON-06`): the gazelle runs when hit, its carcass lies
+three minutes, the hunter gathers it unasked. The opponent does not hunt.
+
 ### D16 — Art is modelled and rendered, not drawn or prompted
 **Date:** 2026-09-05 · **Decided by:** Bo
 
@@ -286,6 +290,18 @@ possible and is recorded as one.
 The Hardest difficulty's declared advantage is a 25% gather bonus, set on
 the match by whoever sets it up (`SimConfig::gather_bonus_pct`) and shown
 in M6's setup screen, never taken by the opponent's code.
+
+### D26 — Attack-move is `A`; the arrows pan by default
+**Date:** 2026-09-22 · **Decided by:** Bo
+
+`docs/03` gave `A` to attack-move (`UX-CMD-02`) and to WASD panning at
+once, and the build had settled it by putting attack-move on `M`. The
+owner chose the spec's key: the arrow keys, edge-scroll and middle-drag
+pan out of the box, as the original did; `A` is attack-move; WASD stays a
+binding away on the settings screen, and a player who binds it gives up
+`A` for attack-move, since the general keys win over the panel's
+letters. The alternative, `A` meaning attack-move only with soldiers
+selected and panning otherwise, was a modal key and was turned down.
 
 ## Open questions
 

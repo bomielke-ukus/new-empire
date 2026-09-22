@@ -616,18 +616,18 @@ impl App {
         if self.playback.is_some() {
             return;
         }
+        // With Shift held, a job is a waypoint: for after what the units
+        // are doing and whatever is queued behind it (`UX-CMD-04`).
+        let kind = if self.modifiers.shift_key() && kind.queueable() {
+            CommandKind::Queued(Box::new(kind))
+        } else {
+            kind
+        };
         // The units answer the moment they are told (`UX-AUDIO-01`): the
         // bark is the command's, not the tick's, which is two ticks off.
         let voice = match &kind {
-            CommandKind::Move { ids, .. }
-            | CommandKind::Stop { ids }
-            | CommandKind::Gather { ids, .. }
-            | CommandKind::Build { ids, .. }
-            | CommandKind::Assist { ids, .. }
-            | CommandKind::Attack { ids, .. }
-            | CommandKind::AttackMove { ids, .. }
-            | CommandKind::Patrol { ids, .. }
-            | CommandKind::Garrison { ids, .. } => self.voice_of(ids),
+            k if k.queueable() || matches!(k, CommandKind::Stop { .. }) => self.voice_of(k.named()),
+            CommandKind::Queued(inner) => self.voice_of(inner.named()),
             _ => None,
         };
         if let Some(class) = voice {
@@ -1702,6 +1702,9 @@ impl App {
             (None, Some((px, py))) if !self.over_hud(px, py) => match self.hovered_target(px, py) {
                 Some(Target::Gather) => CursorIcon::Grab,
                 Some(Target::Assist) => CursorIcon::Pointer,
+                // The spec's wrench; the system's nearest is the cross.
+                Some(Target::Repair) => CursorIcon::Cell,
+                Some(Target::Hunt) => CursorIcon::Crosshair,
                 Some(Target::Attack) => CursorIcon::Crosshair,
                 Some(Target::Garrison) => CursorIcon::Copy,
                 _ => CursorIcon::Default,
@@ -1723,6 +1726,12 @@ impl App {
         }
         if villagers && world.owner[i] == ME && world.construction[i].is_some() {
             return Some(Target::Assist);
+        }
+        if villagers && world.owner[i] == ME && self.sim.repairable(i) {
+            return Some(Target::Repair);
+        }
+        if villagers && huntable_by_me(&self.sim, i) {
+            return Some(Target::Hunt);
         }
         if enemy_of_me(&self.sim, i) && !self.selection.own_fighters(&self.sim, ME).is_empty() {
             return Some(Target::Attack);
@@ -1988,10 +1997,28 @@ impl App {
                 });
                 return;
             }
+            // An animal: hunt it, and gather the carcass after
+            // (`GD-ECON-06`).
+            if !villagers.is_empty() && huntable_by_me(&self.sim, i) {
+                self.issue(CommandKind::Attack {
+                    ids: villagers,
+                    target: id,
+                });
+                return;
+            }
             if !villagers.is_empty() && site {
                 self.issue(CommandKind::Assist {
                     ids: villagers,
                     site: id,
+                });
+                return;
+            }
+            // A damaged building of the player's: repair it (`UX-CMD-01`,
+            // `GD-BUILD-02`).
+            if !villagers.is_empty() && world.owner[i] == ME && self.sim.repairable(i) {
+                self.issue(CommandKind::Repair {
+                    ids: villagers,
+                    building: id,
                 });
                 return;
             }
@@ -2349,9 +2376,12 @@ impl App {
 }
 
 /// What a right-click would target.
+#[derive(Debug)]
 enum Target {
     Gather,
     Assist,
+    Repair,
+    Hunt,
     Attack,
     Garrison,
     #[allow(dead_code)]
@@ -2394,10 +2424,18 @@ fn shelter_of_me(sim: &Simulation, i: usize) -> bool {
 fn gatherable_by_me(sim: &Simulation, i: usize) -> bool {
     let world = sim.world();
     let kind = world.kind[i];
-    kinds::gatherable(kind)
+    // A node, or a carcass while it lies (`GD-ECON-06`).
+    let carcass = kinds::huntable(kind) && world.dying[i] > 0;
+    (kinds::gatherable(kind) || carcass)
         && world.resource[i] > 0
         && world.construction[i].is_none()
         && (kind != kinds::FARM || world.owner[i] == ME)
+}
+
+/// True if entity `i` is a live animal the player's villagers may hunt.
+fn huntable_by_me(sim: &Simulation, i: usize) -> bool {
+    let world = sim.world();
+    world.owner[i] == kinds::GAIA && world.dying[i] == 0 && kinds::huntable(world.kind[i])
 }
 
 /// The letter a key carries, for command hotkeys.

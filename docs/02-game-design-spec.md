@@ -88,6 +88,10 @@ late-game economies dependent on a shrinking forest.
   time is the cost.
 - **[GD-ECON-05] Farms auto-reseed by default** (toggle per-farm and globally), and a
   notification fires when wood is too low to reseed.
+- **[GD-ECON-06] Hunting.** An animal is food only once killed: villagers or soldiers attack
+  it, it runs when hit, and the carcass lies where it fell with its yield on it, gatherable
+  by any villager until it is taken or, after three minutes, gone. A villager that makes the
+  kill gathers the carcass without being told.
 
 ### 3.4 Population
 
@@ -214,6 +218,12 @@ Kept close to the original because it is the series' signature:
 
 **[GD-BUILD-01]** Buildings under construction show a build progress silhouette, take damage
 normally, and can be finished by any villager.
+
+**[GD-BUILD-02]** Villagers repair a finished, damaged building of their own at build speed,
+as many of them counting as of builders. A repair is paid when it starts, half the
+building's cost in proportion to the health missing at that moment, and does not start
+if the side cannot pay; a repair interrupted and taken up again pays again for what
+remains.
 
 ---
 

@@ -262,8 +262,8 @@ impl Economy {
             })
         };
         // What is known to gather from: nodes in sight, own finished farms,
-        // and nodes remembered out of sight. Animals are food on the hoof,
-        // and there is no hunting yet.
+        // and nodes remembered out of sight. Animals are food on the hoof;
+        // the opponent does not hunt yet, so it leaves them.
         let mut nodes: Vec<Node> = seen
             .iter()
             .filter_map(|s| {

@@ -64,10 +64,10 @@ impl Input {
             edge_scroll: true,
             focused: true,
             pan: [
-                Some(KeyCode::KeyW),
-                Some(KeyCode::KeyS),
-                Some(KeyCode::KeyA),
-                Some(KeyCode::KeyD),
+                Some(KeyCode::ArrowUp),
+                Some(KeyCode::ArrowDown),
+                Some(KeyCode::ArrowLeft),
+                Some(KeyCode::ArrowRight),
             ],
             ..Default::default()
         }
@@ -184,7 +184,7 @@ mod tests {
         let mut a = Camera::new(64, 64, (800.0, 600.0));
         let mut b = a;
         let mut input = Input::new();
-        input.held.insert(KeyCode::KeyD);
+        input.held.insert(KeyCode::ArrowRight);
         input.update_camera(&mut a, 0.1);
         for _ in 0..10 {
             input.update_camera(&mut b, 0.01);

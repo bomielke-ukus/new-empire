@@ -875,7 +875,7 @@ pub fn settings_screen(
     let note = if capturing.is_some() {
         "PRESS THE NEW KEY. ESC KEEPS THE OLD ONE."
     } else {
-        "LETTERS THE PANELS USE, DIGITS AND ESC CANNOT BE TAKEN."
+        "DIGITS AND ESC CANNOT BE TAKEN; ONLY THE PAN KEYS MAY TAKE A PANEL'S LETTER."
     };
     s.centred(x + pw / 2.0, ry + 4.0, note, Ink::White, 1.0);
     if let Some(e) = error {

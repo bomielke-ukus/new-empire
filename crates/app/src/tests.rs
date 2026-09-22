@@ -7,7 +7,7 @@ use ai::Difficulty;
 use audio::score::{BED_GAIN, COMBAT_IN_MS, CROSSFADE_MS};
 use audio::{Bed, Fade, Layer, Play};
 use sim::Task;
-use sim::{Command, Formation, Item, MapKind, MapSpec, Order, SimConfig, Stance};
+use sim::{Command, Formation, Fx, Item, MapKind, MapSpec, Order, SimConfig, Stance};
 use view::shell::{Field, MapSize};
 use view::{Control, NoticeKind, Settings, ShellButton};
 
@@ -20,16 +20,33 @@ fn camera_keys_pan_without_building_or_spending_and_release_stops_panning() {
         app.selection.set(selection);
         let selection = app.selection.ids.clone();
         draw(&mut app);
-        for code in [
-            KeyCode::KeyW,
-            KeyCode::KeyA,
-            KeyCode::KeyS,
-            KeyCode::KeyD,
+        // The arrows pan out of the box; WASD once bound to it, which is
+        // what the second half of the list is, so both are checked.
+        for (n, code) in [
             KeyCode::ArrowUp,
             KeyCode::ArrowLeft,
             KeyCode::ArrowDown,
             KeyCode::ArrowRight,
-        ] {
+            KeyCode::KeyW,
+            KeyCode::KeyA,
+            KeyCode::KeyS,
+            KeyCode::KeyD,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if n == 4 {
+                for (control, key) in [
+                    (Control::PanUp, "KeyW"),
+                    (Control::PanLeft, "KeyA"),
+                    (Control::PanDown, "KeyS"),
+                    (Control::PanRight, "KeyD"),
+                ] {
+                    app.settings.bind(control, key).unwrap();
+                }
+                app.apply_settings();
+                draw(&mut app);
+            }
             let commands = app.sim.replay().commands.len();
             let stockpile = app.sim.player(ME).unwrap().stockpile;
             app.camera.look_at_tile(24.0, 24.0);
@@ -804,7 +821,7 @@ fn settings_are_edited_on_their_screen_kept_at_once_and_read_back() {
     assert!(!app.clock.paused(), "Space is nobody's now");
     let [general, _] = view::hud::controls(&app.settings);
     assert!(general.contains(&("F6".to_string(), "PAUSE".to_string())));
-    assert!(general.iter().any(|(k, _)| k == "WASD"));
+    assert!(general.iter().any(|(k, _)| k == "ARROWS"));
     // A missing file is not an error; a broken one reports and defaults.
     let mut none = App::new();
     none.settings_path = dir.join("nothing.ron");
@@ -1415,9 +1432,17 @@ fn soldiers_attack_move_patrol_and_change_stance_from_the_panel() {
     app.camera.look_at_tile(12.0, 10.0);
     draw(&mut app);
 
-    // Attack-move: the button arms targeting, a click on the ground fires.
+    // Attack-move is `A` (`UX-CMD-02`), which no longer pans: the arrows
+    // do by default. The key arms targeting, as the button does.
+    assert!(!app.input.is_pan_key(KeyCode::KeyA), "A is not a pan key");
+    assert!(app.input.is_pan_key(KeyCode::ArrowLeft));
+    assert!(app.hotkey('A'), "A arms attack-move");
+    assert_eq!(app.targeting, Some(Targeting::AttackMove));
+    app.targeting = None;
+    // The button arms targeting, a click on the ground fires.
     let commands = app.sim.replay().commands.len();
     let attack_move = button(&app, "ATTACK MOVE");
+    assert_eq!(attack_move.hotkey, 'A');
     click(&mut app, &attack_move);
     assert_eq!(app.targeting, Some(Targeting::AttackMove));
     draw(&mut app);
@@ -1506,6 +1531,242 @@ fn soldiers_attack_move_patrol_and_change_stance_from_the_panel() {
 }
 
 /// The window position of a ground point, lifted `lift` pixels.
+/// Right-click on a damaged building of the player's with villagers
+/// selected repairs it (`UX-CMD-01`'s row): the cursor says so, the click
+/// issues it, and the villager walks up and mends.
+///
+/// REQ: GD-BUILD-02
+#[test]
+fn villagers_repair_a_damaged_building_on_a_right_click() {
+    let mut app = app();
+    let house = spawn(&mut app, kinds::HOUSE, 12, 12);
+    let vill = spawn(&mut app, kinds::VILLAGER, 8, 12);
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Spawn {
+            kind: kinds::AXEMAN,
+            pos: Vec2Fx::from_int(15, 12),
+        },
+    });
+    step(&mut app, 3);
+    let axe = app
+        .sim
+        .world()
+        .slots()
+        .find(|s| app.sim.world().owner[s.index()] == 1)
+        .map(|s| app.sim.world().id_at(s))
+        .unwrap();
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Attack {
+            ids: vec![axe],
+            target: house,
+        },
+    });
+    let max = Fx::from_int(kinds::info(kinds::HOUSE).max_health);
+    let hi = app.sim.world().slot(house).unwrap().index();
+    for _ in 0..1200 {
+        if app.sim.world().health[hi] < max / 2 {
+            break;
+        }
+        app.sim.step();
+    }
+    let hurt = app.sim.world().health[hi];
+    assert!(hurt < max, "the axeman did damage");
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Despawn { id: axe },
+    });
+    step(&mut app, 3);
+
+    app.camera.look_at_tile(12.0, 12.0);
+    app.selection.set(vec![vill]);
+    draw(&mut app);
+    let (px, py) = on_screen(&app, 12.5, 12.5, 12.0);
+    assert!(
+        matches!(app.hovered_target(px, py), Some(Target::Repair)),
+        "the cursor offers repair over the damaged house"
+    );
+    let commands = app.sim.replay().commands.len();
+    app.right_press(px, py);
+    assert_eq!(app.sim.replay().commands.len(), commands + 1);
+    assert!(matches!(
+        app.sim.replay().commands.last().unwrap().1.kind,
+        CommandKind::Repair { .. }
+    ));
+    for _ in 0..600 {
+        app.sim.step();
+        if app.sim.world().health[hi] >= max {
+            break;
+        }
+    }
+    assert_eq!(app.sim.world().health[hi], max, "mended");
+    let vi = app.sim.world().slot(vill).unwrap().index();
+    step(&mut app, 2);
+    assert_eq!(app.sim.world().order[vi], Order::Idle);
+    // Whole again, the house is no longer a repair target.
+    draw(&mut app);
+    assert!(!matches!(app.hovered_target(px, py), Some(Target::Repair)));
+}
+
+/// With Shift held a right-click is a waypoint (`UX-CMD-04`): the
+/// villager finishes the first trip, then takes the second, and the panel
+/// says what is queued.
+///
+/// REQ: UX-CMD-04
+#[test]
+fn shift_right_click_queues_a_waypoint_and_the_unit_takes_it_after() {
+    let mut app = app();
+    let vill = spawn(&mut app, kinds::VILLAGER, 10, 10);
+    app.camera.look_at_tile(12.0, 12.0);
+    app.selection.set(vec![vill]);
+    draw(&mut app);
+    let (px, py) = on_screen(&app, 14.5, 10.5, 0.0);
+    app.right_press(px, py);
+    app.modifiers = ModifiersState::SHIFT;
+    let (qx, qy) = on_screen(&app, 14.5, 14.5, 0.0);
+    app.right_press(qx, qy);
+    app.modifiers = ModifiersState::empty();
+    let replay = app.sim.replay();
+    let last = &replay.commands.last().unwrap().1.kind;
+    assert!(matches!(last, CommandKind::Queued(_)), "{last:?}");
+    step(&mut app, 3);
+    let vi = app.sim.world().slot(vill).unwrap().index();
+    assert!(matches!(app.sim.world().order[vi], Order::Move { .. }));
+    assert_eq!(
+        app.sim.world().queue_at(vi).len(),
+        1,
+        "one waypoint behind it"
+    );
+    // The line and the flag are drawn for the selected villager
+    // (`UX-CMD-11`): overlay sprites with no entity behind them.
+    let overlays_before = app
+        .scene
+        .sprites
+        .iter()
+        .filter(|s| s.slot == u32::MAX)
+        .count();
+    draw(&mut app);
+    let overlays = app
+        .scene
+        .sprites
+        .iter()
+        .filter(|s| s.slot == u32::MAX)
+        .count();
+    assert!(
+        overlays > overlays_before,
+        "marks on the ground: {overlays}"
+    );
+    // The first trip ends near the first point, the second begins.
+    for _ in 0..400 {
+        app.sim.step();
+        if app.sim.world().queue_at(vi).is_empty() {
+            break;
+        }
+    }
+    let p = app.sim.world().pos[vi];
+    assert!(
+        (view::fx_to_f32(p.x) - 14.5).abs() < 1.5 && (view::fx_to_f32(p.y) - 10.5).abs() < 1.5,
+        "at the first point when the second was taken: {p:?}"
+    );
+    assert!(matches!(app.sim.world().order[vi], Order::Move { .. }));
+    for _ in 0..400 {
+        app.sim.step();
+        if app.sim.world().order[vi] == Order::Idle {
+            break;
+        }
+    }
+    let p = app.sim.world().pos[vi];
+    assert!(
+        (view::fx_to_f32(p.y) - 14.5).abs() < 1.5,
+        "and arrived at the second: {p:?}"
+    );
+}
+
+/// Right-click on an animal with villagers selected hunts it
+/// (`GD-ECON-06`): the cursor says so and the click sends them.
+///
+/// REQ: GD-ECON-06
+#[test]
+fn villagers_hunt_an_animal_on_a_right_click() {
+    let mut app = app();
+    app.sim = Simulation::new(
+        3,
+        SimConfig {
+            map: MapSpec {
+                kind: MapKind::Inland,
+                size: 64,
+                players: 2,
+            },
+            wander: false,
+            ..SimConfig::default()
+        },
+    );
+    let w = app.sim.world();
+    let vill = w
+        .slots()
+        .find(|s| w.owner[s.index()] == 0 && w.kind[s.index()] == kinds::VILLAGER)
+        .map(|s| w.id_at(s))
+        .unwrap();
+    let vp = w.pos[w.slot(vill).unwrap().index()];
+    // The nearest gazelle, walked into sight first: what the fog hides
+    // cannot be clicked.
+    let gazelle = w
+        .slots()
+        .filter(|s| w.kind[s.index()] == kinds::GAZELLE)
+        .min_by_key(|s| vp.distance_sq_raw(w.pos[s.index()]))
+        .map(|s| w.id_at(s))
+        .unwrap();
+    let gp = w.pos[w.slot(gazelle).unwrap().index()];
+    let (gx, gy) = (view::fx_to_f32(gp.x), view::fx_to_f32(gp.y));
+    app.sim.issue(Command {
+        player: 0,
+        kind: CommandKind::Move {
+            ids: vec![vill],
+            target: gp,
+        },
+    });
+    for _ in 0..1200 {
+        let t = sim::nav::tile_of(gp);
+        if app.sim.fog(0).unwrap().visible(t.0, t.1) {
+            break;
+        }
+        app.sim.step();
+    }
+    app.sim.issue(Command {
+        player: 0,
+        kind: CommandKind::Stop { ids: vec![vill] },
+    });
+    step(&mut app, 3);
+    app.camera = Camera::new(64, 64, (1280.0, 720.0));
+    app.camera.look_at_tile(gx, gy);
+    app.selection.set(vec![vill]);
+    draw(&mut app);
+    let (px, py) = on_screen(&app, gx, gy, 8.0);
+    assert!(
+        matches!(app.hovered_target(px, py), Some(Target::Hunt)),
+        "the cursor offers the hunt: {:?}",
+        app.hovered_target(px, py)
+    );
+    let commands = app.sim.replay().commands.len();
+    app.right_press(px, py);
+    assert_eq!(app.sim.replay().commands.len(), commands + 1);
+    let replay = app.sim.replay();
+    assert!(matches!(
+        replay.commands.last().unwrap().1.kind,
+        CommandKind::Attack { target, .. } if target == gazelle
+    ));
+    step(&mut app, 3);
+    let vi = app.sim.world().slot(vill).unwrap().index();
+    assert!(matches!(
+        app.sim.world().order[vi],
+        Order::Attack {
+            then: sim::Then::Hunt(_),
+            ..
+        }
+    ));
+}
+
 fn on_screen(app: &App, x: f32, y: f32, lift: f32) -> (f32, f32) {
     let g = view::iso::project(x, y, view::iso::ground_height(app.sim.map(), x, y));
     app.camera.to_window(g.0, g.1 - lift)

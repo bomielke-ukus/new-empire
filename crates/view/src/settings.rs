@@ -96,10 +96,10 @@ impl Control {
     /// The key it answers to out of the box, by the name `winit` prints.
     pub const fn default_key(self) -> &'static str {
         match self {
-            Control::PanUp => "KeyW",
-            Control::PanDown => "KeyS",
-            Control::PanLeft => "KeyA",
-            Control::PanRight => "KeyD",
+            Control::PanUp => "ArrowUp",
+            Control::PanDown => "ArrowDown",
+            Control::PanLeft => "ArrowLeft",
+            Control::PanRight => "ArrowRight",
             Control::Pause => "Space",
             Control::Slower => "BracketLeft",
             Control::Faster => "BracketRight",
@@ -199,7 +199,10 @@ impl Settings {
         if let Some(rest) = key.strip_prefix("Key") {
             let mut chars = rest.chars();
             if let (Some(letter), None) = (chars.next(), chars.next()) {
-                if command_letters().contains(&letter) {
+                // The pan keys may take a panel's letter: they are held,
+                // not pressed, and they win in the key handler, so binding
+                // WASD to pan takes `A` from attack-move (`docs/07` D26).
+                if command_letters().contains(&letter) && !control.pans() {
                     return Err(format!("{letter} IS A COMMAND KEY ON THE PANELS"));
                 }
             }
@@ -325,9 +328,13 @@ mod tests {
             "a refusal changes nothing"
         );
         assert_eq!(
-            s.bind(Control::Faster, "KeyW"),
-            Err("W IS PAN UP".to_string())
+            s.bind(Control::Faster, "ArrowUp"),
+            Err("UP IS PAN UP".to_string())
         );
+        // The arrows pan out of the box, so `A` is free for attack-move
+        // (`UX-CMD-02`); WASD is a binding away.
+        assert_eq!(Settings::default().key(Control::PanLeft), "ArrowLeft");
+        assert_eq!(s.bind(Control::PanLeft, "KeyA"), Ok(()));
         assert_eq!(
             s.bind(Control::Pause, "F6"),
             Ok(()),

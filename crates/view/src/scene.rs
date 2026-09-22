@@ -1,7 +1,7 @@
 //! Turns simulation state into a sorted list of sprite instances.
 
 use sim::kinds;
-use sim::{GatherPhase, NavState, Order, Simulation, Vec2Fx, DECAY_TICKS, RUBBLE_TICKS, TICK_MS};
+use sim::{GatherPhase, NavState, Order, Simulation, Vec2Fx, RUBBLE_TICKS, TICK_MS};
 
 /// How long the age-up sweep takes to cross a settlement, in ms.
 pub const SWEEP_MS: u32 = 1800;
@@ -215,7 +215,8 @@ impl Scene {
                 if world.dying[i] > 0 {
                     // Falls, then lies: the death animation's length decides
                     // when the corpse frame takes over.
-                    let dead_ms = (DECAY_TICKS - world.dying[i]) as u32 * TICK_MS;
+                    let dead_ms =
+                        sim::decay_ticks(kind).saturating_sub(world.dying[i]) as u32 * TICK_MS;
                     let death_ms = atlas
                         .anim_info(look, Anim::Death)
                         .map_or(0, |a| a.frames * a.frame_ms);
@@ -239,11 +240,12 @@ impl Scene {
             };
             let time_ms = if world.dying[i] > 0 {
                 let span = if info.mobile {
-                    DECAY_TICKS
+                    sim::decay_ticks(kind)
                 } else {
                     RUBBLE_TICKS
                 };
-                (span - world.dying[i]) as u32 * TICK_MS + (alpha * TICK_MS as f32) as u32
+                span.saturating_sub(world.dying[i]) as u32 * TICK_MS
+                    + (alpha * TICK_MS as f32) as u32
             } else if anim == Anim::Work && info.combat.attack > 0 && world.reload[i] > 0 {
                 info.combat
                     .reload_ticks
@@ -435,10 +437,100 @@ impl Scene {
                 }
             }
         }
+        waypoint_marks(sim, atlas, selected, &mut sprites);
         sprites.sort_by(|a, b| a.depth.total_cmp(&b.depth).then(a.slot.cmp(&b.slot)));
         Scene {
             sprites,
             ui: Vec::new(),
+        }
+    }
+}
+
+/// Where an order is headed, for the line a selected unit's queued jobs
+/// are drawn along (`UX-CMD-11`): the point of a move, the thing of a
+/// gather, build, repair, attack or garrison while it stands.
+pub fn order_point(sim: &Simulation, order: &Order) -> Option<Vec2Fx> {
+    let world = sim.world();
+    let of = |id: sim::EntityId| world.slot(id).map(|s| world.pos[s.index()]);
+    match *order {
+        Order::Idle => None,
+        Order::Move { target } | Order::AttackMove { target } | Order::Flee { target, .. } => {
+            Some(target)
+        }
+        Order::Patrol { to, .. } => Some(to),
+        Order::Attack { target, .. } => of(target),
+        Order::Garrison { building } | Order::Repair { building, .. } => of(building),
+        Order::Gather { node, .. } => of(node),
+        Order::Build { site, .. } => of(site),
+    }
+}
+
+/// Every queued job is shown (`UX-CMD-11`): for each selected unit with
+/// something queued, a dotted line from where it is through where its
+/// current job and each queued one is headed, with a flag at each of
+/// those. A queued building is its site, already standing at its pegs.
+fn waypoint_marks(
+    sim: &Simulation,
+    atlas: &Atlas,
+    selected: &[u32],
+    sprites: &mut Vec<SpriteInstance>,
+) {
+    let world = sim.world();
+    let map = sim.map();
+    let dot = *atlas.solid(palette::WHITE);
+    let flag = *atlas.solid(palette::GOLD);
+    let edge = *atlas.solid(palette::BLACK);
+    let mut mark = |frame: &crate::sprites::Frame, x: f32, y: f32, size: f32, lift: f32| {
+        let (gx, gy) = iso::project(x, y, iso::ground_height(map, x, y));
+        sprites.push(SpriteInstance {
+            x: (gx - size / 2.0).round(),
+            y: (gy - size / 2.0 - lift).round(),
+            w: size,
+            h: size,
+            u: frame.x,
+            v: frame.y,
+            uw: frame.w,
+            vh: frame.h,
+            row: 0,
+            flip: false,
+            // The dots lie on the ground, under whatever stands there; a
+            // flag is lifted and drawn over the thing it marks, or it
+            // would hide under the bush or the site it points at.
+            depth: if lift > 0.0 { x + y + 1.0 } else { x + y - 0.6 },
+            slot: u32::MAX,
+            screen: false,
+            light: 255,
+        });
+    };
+    for &slot in selected {
+        let i = slot as usize;
+        if !world.is_live(i) || world.queue_at(i).is_empty() || world.dying[i] > 0 {
+            continue;
+        }
+        let mut points: Vec<Vec2Fx> = Vec::new();
+        points.extend(order_point(sim, &world.order[i]));
+        for pending in world.queue_at(i) {
+            points.extend(order_point(sim, &pending.order));
+        }
+        let mut from = (fx_to_f32(world.pos[i].x), fx_to_f32(world.pos[i].y));
+        for (n, p) in points.iter().enumerate() {
+            let to = (fx_to_f32(p.x), fx_to_f32(p.y));
+            let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+            let len = (dx * dx + dy * dy).sqrt();
+            let steps = (len / 0.5).floor() as usize;
+            for k in 1..steps {
+                let t = k as f32 / steps as f32;
+                mark(&dot, from.0 + dx * t, from.1 + dy * t, 2.0, 0.0);
+            }
+            // The flag: a gold square on a black one, at every point after
+            // the current job's, which the unit is already headed for.
+            if n > 0 || points.len() == world.queue_at(i).len() {
+                mark(&edge, to.0, to.1, 8.0, 14.0);
+                mark(&flag, to.0, to.1, 6.0, 14.0);
+                // The pole.
+                mark(&edge, to.0, to.1, 2.0, 6.0);
+            }
+            from = to;
         }
     }
 }

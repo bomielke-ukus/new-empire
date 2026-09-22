@@ -30,8 +30,8 @@ use crate::map::TileMap;
 use crate::mapgen::{self, MapSpec};
 use crate::nav::{self, NavGrid, Tile};
 use crate::orders::{
-    GatherPhase, Item, Modifiers, Nav, NavState, Order, Player, Production, QueueItem, Rally,
-    Stance, Then,
+    GatherPhase, Item, Modifiers, Nav, NavState, Order, Pending, Player, Production, QueueItem,
+    Rally, Stance, Then,
 };
 use crate::replay::Replay;
 use crate::rng::Rng;
@@ -325,6 +325,44 @@ impl<'a> Lap<'a> {
             self.last = now;
         }
     }
+}
+
+/// What a villager at a building of its side's is there to do.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Job {
+    /// Finish a site.
+    Build,
+    /// Bring a damaged building back to full health.
+    Repair,
+}
+
+impl Job {
+    /// The order for the job at `target`, walking or working.
+    fn order(self, target: EntityId, working: bool) -> Order {
+        match self {
+            Job::Build => Order::Build {
+                site: target,
+                working,
+            },
+            Job::Repair => Order::Repair {
+                building: target,
+                working,
+            },
+        }
+    }
+}
+
+/// What a repair costs (`GD-BUILD-02`): half the building's cost in
+/// proportion to the health missing, each resource rounded up so a scratch
+/// costs one.
+pub fn repair_due(cost: &Cost, missing: Fx, max_health: i32) -> Cost {
+    let mut due = [0i32; 4];
+    let whole = 2 * i64::from(max_health.max(1)) * i64::from(Fx::ONE.raw());
+    for (d, &c) in due.iter_mut().zip(cost) {
+        let part = i64::from(c) * i64::from(missing.max(Fx::ZERO).raw());
+        *d = ((part + whole - 1) / whole) as i32;
+    }
+    due
 }
 
 /// What one slot's sight disc was last stamped as: whose fog, from which
@@ -1180,6 +1218,7 @@ impl Simulation {
         self.deaths();
         lap.mark(&mut t.combat);
         self.construction();
+        self.repairs();
         self.production();
         self.recount_population();
         lap.mark(&mut t.economy);
@@ -1498,6 +1537,15 @@ impl Simulation {
                     self.world.priority[slot.index()] = via as u8;
                 }
             }
+            // A job given outright, or a stop, is the end of whatever was
+            // queued for the unit (`UX-CMD-04`); only a waypoint adds.
+            if cmd.kind.queueable() || matches!(cmd.kind, CommandKind::Stop { .. }) {
+                for id in cmd.kind.named() {
+                    if let Some(slot) = self.owned_mobile(*id, cmd.player) {
+                        self.world.queue_mut(slot.index()).clear();
+                    }
+                }
+            }
             self.apply(cmd);
         }
     }
@@ -1549,7 +1597,10 @@ impl Simulation {
                     return;
                 };
                 let owner = self.world.owner[ts.index()];
-                if owner == p || owner == GAIA {
+                // Nature's are not attacked, except an animal that is food
+                // (`GD-ECON-06`): a hunt, and a villager's ends in gathering.
+                let hunt = owner == GAIA && kinds::huntable(self.world.kind[ts.index()]);
+                if owner == p || (owner == GAIA && !hunt) {
                     return;
                 }
                 for id in ids {
@@ -1558,7 +1609,12 @@ impl Simulation {
                         if kinds::info(self.world.kind[i]).combat.attack == 0 {
                             continue;
                         }
-                        self.engage(i, target, Then::Idle, None);
+                        let then = if hunt && self.world.kind[i] == kinds::VILLAGER {
+                            Then::Hunt(target)
+                        } else {
+                            Then::Idle
+                        };
+                        self.engage(i, target, then, None);
                     }
                 }
             }
@@ -1729,6 +1785,23 @@ impl Simulation {
                 }
                 self.assign_builders(&ids, p, site);
             }
+            CommandKind::Queued(inner) => self.apply_queued(p, *inner),
+            CommandKind::Repair { ids, building } => {
+                match self.owned_slot(building, p) {
+                    Some(s) if self.repairable(s.index()) => {}
+                    _ => return,
+                }
+                for &id in &ids {
+                    if let Some(slot) = self.owned_villager(id, p) {
+                        let i = slot.index();
+                        self.world.order[i] = Order::Repair {
+                            building,
+                            working: false,
+                        };
+                        self.world.nav[i] = None;
+                    }
+                }
+            }
             CommandKind::Train { building, kind } => {
                 if self.can_train(p, building, kind).is_err() {
                     return;
@@ -1857,6 +1930,84 @@ impl Simulation {
         (goals, pace, field)
     }
 
+    /// A waypoint (`UX-CMD-04`). The command inside is applied as it would
+    /// be given outright, which resolves it fully: the site placed and
+    /// paid, each unit's slot in the formation and its trip worked out.
+    /// A unit with nothing to do and nothing queued simply keeps what
+    /// that set; a busy unit has what was set for it taken off again and
+    /// put on its queue, and its current job and trip put back.
+    fn apply_queued(&mut self, p: PlayerId, inner: CommandKind) {
+        /// What a busy unit was doing, to put back.
+        struct Kept {
+            slot: usize,
+            order: Order,
+            nav: Option<Nav>,
+            move_target: Option<Vec2Fx>,
+            work: Fx,
+        }
+        let mut busy: Vec<Kept> = Vec::new();
+        for &id in inner.named() {
+            if let Some(slot) = self.owned_mobile(id, p) {
+                let i = slot.index();
+                if self.world.order[i] != Order::Idle || !self.world.queue_at(i).is_empty() {
+                    busy.push(Kept {
+                        slot: i,
+                        order: self.world.order[i],
+                        nav: self.world.nav[i].clone(),
+                        move_target: self.world.move_target[i],
+                        work: self.world.work[i],
+                    });
+                }
+            }
+        }
+        self.apply(Command {
+            player: p,
+            kind: inner,
+        });
+        for kept in busy {
+            let i = kept.slot;
+            let set_order = self.world.order[i];
+            let set_nav = self.world.nav[i].take();
+            if set_order != kept.order || set_nav != kept.nav {
+                self.world.queue_mut(i).push(Pending {
+                    order: set_order,
+                    nav: set_nav,
+                });
+            }
+            self.world.order[i] = kept.order;
+            self.world.nav[i] = kept.nav;
+            self.world.move_target[i] = kept.move_target;
+            self.world.work[i] = kept.work;
+        }
+    }
+
+    /// Waypoints (`UX-CMD-04`): a unit that has finished its job takes the
+    /// next one queued for it, at once, so nothing stands idle between
+    /// two of them. A patrol starts from where the unit is now.
+    fn advance_queues(&mut self) {
+        for i in 0..self.world.capacity() {
+            if !self.world.is_live(i)
+                || self.world.order[i] != Order::Idle
+                || self.world.dying[i] > 0
+                || self.world.inside[i].is_some()
+                || self.world.queue_at(i).is_empty()
+            {
+                continue;
+            }
+            let next = self.world.queue_mut(i).remove(0);
+            let order = match next.order {
+                Order::Patrol { to, leg, .. } => Order::Patrol {
+                    from: self.world.pos[i],
+                    to,
+                    leg,
+                },
+                o => o,
+            };
+            self.world.order[i] = order;
+            self.world.nav[i] = next.nav;
+        }
+    }
+
     fn assign_builders(&mut self, ids: &[EntityId], p: PlayerId, site: EntityId) {
         for &id in ids {
             if let Some(slot) = self.owned_villager(id, p) {
@@ -1911,9 +2062,13 @@ impl Simulation {
                     resource,
                     phase,
                 } => self.tick_gather(slot, node, resource, phase),
-                Order::Build { site, working } => self.tick_build(slot, site, working),
+                Order::Build { site, working } => self.tick_work(slot, site, working, Job::Build),
+                Order::Repair { building, working } => {
+                    self.tick_work(slot, building, working, Job::Repair)
+                }
             }
         }
+        self.advance_queues();
     }
 
     /// True once a walker has arrived or given up.
@@ -2127,11 +2282,29 @@ impl Simulation {
         }
     }
 
-    fn tick_build(&mut self, slot: Slot, site: EntityId, working: bool) {
+    /// True if a villager of the owner's could repair building `i`: finished,
+    /// standing, and short of its full health (`GD-BUILD-02`).
+    pub fn repairable(&self, i: usize) -> bool {
+        let k = kinds::info(self.world.kind[i]);
+        !k.mobile
+            && self.world.construction[i].is_none()
+            && self.world.dying[i] == 0
+            && self.world.health[i] < Fx::from_int(k.max_health)
+    }
+
+    /// A villager walking up to a building of its side's and working at
+    /// it: to a site to build it, or to a damaged building to repair it.
+    /// The walk is the same; what makes the target valid differs.
+    fn tick_work(&mut self, slot: Slot, target: EntityId, working: bool, job: Job) {
         let i = slot.index();
         let me = self.world.owner[i];
-        let ss = self.world.slot(site).filter(|s| {
-            self.world.owner[s.index()] == me && self.world.construction[s.index()].is_some()
+        let ss = self.world.slot(target).filter(|s| {
+            let t = s.index();
+            self.world.owner[t] == me
+                && match job {
+                    Job::Build => self.world.construction[t].is_some(),
+                    Job::Repair => self.repairable(t),
+                }
         });
         let Some(ss) = ss else {
             self.world.order[i] = Order::Idle;
@@ -2144,10 +2317,7 @@ impl Simulation {
                     .angle()
                     .facing8();
             } else {
-                self.world.order[i] = Order::Build {
-                    site,
-                    working: false,
-                };
+                self.world.order[i] = job.order(target, false);
             }
             return;
         }
@@ -2161,10 +2331,7 @@ impl Simulation {
         }
         self.world.nav[i] = None;
         if self.within_reach(i, ss) {
-            self.world.order[i] = Order::Build {
-                site,
-                working: true,
-            };
+            self.world.order[i] = job.order(target, true);
         } else if let Some(goal) = self.approach(i, ss) {
             let field = self.field_key_of(ss);
             self.world.nav[i] = Some(Nav::along(goal, Fx::from_ratio(2, 10), field));
@@ -2220,6 +2387,7 @@ impl Simulation {
                 phase: GatherPhase::Working,
                 ..
             } | Order::Build { working: true, .. }
+                | Order::Repair { working: true, .. }
         )
     }
 
@@ -2270,12 +2438,14 @@ impl Simulation {
     /// True if `p`'s villagers may gather from entity `n` right now: a
     /// static node with something left, not a site, and — for a farm —
     /// theirs. Gaia's nodes are everyone's; a farm is its owner's.
-    fn gatherable_by(&self, n: usize, p: PlayerId) -> bool {
+    pub(crate) fn gatherable_by(&self, n: usize, p: PlayerId) -> bool {
         let k = self.world.kind[n];
-        kinds::gatherable(k)
+        // A node while it stands, or a carcass while it lies (`GD-ECON-06`).
+        let node = kinds::gatherable(k) && self.world.dying[n] == 0;
+        let carcass = kinds::huntable(k) && self.world.dying[n] > 0;
+        (node || carcass)
             && self.world.resource[n] > 0
             && self.world.construction[n].is_none()
-            && self.world.dying[n] == 0
             && (k != kinds::FARM || self.world.owner[n] == p)
     }
 
@@ -3338,6 +3508,99 @@ impl Simulation {
                 }
             }
             *aged = 0;
+        }
+    }
+
+    /// Repairs (`GD-BUILD-02`): villagers working at a finished, damaged
+    /// building of their side's bring it back to full health at build
+    /// speed, as many of them counting as of builders. The repair is paid
+    /// when it starts, half the building's cost in proportion to the damage
+    /// at that moment, and does not start if the side cannot pay; the
+    /// building's `work` holds the paid mark for as long as someone is at
+    /// it, so a repair interrupted and taken up again is paid again for
+    /// what remains.
+    fn repairs(&mut self) {
+        let mut at_work: Vec<(EntityId, u32)> = Vec::new();
+        for s in self.world.slots() {
+            let i = s.index();
+            if let Order::Repair {
+                building,
+                working: true,
+            } = self.world.order[i]
+            {
+                match at_work.iter_mut().find(|(b, _)| *b == building) {
+                    Some(entry) => entry.1 += 1,
+                    None => at_work.push((building, 1)),
+                }
+                // The hammer, for the ear (`TA-AUDIO-02`).
+                if (self.tick + i as u64).is_multiple_of(WORK_PERIOD) {
+                    self.events.push(Event::Work {
+                        task: Task::Build,
+                        owner: self.world.owner[i],
+                        pos: self.world.pos[i],
+                    });
+                }
+            }
+        }
+        // A paid mark on a building nobody is at any more lapses.
+        let lapsed: Vec<usize> = self
+            .world
+            .slots()
+            .map(|s| s.index())
+            .filter(|&i| {
+                self.world.work[i] != Fx::ZERO
+                    && !kinds::info(self.world.kind[i]).mobile
+                    && !at_work
+                        .iter()
+                        .any(|(b, _)| *b == self.world.id_at(Slot::new(i)))
+            })
+            .collect();
+        for i in lapsed {
+            self.world.work[i] = Fx::ZERO;
+        }
+        for (building, n) in at_work {
+            let Some(bs) = self.world.slot(building) else {
+                continue;
+            };
+            let i = bs.index();
+            let info = kinds::info(self.world.kind[i]);
+            let owner = self.world.owner[i];
+            let max = Fx::from_int(info.max_health);
+            if self.world.work[i] == Fx::ZERO {
+                let due = repair_due(&info.cost, max - self.world.health[i], info.max_health);
+                let paid = self
+                    .players
+                    .get_mut(owner as usize)
+                    .is_some_and(|p| p.pay(&due));
+                if !paid {
+                    // Cannot afford it: the repairers stand down.
+                    self.stop_repairers(building);
+                    continue;
+                }
+                self.world.work[i] = Fx::ONE;
+            }
+            let modifiers = self.modifiers(owner);
+            let pace = (100 + modifiers.build_speed_pct).max(1) as u32;
+            let total = info.build_work().max(1);
+            let gain =
+                max * Fx::from_ratio((n.min(MAX_BUILDERS as u32) * pace) as i32, total as i32);
+            let health = (self.world.health[i] + gain).min(max);
+            self.world.health[i] = health;
+            if health >= max {
+                self.world.work[i] = Fx::ZERO;
+                self.stop_repairers(building);
+            }
+        }
+    }
+
+    /// Everyone repairing `building` goes idle.
+    fn stop_repairers(&mut self, building: EntityId) {
+        for s in self.world.slots().collect::<Vec<_>>() {
+            let j = s.index();
+            if matches!(self.world.order[j], Order::Repair { building: b, .. } if b == building) {
+                self.world.order[j] = Order::Idle;
+                self.world.nav[j] = None;
+            }
         }
     }
 
