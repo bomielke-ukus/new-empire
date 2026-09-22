@@ -1177,7 +1177,8 @@ each its own commit.
 - `crates/app`: right-click on a damaged building of the player's with
   villagers selected repairs it (`UX-CMD-01`'s row), the cursor a cross
   over it (the system has no wrench); the villagers answer.
-- Not done: the AI does not repair.
+- Not done at the time: the AI did not repair. It does since the work
+  record "the opponent hunts and repairs" below.
 
 ### Work record: playtest-2 — waypoints (2026-09-22)
 
@@ -1215,7 +1216,8 @@ each its own commit.
 - `crates/view`: the corpse span per kind; HUNTING in the status line.
 - `crates/app`: right-click on an animal with villagers selected hunts
   it (crosshair); a carcass is a gather target.
-- Not done: the opponent does not hunt; no boar (`docs/02` §3.2), which
+- Not done at the time: the opponent did not hunt (it does now, below);
+  no boar (`docs/02` §3.2), which
   fights back and is M8's.
 
 ### Work record: playtest-2 — attack-move on `A` (2026-09-22)
@@ -1226,6 +1228,46 @@ away on the settings screen, which then takes `A` back from attack-move.
 `Settings` defaults, the HUD's key on ATTACK MOVE, the controls overlay
 and the settings screen follow; goldens rebaked. The panel's command
 letters are still not rebindable (`GD-A11Y-02`).
+
+### Work record: the opponent hunts and repairs (2026-09-22)
+
+- `crates/sim`: a carcass's clock stands still while anyone has it as a
+  gather target, walking to it, working it or carrying from it
+  (`GD-ECON-06` amended: "decays if left"). Before, a lone hunter lost
+  more than half of every kill: one villager needs about five minutes to
+  gather 140 food at the spec's rate, and the carcass lasted three.
+- `crates/fogged`: `Job::Repairing` and `Job::Hunting`; a carcass with
+  food on it is listed in the sightings (`Sighting::carcass`), as a player
+  sees it lying there; `FoggedView::repair_cost`, what a repair of one of
+  the player's own buildings would be charged now.
+- `crates/ai`: the economy manager hunts (`GD-AI-02`). Live animals in
+  sight within `HUNT_RANGE` (12) tiles of a drop-off are the herd; a hunt
+  starts only while the bushes and farms near home hold less than
+  `HUNT_WHEN_FOOD_BELOW` (300) food and no carcass lies waiting, with at
+  most `BuildOrder::hunters` out at once (Easy 1, Standard 2, Hard 3; a
+  save from before reads 2): an idle villager picked for food goes after
+  the nearest animal, and one food gatherer a thought joins the hunt. A
+  hunter counts as a food gatherer. Carcasses are food nodes, but not for
+  the farm count or the rally point, since they do not last. It repairs:
+  the most damaged of its buildings below three quarters of its health,
+  with no enemy soldier within eight tiles, gets a villager, the Town
+  Center two, the cost counted against the stock at once.
+- Why the threshold: meat is gathered no faster than berries
+  (`GD-ECON-02`) and the herd is farther away, so a hunt that competes
+  with the bushes costs food. Hunting whenever the herd was in sight left
+  a Standard opponent a villager short at eight minutes; hunting only
+  once nothing else was near never happened in twenty minutes on six
+  seeds. As the home bushes run low, every difficulty hunts on every seed
+  tried, mostly from the seventh minute.
+- Tests: the carcass clock in `behaviour_hunting.rs`; an opponent that
+  hunts its home herd and one that repairs a house after a raid in
+  `tools/simrunner/tests/ai_economy.rs`, both claiming `GD-AI-02`.
+  `versus-hard-easy.golden` rewritten: Hard still wins 20 of 20
+  (`RM-M5-01` needs 18), but 8 by elimination and 12 on score at the
+  forty-minute limit, where it was 18 and 2. Repair is the reason: Easy
+  mends its Town Center between Hard's waves. With repair switched off
+  and hunting kept, six of the seeds that moved all ended by elimination
+  again at about their old times.
 
 ### Resume here next session
 

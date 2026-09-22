@@ -117,7 +117,7 @@ fn a_villager_hunts_a_gazelle_and_gathers_its_carcass() {
 }
 
 /// A carcass nobody gathers is gone after its time; a villager sent to a
-/// carcass gathers it as a node.
+/// carcass gathers it as a node, and while one does, it does not rot.
 /// REQ: GD-ECON-06
 #[test]
 fn a_carcass_left_alone_decays_and_one_sent_for_is_gathered() {
@@ -156,6 +156,18 @@ fn a_carcass_left_alone_decays_and_one_sent_for_is_gathered() {
         sim.world().order[index_of(&sim, v)],
         Order::Gather { node, .. } if node == gazelle
     ));
+    // While it is gathered its clock stands still ("decays if left").
+    let gi = index_of(&sim, gazelle);
+    let held = sim.world().dying[gi];
+    run(&mut sim, 300);
+    assert!(
+        matches!(
+            sim.world().order[index_of(&sim, v)],
+            Order::Gather { node, .. } if node == gazelle
+        ),
+        "still at it"
+    );
+    assert_eq!(sim.world().dying[gi], held, "no rot while tended");
     sim.issue(Command {
         player: 0,
         kind: CommandKind::Stop { ids: vec![v] },

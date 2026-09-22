@@ -22,9 +22,10 @@ use serde::{Deserialize, Serialize};
 /// Ticks a corpse stays on the ground: thirty seconds.
 pub const DECAY_TICKS: u16 = 600;
 
-/// How long a hunted animal's carcass lies before it is gone, gatherable
-/// while it lasts (`GD-ECON-06`): three minutes, enough for a couple of
-/// villagers to take it all, and not for one to dawdle.
+/// How long a hunted animal's carcass lies untended before it is gone
+/// (`GD-ECON-06`): three minutes. The clock runs only while nobody is
+/// gathering it, so a lone hunter takes the whole animal and one left
+/// behind rots.
 pub const CARCASS_TICKS: u16 = 3600;
 
 /// How long a dead mobile unit of `kind` lies: a carcass for a huntable
@@ -899,9 +900,29 @@ impl Simulation {
     /// both out of every system but the renderer.
     pub(crate) fn deaths(&mut self) {
         let slots: Vec<Slot> = self.world.slots().collect();
+        // Carcasses someone is gathering, walking to or carrying from: their
+        // clock stands still (`GD-ECON-06`, "decays if left"). Looked up
+        // only when there is a carcass at all.
+        let carcass = |w: &crate::entity::World, i: usize| {
+            w.dying[i] > 0 && kinds::huntable(w.kind[i]) && w.resource[i] > 0
+        };
+        let tended: Vec<EntityId> = if slots.iter().any(|s| carcass(&self.world, s.index())) {
+            slots
+                .iter()
+                .filter_map(|s| match self.world.order[s.index()] {
+                    Order::Gather { node, .. } => Some(node),
+                    _ => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         for slot in slots {
             let i = slot.index();
             if self.world.dying[i] > 0 {
+                if carcass(&self.world, i) && tended.contains(&self.world.id_at(slot)) {
+                    continue;
+                }
                 self.world.dying[i] -= 1;
                 if self.world.dying[i] == 0 {
                     self.remove(self.world.id_at(slot));

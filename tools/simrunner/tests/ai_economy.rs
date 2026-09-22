@@ -176,3 +176,166 @@ fn two_opponents_play_the_same_match() {
     }
     sim.replay().verify().expect("replays");
 }
+
+/// An opponent hunts the herd near its town (`GD-AI-02`): its villagers
+/// are sent at the gazelles by the same order a player gives, the animals
+/// die, and their food comes home. Nothing is hunted far from a drop-off.
+///
+/// REQ: GD-AI-02
+/// REQ: GD-ECON-06
+#[test]
+fn an_opponent_hunts_the_herd_near_its_town() {
+    let mut bots = [Opponent::new(0, Difficulty::Standard, 2)];
+    let start = Simulation::new(
+        2,
+        SimConfig {
+            map: MapSpec {
+                kind: MapKind::Inland,
+                size: 96,
+                players: 2,
+            },
+            ..SimConfig::default()
+        },
+    );
+    let w = start.world();
+    let gazelles: Vec<EntityId> = w
+        .slots()
+        .filter(|s| w.kind[s.index()] == kinds::GAZELLE)
+        .map(|s| w.id_at(s))
+        .collect();
+    assert!(!gazelles.is_empty());
+    let (sim, _) = play(2, &mut bots, 6000, 0);
+    let replay = sim.replay();
+    let hunts: Vec<EntityId> = replay
+        .commands
+        .iter()
+        .filter(|(_, c)| c.player == 0)
+        .filter_map(|(_, c)| match c.kind {
+            sim::CommandKind::Attack { target, .. } if gazelles.contains(&target) => Some(target),
+            _ => None,
+        })
+        .collect();
+    assert!(!hunts.is_empty(), "the opponent went hunting");
+    let dead = hunts
+        .iter()
+        .filter(|g| {
+            sim.world()
+                .slot(**g)
+                .is_none_or(|s| sim.world().dying[s.index()] > 0)
+        })
+        .count();
+    assert!(dead > 0, "and killed: {dead} of {}", hunts.len());
+    // Every animal hunted was near a drop-off of its side when it was
+    // chosen: the home herd, not the far ones.
+    let (sx, sy) = start.starts()[0];
+    let home = sim::nav::centre((sx, sy));
+    for g in &hunts {
+        let at = start.world().pos[start.world().slot(*g).unwrap().index()];
+        assert!(
+            at.distance(home) < sim::Fx::from_int(ai::economy::HUNT_RANGE + 12),
+            "hunted one far from home: {at:?}"
+        );
+    }
+    sim.check().unwrap();
+}
+
+/// An opponent repairs a building an enemy damaged (`GD-AI-02`), once the
+/// enemy is gone: a villager is sent with the same order a player gives,
+/// and the building is whole again.
+///
+/// REQ: GD-AI-02
+/// REQ: GD-BUILD-02
+#[test]
+fn an_opponent_repairs_a_building_once_the_raiders_are_gone() {
+    let mut sim = Simulation::new(
+        4,
+        SimConfig {
+            map: MapSpec {
+                kind: MapKind::Inland,
+                size: 96,
+                players: 2,
+            },
+            ..SimConfig::default()
+        },
+    );
+    let (sx, sy) = sim.starts()[0];
+    // A house of the opponent's, and three raiders of the other side's at it.
+    sim.issue(sim::Command {
+        player: 0,
+        kind: sim::CommandKind::Spawn {
+            kind: kinds::HOUSE,
+            pos: sim::nav::centre((sx - 4, sy + 4)),
+        },
+    });
+    for dx in 0..3 {
+        sim.issue(sim::Command {
+            player: 1,
+            kind: sim::CommandKind::Spawn {
+                kind: kinds::AXEMAN,
+                pos: sim::nav::centre((sx - 7 + dx, sy + 7)),
+            },
+        });
+    }
+    for _ in 0..3 {
+        sim.step();
+    }
+    let w = sim.world();
+    let house = w
+        .slots()
+        .find(|s| w.owner[s.index()] == 0 && w.kind[s.index()] == kinds::HOUSE)
+        .map(|s| w.id_at(s))
+        .unwrap();
+    let raiders: Vec<EntityId> = w
+        .slots()
+        .filter(|s| w.owner[s.index()] == 1 && w.kind[s.index()] == kinds::AXEMAN)
+        .map(|s| w.id_at(s))
+        .collect();
+    sim.issue(sim::Command {
+        player: 1,
+        kind: sim::CommandKind::Attack {
+            ids: raiders.clone(),
+            target: house,
+        },
+    });
+    let max = sim::Fx::from_int(kinds::info(kinds::HOUSE).max_health);
+    let hi = sim.world().slot(house).unwrap().index();
+    for _ in 0..2000 {
+        if sim.world().health[hi] < max / 2 {
+            break;
+        }
+        sim.step();
+    }
+    assert!(sim.world().health[hi] < max / 2, "the raid hurt it");
+    for r in raiders {
+        sim.issue(sim::Command {
+            player: 1,
+            kind: sim::CommandKind::Despawn { id: r },
+        });
+    }
+    sim.step();
+
+    let mut bot = Opponent::new(0, Difficulty::Standard, 4);
+    let mut repaired_at = None;
+    while sim.tick() < 4000 {
+        let commands = {
+            let view = FoggedView::new(&sim, 0);
+            bot.think(&view)
+        };
+        for c in commands {
+            c.validate().unwrap();
+            sim.issue_from(c, Source::Ai);
+        }
+        sim.step();
+        if sim.world().health[hi] >= max {
+            repaired_at = Some(sim.tick());
+            break;
+        }
+    }
+    assert!(repaired_at.is_some(), "the house was mended");
+    let asked = sim.replay().commands.iter().any(|(_, c)| {
+        c.player == 0
+            && matches!(c.kind, sim::CommandKind::Repair { building, .. } if building == house)
+    });
+    assert!(asked, "by a repair order");
+    sim.check().unwrap();
+}
