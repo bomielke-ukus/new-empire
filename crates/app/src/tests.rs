@@ -2184,6 +2184,32 @@ fn bus_volumes_are_set_on_the_settings_screen_and_kept() {
     assert_eq!(app.settings.volume(Bus::Music), 70, "the default");
 }
 
+/// The beds are positional (`docs/05` §5.1): the explored field around
+/// the villager, in the middle of the view, sits in the middle; with the
+/// camera moved so it lies to the left, the field's bed moves left.
+#[test]
+fn a_bed_sits_toward_the_side_of_the_view_its_ground_is_on() {
+    let mut app = app();
+    two_sides(&mut app);
+    app.clock.set_paused(true);
+    let field = |app: &mut App| {
+        app.speaker
+            .take_fades()
+            .into_iter()
+            .find(|f| f.layer == Layer::Bed(Bed::Field))
+    };
+    app.camera.look_at_tile(8.0, 8.0);
+    draw(&mut app);
+    let middle = field(&mut app).expect("the field");
+    assert!(middle.level > 0.0 && middle.pan.abs() < 0.1, "{middle:?}");
+    app.camera.look_at_tile(16.0, 0.0);
+    step(&mut app, SURVEY_TICKS as u32);
+    draw(&mut app);
+    let left = field(&mut app).expect("the field moved");
+    assert!(left.pan < -0.3, "{left:?}");
+    assert!(left.level > 0.0);
+}
+
 /// The score follows the match: the Stone stem fades in at the start and
 /// the field's bed sits under it; the Tool Age cross-fades the stems over
 /// four seconds; six units fighting in view bring the combat stem in; and
@@ -2193,13 +2219,17 @@ fn the_score_follows_the_age_and_the_fight_and_the_beds_the_ground() {
     let mut app = app();
     two_sides(&mut app);
     app.clock.set_paused(true);
+    // The explored ground is around the villager; only what is on screen
+    // is heard.
+    app.camera.look_at_tile(8.0, 8.0);
     draw(&mut app);
     let fades = app.speaker.take_fades();
     assert!(
         fades.contains(&Fade {
             layer: Layer::Stem(Age::Stone),
             level: 1.0,
-            ms: CROSSFADE_MS
+            ms: CROSSFADE_MS,
+            pan: 0.0
         }),
         "{fades:?}"
     );
@@ -2240,14 +2270,16 @@ fn the_score_follows_the_age_and_the_fight_and_the_beds_the_ground() {
         fades.contains(&Fade {
             layer: Layer::Stem(Age::Stone),
             level: 0.0,
-            ms: CROSSFADE_MS
+            ms: CROSSFADE_MS,
+            pan: 0.0
         }),
         "{fades:?}"
     );
     assert!(fades.contains(&Fade {
         layer: Layer::Stem(Age::Tool),
         level: 1.0,
-        ms: CROSSFADE_MS
+        ms: CROSSFADE_MS,
+        pan: 0.0
     }));
     // Six clubmen sent at an enemy in view.
     app.camera.look_at_tile(30.0, 30.0);
@@ -2280,7 +2312,8 @@ fn the_score_follows_the_age_and_the_fight_and_the_beds_the_ground() {
         fades.contains(&Fade {
             layer: Layer::Combat,
             level: 1.0,
-            ms: COMBAT_IN_MS
+            ms: COMBAT_IN_MS,
+            pan: 0.0
         }),
         "{fades:?}"
     );

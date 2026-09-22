@@ -1345,6 +1345,27 @@ technology opened, for as long as its notice stays up.
 - `tools/mapview`: `--fresh` rings what the side's technologies opened as
   if each had just finished; the `ages-fresh-hud` golden.
 
+### Work record: playtest-4 — positional ambient beds (2026-09-22)
+
+`docs/05` §5.1 asks for ambient beds that are "low, looping,
+positional"; they were low and looping and followed the view as a
+whole.
+
+- `crates/audio`: `Fade` carries a pan; `Ground::across` holds where
+  each kind of ground lies across the view; `Ambience` keeps a pan per
+  bed beside its level, scaled by the world sounds' width, and fades a
+  bed whose place moved by 0.1. A bed going quiet keeps its place. One
+  unit test.
+- `crates/app`: the survey places each on-screen tile by where its middle
+  projects in the window, and leaves out the tiles of the view's
+  bounding box that are off screen, so the fractions are of what is
+  seen. The device glides a loop's panning with its volume. One app
+  test; the score test now points the camera at its villager, whose
+  explored ground was off screen and heard only through the old box.
+- Not heard here: this container has no audio device, so the pans are
+  tested as the numbers the device is given. Whether they sound right is
+  for the Mac.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1538,8 +1559,7 @@ Stated so they are not rediscovered.
   noise, the stems and the beds included. Recordings under
   `assets/sounds/<cue>/`, `stem-<age>/`, `stem-combat/` and `bed-<kind>/`
   replace them by name.
-- **The beds are not positional** (`docs/05` §5.1 asks it): they follow
-  the view as a whole. **No stem plays on the title screen.**
+- **No stem plays on the title screen.**
 - **The performance numbers are from a shared-runner-class machine**
   (`docs/09` §8): every §12 row is inside its budget there, but the
   measurement on the Mac is the owner's (`F4`). Rendering is read, not

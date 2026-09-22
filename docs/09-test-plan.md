@@ -612,6 +612,14 @@ Tool Age researched cross-fades the stems, six clubmen sent at an enemy
 in view bring the combat stem in, and the title takes the stem, the
 combat stem and the bed out.
 
+**Playtest-4, positional beds.** `crates/audio/src/score.rs`: water on
+the left puts the surf at the left as far as a world sound goes and the
+grass on the right the field there, a small shift is no fade, the ground
+moving to the middle moves the bed and not its level, and a bed going
+quiet keeps its place. `crates/app/src/tests.rs`: the explored field
+around the villager in the middle of the view sits in the middle; with
+the camera moved so it lies to the left, the field's bed moves left.
+
 **M7 chunk 3, the visual feedback.** `crates/view/src/feedback.rs`
 unit tests on a real simulation: three clubmen on a villager, and at
 the first blow the villager's sprite has moved a step away from them

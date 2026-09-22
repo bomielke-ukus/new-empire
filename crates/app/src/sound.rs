@@ -46,7 +46,8 @@ impl Speaker {
         }
     }
 
-    /// Fades a layer to a level, starting its loop if it is not playing.
+    /// Fades a layer to a level and a place, starting its loop if it is
+    /// not playing.
     pub fn fade(&mut self, fade: Fade, clip: Option<&Clip>) {
         match self {
             Speaker::Silent => {}
@@ -126,6 +127,7 @@ impl Device {
         };
         if let Some((_, handle)) = self.loops.iter_mut().find(|(l, _)| *l == fade.layer) {
             handle.set_volume(decibels(fade.level), tween);
+            handle.set_panning(Panning(fade.pan), tween);
             return;
         }
         // Not playing yet: nothing to fade out, and a loop to start
@@ -133,7 +135,10 @@ impl Device {
         let Some(clip) = clip.filter(|_| fade.level > 0.0) else {
             return;
         };
-        let sound = data(clip).loop_region(..).volume(Decibels::SILENCE);
+        let sound = data(clip)
+            .loop_region(..)
+            .volume(Decibels::SILENCE)
+            .panning(Panning(fade.pan));
         match self.tracks[fade.layer.bus().index()].play(sound) {
             Ok(mut handle) => {
                 handle.set_volume(decibels(fade.level), tween);

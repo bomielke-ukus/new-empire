@@ -752,31 +752,46 @@ impl App {
             .count()
     }
 
-    /// The ground under the view, as fractions of its tiles: unexplored
-    /// ground is nothing, since it has no sound.
+    /// The ground under the view, as fractions of the tiles on screen,
+    /// and where each kind lies across it (`docs/05` §5.1): unexplored
+    /// ground is nothing, since it has no sound. The box `rect` is a
+    /// rectangle of tiles around a diamond of screen, so a tile whose
+    /// middle is off screen is left out.
     fn ground_in(&self, (x0, y0, x1, y1): (i32, i32, i32, i32)) -> Ground {
         let map = self.sim.map();
         let fog = self.viewer.and_then(|p| self.sim.fog(p));
-        let mut g = Ground::default();
-        let total = ((x1 - x0 + 1) * (y1 - y0 + 1)).max(1) as f32;
+        let (vw, vh) = self.camera.viewport;
+        let (mut count, mut across) = ([0.0f32; 4], [0.0f32; 4]);
+        let mut total = 0.0f32;
         for y in y0..=y1 {
             for x in x0..=x1 {
+                let (sx, sy) = view::iso::project(x as f32 + 0.5, y as f32 + 0.5, 0.0);
+                let (px, py) = self.camera.to_window(sx, sy);
+                if !(0.0..=vw).contains(&px) || !(0.0..=vh).contains(&py) {
+                    continue;
+                }
+                total += 1.0;
                 if fog.is_some_and(|f| !f.explored(x, y)) {
                     continue;
                 }
-                match map.terrain(x, y) {
-                    Terrain::ForestFloor => g.forest += 1.0,
-                    Terrain::ShallowWater | Terrain::DeepWater => g.water += 1.0,
-                    Terrain::Desert | Terrain::Sand => g.sand += 1.0,
-                    Terrain::Grass | Terrain::Dirt | Terrain::Snow => g.open += 1.0,
-                }
+                // In `Bed::ALL` order: forest, surf, wind, field.
+                let k = match map.terrain(x, y) {
+                    Terrain::ForestFloor => 0,
+                    Terrain::ShallowWater | Terrain::DeepWater => 1,
+                    Terrain::Desert | Terrain::Sand => 2,
+                    Terrain::Grass | Terrain::Dirt | Terrain::Snow => 3,
+                };
+                count[k] += 1.0;
+                across[k] += px / vw.max(1.0) * 2.0 - 1.0;
             }
         }
+        let total = total.max(1.0);
         Ground {
-            forest: g.forest / total,
-            water: g.water / total,
-            sand: g.sand / total,
-            open: g.open / total,
+            forest: count[0] / total,
+            water: count[1] / total,
+            sand: count[2] / total,
+            open: count[3] / total,
+            across: std::array::from_fn(|k| across[k] / count[k].max(1.0)),
         }
     }
 
