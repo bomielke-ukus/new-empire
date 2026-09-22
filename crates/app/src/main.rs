@@ -616,19 +616,18 @@ impl App {
         if self.playback.is_some() {
             return;
         }
+        // With Shift held, a job is a waypoint: for after what the units
+        // are doing and whatever is queued behind it (`UX-CMD-04`).
+        let kind = if self.modifiers.shift_key() && kind.queueable() {
+            CommandKind::Queued(Box::new(kind))
+        } else {
+            kind
+        };
         // The units answer the moment they are told (`UX-AUDIO-01`): the
         // bark is the command's, not the tick's, which is two ticks off.
         let voice = match &kind {
-            CommandKind::Move { ids, .. }
-            | CommandKind::Stop { ids }
-            | CommandKind::Gather { ids, .. }
-            | CommandKind::Build { ids, .. }
-            | CommandKind::Repair { ids, .. }
-            | CommandKind::Assist { ids, .. }
-            | CommandKind::Attack { ids, .. }
-            | CommandKind::AttackMove { ids, .. }
-            | CommandKind::Patrol { ids, .. }
-            | CommandKind::Garrison { ids, .. } => self.voice_of(ids),
+            k if k.queueable() || matches!(k, CommandKind::Stop { .. }) => self.voice_of(k.named()),
+            CommandKind::Queued(inner) => self.voice_of(inner.named()),
             _ => None,
         };
         if let Some(class) = voice {

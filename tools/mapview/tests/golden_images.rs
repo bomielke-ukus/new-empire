@@ -378,6 +378,28 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // Waypoints (`UX-CMD-11`): a villager on its way with a gather and a
+        // build queued, the dotted line through its points and a flag at
+        // each queued one, the house's site already at its pegs.
+        name: "waypoints",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "waypoints",
+            "--ticks",
+            "30",
+            "--select",
+            "1",
+            "--hud",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The performance readout (`F4`) with fixed sample numbers: the
         // frame, the tick, its phases and the budgets of `docs/04` §12.
         name: "perf-readout",

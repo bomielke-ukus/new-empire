@@ -112,6 +112,12 @@ In the match: edge-scroll, `WASD`/arrows or middle-drag to pan; wheel or
 `+`/`-` to zoom, from 0.5× to 3×, about the cursor; click the minimap to
 jump; `Space` pause; `[` `]` speed; `F3` toggles edge scrolling; `F2`
 cycles the HUD size (1×, 1.5×, 2×); `Home` jumps to your Town Center;
+Hold Shift while giving any order to make it a waypoint: the units do it
+after what they are doing and whatever is queued behind that, so a
+villager can be sent to walk here, build this, then gather that in one
+go; a dotted line and flags on the ground show the queue for the
+selected units, and the panel counts it. An order given without Shift,
+or STOP, clears the queue.
 Right-click a damaged building of yours with villagers selected to repair
 it, at build speed, for half its cost in proportion to the damage, paid
 as the repair starts. `F4` opens a performance readout: the frame and the tick, the tick's

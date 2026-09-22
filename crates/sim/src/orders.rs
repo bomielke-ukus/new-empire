@@ -321,6 +321,25 @@ pub enum NavState {
     Failed,
 }
 
+/// A job waiting behind a unit's current one (`UX-CMD-04`): the order
+/// and the trip the command would have set had the unit been free, kept
+/// as they were resolved (the unit's slot in its formation included) and
+/// started when the unit is.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Pending {
+    /// The job.
+    pub order: Order,
+    /// Its trip, for the jobs that come with one.
+    pub nav: Option<Nav>,
+}
+
+impl HashState for Pending {
+    fn hash_state(&self, h: &mut StateHasher) {
+        h.write(&self.order);
+        h.write(&self.nav);
+    }
+}
+
 /// Where a unit is walking, and the waypoints it will take.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Nav {

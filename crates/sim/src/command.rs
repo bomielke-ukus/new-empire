@@ -95,6 +95,13 @@ pub enum CommandKind {
         /// The building.
         building: EntityId,
     },
+    /// A waypoint (`UX-CMD-04`): the command inside is for after the
+    /// units' current job and whatever is already queued behind it, so a
+    /// sequence of any mixed kinds can be given at once. A unit with
+    /// nothing to do takes it at once. The command inside must be one
+    /// that orders units: move, gather, build, assist, repair, attack,
+    /// attack-move, patrol or garrison.
+    Queued(Box<CommandKind>),
     /// Queue a unit at a building. The cost is paid on queueing.
     Train {
         /// The building.
@@ -194,9 +201,27 @@ pub enum Source {
 }
 
 impl CommandKind {
+    /// True for the commands that give units a job, the ones a waypoint
+    /// may hold (`UX-CMD-04`).
+    pub fn queueable(&self) -> bool {
+        matches!(
+            self,
+            CommandKind::Move { .. }
+                | CommandKind::Gather { .. }
+                | CommandKind::Build { .. }
+                | CommandKind::Assist { .. }
+                | CommandKind::Repair { .. }
+                | CommandKind::Attack { .. }
+                | CommandKind::AttackMove { .. }
+                | CommandKind::Patrol { .. }
+                | CommandKind::Garrison { .. }
+        )
+    }
+
     /// The entities the command names, for the variants that name any.
     pub fn named(&self) -> &[EntityId] {
         match self {
+            CommandKind::Queued(inner) => inner.named(),
             CommandKind::Move { ids, .. }
             | CommandKind::Stop { ids }
             | CommandKind::Gather { ids, .. }
@@ -231,6 +256,8 @@ pub enum CommandError {
         /// The offending index.
         player: PlayerId,
     },
+    /// A waypoint holding a command that does not give units a job.
+    NotQueueable,
     /// The entity list exceeds [`MAX_COMMAND_IDS`].
     TooManyIds {
         /// How many were named.
@@ -244,6 +271,10 @@ impl core::fmt::Display for CommandError {
             CommandError::PlayerOutOfRange { player } => {
                 write!(f, "player {player} is not in 0..{MAX_PLAYERS}")
             }
+            CommandError::NotQueueable => write!(
+                f,
+                "a waypoint can hold only a command that gives units a job"
+            ),
             CommandError::TooManyIds { len } => {
                 write!(
                     f,
@@ -268,7 +299,18 @@ impl Command {
                 player: self.player,
             });
         }
+        if let CommandKind::Queued(inner) = &self.kind {
+            if !inner.queueable() {
+                return Err(CommandError::NotQueueable);
+            }
+            return Command {
+                player: self.player,
+                kind: (**inner).clone(),
+            }
+            .validate();
+        }
         let named = match &self.kind {
+            CommandKind::Queued(_) => 0,
             CommandKind::Move { ids, .. }
             | CommandKind::Stop { ids }
             | CommandKind::Gather { ids, .. }
@@ -343,6 +385,10 @@ impl HashState for CommandKind {
                 h.write_u8(20);
                 h.write(ids);
                 h.write(building);
+            }
+            CommandKind::Queued(inner) => {
+                h.write_u8(21);
+                inner.hash_state(h);
             }
             CommandKind::Train { building, kind } => {
                 h.write_u8(7);
@@ -724,6 +770,10 @@ mod tests {
                 ids: vec![id],
                 building: id,
             },
+            CommandKind::Queued(Box::new(CommandKind::Move {
+                ids: vec![id],
+                target: Vec2Fx::from_int(1, 1),
+            })),
             CommandKind::Train {
                 building: id,
                 kind: 1,

@@ -1486,7 +1486,14 @@ impl Hud {
                     Order::Garrison { .. } => "GOING INSIDE",
                 };
                 if !job.is_empty() {
-                    p.text(10.0, ty, job, false, 1.0);
+                    // What is queued behind it (`UX-CMD-04`).
+                    let queued = world.queue_at(i).len();
+                    let line = if queued > 0 {
+                        format!("{job}, THEN {queued} MORE")
+                    } else {
+                        job.to_string()
+                    };
+                    p.text(10.0, ty, &line, false, 1.0);
                     ty += 12.0;
                 }
                 if let Some(q) = world.production[i].as_ref() {

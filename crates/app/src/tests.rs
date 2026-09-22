@@ -1584,6 +1584,80 @@ fn villagers_repair_a_damaged_building_on_a_right_click() {
     assert!(!matches!(app.hovered_target(px, py), Some(Target::Repair)));
 }
 
+/// With Shift held a right-click is a waypoint (`UX-CMD-04`): the
+/// villager finishes the first trip, then takes the second, and the panel
+/// says what is queued.
+///
+/// REQ: UX-CMD-04
+#[test]
+fn shift_right_click_queues_a_waypoint_and_the_unit_takes_it_after() {
+    let mut app = app();
+    let vill = spawn(&mut app, kinds::VILLAGER, 10, 10);
+    app.camera.look_at_tile(12.0, 12.0);
+    app.selection.set(vec![vill]);
+    draw(&mut app);
+    let (px, py) = on_screen(&app, 14.5, 10.5, 0.0);
+    app.right_press(px, py);
+    app.modifiers = ModifiersState::SHIFT;
+    let (qx, qy) = on_screen(&app, 14.5, 14.5, 0.0);
+    app.right_press(qx, qy);
+    app.modifiers = ModifiersState::empty();
+    let replay = app.sim.replay();
+    let last = &replay.commands.last().unwrap().1.kind;
+    assert!(matches!(last, CommandKind::Queued(_)), "{last:?}");
+    step(&mut app, 3);
+    let vi = app.sim.world().slot(vill).unwrap().index();
+    assert!(matches!(app.sim.world().order[vi], Order::Move { .. }));
+    assert_eq!(
+        app.sim.world().queue_at(vi).len(),
+        1,
+        "one waypoint behind it"
+    );
+    // The line and the flag are drawn for the selected villager
+    // (`UX-CMD-11`): overlay sprites with no entity behind them.
+    let overlays_before = app
+        .scene
+        .sprites
+        .iter()
+        .filter(|s| s.slot == u32::MAX)
+        .count();
+    draw(&mut app);
+    let overlays = app
+        .scene
+        .sprites
+        .iter()
+        .filter(|s| s.slot == u32::MAX)
+        .count();
+    assert!(
+        overlays > overlays_before,
+        "marks on the ground: {overlays}"
+    );
+    // The first trip ends near the first point, the second begins.
+    for _ in 0..400 {
+        app.sim.step();
+        if app.sim.world().queue_at(vi).is_empty() {
+            break;
+        }
+    }
+    let p = app.sim.world().pos[vi];
+    assert!(
+        (view::fx_to_f32(p.x) - 14.5).abs() < 1.5 && (view::fx_to_f32(p.y) - 10.5).abs() < 1.5,
+        "at the first point when the second was taken: {p:?}"
+    );
+    assert!(matches!(app.sim.world().order[vi], Order::Move { .. }));
+    for _ in 0..400 {
+        app.sim.step();
+        if app.sim.world().order[vi] == Order::Idle {
+            break;
+        }
+    }
+    let p = app.sim.world().pos[vi];
+    assert!(
+        (view::fx_to_f32(p.y) - 14.5).abs() < 1.5,
+        "and arrived at the second: {p:?}"
+    );
+}
+
 fn on_screen(app: &App, x: f32, y: f32, lift: f32) -> (f32, f32) {
     let g = view::iso::project(x, y, view::iso::ground_height(app.sim.map(), x, y));
     app.camera.to_window(g.0, g.1 - lift)

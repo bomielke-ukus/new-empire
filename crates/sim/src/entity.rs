@@ -13,7 +13,7 @@ use crate::command::PlayerId;
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
 use crate::kinds::Resource;
-use crate::orders::{Formation, Nav, Order, Production, Stance};
+use crate::orders::{Formation, Nav, Order, Pending, Production, Stance};
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
 
@@ -135,6 +135,12 @@ pub struct World {
     /// (`TA-PATH-06`).
     #[serde(default)]
     pub priority: Vec<u8>,
+    /// The jobs queued behind the current one (`UX-CMD-04`), oldest first.
+    /// Read through [`World::queue_at`] and written through
+    /// [`World::queue_mut`]: a save from before waypoints has no column,
+    /// and those grow it to size.
+    #[serde(default)]
+    pub queue: Vec<Vec<Pending>>,
 }
 
 /// A structural invariant of the entity store that does not hold.
@@ -263,6 +269,20 @@ impl World {
         self.is_live(index).then_some(Slot(index))
     }
 
+    /// The jobs queued behind slot `index`'s current one, oldest first.
+    pub fn queue_at(&self, index: usize) -> &[Pending] {
+        self.queue.get(index).map_or(&[], |q| q.as_slice())
+    }
+
+    /// The queue of slot `index`, to add to or take from; grows the column
+    /// to the store's size first, for a save from before there was one.
+    pub fn queue_mut(&mut self, index: usize) -> &mut Vec<Pending> {
+        if self.queue.len() < self.alive.len() {
+            self.queue.resize(self.alive.len(), Vec::new());
+        }
+        &mut self.queue[index]
+    }
+
     /// Creates an entity and returns its handle.
     pub fn spawn(&mut self, kind: KindId, owner: PlayerId, pos: Vec2Fx, health: Fx) -> EntityId {
         self.spawn_with_resource(kind, owner, pos, health, 0)
@@ -300,6 +320,9 @@ impl World {
             self.dying[i] = 0;
             self.inside[i] = None;
             self.priority[i] = 0;
+            if let Some(q) = self.queue.get_mut(i) {
+                q.clear();
+            }
             EntityId {
                 index: i as u32,
                 generation: self.generation[i],
@@ -327,6 +350,9 @@ impl World {
             self.dying.push(0);
             self.inside.push(None);
             self.priority.push(0);
+            if self.queue.len() == i {
+                self.queue.push(Vec::new());
+            }
             EntityId {
                 index: i as u32,
                 generation: 0,
@@ -364,6 +390,9 @@ impl World {
         self.dying[i] = 0;
         self.inside[i] = None;
         self.priority[i] = 0;
+        if let Some(q) = self.queue.get_mut(i) {
+            q.clear();
+        }
         self.live -= 1;
         // Keep `free` sorted descending: insert at the position that
         // maintains order. Slot counts are small enough that the O(n) insert
@@ -564,6 +593,12 @@ impl HashState for World {
                 h.write_u16(self.dying[i]);
                 h.write(&self.inside[i]);
                 h.write_u8(self.priority[i]);
+                // Written only when there is one, so a match that never
+                // queues hashes as it did before there were queues.
+                if let Some(q) = self.queue.get(i).filter(|q| !q.is_empty()) {
+                    h.write_u8(1);
+                    h.write(q);
+                }
             }
         }
     }

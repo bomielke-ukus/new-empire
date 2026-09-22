@@ -1179,6 +1179,30 @@ each its own commit.
   over it (the system has no wrench); the villagers answer.
 - Not done: the AI does not repair.
 
+### Work record: playtest-2 — waypoints (2026-09-22)
+
+- `crates/sim`: `CommandKind::Queued(Box<CommandKind>)`, a waypoint
+  holding any job-giving command (`queueable`; a stop or a nested
+  waypoint fails validation, `CommandError::NotQueueable`); `Pending`
+  (an order and its trip) and the entity store's `queue` column, read
+  through `queue_at` and grown on demand by `queue_mut` so a save from
+  before loads, hashed only when non-empty so the corpus digests stand.
+  `apply_queued` applies the command inside as if given outright, which
+  resolves it fully (the site placed and paid, each unit's slot in the
+  formation and its trip), then takes what was set for a busy unit off
+  again onto its queue and puts its job back; `advance_queues` at the end
+  of the orders pass starts the next job the tick a unit falls idle, a
+  patrol from where it stands. A job given outright, or a stop, clears
+  the queue. `behaviour_waypoints.rs`: three tests claim `UX-CMD-04`.
+- `crates/view`: `scene::order_point` and the marks (`UX-CMD-11`): a
+  dotted line from the unit through where each job is headed, a flag
+  over each queued one, a queued building its own site; the status line
+  reads "MOVING, THEN 2 MORE".
+- `crates/app`: Shift held while any order is given makes it a waypoint
+  (`issue`), so right-click, the targeting clicks and building placement
+  all queue; the units answer. One test.
+- `mapview --scenario waypoints`; golden `waypoints`.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1370,8 +1394,6 @@ Stated so they are not rediscovered.
 
 - **Hunting** (`docs/07` D15) waits for a carcass: animals cannot be
   attacked yet.
-- **Waypoints** (`UX-CMD-04`) are untouched; Shift only keeps placement
-  and targeting armed.
 - **Attack-move is `M`**, where `docs/03` says `A`; `A` pans the camera.
 - **The panels' command letters are not rebindable** (`GD-A11Y-02`):
   the settings screen rebinds the seventeen general keys only. Full

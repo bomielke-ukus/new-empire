@@ -683,7 +683,8 @@ fn villagers_repair_a_damaged_building_for_half_its_cost_in_proportion() {
     // At build speed: one villager brings a whole life back in the build
     // time, so half of it in less.
     assert!(
-        run_until(&mut sim, info.build_ticks() + 10, |s| health(s, house) >= max),
+        run_until(&mut sim, info.build_ticks() + 10, |s| health(s, house)
+            >= max),
         "full within the build time"
     );
     run(&mut sim, 2);
@@ -744,7 +745,8 @@ fn a_repair_the_side_cannot_pay_does_not_start() {
         "the order was taken"
     );
     assert!(
-        run_until(&mut sim, 400, |s| s.world().order[index_of(s, vill)] == Order::Idle),
+        run_until(&mut sim, 400, |s| s.world().order[index_of(s, vill)]
+            == Order::Idle),
         "the villager stood down"
     );
     let d = pos_of(&sim, vill) - pos_of(&sim, house);

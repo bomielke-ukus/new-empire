@@ -30,8 +30,8 @@ use crate::map::TileMap;
 use crate::mapgen::{self, MapSpec};
 use crate::nav::{self, NavGrid, Tile};
 use crate::orders::{
-    GatherPhase, Item, Modifiers, Nav, NavState, Order, Player, Production, QueueItem, Rally,
-    Stance, Then,
+    GatherPhase, Item, Modifiers, Nav, NavState, Order, Pending, Player, Production, QueueItem,
+    Rally, Stance, Then,
 };
 use crate::replay::Replay;
 use crate::rng::Rng;
@@ -1537,6 +1537,15 @@ impl Simulation {
                     self.world.priority[slot.index()] = via as u8;
                 }
             }
+            // A job given outright, or a stop, is the end of whatever was
+            // queued for the unit (`UX-CMD-04`); only a waypoint adds.
+            if cmd.kind.queueable() || matches!(cmd.kind, CommandKind::Stop { .. }) {
+                for id in cmd.kind.named() {
+                    if let Some(slot) = self.owned_mobile(*id, cmd.player) {
+                        self.world.queue_mut(slot.index()).clear();
+                    }
+                }
+            }
             self.apply(cmd);
         }
     }
@@ -1768,6 +1777,7 @@ impl Simulation {
                 }
                 self.assign_builders(&ids, p, site);
             }
+            CommandKind::Queued(inner) => self.apply_queued(p, *inner),
             CommandKind::Repair { ids, building } => {
                 match self.owned_slot(building, p) {
                     Some(s) if self.repairable(s.index()) => {}
@@ -1912,6 +1922,84 @@ impl Simulation {
         (goals, pace, field)
     }
 
+    /// A waypoint (`UX-CMD-04`). The command inside is applied as it would
+    /// be given outright, which resolves it fully: the site placed and
+    /// paid, each unit's slot in the formation and its trip worked out.
+    /// A unit with nothing to do and nothing queued simply keeps what
+    /// that set; a busy unit has what was set for it taken off again and
+    /// put on its queue, and its current job and trip put back.
+    fn apply_queued(&mut self, p: PlayerId, inner: CommandKind) {
+        /// What a busy unit was doing, to put back.
+        struct Kept {
+            slot: usize,
+            order: Order,
+            nav: Option<Nav>,
+            move_target: Option<Vec2Fx>,
+            work: Fx,
+        }
+        let mut busy: Vec<Kept> = Vec::new();
+        for &id in inner.named() {
+            if let Some(slot) = self.owned_mobile(id, p) {
+                let i = slot.index();
+                if self.world.order[i] != Order::Idle || !self.world.queue_at(i).is_empty() {
+                    busy.push(Kept {
+                        slot: i,
+                        order: self.world.order[i],
+                        nav: self.world.nav[i].clone(),
+                        move_target: self.world.move_target[i],
+                        work: self.world.work[i],
+                    });
+                }
+            }
+        }
+        self.apply(Command {
+            player: p,
+            kind: inner,
+        });
+        for kept in busy {
+            let i = kept.slot;
+            let set_order = self.world.order[i];
+            let set_nav = self.world.nav[i].take();
+            if set_order != kept.order || set_nav != kept.nav {
+                self.world.queue_mut(i).push(Pending {
+                    order: set_order,
+                    nav: set_nav,
+                });
+            }
+            self.world.order[i] = kept.order;
+            self.world.nav[i] = kept.nav;
+            self.world.move_target[i] = kept.move_target;
+            self.world.work[i] = kept.work;
+        }
+    }
+
+    /// Waypoints (`UX-CMD-04`): a unit that has finished its job takes the
+    /// next one queued for it, at once, so nothing stands idle between
+    /// two of them. A patrol starts from where the unit is now.
+    fn advance_queues(&mut self) {
+        for i in 0..self.world.capacity() {
+            if !self.world.is_live(i)
+                || self.world.order[i] != Order::Idle
+                || self.world.dying[i] > 0
+                || self.world.inside[i].is_some()
+                || self.world.queue_at(i).is_empty()
+            {
+                continue;
+            }
+            let next = self.world.queue_mut(i).remove(0);
+            let order = match next.order {
+                Order::Patrol { to, leg, .. } => Order::Patrol {
+                    from: self.world.pos[i],
+                    to,
+                    leg,
+                },
+                o => o,
+            };
+            self.world.order[i] = order;
+            self.world.nav[i] = next.nav;
+        }
+    }
+
     fn assign_builders(&mut self, ids: &[EntityId], p: PlayerId, site: EntityId) {
         for &id in ids {
             if let Some(slot) = self.owned_villager(id, p) {
@@ -1972,6 +2060,7 @@ impl Simulation {
                 }
             }
         }
+        self.advance_queues();
     }
 
     /// True once a walker has arrived or given up.
@@ -3483,7 +3572,8 @@ impl Simulation {
             let modifiers = self.modifiers(owner);
             let pace = (100 + modifiers.build_speed_pct).max(1) as u32;
             let total = info.build_work().max(1);
-            let gain = max * Fx::from_ratio((n.min(MAX_BUILDERS as u32) * pace) as i32, total as i32);
+            let gain =
+                max * Fx::from_ratio((n.min(MAX_BUILDERS as u32) * pace) as i32, total as i32);
             let health = (self.world.health[i] + gain).min(max);
             self.world.health[i] = health;
             if health >= max {
