@@ -1294,6 +1294,68 @@ fn hud_outside_the_minimap_diamond_does_not_issue_world_commands() {
     assert_eq!(app.sim.world().order[unit.index()], Order::Idle);
 }
 
+/// What a finished technology or age opened is ringed on the panels
+/// (`docs/03` §6.3) while its notice stays up. A technology finishing
+/// after one later in the table is news too: the side's list is in id
+/// order, so the app compares it rather than counting it.
+#[test]
+fn what_a_finished_technology_opens_is_ringed_on_the_panels_for_a_while() {
+    let mut app = app();
+    let (store, tc, _) = research_settlement(&mut app);
+    let barracks = app
+        .sim
+        .world()
+        .slots()
+        .find(|s| app.sim.world().kind[s.index()] == kinds::BARRACKS)
+        .map(|s| app.sim.world().id_at(s))
+        .unwrap();
+    let ringed = |app: &mut App, building: EntityId, action: Action| {
+        app.selection.set(vec![building]);
+        draw(app);
+        app.hud
+            .buttons
+            .iter()
+            .find(|b| b.action == action)
+            .unwrap_or_else(|| panic!("no {action:?}"))
+            .fresh
+    };
+    // The Tool Age opened the next age and the Tool Age technologies.
+    assert!(ringed(&mut app, tc, Action::Research(tech::AGE_BRONZE)));
+    assert!(ringed(&mut app, store, Action::Research(tech::WOODWORKING)));
+    assert!(!ringed(&mut app, tc, Action::Train(kinds::VILLAGER)));
+
+    // Toolworking, then Woodworking, which comes before it in the table.
+    for t in [tech::TOOLWORKING, tech::WOODWORKING] {
+        app.issue(CommandKind::Research {
+            building: store,
+            tech: t,
+        });
+        step(&mut app, tech::info(t).unwrap().ticks() + 3);
+        draw(&mut app);
+    }
+    let researched: Vec<&str> = app
+        .notices
+        .shown()
+        .iter()
+        .filter(|n| n.kind == NoticeKind::Research)
+        .map(|n| n.text.as_str())
+        .collect();
+    assert_eq!(
+        researched,
+        ["TOOLWORKING RESEARCHED", "WOODWORKING RESEARCHED"]
+    );
+
+    // The axe opens the axeman at the Barracks, until the notice is gone.
+    app.issue(CommandKind::Research {
+        building: barracks,
+        tech: tech::AXE,
+    });
+    step(&mut app, tech::info(tech::AXE).unwrap().ticks() + 3);
+    assert!(ringed(&mut app, barracks, Action::Train(kinds::AXEMAN)));
+    step(&mut app, view::hud::FRESH_TICKS as u32);
+    assert!(!ringed(&mut app, barracks, Action::Train(kinds::AXEMAN)));
+}
+
 fn research_settlement(app: &mut App) -> (EntityId, EntityId, EntityId) {
     // The Storehouse has a lower ID than the TC, so mixed selection shows
     // its queue while a search for a trainer would mistakenly return the TC.

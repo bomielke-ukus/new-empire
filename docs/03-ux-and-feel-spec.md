@@ -237,6 +237,14 @@ click-to-jump:
 | Cannot afford / population capped | Distinct voice line, plus the resource in the bar flashing |
 | Enemy Wonder started | Global announcement, permanent minimap marker |
 
+The panel highlight is a gold ring on every command button the finished
+technology or age opened: for an age, its buildings, units and
+technologies (a unit still waiting on its upgrade excepted); for a
+technology, the unit its line becomes and the technologies that needed
+it, once their age is here; DEFENCES when it opened something on that
+page. The ring stays as long as the notice does, thirty seconds of match
+time.
+
 **[UX-NOTIFY-01]** Attack notifications are rate-limited (one per area per 20 seconds) so a long
 siege does not become an alarm loop.
 

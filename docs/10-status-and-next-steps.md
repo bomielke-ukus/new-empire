@@ -1318,6 +1318,33 @@ letters were fixed.
 - `tools/mapview`: a `settings-letters` screen and golden; the settings
   screen golden rebaked for the PANEL LETTERS button.
 
+### Work record: playtest-4 — the panel highlight for finished research (2026-09-22)
+
+`docs/03` §6.3 lists "fanfare, panel highlight" for research or age-up
+complete; the fanfare and the notice were in, the highlight was not.
+It is now a light-gold ring on every command button the finished
+technology opened, for as long as its notice stays up.
+
+- `crates/view` HUD: `opened_by(action, tech, player)` says whether a
+  button's action is open now and was not without that technology (or,
+  for an age, before it): an age opens its buildings, units and
+  technologies, a technology the unit its line becomes and what needed
+  it. The rule reads the tables, not the sim's refusals, so a button
+  the side cannot afford is still ringed. `HudInput::fresh` carries the
+  side's recent technologies with the tick each finished;
+  `Button::fresh` is drawn as the ring for `FRESH_TICKS` (the notice's
+  thirty seconds of match time). One unit test.
+- `crates/app`: records each technology and age the viewed side
+  finishes, clears the list for a new match or a change of eyes in a
+  replay. **A bug fixed on the way:** the app found a new technology by
+  counting past the old length of the side's list, but that list is in
+  id order, so a technology earlier in the table finishing after a later
+  one (the Bronze Age after Woodworking, say) was missed and the last in
+  the table announced again. It now compares the lists. One app test,
+  which fails on the old counting.
+- `tools/mapview`: `--fresh` rings what the side's technologies opened as
+  if each had just finished; the `ages-fresh-hud` golden.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1524,8 +1551,7 @@ Stated so they are not rediscovered.
   §6.2, `docs/06` M7): the placeholders have a fall and a corpse and no
   more; a building's collapse is a cloud over the rubble, not an
   animation.
-- **Two notification rows stay open**: no panel highlight for a
-  finished technology, and no Wonder to announce.
+- **One notification row stays open**: no Wonder to announce.
 - **The Mac build is not notarised, Apple Silicon only, and has no icon.**
   Notarising needs an Apple Developer account and a signing identity in
   the workflow's secrets; an Intel slice needs a second target and `lipo`;

@@ -227,6 +227,32 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The Tool Age just arrived and a villager selected: the build
+        // grid rings the buildings it opened, and DEFENCES for the tower
+        // (`docs/03` §6.3).
+        name: "ages-fresh-hud",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "ages",
+            "--stockpile",
+            "5000",
+            "--ticks",
+            "100",
+            "--select",
+            "1",
+            "--fresh",
+            "1",
+            "--hud",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The Tool Age settlement: mudbrick buildings, the Town Center
         // selected with the Bronze Age button and its gate on the grid, a
         // technology queued, the farm in the field.

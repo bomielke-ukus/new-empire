@@ -172,7 +172,7 @@ main job over time, and what turns the soak from a one-off run into a ratchet.
 
 ### 4.5 Rendering
 
-Twenty-six scenes rendered through `tools/mapview` and compared against committed
+Twenty-seven scenes rendered through `tools/mapview` and compared against committed
 PNGs with a tolerance. The test drives the binary rather than the rendering
 library, because the command line is what CI invokes and what a developer
 types.
@@ -557,6 +557,18 @@ the results, QUIT, the save listed and loaded at its tick and hash with
 the opponent, quit again, the recording listed and watched to the won
 match's last tick and hash, REPLAY OVER; every step a button or a key
 through the window's handlers. The same run by hand on the Mac is owed.
+
+**Playtest-4, the panel highlight.** The HUD unit test: the Tool Age
+opens its buildings, units, technologies and the next age, and DEFENCES
+for the tower, but not a Stone Age building, the axeman still waiting on
+the axe, or a Bronze Age technology; the axe opens the axeman; the Bronze
+Age opens Carrying Baskets once Woodworking is in, and DEFENCES for the
+stone wall. `crates/app/src/tests.rs`: after the Tool Age the Town
+Center rings the Bronze Age and the Storehouse Woodworking, and not the
+villager; Toolworking then Woodworking, earlier in the table, each put
+their own line on the stack; the axe rings the axeman at the Barracks
+until thirty seconds on. The `ages-fresh-hud` golden image pins the
+rings on a villager's build grid after the Tool Age.
 
 **M7 chunk 1, audio.** `crates/audio/src/lib.rs` unit tests: twelve chop
 cues at one moment play four, each at its own pitch within five percent,

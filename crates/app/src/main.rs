@@ -254,9 +254,13 @@ struct App {
     settings_error: Option<String>,
     /// The notification stack (`docs/03` §6.3).
     notices: Notices,
-    /// How many technologies the viewer had last frame, to notice a new
-    /// one.
-    last_researched: usize,
+    /// The technologies the viewer had last frame, to notice a new one.
+    /// The side's list is in id order, not the order they finished, so a
+    /// new one is found by comparing, not by counting.
+    last_researched: Vec<sim::TechId>,
+    /// The viewer's technologies and ages finished lately, with the tick
+    /// each finished at: the panels ring what they opened (`docs/03` §6.3).
+    fresh: Vec<(sim::TechId, u64)>,
     /// What plays: the mixer decides (`docs/04` §8).
     mixer: audio::Mixer,
     /// Where it plays: the device, a recorder in tests, or nowhere.
@@ -474,7 +478,8 @@ impl App {
             settings_page: SettingsPage::Keys,
             settings_error: None,
             notices: Notices::default(),
-            last_researched: 0,
+            last_researched: Vec::new(),
+            fresh: Vec::new(),
             mixer: audio::Mixer::new(library),
             speaker: Speaker::Silent,
             started: Instant::now(),
@@ -1053,7 +1058,14 @@ impl App {
             .sim
             .player(me)
             .map_or_else(Vec::new, |p| p.researched.clone());
-        for id in researched.iter().skip(self.last_researched) {
+        let tick = self.sim.tick();
+        self.fresh
+            .retain(|(_, at)| tick.saturating_sub(*at) < view::hud::FRESH_TICKS);
+        for id in researched
+            .iter()
+            .filter(|t| self.last_researched.binary_search(t).is_err())
+        {
+            self.fresh.push((*id, tick));
             if let Some(t) = tech::info(*id).filter(|t| t.advances_age().is_none()) {
                 self.notices.push(Notice {
                     kind: NoticeKind::Research,
@@ -1063,7 +1075,7 @@ impl App {
                 });
             }
         }
-        self.last_researched = researched.len();
+        self.last_researched = researched;
         let since = self.age_up.map(|(t, _)| t.elapsed().as_millis());
         let sweep = since.filter(|&ms| ms < SWEEP_MS as u128).map(|ms| Sweep {
             player: ME,
@@ -1185,6 +1197,7 @@ impl App {
                     .filter(|(at, _)| at.elapsed().as_millis() < FLASH_MS)
                     .map_or([false; 4], |(_, lacks)| lacks),
                 perf: readout.as_ref(),
+                fresh: &self.fresh,
             },
         );
         scene.ui.extend(hud.sprites.iter().cloned());
@@ -1664,7 +1677,11 @@ impl App {
         self.results = ResultsState::Pending;
         self.viewer = Some(ME);
         self.notices.clear();
-        self.last_researched = self.sim.player(ME).map_or(0, |p| p.researched.len());
+        self.last_researched = self
+            .sim
+            .player(ME)
+            .map_or_else(Vec::new, |p| p.researched.clone());
+        self.fresh.clear();
         self.match_started = now_secs();
         self.recording = None;
         self.shell = Shell::Match;
@@ -2355,7 +2372,8 @@ impl App {
                 self.last_researched = self
                     .sim
                     .player(self.hud_player())
-                    .map_or(0, |p| p.researched.len());
+                    .map_or_else(Vec::new, |p| p.researched.clone());
+                self.fresh.clear();
                 self.notices.clear();
                 self.last_fog_tick = None;
                 self.last_minimap = Instant::now() - Duration::from_secs(10);

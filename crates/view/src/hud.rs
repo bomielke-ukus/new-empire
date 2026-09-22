@@ -106,6 +106,9 @@ pub struct Button {
     /// Which resources the player is short of for it, in
     /// [`Resource::ALL`] order: the bar flashes them on a click.
     pub lacks: [bool; 4],
+    /// Opened by a technology or age that finished lately, and ringed
+    /// for it (`docs/03` §6.3).
+    pub fresh: bool,
 }
 
 impl Button {
@@ -195,6 +198,53 @@ pub struct HudInput<'a> {
     pub flash: [bool; 4],
     /// The performance readout, when it is up (`F4`).
     pub perf: Option<&'a crate::perf::Readout>,
+    /// Technologies and ages the side finished, with the tick each
+    /// finished at: the buttons they opened are ringed for
+    /// [`FRESH_TICKS`] (`docs/03` §6.3).
+    pub fresh: &'a [(TechId, u64)],
+}
+
+/// How long a button a finished technology opened stays ringed: as long
+/// as the notice that announced it stays up.
+pub const FRESH_TICKS: u64 = crate::notify::LIFE_TICKS;
+
+/// Whether `tech`, finished, opened what `action` does for `pl`
+/// (`docs/03` §6.3): an age the buildings, units and technologies of that
+/// age; a technology the ones that needed it and the unit its line
+/// becomes; the DEFENCES button whatever it opened on that page. Only
+/// what is open now counts, so a unit that still waits on its upgrade is
+/// not ringed by the age.
+pub fn opened_by(action: Action, tech: TechId, pl: &sim::Player) -> bool {
+    let Some(t) = tech::info(tech) else {
+        return false;
+    };
+    if action == Action::Defences {
+        return DEFENCES
+            .iter()
+            .any(|k| opened_by(Action::Build(*k), tech, pl));
+    }
+    // An age advance is researched from the age before the one it gives.
+    let before = if t.advances_age().is_some() {
+        t.age
+    } else {
+        pl.age
+    };
+    open(action, pl.age, &|r| pl.has_researched(r))
+        && !open(action, before, &|r| r != tech && pl.has_researched(r))
+}
+
+/// Whether an action's age and technologies are met: what the panels
+/// grey a button for, less the stockpile and the queue.
+fn open(action: Action, age: sim::Age, has: &dyn Fn(TechId) -> bool) -> bool {
+    match action {
+        Action::Build(k) | Action::Train(k) => {
+            kinds::info(k).age <= age && tech::unlocked_by(k).is_none_or(|t| has(t.id))
+        }
+        Action::Research(r) => {
+            tech::info(r).is_some_and(|t| t.age <= age && t.requires.iter().all(|q| has(*q)))
+        }
+        _ => false,
+    }
 }
 
 /// How long the "F1 CONTROLS" hint stays in the resource bar: the first
@@ -457,6 +507,13 @@ impl<'a> Painter<'a> {
         self.text_in(b.x + 4.0, b.y + b.h - 11.0, &cost, ink, 1.0);
         if !key.is_empty() {
             self.text_in(b.x + b.w - kw - 4.0, b.y + b.h - 11.0, &key, ink, 1.0);
+        }
+        if b.fresh {
+            // Newly opened: a gold ring inside the border (`docs/03` §6.3).
+            self.rect(b.x + 1.0, b.y + 1.0, b.w - 2.0, 2.0, GOLD_LIGHT, 0);
+            self.rect(b.x + 1.0, b.y + b.h - 3.0, b.w - 2.0, 2.0, GOLD_LIGHT, 0);
+            self.rect(b.x + 1.0, b.y + 1.0, 2.0, b.h - 2.0, GOLD_LIGHT, 0);
+            self.rect(b.x + b.w - 3.0, b.y + 1.0, 2.0, b.h - 2.0, GOLD_LIGHT, 0);
         }
     }
 }
@@ -1647,6 +1704,12 @@ impl Hud {
             input.targeting,
             input.defences,
         );
+        let lately: Vec<TechId> = input
+            .fresh
+            .iter()
+            .filter(|(_, at)| sim.tick().saturating_sub(*at) < FRESH_TICKS)
+            .map(|(t, _)| *t)
+            .collect();
         for (n, mut d) in defs.into_iter().take(GRID_COLS * GRID_ROWS).enumerate() {
             let col = (n % GRID_COLS) as f32;
             let row = (n / GRID_COLS) as f32;
@@ -1675,6 +1738,9 @@ impl Hud {
                 reason: d.reason,
                 tip: d.tip,
                 lacks: d.lacks,
+                fresh: sim
+                    .player(me)
+                    .is_some_and(|pl| lately.iter().any(|t| opened_by(d.action, *t, pl))),
             };
             let lit = hover.is_some_and(|(hx, hy)| b.contains(hx, hy));
             p.button_keyed(&b, lit, &shown);
@@ -1821,6 +1887,7 @@ impl Hud {
                     reason: "CLICK TO LOOK".to_string(),
                     tip: Vec::new(),
                     lacks: [false; 4],
+                    fresh: false,
                 });
             }
         }
@@ -1998,6 +2065,79 @@ mod tests {
         }
     }
 
+    /// What a finished technology opened (`docs/03` §6.3): an age its
+    /// buildings, units and technologies, but not a unit still waiting on
+    /// its upgrade nor anything of a later age; a technology the unit its
+    /// line becomes and what needed it, once that one's age is here; the
+    /// DEFENCES button for what it opened on that page.
+    #[test]
+    fn a_finished_technology_opens_its_age_its_line_and_what_needed_it() {
+        let mut pl = sim::Player::new();
+        pl.mark_researched(tech::AGE_TOOL);
+        pl.age = sim::Age::Tool;
+        assert!(opened_by(Action::Build(kinds::MARKET), tech::AGE_TOOL, &pl));
+        assert!(opened_by(
+            Action::Train(kinds::SPEARMAN),
+            tech::AGE_TOOL,
+            &pl
+        ));
+        assert!(opened_by(
+            Action::Research(tech::AGE_BRONZE),
+            tech::AGE_TOOL,
+            &pl
+        ));
+        assert!(opened_by(
+            Action::Research(tech::WOODWORKING),
+            tech::AGE_TOOL,
+            &pl
+        ));
+        assert!(
+            opened_by(Action::Defences, tech::AGE_TOOL, &pl),
+            "the tower"
+        );
+        assert!(!opened_by(Action::Build(kinds::HOUSE), tech::AGE_TOOL, &pl));
+        assert!(!opened_by(
+            Action::Train(kinds::AXEMAN),
+            tech::AGE_TOOL,
+            &pl
+        ));
+        assert!(!opened_by(
+            Action::Research(tech::CARRYING_BASKETS),
+            tech::AGE_TOOL,
+            &pl
+        ));
+        assert!(!opened_by(Action::Stop, tech::AGE_TOOL, &pl));
+
+        pl.mark_researched(tech::AXE);
+        assert!(opened_by(Action::Train(kinds::AXEMAN), tech::AXE, &pl));
+        assert!(!opened_by(Action::Train(kinds::SPEARMAN), tech::AXE, &pl));
+        // Woodworking in the Tool Age opens nothing yet; the Bronze Age
+        // then opens what needed it.
+        pl.mark_researched(tech::WOODWORKING);
+        assert!(!opened_by(
+            Action::Research(tech::CARRYING_BASKETS),
+            tech::WOODWORKING,
+            &pl
+        ));
+        pl.mark_researched(tech::AGE_BRONZE);
+        pl.age = sim::Age::Bronze;
+        assert!(opened_by(
+            Action::Research(tech::CARRYING_BASKETS),
+            tech::AGE_BRONZE,
+            &pl
+        ));
+        assert!(opened_by(Action::Build(kinds::GATE), tech::AGE_BRONZE, &pl));
+        assert!(
+            opened_by(Action::Defences, tech::AGE_BRONZE, &pl),
+            "the stone wall"
+        );
+        assert!(!opened_by(
+            Action::Build(kinds::MARKET),
+            tech::AGE_BRONZE,
+            &pl
+        ));
+    }
+
     /// Every unit tooltip carries cost, time, what it does per hit, what it
     /// counters and what counters it; every roster's keys are distinct.
     ///
@@ -2084,6 +2224,7 @@ mod tests {
             hint: None,
             flash: [false; 4],
             perf: None,
+            fresh: &[],
         };
         let has = |lines: &[String], what: &str| lines.iter().any(|l| l.contains(what));
         let b = Hud::build(
@@ -2248,6 +2389,7 @@ mod tests {
             hint: None,
             flash: [false; 4],
             perf: None,
+            fresh: &[],
         };
         let none = Hud::build(&atlas, &base);
         assert!(none.buttons.is_empty());
@@ -2411,6 +2553,7 @@ mod tests {
                     hint: None,
                     flash: [false; 4],
                     perf: None,
+                    fresh: &[],
                 },
             )
         };
@@ -2456,6 +2599,7 @@ mod tests {
                 hint: None,
                 flash: [false; 4],
                 perf: None,
+                fresh: &[],
             },
         );
         assert_ne!(lit.sprites, b.sprites, "the hovered button draws lit");
@@ -2522,6 +2666,7 @@ mod tests {
             hint: None,
             flash: [false; 4],
             perf: None,
+            fresh: &[],
         };
         let closed = Hud::build(&atlas, &base);
         let open = Hud::build(&atlas, &HudInput { help: true, ..base });
@@ -2578,6 +2723,7 @@ mod tests {
                     hint: None,
                     flash: [false; 4],
                     perf: None,
+                    fresh: &[],
                 },
             );
             // Every glyph in the top bar stays inside the window.
@@ -2662,6 +2808,7 @@ mod tests {
             hint: None,
             flash: [false; 4],
             perf: None,
+            fresh: &[],
         };
         let none = Hud::build(&atlas, &base);
         let some = Hud::build(
