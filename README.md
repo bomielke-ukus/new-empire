@@ -1,4 +1,4 @@
-# New Empire
+# Brenden's Empires
 
 A real-time strategy game about taking a civilization from hand-axes to iron in
 about half an hour — built to recapture what made *Age of Empires* (1997)
@@ -66,17 +66,20 @@ cargo run -p atlas -- rig                    # render rig, checked against the s
 ### Testing a build on a Mac
 
 Every push to `main`, and a manual run of the **Mac build** workflow under
-the repository's Actions tab, builds `New Empire.app` for Apple Silicon and
-attaches it to the run as the artifact `New-Empire-macOS-<commit>`, kept
-for thirty days. On the Mac: open the run, download the artifact, and
-unzip the `New Empire.zip` inside it: a `New Empire` folder with
-`New Empire.app` and the player's `READ ME FIRST.txt`. The bundle
+the repository's Actions tab, builds `Brenden's Empires.app` for Apple
+Silicon and attaches it to the run as the artifact
+`Brendens-Empires-macOS-<commit>`, kept for thirty days. On the Mac: open
+the run, download the artifact, and unzip the `Brenden's Empires.zip`
+inside it: a `Brenden's Empires` folder with `Brenden's Empires.app` and
+the player's `READ ME FIRST.txt`. The bundle
 is ad-hoc signed and not notarised, so the first launch is refused. On
 macOS 15 and later: open it once, click Done, then in System Settings,
-Privacy & Security, scroll to the note that "New Empire" was blocked and
+Privacy & Security, scroll to the note that "Brenden's Empires" was blocked and
 click Open Anyway. On older macOS, Control-click the app and choose Open.
 After that it opens normally. Saves, recordings and settings go to
-`~/Library/Application Support/new-empire/` as with any other build.
+`~/Library/Application Support/new-empire/` as with any other build: the
+repository, the crates, the binary and that folder keep the code name
+`new-empire` (`docs/07` D27).
 `scripts/bundle-mac.sh` builds the same bundle from a checkout on a Mac,
 into `target/bundle/`.
 
@@ -85,14 +88,17 @@ into `target/bundle/`.
 A build to hand to playtesters is a GitHub Release, which anyone can
 download without an account. Under the Actions tab run **Playtest build**
 with a name such as `playtest-1`, or push a tag of that name. The
-workflow builds `New Empire.app` on an Apple Silicon runner, zips it in a
-folder with `packaging/macos/READ ME FIRST.txt`, and publishes the zip as
-`New-Empire-macOS-playtest-1.zip` on the pre-release
+workflow builds `Brenden's Empires.app` on an Apple Silicon runner, zips
+it in a folder with `packaging/macos/READ ME FIRST.txt`, and publishes the
+zip as `Brendens-Empires-macOS-playtest-1.zip` on the pre-release
 `github.com/bomielke-ukus/new-empire/releases/tag/playtest-1`, with the
-note as the release text. Send the player that link. The note says how
+note and every key as the release text. Send the player that link. The note says how
 to get past Gatekeeper, where the recordings are, that nothing leaves
 the Mac, and what to send back; `docs/09` §9.1 is the observer's sheet.
-Running the workflow again with the same name replaces the zip.
+Running the workflow again with the same name replaces the zip and the
+text. The keys are `packaging/macos/KEYS.md`, the controls overlay written
+out by `mapview --keys`; `scripts/check-generated.sh` fails CI when it no
+longer matches the game.
 
 The game opens on a title screen: `Enter` or NEW GAME opens the skirmish
 setup (map size, opponents and their difficulties, population cap, seed,

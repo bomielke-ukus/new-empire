@@ -1,4 +1,4 @@
-# Game Design Spec — *New Empire* (working title)
+# Game Design Spec — *Brenden's Empires*
 
 A real-time strategy game about taking a civilization from hand-axes to iron, in
 about half an hour, with the pacing and texture of *Age of Empires* (1997) and

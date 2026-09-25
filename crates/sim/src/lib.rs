@@ -1,4 +1,4 @@
-//! The deterministic simulation core of New Empire.
+//! The deterministic simulation core of Brenden's Empires.
 //!
 //! Everything in this crate obeys one rule: **given the same seed and the same
 //! command log, every machine produces bit-identical state, forever.** That is

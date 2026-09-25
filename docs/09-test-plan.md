@@ -1,6 +1,6 @@
 # Test Plan
 
-How we find out whether *New Empire* is any good before a player does.
+How we find out whether *Brenden's Empires* is any good before a player does.
 
 `docs/04-technical-architecture.md` §11 is the one-paragraph version this grew
 out of. Everything described here as landed exists and runs; everything marked
@@ -896,7 +896,7 @@ question is written down verbatim, because each one is a hint or a tooltip
 the game failed to give.
 
 **Setup.** The playtest release named on the sheet (README, "Playtest
-builds"): the `Playtest build` workflow publishes `New Empire.app` zipped
+builds"): the `Playtest build` workflow publishes `Brenden's Empires.app` zipped
 with the player's `READ ME FIRST.txt`, which says how to open it, where
 the recordings are and what to send back; a fresh `settings.ron` (hints
 on, the default volumes, the default keys); the setup screen's defaults

@@ -1366,6 +1366,30 @@ whole.
   tested as the numbers the device is given. Whether they sound right is
   for the Mac.
 
+### Work record: the name, and the keys in the release notes (2026-09-25)
+
+The owner named the game and asked for the keys in the release notes.
+
+- **The name** (`docs/07` D27). The owner's first choice was *Brenden's
+  Age of Empires*; *Age of Empires* is Microsoft's trademark and the
+  builds are public downloads, which was raised, and the owner chose
+  *Brenden's Empires*. The title screen, the window, the bundle's name,
+  display name and identifier (`dev.brendens-empires.game`), the app,
+  folder and zip the player unzips, the release title and asset
+  (`Brendens-Empires-macOS-<name>.zip`), the note, the README and the
+  specs' titles say it. The code name `new-empire` stays on the
+  repository, crates, binary, environment variables and the data folder,
+  so settings, saves and recordings made so far are found. The pixel font
+  gained an apostrophe.
+- **The keys** in every playtest release's text: `mapview --keys` writes
+  the controls overlay's two columns, from the same tables and the
+  default settings, as `packaging/macos/KEYS.md`, with the mouse spelled
+  out; the release workflow appends it after the note, and a rerun of a
+  release now replaces its text as well as its zip.
+  `scripts/check-generated.sh` regenerates it and fails on any
+  difference, so a key moved in the game cannot be left wrong in the
+  notes. `playtest-4`'s text predates this; the next release carries it.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1574,8 +1598,8 @@ Stated so they are not rediscovered.
 - **One notification row stays open**: no Wonder to announce.
 - **The Mac build is not notarised, Apple Silicon only, and has no icon.**
   Notarising needs an Apple Developer account and a signing identity in
-  the workflow's secrets; an Intel slice needs a second target and `lipo`;
-  the icon waits on the name (`docs/07` Q5).
+  the workflow's secrets; an Intel slice needs a second target and `lipo`
+  (the owner has no Intel Mac, so none is planned); the icon is not drawn.
 - The age-up **fanfare** waits for audio (M7). The sweep and banner exist.
 - **Age variants exist for placeholders only.** Rendered sets carry no
   variants yet; `Atlas::variant` answers with the base kind for them. The
@@ -1596,7 +1620,7 @@ in the order they bite:
 | Q9 — A second ownership cue besides colour | M4 (readability of a fight), M7 | Decide before combat art is commissioned; a banner glyph per player is the cheapest candidate |
 | Q1 — Naval in the vertical slice? | M4 scope | Leave it out of the slice; the map generator has water but nothing sails |
 | Q8 — Four ages or five? | Content tables | Four, as `docs/02` stands; M3 shipped the four-age structure |
-| Q5 — The game's name | M6 (menus), M9 | Biting now: the title screen shows the placeholder, one constant (`view::shell::TITLE`) to change |
+| Q5 — The game's name | M6 (menus), M9 | Answered: *Brenden's Empires* (`docs/07` D27) |
 
 ---
 
