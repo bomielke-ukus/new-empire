@@ -126,8 +126,42 @@ It quantises each frame, lays them out one row per (animation, facing) and one
 column per frame, writes the manifest with the anchor the rig aimed at, and runs
 the same validation any other art goes through.
 
-## Blender version
+## The slice's subjects
 
-Written against Blender 4.x. The engine is the one thing the script falls back
-on rather than failing: EEVEE Next, then EEVEE, then Cycles. Cycles would be
-more accurate and is not worth the render time at 192 px.
+`kit.py` is the modelling kit — matte materials, boxes, prisms, cylinders and
+cones, a humanoid with the villager's proportions and the five animations, and
+a building shown frame by frame through three construction stages, its
+finished state and its rubble. `slice.py` builds each subject of the slice
+from it by name, and `scripts/render-sprites.sh` does the rest:
+
+```sh
+BLENDER=/path/to/blender scripts/render-sprites.sh            # every subject
+BLENDER=/path/to/blender scripts/render-sprites.sh spearman   # one
+```
+
+It builds the file, renders every frame and runs `atlas compose`, which
+validates the set, into `assets/sprites/<name>`. Two things a building does
+differently: it renders unturned (`render_sheet.py --still 1`), because the S
+facing would turn it 45° off the tile grid; and it is anchored at the centre of
+its footprint, which is where the renderer puts a building's position, so its
+front corner lies `footprint × 16` px below the anchor at 1×. A building's
+class follows its footprint: one tile SmallBuilding, two MediumBuilding, three
+LargeBuilding. The camera sees the +X and +Y faces and the top, so doors and
+player colour go there.
+
+Colours in `kit.COLOURS` are linear, as Blender's base colour is; `srgb()`
+converts the colour you want on screen, since a linear 0.5 renders as a pale
+0.73.
+
+## Blender version and engine
+
+Written against Blender 4.x (4.5 LTS is what renders the committed sets).
+The engine is Cycles on the CPU with no light bounces: it needs no GPU, and a
+frame takes under a second, where EEVEE on a machine without one runs on
+software OpenGL at about twenty. Bounces are off because light off a magenta
+surface tints its neighbours pink, which the quantiser reads as player colour,
+and because EEVEE, which the rig was first written for, had none. The seed is
+fixed and the denoiser off, so a file renders the same pixels every time. EEVEE
+Next is the fallback; every set must come from one engine, so falling back
+means re-rendering them all. On a headless Linux machine Blender still wants
+`libEGL.so.1` to start (Mesa's `libegl1` package provides it).

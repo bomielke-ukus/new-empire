@@ -91,20 +91,35 @@ def build_lights(rig, scene):
 def configure_render(rig, scene):
     spec = rig["render"]
 
-    # EEVEE Next in Blender 4.2+, plain EEVEE before that. Cycles would be more
-    # accurate and is not worth it at 192 px; the engine is the one place we
-    # fall back rather than fail.
-    engines = {e.identifier for e in
-               bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items}
-    for candidate in (spec["engine"], spec["engine_fallback"], "CYCLES"):
-        if candidate in engines:
+    # Cycles on the CPU, lit by the three suns alone (no bounces): it needs no
+    # GPU, so every sprite can be rendered on any machine, a build runner
+    # included, at under a second a frame; EEVEE on software OpenGL took
+    # twenty. The engine is the one place we fall back rather than fail, and
+    # every set in the game must come from one engine. Each candidate is
+    # tried by setting it: the property's static enum lists only the
+    # built-in engines, not add-on ones such as Cycles.
+    for candidate in (spec["engine"], spec["engine_fallback"]):
+        try:
             scene.render.engine = candidate
+        except TypeError:
+            continue
+        if scene.render.engine == candidate:
             break
 
     if hasattr(scene, "eevee"):
         scene.eevee.taa_render_samples = spec["samples"]
     if scene.render.engine == "CYCLES":
         scene.cycles.samples = spec["samples"]
+        scene.cycles.device = "CPU"
+        # A fixed seed and no denoiser: the same file renders the same pixels.
+        scene.cycles.seed = 0
+        scene.cycles.use_denoising = False
+        scene.cycles.use_adaptive_sampling = False
+        # Keep the scene between frames of a sheet.
+        scene.render.use_persistent_data = True
+        # Direct light only. A bounce off a magenta surface tints whatever is
+        # beside it pink, and the quantiser reads pink as player colour.
+        scene.cycles.max_bounces = 0
 
     scene.render.film_transparent = spec["film_transparent"]
     scene.render.filter_size = spec["filter_width"]

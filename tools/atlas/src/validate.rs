@@ -336,8 +336,10 @@ fn check_frames_and_anchors(
                 // lying down spreads to exactly that bound. Content further
                 // below than that has slid onto the tile in front; content
                 // further above means the unit hovers over its own tile. Both
-                // are real errors, and the same number bounds them.
-                let slack = Class::Terrain.size().1 / 2 * set.scale;
+                // are real errors, and the same number bounds them. A building
+                // stands on its whole footprint, whose front corner lies that
+                // many half-tiles below its centre.
+                let slack = Class::Terrain.size().1 / 2 * set.class.footprint() * set.scale;
                 let lowest = by + bh - 1;
                 let anchor_y = ay as i64;
                 let delta = lowest as i64 - anchor_y;

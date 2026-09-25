@@ -31,7 +31,8 @@ TURNTABLE = "ne_turntable"
 
 
 def _parse(argv):
-    out = {"anims": [], "subject": None, "cls": None, "out": None}
+    out = {"anims": [], "subject": None, "cls": None, "out": None, "facings": None,
+           "still": False}
     names = {"--subject": "subject", "--class": "cls", "--out": "out"}
     i = 0
     while i < len(argv):
@@ -41,6 +42,14 @@ def _parse(argv):
             raise SystemExit("%s needs a value" % key)
         if key in names:
             out[names[key]] = value
+        elif key == "--facings":
+            out["facings"] = value.split(",")
+        elif key == "--still":
+            # A building: rendered as modelled, square to the tile grid, and
+            # stored as the one view a building has, S. Turning it to the S
+            # facing would set it 45 degrees off the grid.
+            out["still"] = value not in ("0", "false")
+            out["facings"] = ["S"]
         elif key == "--anim":
             name, _, span = value.partition("=")
             if not span:
@@ -100,7 +109,12 @@ def render(cfg):
     total = 0
     for name, first, last in cfg["anims"]:
         for facing in rig["facings"]:
-            rig_module.face(rig, empty, facing["name"])
+            if cfg["facings"] and facing["name"] not in cfg["facings"]:
+                continue
+            if cfg["still"]:
+                empty.rotation_euler.z = 0.0
+            else:
+                rig_module.face(rig, empty, facing["name"])
             for index, frame in enumerate(range(first, last + 1)):
                 scene.frame_set(frame)
                 path = os.path.join(
@@ -110,7 +124,7 @@ def render(cfg):
                 bpy.ops.render.render(write_still=True)
                 total += 1
         print("  %s: %d frames x %d facings"
-              % (name, last - first + 1, len(rig["facings"])))
+              % (name, last - first + 1, len(cfg["facings"] or rig["facings"])))
 
     print("wrote %d renders to %s" % (total, out_dir))
     print("next: cargo run -p atlas -- compose --renders %s --set %s --class %s "

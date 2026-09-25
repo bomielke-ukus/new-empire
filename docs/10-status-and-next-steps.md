@@ -1426,6 +1426,30 @@ opponent hunting from the opening.
   The Hard-against-Easy record is rewritten; see the commit for the
   tally. Golden images on generated maps are rebaked.
 
+### Work record: the art, first step (2026-09-25)
+
+The owner asked where art could come from; of free packs, a hired modeller
+or models made here by code, they chose the last (`docs/08` §9 step 3).
+
+- **Rendering here.** Blender 4.5 LTS renders on this machine's CPU. The rig
+  now names Cycles with no bounces as its engine: EEVEE without a GPU ran at
+  about twenty seconds a frame, Cycles under one. The engine fallback in
+  `rig.py` never reached Cycles (the engine property's static list holds
+  only built-in engines), which is fixed. The villager is re-rendered on
+  Cycles so every set comes from one engine.
+- **Buildings.** The rig anchored buildings like units, at the frame's
+  bottom; the renderer places a building by its footprint's centre, so the
+  building classes now anchor there (`rig.json`; `atlas rig` checks it; the
+  lowest-pixel rule in `atlas validate` allows the footprint's half-height).
+  `render_sheet.py --still` renders a building square to the grid.
+- **The kit and the first two.** `tools/render/kit.py`, `slice.py` and
+  `scripts/render-sprites.sh`; the spearman (bronze cone helmet, spear,
+  shield, a thrust) and the house (mudbrick, thatch, the owner's cloth over
+  the door; three construction stages, finished, rubble). Golden images with
+  the villager, the spearman or a house are rebaked.
+- **Next:** the other ten units and eight buildings once the owner has seen
+  these two.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):

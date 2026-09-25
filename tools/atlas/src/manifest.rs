@@ -53,6 +53,17 @@ impl Class {
         }
     }
 
+    /// Tiles on a side of the footprint the class is drawn for: a building
+    /// stands on its whole footprint, a unit on one tile.
+    pub fn footprint(self) -> u32 {
+        match self {
+            Class::MediumBuilding => 2,
+            Class::LargeBuilding => 3,
+            Class::Wonder => 5,
+            _ => 1,
+        }
+    }
+
     pub fn kind(self) -> Kind {
         match self {
             Class::Foot | Class::Mounted | Class::Heavy => Kind::Mobile,
