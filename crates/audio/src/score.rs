@@ -1,7 +1,9 @@
 //! The score and the ambience (`docs/03` §6.1, `docs/04` §8, `docs/05`
 //! §5.3): a stem per age under the match, cross-fading when the age
 //! advances; the combat stem over it while a fight is in view; and an
-//! ambient bed per kind of ground under the camera, low and looping.
+//! ambient bed per kind of ground under the camera, low, looping and
+//! positional (`docs/05` §5.1): toward the side of the view its ground
+//! is on.
 //! Both are pure: they decide the fades, and the app's device applies
 //! them. Time is milliseconds on the caller's clock.
 
@@ -87,6 +89,9 @@ pub struct Fade {
     pub level: f32,
     /// How long the fade takes.
     pub ms: u32,
+    /// Where it sits, -1 left to 1 right, moved to over the same time:
+    /// a bed toward its ground, the score in the middle.
+    pub pan: f32,
 }
 
 /// An age's stem cross-fades into the next over this long (`docs/04` §8).
@@ -126,6 +131,7 @@ impl Score {
                     layer: Layer::Stem(old),
                     level: 0.0,
                     ms: CROSSFADE_MS,
+                    pan: 0.0,
                 });
             }
             if let Some(new) = age {
@@ -133,6 +139,7 @@ impl Score {
                     layer: Layer::Stem(new),
                     level: 1.0,
                     ms: CROSSFADE_MS,
+                    pan: 0.0,
                 });
             }
             self.age = age;
@@ -145,6 +152,7 @@ impl Score {
                     layer: Layer::Combat,
                     level: 1.0,
                     ms: COMBAT_IN_MS,
+                    pan: 0.0,
                 });
             }
         } else if self.combat {
@@ -156,6 +164,7 @@ impl Score {
                     layer: Layer::Combat,
                     level: 0.0,
                     ms: COMBAT_OUT_MS,
+                    pan: 0.0,
                 });
             }
         }
@@ -186,21 +195,27 @@ pub struct Ground {
     pub sand: f32,
     /// Grass and dirt.
     pub open: f32,
+    /// Where each kind lies across the view, in [`Bed::ALL`] order: the
+    /// mean of its tiles' places, -1 the left edge to 1 the right.
+    pub across: [f32; 4],
 }
 
-/// The beds' levels, following the ground.
+/// The beds' levels and places, following the ground.
 #[derive(Clone, Debug, Default)]
 pub struct Ambience {
     levels: [f32; 4],
+    pans: [f32; 4],
 }
 
 /// A bed's target moves by at least this before it is worth a fade.
 const BED_STEP: f32 = 0.05;
+/// A bed's place moves by at least this before it is worth a fade.
+const BED_PAN_STEP: f32 = 0.1;
 
 impl Ambience {
     /// The ground under the camera this moment, or none outside a match.
-    /// The fades to apply: a bed whose target moved enough, or to or from
-    /// silence.
+    /// The fades to apply: a bed whose target or place moved enough, or
+    /// to or from silence. A bed going quiet stays where it was.
     pub fn update(&mut self, ground: Option<Ground>) -> Vec<Fade> {
         let targets = ground.map_or([0.0; 4], |g| {
             [
@@ -211,16 +226,24 @@ impl Ambience {
             ]
             .map(|t| t * BED_GAIN)
         });
+        let places = ground.map_or(self.pans, |g| {
+            g.across.map(|x| x.clamp(-1.0, 1.0) * crate::PAN_WIDTH)
+        });
         let mut out = Vec::new();
         for bed in Bed::ALL {
-            let (have, want) = (self.levels[bed.index()], targets[bed.index()]);
+            let i = bed.index();
+            let (have, want) = (self.levels[i], targets[i]);
+            let place = if want > 0.0 { places[i] } else { self.pans[i] };
             let silence_changed = (have == 0.0) != (want == 0.0);
-            if silence_changed || (have - want).abs() >= BED_STEP {
-                self.levels[bed.index()] = want;
+            let moved = want > 0.0 && (self.pans[i] - place).abs() >= BED_PAN_STEP;
+            if silence_changed || (have - want).abs() >= BED_STEP || moved {
+                self.levels[i] = want;
+                self.pans[i] = place;
                 out.push(Fade {
                     layer: Layer::Bed(bed),
                     level: want,
                     ms: BED_FADE_MS,
+                    pan: place,
                 });
             }
         }
@@ -230,6 +253,11 @@ impl Ambience {
     /// A bed's level now.
     pub fn level(&self, bed: Bed) -> f32 {
         self.levels[bed.index()]
+    }
+
+    /// Where a bed sits now, -1 left to 1 right.
+    pub fn pan(&self, bed: Bed) -> f32 {
+        self.pans[bed.index()]
     }
 }
 
@@ -251,7 +279,8 @@ mod tests {
             vec![Fade {
                 layer: Layer::Stem(Age::Stone),
                 level: 1.0,
-                ms: CROSSFADE_MS
+                ms: CROSSFADE_MS,
+                pan: 0.0
             }]
         );
         assert!(s.update(Some(Age::Stone), 0, 2000).is_empty(), "steady");
@@ -260,12 +289,14 @@ mod tests {
         assert!(up.contains(&Fade {
             layer: Layer::Stem(Age::Stone),
             level: 0.0,
-            ms: CROSSFADE_MS
+            ms: CROSSFADE_MS,
+            pan: 0.0
         }));
         assert!(up.contains(&Fade {
             layer: Layer::Stem(Age::Tool),
             level: 1.0,
-            ms: CROSSFADE_MS
+            ms: CROSSFADE_MS,
+            pan: 0.0
         }));
         assert_eq!(s.age(), Some(Age::Tool));
         assert!(
@@ -279,7 +310,8 @@ mod tests {
             vec![Fade {
                 layer: Layer::Combat,
                 level: 1.0,
-                ms: COMBAT_IN_MS
+                ms: COMBAT_IN_MS,
+                pan: 0.0
             }]
         );
         assert!(s.combat());
@@ -294,7 +326,8 @@ mod tests {
             vec![Fade {
                 layer: Layer::Combat,
                 level: 0.0,
-                ms: COMBAT_OUT_MS
+                ms: COMBAT_OUT_MS,
+                pan: 0.0
             }]
         );
         assert!(!s.combat());
@@ -318,6 +351,7 @@ mod tests {
             water: 0.5,
             sand: 0.2,
             open: 0.3,
+            ..Ground::default()
         }));
         let of = |bed: Bed| shore.iter().find(|f| f.layer == Layer::Bed(bed)).copied();
         assert_eq!(
@@ -334,6 +368,7 @@ mod tests {
             water: 0.51,
             sand: 0.19,
             open: 0.3,
+            ..Ground::default()
         }));
         assert!(nudge.is_empty(), "a small move is not a fade");
         let woods = a.update(Some(Ground {
@@ -341,6 +376,7 @@ mod tests {
             water: 0.0,
             sand: 0.0,
             open: 0.4,
+            ..Ground::default()
         }));
         assert!(woods
             .iter()
@@ -358,5 +394,45 @@ mod tests {
         assert_eq!(Layer::Stem(Age::Iron).name(), "stem-iron");
         assert_eq!(Layer::Bed(Bed::Surf).bus(), Bus::World);
         assert_eq!(Layer::Combat.bus(), Bus::Music);
+    }
+
+    /// The beds are positional (`docs/05` §5.1): water on the left puts
+    /// the surf on the left, as far as a world sound goes; the ground
+    /// moving across the view moves the bed, a small shift does not; a
+    /// bed going quiet stays where it was.
+    #[test]
+    fn a_bed_sits_toward_the_side_its_ground_is_on() {
+        let mut a = Ambience::default();
+        let shore = |across_water: f32| Ground {
+            water: 0.5,
+            open: 0.5,
+            across: [0.0, across_water, 0.0, -across_water],
+            ..Ground::default()
+        };
+        let left = a.update(Some(shore(-1.0)));
+        let surf = |fades: &[Fade]| {
+            fades
+                .iter()
+                .find(|f| f.layer == Layer::Bed(Bed::Surf))
+                .copied()
+        };
+        assert_eq!(surf(&left).unwrap().pan, -crate::PAN_WIDTH);
+        assert_eq!(
+            a.pan(Bed::Field),
+            crate::PAN_WIDTH,
+            "the grass to the right"
+        );
+        assert!(a.update(Some(shore(-0.95))).is_empty(), "a small shift");
+        let middle = a.update(Some(shore(0.0)));
+        assert_eq!(surf(&middle).unwrap().pan, 0.0);
+        assert_eq!(
+            surf(&middle).unwrap().level,
+            BED_GAIN,
+            "only the place moved"
+        );
+        a.update(Some(shore(0.5)));
+        let quiet = a.update(None);
+        assert_eq!(surf(&quiet).unwrap().level, 0.0);
+        assert_eq!(surf(&quiet).unwrap().pan, 0.5 * crate::PAN_WIDTH);
     }
 }

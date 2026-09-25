@@ -1269,6 +1269,103 @@ letters are still not rebindable (`GD-A11Y-02`).
   and hunting kept, six of the seeds that moved all ended by elimination
   again at about their old times.
 
+### Work record: playtest-4 — per-farm reseed (2026-09-22)
+
+The owner's go on the four gaps `playtest-4` closes: per-farm reseed,
+rebindable panel letters, a panel highlight for finished research, and
+positional ambient beds, each its own commit.
+
+- `crates/sim`: `docs/02` `GD-ECON-05` asks for a reseed switch "per-farm
+  and globally". `Player::auto_reseed` stays the side's switch and a new
+  farm's setting; `Player::reseed_exceptions` holds the farms whose own
+  switch differs, hashed only when non-empty so recorded matches stand;
+  `farm_reseeds`, `set_farm_reseed`, `set_auto_reseed` (which clears the
+  exceptions, so every farm follows). `CommandKind::SetFarmReseed`; a farm
+  removed leaves the list. One sim test.
+- `crates/view`: a farm's panel shows and flips its own switch
+  (`Action::ToggleFarmReseed`); the Town Center's and the Market's the
+  side's. The "wood too low to reseed" notice counts only farms whose
+  own switch is on.
+- `crates/app`: R on selected farms sets them all to the opposite of the
+  first's. One app test.
+
+### Work record: playtest-4 — rebindable panel letters (2026-09-22)
+
+`docs/02` `GD-A11Y-02` asks for full key rebinding; until now the
+settings screen moved the seventeen general keys and the panels' command
+letters were fixed.
+
+- `crates/view` settings: `Settings::letters` maps a letter to the key
+  it has moved to; a letter left out answers to its own key, so older
+  files load unchanged. `letter_key`, `letter_for`, `letter_shown`,
+  `bind_letter`. A letter keeps its meaning on every panel; only its key
+  moves. Onto a key another letter holds, the two swap, so no panel can
+  have two commands on one key. Escape, a digit and a key a general
+  control holds are refused with the reason. A general control is
+  refused a key a letter answers to (the pan keys excepted, as before,
+  `docs/07` D26), and may take one a letter has left. One unit test.
+- `crates/view` shell: the settings screen has two pages, the general
+  keys and PANEL LETTERS (A to Z in two columns, each with CHANGE),
+  switched by a button at its top right. Capture is per control or per
+  letter (`Capture`).
+- `crates/view` HUD: a button's key corner, its tooltip's first line and
+  the controls overlay's letter rows show the key the letter answers to.
+- `crates/app`: a key press finds its letter through the settings; `F4`
+  opens the timings only while no letter has moved onto it. One app test:
+  H moved to F6 on the screen and kept in the file, Space refused for B
+  with the reason, then in a match F6 places a house, H does nothing, and
+  the button's tooltip and the overlay say F6.
+- `tools/mapview`: a `settings-letters` screen and golden; the settings
+  screen golden rebaked for the PANEL LETTERS button.
+
+### Work record: playtest-4 — the panel highlight for finished research (2026-09-22)
+
+`docs/03` §6.3 lists "fanfare, panel highlight" for research or age-up
+complete; the fanfare and the notice were in, the highlight was not.
+It is now a light-gold ring on every command button the finished
+technology opened, for as long as its notice stays up.
+
+- `crates/view` HUD: `opened_by(action, tech, player)` says whether a
+  button's action is open now and was not without that technology (or,
+  for an age, before it): an age opens its buildings, units and
+  technologies, a technology the unit its line becomes and what needed
+  it. The rule reads the tables, not the sim's refusals, so a button
+  the side cannot afford is still ringed. `HudInput::fresh` carries the
+  side's recent technologies with the tick each finished;
+  `Button::fresh` is drawn as the ring for `FRESH_TICKS` (the notice's
+  thirty seconds of match time). One unit test.
+- `crates/app`: records each technology and age the viewed side
+  finishes, clears the list for a new match or a change of eyes in a
+  replay. **A bug fixed on the way:** the app found a new technology by
+  counting past the old length of the side's list, but that list is in
+  id order, so a technology earlier in the table finishing after a later
+  one (the Bronze Age after Woodworking, say) was missed and the last in
+  the table announced again. It now compares the lists. One app test,
+  which fails on the old counting.
+- `tools/mapview`: `--fresh` rings what the side's technologies opened as
+  if each had just finished; the `ages-fresh-hud` golden.
+
+### Work record: playtest-4 — positional ambient beds (2026-09-22)
+
+`docs/05` §5.1 asks for ambient beds that are "low, looping,
+positional"; they were low and looping and followed the view as a
+whole.
+
+- `crates/audio`: `Fade` carries a pan; `Ground::across` holds where
+  each kind of ground lies across the view; `Ambience` keeps a pan per
+  bed beside its level, scaled by the world sounds' width, and fades a
+  bed whose place moved by 0.1. A bed going quiet keeps its place. One
+  unit test.
+- `crates/app`: the survey places each on-screen tile by where its middle
+  projects in the window, and leaves out the tiles of the view's
+  bounding box that are off screen, so the fractions are of what is
+  seen. The device glides a loop's panning with its volume. One app
+  test; the score test now points the camera at its villager, whose
+  explored ground was off screen and heard only through the old box.
+- Not heard here: this container has no audio device, so the pans are
+  tested as the numbers the device is given. Whether they sound right is
+  for the Mac.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1458,16 +1555,11 @@ complete without them, and the owner decides when and by whom.
 
 Stated so they are not rediscovered.
 
-- **The panels' command letters are not rebindable** (`GD-A11Y-02`):
-  the settings screen rebinds the seventeen general keys only. Full
-  rebinding needs a per-command capture flow and the HUD's tables read
-  through the bindings.
 - **Every sound is a placeholder** (`docs/07` Q7): synthesised tones and
   noise, the stems and the beds included. Recordings under
   `assets/sounds/<cue>/`, `stem-<age>/`, `stem-combat/` and `bed-<kind>/`
   replace them by name.
-- **The beds are not positional** (`docs/05` §5.1 asks it): they follow
-  the view as a whole. **No stem plays on the title screen.**
+- **No stem plays on the title screen.**
 - **The performance numbers are from a shared-runner-class machine**
   (`docs/09` §8): every §12 row is inside its budget there, but the
   measurement on the Mac is the owner's (`F4`). Rendering is read, not
@@ -1479,15 +1571,12 @@ Stated so they are not rediscovered.
   §6.2, `docs/06` M7): the placeholders have a fall and a corpse and no
   more; a building's collapse is a cloud over the rubble, not an
   animation.
-- **Two notification rows stay open**: no panel highlight for a
-  finished technology, and no Wonder to announce.
+- **One notification row stays open**: no Wonder to announce.
 - **The Mac build is not notarised, Apple Silicon only, and has no icon.**
   Notarising needs an Apple Developer account and a signing identity in
   the workflow's secrets; an Intel slice needs a second target and `lipo`;
   the icon waits on the name (`docs/07` Q5).
 - The age-up **fanfare** waits for audio (M7). The sweep and banner exist.
-- **Auto-reseed is per player**, not per farm as `docs/02` [GD-ECON-05]
-  asks. A per-farm flag needs a per-entity toggle in the world store.
 - **Age variants exist for placeholders only.** Rendered sets carry no
   variants yet; `Atlas::variant` answers with the base kind for them. The
   sprite manifest needs a per-age entry when the art stream models the

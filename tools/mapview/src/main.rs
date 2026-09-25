@@ -57,6 +57,9 @@ struct Args {
     hint: bool,
     /// Show the performance readout with fixed sample numbers.
     perf: bool,
+    /// Ring what the side's technologies opened, as if each had just
+    /// finished (`docs/03` §6.3).
+    fresh: bool,
     dpi: f32,
     ui_scale: f32,
     controls: bool,
@@ -94,6 +97,7 @@ fn parse() -> Result<Args, String> {
         hover_button: None,
         hint: false,
         perf: false,
+        fresh: false,
         dpi: 1.0,
         ui_scale: 1.0,
         controls: false,
@@ -148,6 +152,7 @@ fn parse() -> Result<Args, String> {
             "--hover-button" => a.hover_button = Some(val.clone()),
             "--hint" => a.hint = val == "1" || val == "true",
             "--perf" => a.perf = val == "1" || val == "true",
+            "--fresh" => a.fresh = val == "1" || val == "true",
             "--hover" => {
                 let (x, y) = val.split_once(',').ok_or("--hover wants X,Y")?;
                 a.hover = Some((num(x)?, num(y)?));
@@ -218,7 +223,25 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
             )
         }
         "settings" => (
-            shell::settings_screen(&atlas, &input, &Settings::default(), None, None),
+            shell::settings_screen(
+                &atlas,
+                &input,
+                &Settings::default(),
+                shell::SettingsPage::Keys,
+                None,
+                None,
+            ),
+            None,
+        ),
+        "settings-letters" => (
+            shell::settings_screen(
+                &atlas,
+                &input,
+                &Settings::default(),
+                shell::SettingsPage::Letters,
+                None,
+                None,
+            ),
             None,
         ),
         other => return Err(format!("--screen {other}: title, setup, load or settings")),
@@ -447,6 +470,12 @@ fn run() -> Result<(), String> {
         let hint = hint.flatten();
         let perf = a.perf.then(view::Readout::sample);
         let status = format!("TICK {}", sim.tick());
+        let fresh: Vec<(sim::tech::TechId, u64)> = sim
+            .player(0)
+            .filter(|_| a.fresh)
+            .map_or_else(Vec::new, |p| {
+                p.researched.iter().map(|t| (*t, sim.tick())).collect()
+            });
         let input = |hover: Option<(f32, f32)>| HudInput {
             sim: &sim,
             player: 0,
@@ -468,6 +497,7 @@ fn run() -> Result<(), String> {
             hint: hint.as_deref(),
             flash: [false; 4],
             perf: perf.as_ref(),
+            fresh: &fresh,
         };
         let mut hover = a.hover;
         if let Some(label) = &a.hover_button {

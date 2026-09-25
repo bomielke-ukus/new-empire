@@ -496,6 +496,63 @@ fn auto_reseed_can_be_switched_off_and_on() {
     );
 }
 
+/// Each farm has its own switch beside the side's (`GD-ECON-05`: "toggle
+/// per-farm and globally"). A farm switched off stays empty and costs
+/// nothing while the side's switch is on; switched on, it reseeds at once;
+/// and setting the side's switch sets every farm's with it.
+/// REQ: GD-ECON-05
+#[test]
+fn a_farm_has_its_own_reseed_switch_and_the_sides_switch_sets_them_all() {
+    let mut sim = flat(1, [0, 1000, 0, 0]);
+    let farm = farmstead(&mut sim);
+    let off = |sim: &mut Simulation, enabled: bool| {
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::SetFarmReseed {
+                farms: vec![farm],
+                enabled,
+            },
+        });
+    };
+    off(&mut sim, false);
+    run(&mut sim, 4);
+    let pl = sim.player(0).unwrap();
+    assert!(pl.auto_reseed, "the side's switch is untouched");
+    assert!(!pl.farm_reseeds(farm), "the farm's own is off");
+
+    let drained = run_until(&mut sim, 20 * 150, |s| {
+        s.player(0).unwrap().gathered[Resource::Food.index()] == 250
+    });
+    assert!(drained);
+    run(&mut sim, 40);
+    assert_eq!(farm_food(&sim, farm), 0, "this farm stays empty");
+    assert_eq!(
+        sim.player(0).unwrap().stockpile[Resource::Wood.index()],
+        1000
+    );
+
+    off(&mut sim, true);
+    run(&mut sim, 4);
+    assert_eq!(farm_food(&sim, farm), 250, "its own switch on: at once");
+    assert!(
+        sim.player(0).unwrap().reseed_exceptions.is_empty(),
+        "it follows the side again"
+    );
+
+    // Off again on its own, then the side's switch set: every farm follows.
+    off(&mut sim, false);
+    run(&mut sim, 4);
+    assert_eq!(sim.player(0).unwrap().reseed_exceptions, vec![farm]);
+    sim.issue(Command {
+        player: 0,
+        kind: CommandKind::SetAutoReseed { enabled: true },
+    });
+    run(&mut sim, 4);
+    let pl = sim.player(0).unwrap();
+    assert!(pl.farm_reseeds(farm) && pl.reseed_exceptions.is_empty());
+    sim.check().unwrap();
+}
+
 /// A farm is its owner's. Another player's villager sent to it is ignored.
 #[test]
 fn only_the_owner_may_work_a_farm() {

@@ -55,8 +55,11 @@ pub enum Action {
     CancelTrain(EntityId),
     /// Queue a technology (an age advance included) at the selected building.
     Research(TechId),
-    /// Flip the player's farm auto-reseed.
+    /// Flip the player's farm auto-reseed: the side's switch, which every
+    /// farm then follows.
     ToggleReseed,
+    /// Flip the selected farms' own switches (`GD-ECON-05`).
+    ToggleFarmReseed,
     /// Start picking a point to attack-move to (`UX-CMD-02`).
     AttackMove,
     /// Start picking a point to patrol to (`UX-CMD-03`).
@@ -103,6 +106,9 @@ pub struct Button {
     /// Which resources the player is short of for it, in
     /// [`Resource::ALL`] order: the bar flashes them on a click.
     pub lacks: [bool; 4],
+    /// Opened by a technology or age that finished lately, and ringed
+    /// for it (`docs/03` §6.3).
+    pub fresh: bool,
 }
 
 impl Button {
@@ -192,6 +198,53 @@ pub struct HudInput<'a> {
     pub flash: [bool; 4],
     /// The performance readout, when it is up (`F4`).
     pub perf: Option<&'a crate::perf::Readout>,
+    /// Technologies and ages the side finished, with the tick each
+    /// finished at: the buttons they opened are ringed for
+    /// [`FRESH_TICKS`] (`docs/03` §6.3).
+    pub fresh: &'a [(TechId, u64)],
+}
+
+/// How long a button a finished technology opened stays ringed: as long
+/// as the notice that announced it stays up.
+pub const FRESH_TICKS: u64 = crate::notify::LIFE_TICKS;
+
+/// Whether `tech`, finished, opened what `action` does for `pl`
+/// (`docs/03` §6.3): an age the buildings, units and technologies of that
+/// age; a technology the ones that needed it and the unit its line
+/// becomes; the DEFENCES button whatever it opened on that page. Only
+/// what is open now counts, so a unit that still waits on its upgrade is
+/// not ringed by the age.
+pub fn opened_by(action: Action, tech: TechId, pl: &sim::Player) -> bool {
+    let Some(t) = tech::info(tech) else {
+        return false;
+    };
+    if action == Action::Defences {
+        return DEFENCES
+            .iter()
+            .any(|k| opened_by(Action::Build(*k), tech, pl));
+    }
+    // An age advance is researched from the age before the one it gives.
+    let before = if t.advances_age().is_some() {
+        t.age
+    } else {
+        pl.age
+    };
+    open(action, pl.age, &|r| pl.has_researched(r))
+        && !open(action, before, &|r| r != tech && pl.has_researched(r))
+}
+
+/// Whether an action's age and technologies are met: what the panels
+/// grey a button for, less the stockpile and the queue.
+fn open(action: Action, age: sim::Age, has: &dyn Fn(TechId) -> bool) -> bool {
+    match action {
+        Action::Build(k) | Action::Train(k) => {
+            kinds::info(k).age <= age && tech::unlocked_by(k).is_none_or(|t| has(t.id))
+        }
+        Action::Research(r) => {
+            tech::info(r).is_some_and(|t| t.age <= age && t.requires.iter().all(|q| has(*q)))
+        }
+        _ => false,
+    }
 }
 
 /// How long the "F1 CONTROLS" hint stays in the resource bar: the first
@@ -209,6 +262,24 @@ pub fn controls_hint(sim: &Simulation) -> bool {
 pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
     let s = |k: &str, a: &str| (k.to_string(), a.to_string());
     let key = |c: Control| pretty(settings.key(c));
+    // Panel letters as the player has them bound (`GD-A11Y-02`): each
+    // one-letter word of a key column is a letter to look up.
+    let lk = |k: &str| -> String {
+        k.split(' ')
+            .map(|t| {
+                let (core, tail) = t.strip_suffix(',').map_or((t, ""), |c| (c, ","));
+                let mut cs = core.chars();
+                match (cs.next(), cs.next()) {
+                    (Some(c), None) if command_letters().contains(&c) => {
+                        format!("{}{tail}", settings.letter_shown(c))
+                    }
+                    _ => t.to_string(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let l = |k: &str, a: &str| (lk(k), a.to_string());
     // The general keys are the player's bindings, so the overlay cannot
     // disagree with the settings screen.
     let pan: Vec<String> = [
@@ -242,14 +313,14 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
         s("CTRL+0-9", "SAVE A GROUP, 0-9 RECALLS"),
         (key(Control::NextIdle), "NEXT IDLE VILLAGER".to_string()),
         s("RIGHT", "MOVE, GATHER, BUILD, RALLY"),
-        s("T", "STOP"),
-        s("C P G B L", "TRAIN AT A BARRACKS, RANGE, STABLE"),
+        l("T", "STOP"),
+        l("C P G B L", "TRAIN AT A BARRACKS, RANGE, STABLE"),
         s("RIGHT", "ON AN ENEMY: ATTACK"),
         s("RIGHT", "ON A TOWER OR TOWN CENTER: GARRISON"),
-        s("T", "AT A BUILDING: ALL OUT"),
-        s("A, P", "ATTACK-MOVE, PATROL, THEN CLICK"),
-        s("Q E I K", "STANCE, AGGRESSIVE TO PASSIVE"),
-        s("Z", "NEXT FORMATION"),
+        l("T", "AT A BUILDING: ALL OUT"),
+        l("A, P", "ATTACK-MOVE, PATROL, THEN CLICK"),
+        l("Q E I K", "STANCE, AGGRESSIVE TO PASSIVE"),
+        l("Z", "NEXT FORMATION"),
         (key(Control::Dismiss), "DISMISS".to_string()),
         (key(Control::Pause), "PAUSE".to_string()),
         (
@@ -309,6 +380,7 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
     orders.push(s("R", "AUTO-RESEED ON, OFF"));
     orders.push(s("X", "UNQUEUE, OR CANCEL PLACING"));
     orders.push(s("SHIFT", "KEEP PLACING"));
+    let orders = orders.into_iter().map(|(k, a)| (lk(&k), a)).collect();
     [general, orders]
 }
 
@@ -401,6 +473,17 @@ impl<'a> Painter<'a> {
 
     /// A labelled button. Greyed when disabled; lit when hovered.
     pub fn button(&mut self, b: &Button, hover: bool) {
+        let key = if b.hotkey == ' ' {
+            String::new()
+        } else {
+            b.hotkey.to_string()
+        };
+        self.button_keyed(b, hover, &key);
+    }
+
+    /// A labelled button showing `key` in its corner, the key its letter
+    /// is bound to (`GD-A11Y-02`); nothing for none.
+    pub fn button_keyed(&mut self, b: &Button, hover: bool, key: &str) {
         let (fill, ink) = if !b.enabled {
             (GREY_DARK, Ink::White)
         } else if hover {
@@ -414,16 +497,23 @@ impl<'a> Painter<'a> {
         let label = fit(&b.label, b.w - 8.0);
         self.text_in(b.x + 4.0, b.y + 5.0, &label, ink, 1.0);
         // A button without a key (the Town Center) shows none.
-        let key = if b.hotkey == ' ' {
+        let key = if key.is_empty() {
             String::new()
         } else {
-            format!("({})", b.hotkey)
+            format!("({key})")
         };
         let kw = font::width(&key) as f32;
         let cost = fit(&b.cost, b.w - kw - 10.0);
         self.text_in(b.x + 4.0, b.y + b.h - 11.0, &cost, ink, 1.0);
         if !key.is_empty() {
             self.text_in(b.x + b.w - kw - 4.0, b.y + b.h - 11.0, &key, ink, 1.0);
+        }
+        if b.fresh {
+            // Newly opened: a gold ring inside the border (`docs/03` §6.3).
+            self.rect(b.x + 1.0, b.y + 1.0, b.w - 2.0, 2.0, GOLD_LIGHT, 0);
+            self.rect(b.x + 1.0, b.y + b.h - 3.0, b.w - 2.0, 2.0, GOLD_LIGHT, 0);
+            self.rect(b.x + 1.0, b.y + 1.0, 2.0, b.h - 2.0, GOLD_LIGHT, 0);
+            self.rect(b.x + b.w - 3.0, b.y + 1.0, 2.0, b.h - 2.0, GOLD_LIGHT, 0);
         }
     }
 }
@@ -1082,18 +1172,30 @@ fn commands(
                 .gated(check),
             );
         }
-        if matches!(kind, kinds::FARM | kinds::MARKET | kinds::TOWN_CENTER) {
-            let label = if pl.auto_reseed {
-                "RESEED ON"
-            } else {
-                "RESEED OFF"
-            };
+        if kind == kinds::FARM {
+            // This farm's own switch (`GD-ECON-05`).
+            let on = pl.farm_reseeds(id);
             defs.push(Def::on(
-                Action::ToggleReseed,
-                label,
+                Action::ToggleFarmReseed,
+                if on { "RESEED ON" } else { "RESEED OFF" },
                 'R',
                 format!(
-                    "FARMS RESEED FOR {} WHEN EMPTY",
+                    "THIS FARM RESEEDS FOR {} WHEN EMPTY",
+                    cost_words(&kinds::FARM_RESEED_COST)
+                ),
+            ));
+        } else if matches!(kind, kinds::MARKET | kinds::TOWN_CENTER) {
+            // The side's switch, which sets every farm's.
+            defs.push(Def::on(
+                Action::ToggleReseed,
+                if pl.auto_reseed {
+                    "RESEED ON"
+                } else {
+                    "RESEED OFF"
+                },
+                'R',
+                format!(
+                    "EVERY FARM RESEEDS FOR {} WHEN EMPTY",
                     cost_words(&kinds::FARM_RESEED_COST)
                 ),
             ));
@@ -1138,14 +1240,14 @@ fn farm_needs_wood(sim: &Simulation, me: u8) -> bool {
     let Some(pl) = sim.player(me) else {
         return false;
     };
-    pl.auto_reseed
-        && !pl.can_afford(&kinds::FARM_RESEED_COST)
+    !pl.can_afford(&kinds::FARM_RESEED_COST)
         && world.slots().any(|s| {
             let i = s.index();
             world.owner[i] == me
                 && world.kind[i] == kinds::FARM
                 && world.construction[i].is_none()
                 && world.resource[i] <= 0
+                && pl.farm_reseeds(world.id_at(s))
         })
 }
 
@@ -1602,9 +1704,27 @@ impl Hud {
             input.targeting,
             input.defences,
         );
-        for (n, d) in defs.into_iter().take(GRID_COLS * GRID_ROWS).enumerate() {
+        let lately: Vec<TechId> = input
+            .fresh
+            .iter()
+            .filter(|(_, at)| sim.tick().saturating_sub(*at) < FRESH_TICKS)
+            .map(|(t, _)| *t)
+            .collect();
+        for (n, mut d) in defs.into_iter().take(GRID_COLS * GRID_ROWS).enumerate() {
             let col = (n % GRID_COLS) as f32;
             let row = (n / GRID_COLS) as f32;
+            // The key the letter is bound to, on the button and in the
+            // tooltip's first line (`GD-A11Y-02`).
+            let shown = if d.hotkey == ' ' {
+                String::new()
+            } else {
+                input.settings.letter_shown(d.hotkey)
+            };
+            if let Some(first) = d.tip.first_mut() {
+                if let Some(name) = first.strip_suffix(&format!("({})", d.hotkey)) {
+                    *first = format!("{name}({shown})");
+                }
+            }
             let b = Button {
                 x: grid_x + col * (bw + BUTTON_GAP),
                 y: py + 10.0 + row * (BUTTON_H + BUTTON_GAP),
@@ -1618,9 +1738,12 @@ impl Hud {
                 reason: d.reason,
                 tip: d.tip,
                 lacks: d.lacks,
+                fresh: sim
+                    .player(me)
+                    .is_some_and(|pl| lately.iter().any(|t| opened_by(d.action, *t, pl))),
             };
             let lit = hover.is_some_and(|(hx, hy)| b.contains(hx, hy));
-            p.button(&b, lit);
+            p.button_keyed(&b, lit, &shown);
             buttons.push(b);
         }
         // The line under the grid: the hovered button's story, else what
@@ -1764,6 +1887,7 @@ impl Hud {
                     reason: "CLICK TO LOOK".to_string(),
                     tip: Vec::new(),
                     lacks: [false; 4],
+                    fresh: false,
                 });
             }
         }
@@ -1941,6 +2065,79 @@ mod tests {
         }
     }
 
+    /// What a finished technology opened (`docs/03` §6.3): an age its
+    /// buildings, units and technologies, but not a unit still waiting on
+    /// its upgrade nor anything of a later age; a technology the unit its
+    /// line becomes and what needed it, once that one's age is here; the
+    /// DEFENCES button for what it opened on that page.
+    #[test]
+    fn a_finished_technology_opens_its_age_its_line_and_what_needed_it() {
+        let mut pl = sim::Player::new();
+        pl.mark_researched(tech::AGE_TOOL);
+        pl.age = sim::Age::Tool;
+        assert!(opened_by(Action::Build(kinds::MARKET), tech::AGE_TOOL, &pl));
+        assert!(opened_by(
+            Action::Train(kinds::SPEARMAN),
+            tech::AGE_TOOL,
+            &pl
+        ));
+        assert!(opened_by(
+            Action::Research(tech::AGE_BRONZE),
+            tech::AGE_TOOL,
+            &pl
+        ));
+        assert!(opened_by(
+            Action::Research(tech::WOODWORKING),
+            tech::AGE_TOOL,
+            &pl
+        ));
+        assert!(
+            opened_by(Action::Defences, tech::AGE_TOOL, &pl),
+            "the tower"
+        );
+        assert!(!opened_by(Action::Build(kinds::HOUSE), tech::AGE_TOOL, &pl));
+        assert!(!opened_by(
+            Action::Train(kinds::AXEMAN),
+            tech::AGE_TOOL,
+            &pl
+        ));
+        assert!(!opened_by(
+            Action::Research(tech::CARRYING_BASKETS),
+            tech::AGE_TOOL,
+            &pl
+        ));
+        assert!(!opened_by(Action::Stop, tech::AGE_TOOL, &pl));
+
+        pl.mark_researched(tech::AXE);
+        assert!(opened_by(Action::Train(kinds::AXEMAN), tech::AXE, &pl));
+        assert!(!opened_by(Action::Train(kinds::SPEARMAN), tech::AXE, &pl));
+        // Woodworking in the Tool Age opens nothing yet; the Bronze Age
+        // then opens what needed it.
+        pl.mark_researched(tech::WOODWORKING);
+        assert!(!opened_by(
+            Action::Research(tech::CARRYING_BASKETS),
+            tech::WOODWORKING,
+            &pl
+        ));
+        pl.mark_researched(tech::AGE_BRONZE);
+        pl.age = sim::Age::Bronze;
+        assert!(opened_by(
+            Action::Research(tech::CARRYING_BASKETS),
+            tech::AGE_BRONZE,
+            &pl
+        ));
+        assert!(opened_by(Action::Build(kinds::GATE), tech::AGE_BRONZE, &pl));
+        assert!(
+            opened_by(Action::Defences, tech::AGE_BRONZE, &pl),
+            "the stone wall"
+        );
+        assert!(!opened_by(
+            Action::Build(kinds::MARKET),
+            tech::AGE_BRONZE,
+            &pl
+        ));
+    }
+
     /// Every unit tooltip carries cost, time, what it does per hit, what it
     /// counters and what counters it; every roster's keys are distinct.
     ///
@@ -2027,6 +2224,7 @@ mod tests {
             hint: None,
             flash: [false; 4],
             perf: None,
+            fresh: &[],
         };
         let has = |lines: &[String], what: &str| lines.iter().any(|l| l.contains(what));
         let b = Hud::build(
@@ -2191,6 +2389,7 @@ mod tests {
             hint: None,
             flash: [false; 4],
             perf: None,
+            fresh: &[],
         };
         let none = Hud::build(&atlas, &base);
         assert!(none.buttons.is_empty());
@@ -2245,6 +2444,10 @@ mod tests {
         assert_eq!(age.label, "TOOL AGE");
         assert!(age.reason.contains("BUILDINGS"), "{}", age.reason);
         assert_eq!(find(&t, Action::ToggleReseed).unwrap().label, "RESEED ON");
+        assert!(
+            find(&t, Action::ToggleFarmReseed).is_none(),
+            "the Town Center holds the side's switch, not a farm's"
+        );
         assert!(
             !t.buttons
                 .iter()
@@ -2350,6 +2553,7 @@ mod tests {
                     hint: None,
                     flash: [false; 4],
                     perf: None,
+                    fresh: &[],
                 },
             )
         };
@@ -2395,6 +2599,7 @@ mod tests {
                 hint: None,
                 flash: [false; 4],
                 perf: None,
+                fresh: &[],
             },
         );
         assert_ne!(lit.sprites, b.sprites, "the hovered button draws lit");
@@ -2461,6 +2666,7 @@ mod tests {
             hint: None,
             flash: [false; 4],
             perf: None,
+            fresh: &[],
         };
         let closed = Hud::build(&atlas, &base);
         let open = Hud::build(&atlas, &HudInput { help: true, ..base });
@@ -2517,6 +2723,7 @@ mod tests {
                     hint: None,
                     flash: [false; 4],
                     perf: None,
+                    fresh: &[],
                 },
             );
             // Every glyph in the top bar stays inside the window.
@@ -2601,6 +2808,7 @@ mod tests {
             hint: None,
             flash: [false; 4],
             perf: None,
+            fresh: &[],
         };
         let none = Hud::build(&atlas, &base);
         let some = Hud::build(

@@ -612,8 +612,14 @@ pub struct Player {
     pub modifiers: Modifiers,
     /// Technologies completed, sorted.
     pub researched: Vec<TechId>,
-    /// Whether exhausted farms are reseeded automatically.
+    /// Whether exhausted farms are reseeded automatically: the side's
+    /// switch, and the setting a new farm starts with (`GD-ECON-05`).
     pub auto_reseed: bool,
+    /// Farms whose own switch differs from the side's, sorted
+    /// (`GD-ECON-05`: "toggle per-farm and globally"). Setting the side's
+    /// switch clears it, so every farm then follows.
+    #[serde(default)]
+    pub reseed_exceptions: Vec<EntityId>,
     /// Has given up: out of the match, and its orders are ignored
     /// (`docs/02` §10).
     #[serde(default)]
@@ -637,8 +643,35 @@ impl Player {
             modifiers: Modifiers::default(),
             researched: Vec::new(),
             auto_reseed: true,
+            reseed_exceptions: Vec::new(),
             resigned: false,
         }
+    }
+
+    /// Whether `farm` reseeds itself when empty: the side's switch, unless
+    /// the farm's own was flipped.
+    pub fn farm_reseeds(&self, farm: EntityId) -> bool {
+        self.auto_reseed != self.reseed_exceptions.binary_search(&farm).is_ok()
+    }
+
+    /// Sets one farm's own switch.
+    pub fn set_farm_reseed(&mut self, farm: EntityId, enabled: bool) {
+        match (
+            self.reseed_exceptions.binary_search(&farm),
+            enabled == self.auto_reseed,
+        ) {
+            (Ok(i), true) => {
+                self.reseed_exceptions.remove(i);
+            }
+            (Err(i), false) => self.reseed_exceptions.insert(i, farm),
+            _ => {}
+        }
+    }
+
+    /// Sets the side's switch, and every farm's with it.
+    pub fn set_auto_reseed(&mut self, enabled: bool) {
+        self.auto_reseed = enabled;
+        self.reseed_exceptions.clear();
     }
 
     /// True if the technology is complete.
@@ -707,6 +740,12 @@ impl HashState for Player {
         }
         h.write_bool(self.auto_reseed);
         h.write_bool(self.resigned);
+        // Only when some farm differs, so a side that never flips one
+        // hashes as it did before farms had their own switch.
+        if !self.reseed_exceptions.is_empty() {
+            h.write_u8(1);
+            h.write(&self.reseed_exceptions);
+        }
     }
 }
 

@@ -51,6 +51,10 @@ fn every_command_from_a_player_the_match_does_not_have() {
                 ids: real.clone(),
                 target: Vec2Fx::from_int(5, 5),
             })),
+            CommandKind::SetFarmReseed {
+                farms: real.clone(),
+                enabled: false,
+            },
             CommandKind::Train {
                 building: real[0],
                 kind: 1,

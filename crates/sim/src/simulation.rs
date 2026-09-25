@@ -1518,6 +1518,14 @@ impl Simulation {
             let (w, h) = (self.map.width(), self.map.height());
             self.scratch.vacate(ax, ay, fp, i, w, h);
         }
+        if self.world.kind[i] == kinds::FARM {
+            // A farm gone takes its own switch with it.
+            if let Some(pl) = self.players.get_mut(self.world.owner[i] as usize) {
+                if let Ok(k) = pl.reseed_exceptions.binary_search(&id) {
+                    pl.reseed_exceptions.remove(k);
+                }
+            }
+        }
         self.world.despawn(id)
     }
 
@@ -1853,7 +1861,19 @@ impl Simulation {
             }
             CommandKind::SetAutoReseed { enabled } => {
                 if let Some(pl) = self.players.get_mut(p as usize) {
-                    pl.auto_reseed = enabled;
+                    pl.set_auto_reseed(enabled);
+                }
+            }
+            CommandKind::SetFarmReseed { farms, enabled } => {
+                for farm in farms {
+                    let own_farm = self
+                        .owned_slot(farm, p)
+                        .is_some_and(|s| self.world.kind[s.index()] == kinds::FARM);
+                    if own_farm {
+                        if let Some(pl) = self.players.get_mut(p as usize) {
+                            pl.set_farm_reseed(farm, enabled);
+                        }
+                    }
                 }
             }
             CommandKind::SetRally { building, rally } => {
@@ -2449,9 +2469,10 @@ impl Simulation {
             && (k != kinds::FARM || self.world.owner[n] == p)
     }
 
-    /// Reseeds every exhausted farm whose owner has auto-reseed on and the
-    /// wood to pay for it. Runs before orders, so a villager working a farm
-    /// that ran dry last tick finds it full again before it looks elsewhere.
+    /// Reseeds every exhausted farm whose switch is on (its own, or its
+    /// side's) and whose owner has the wood to pay for it. Runs before
+    /// orders, so a villager working a farm that ran dry last tick finds it
+    /// full again before it looks elsewhere.
     fn farms(&mut self) {
         let base = kinds::info(kinds::FARM)
             .resource
@@ -2465,10 +2486,11 @@ impl Simulation {
             {
                 continue;
             }
+            let farm = self.world.id_at(slot);
             let Some(p) = self.players.get_mut(self.world.owner[i] as usize) else {
                 continue;
             };
-            if !p.auto_reseed || !p.pay(&kinds::FARM_RESEED_COST) {
+            if !p.farm_reseeds(farm) || !p.pay(&kinds::FARM_RESEED_COST) {
                 continue;
             }
             self.world.resource[i] = p.modifiers.farm_yield(base);

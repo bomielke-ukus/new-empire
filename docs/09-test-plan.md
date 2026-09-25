@@ -172,7 +172,7 @@ main job over time, and what turns the soak from a one-off run into a ratchet.
 
 ### 4.5 Rendering
 
-Twenty-four scenes rendered through `tools/mapview` and compared against committed
+Twenty-seven scenes rendered through `tools/mapview` and compared against committed
 PNGs with a tolerance. The test drives the binary rather than the rendering
 library, because the command line is what CI invokes and what a developer
 types.
@@ -520,7 +520,11 @@ defaults give every control its own key and none a panel letter; a key
 another control holds, a panel letter, Escape and a digit are refused
 with the reason and change nothing; the file round-trips, an older file
 lacking a field loads with the default, the HUD size cycles and wraps,
-and keys read as the screen shows them (`GD-A11Y-02`).
+and keys read as the screen shows them (`GD-A11Y-02`). A panel letter
+moves to another key, a key another letter holds is swapped so no two
+share one, a general key, Escape and a digit are refused, a general
+control may take the key a letter left and not one a letter holds, and a
+letter moved back to its own key leaves the file.
 `crates/app/src/keys.rs`: every default key's name resolves to its key
 and back. The shell test lists every control with its CHANGE button, the
 one being rebound greyed and saying so, and the error line. The HUD test
@@ -553,6 +557,18 @@ the results, QUIT, the save listed and loaded at its tick and hash with
 the opponent, quit again, the recording listed and watched to the won
 match's last tick and hash, REPLAY OVER; every step a button or a key
 through the window's handlers. The same run by hand on the Mac is owed.
+
+**Playtest-4, the panel highlight.** The HUD unit test: the Tool Age
+opens its buildings, units, technologies and the next age, and DEFENCES
+for the tower, but not a Stone Age building, the axeman still waiting on
+the axe, or a Bronze Age technology; the axe opens the axeman; the Bronze
+Age opens Carrying Baskets once Woodworking is in, and DEFENCES for the
+stone wall. `crates/app/src/tests.rs`: after the Tool Age the Town
+Center rings the Bronze Age and the Storehouse Woodworking, and not the
+villager; Toolworking then Woodworking, earlier in the table, each put
+their own line on the stack; the axe rings the axeman at the Barracks
+until thirty seconds on. The `ages-fresh-hud` golden image pins the
+rings on a villager's build grid after the Tool Age.
 
 **M7 chunk 1, audio.** `crates/audio/src/lib.rs` unit tests: twelve chop
 cues at one moment play four, each at its own pitch within five percent,
@@ -595,6 +611,14 @@ field's bed under it and no surf, a second frame fades nothing, the
 Tool Age researched cross-fades the stems, six clubmen sent at an enemy
 in view bring the combat stem in, and the title takes the stem, the
 combat stem and the bed out.
+
+**Playtest-4, positional beds.** `crates/audio/src/score.rs`: water on
+the left puts the surf at the left as far as a world sound goes and the
+grass on the right the field there, a small shift is no fade, the ground
+moving to the middle moves the bed and not its level, and a bed going
+quiet keeps its place. `crates/app/src/tests.rs`: the explored field
+around the villager in the middle of the view sits in the middle; with
+the camera moved so it lies to the left, the field's bed moves left.
 
 **M7 chunk 3, the visual feedback.** `crates/view/src/feedback.rs`
 unit tests on a real simulation: three clubmen on a villager, and at

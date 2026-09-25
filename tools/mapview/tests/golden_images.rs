@@ -77,6 +77,19 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The settings screen's second page (`GD-A11Y-02`): every panel
+        // letter with the key it answers to and a CHANGE button.
+        name: "settings-letters",
+        args: &[
+            "--screen",
+            "settings-letters",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The actual acceptance replay, during contact between the two armies.
         name: "battle-40v40",
         args: &[
@@ -206,6 +219,32 @@ const SCENES: &[Scene] = &[
             "--zoom",
             "0.5",
             "--start",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // The Tool Age just arrived and a villager selected: the build
+        // grid rings the buildings it opened, and DEFENCES for the tower
+        // (`docs/03` §6.3).
+        name: "ages-fresh-hud",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "ages",
+            "--stockpile",
+            "5000",
+            "--ticks",
+            "100",
+            "--select",
+            "1",
+            "--fresh",
+            "1",
+            "--hud",
             "1",
             "--width",
             "960",

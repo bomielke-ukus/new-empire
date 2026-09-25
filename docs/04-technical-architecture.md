@@ -1346,18 +1346,28 @@ siege are still owed, and a human will find this opponent predictable.
   from silence, over 2,000 ms. The beds' targets come from the ground
   under the camera: water at half the view is full surf, sand two thirds
   is full wind, canopy at half is full birds, and the open field is
-  quiet; all under `BED_GAIN` (0.35).
+  quiet; all under `BED_GAIN` (0.35). The beds are positional
+  (`docs/05` §5.1, since `playtest-4`): each `Fade` carries a pan, and a
+  bed's is the mean place of its ground across the view, -1 the left
+  edge to 1 the right, scaled by the world sounds' 0.75 so no bed goes
+  hard to one side. A bed's pan moving by 0.1 is a fade of its own; a
+  bed going quiet keeps its place, so it does not swing to the middle as
+  it fades. The score's layers sit in the middle.
 - **What the app surveys.** Every five ticks or half a second the app
   takes the bounding box of the view's four corners in tiles, counts the
   units in it with an attack order that the viewer can see, and sorts
   its explored tiles by terrain into forest floor, water, sand and open
-  ground; unexplored tiles are nothing, since the ground the player has
-  not seen has no sound. The age is read every frame so an advance is
+  ground, with where each lies across the window; unexplored tiles are
+  nothing, since the ground the player has not seen has no sound. The
+  box is a rectangle of tiles around a diamond of screen, so for the
+  ground a tile whose middle projects off the window is left out, and
+  the fractions are of the tiles on screen. The age is read every frame so an advance is
   heard at once. The shell calls the quiet update, so leaving a match
   fades everything out.
 - **Layers on the device.** A layer is a loop started silent on its
   bus's track the first time it is asked for, then faded with the
-  handle's volume tween; a fade to a level it already holds is a no-op
+  handle's volume and panning tweens over the fade's time; a fade to a
+  level it already holds is a no-op
   at the state machine, not a call. The stems are on the music bus; the
   beds are the world's and sit on the world bus, so a player who mutes
   the music keeps the surf.
@@ -1375,8 +1385,8 @@ siege are still owed, and a human will find this opponent predictable.
   under `assets/sounds/stem-<age>/`, `stem-combat/` or `bed-<kind>/`
   replaces one; the first file is the loop.
 - **Not done.** The music is placeholder in every sense (`docs/07` Q7);
-  the beds are not positional (they follow the view as a whole); no
-  stem plays on the title screen.
+  the beds were not positional until `playtest-4` (above); no stem
+  plays on the title screen.
 
 ---
 
@@ -1536,8 +1546,8 @@ siege are still owed, and a human will find this opponent predictable.
   crowds march (60% of `marching-8p`) and combat with thinking where
   opponents fight. The measurement on a real Mac is the owner's, with
   `F4`.
-- **Not done.** The beds are still not positional (§5 note in `docs/10`);
-  rendering is measured only as the frame in `F4`, not gated, since the
+- **Not done.** The beds were still not positional (done in
+  `playtest-4`, §36); rendering is measured only as the frame in `F4`, not gated, since the
   software rasteriser proves nothing about the GPU; `orders` on a full
   economy is the next phase worth a look (villagers seeking nodes and
   drop-offs scan), inside budget and left alone.

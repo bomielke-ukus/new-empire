@@ -214,8 +214,8 @@ VICTORY, a save in the middle, the save reloaded, the recording watched to
 its last tick, every step through the screens' buttons and the window's
 handlers. Deferred: civilisation, teams, victory conditions and starting
 age on the setup screen (the content they need is M8's); the panels'
-command letters are not rebindable (`GD-A11Y-02` is met for the general
-keys); no audio settings, there being no audio; no seeking in a replay;
+command letters were not rebindable until `playtest-4` (`GD-A11Y-02`);
+no audio settings, there being no audio; no seeking in a replay;
 the game's name (`docs/07` Q5).
 
 ---

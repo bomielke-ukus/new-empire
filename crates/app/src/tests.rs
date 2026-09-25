@@ -776,7 +776,7 @@ fn settings_are_edited_on_their_screen_kept_at_once_and_read_back() {
     assert!(app.settings.fullscreen);
     // Rebind PAUSE: CHANGE, then the key; the row says it is waiting.
     press(&mut app, ShellAction::Rebind(Control::Pause));
-    assert_eq!(app.capturing, Some(Control::Pause));
+    assert_eq!(app.capturing, Some(view::Capture::Control(Control::Pause)));
     draw(&mut app);
     assert!(!shell_button(&app, ShellAction::Rebind(Control::Pause)).enabled);
     assert!(!app.keyboard_input(KeyCode::F6, ElementState::Pressed, false));
@@ -1294,6 +1294,68 @@ fn hud_outside_the_minimap_diamond_does_not_issue_world_commands() {
     assert_eq!(app.sim.world().order[unit.index()], Order::Idle);
 }
 
+/// What a finished technology or age opened is ringed on the panels
+/// (`docs/03` §6.3) while its notice stays up. A technology finishing
+/// after one later in the table is news too: the side's list is in id
+/// order, so the app compares it rather than counting it.
+#[test]
+fn what_a_finished_technology_opens_is_ringed_on_the_panels_for_a_while() {
+    let mut app = app();
+    let (store, tc, _) = research_settlement(&mut app);
+    let barracks = app
+        .sim
+        .world()
+        .slots()
+        .find(|s| app.sim.world().kind[s.index()] == kinds::BARRACKS)
+        .map(|s| app.sim.world().id_at(s))
+        .unwrap();
+    let ringed = |app: &mut App, building: EntityId, action: Action| {
+        app.selection.set(vec![building]);
+        draw(app);
+        app.hud
+            .buttons
+            .iter()
+            .find(|b| b.action == action)
+            .unwrap_or_else(|| panic!("no {action:?}"))
+            .fresh
+    };
+    // The Tool Age opened the next age and the Tool Age technologies.
+    assert!(ringed(&mut app, tc, Action::Research(tech::AGE_BRONZE)));
+    assert!(ringed(&mut app, store, Action::Research(tech::WOODWORKING)));
+    assert!(!ringed(&mut app, tc, Action::Train(kinds::VILLAGER)));
+
+    // Toolworking, then Woodworking, which comes before it in the table.
+    for t in [tech::TOOLWORKING, tech::WOODWORKING] {
+        app.issue(CommandKind::Research {
+            building: store,
+            tech: t,
+        });
+        step(&mut app, tech::info(t).unwrap().ticks() + 3);
+        draw(&mut app);
+    }
+    let researched: Vec<&str> = app
+        .notices
+        .shown()
+        .iter()
+        .filter(|n| n.kind == NoticeKind::Research)
+        .map(|n| n.text.as_str())
+        .collect();
+    assert_eq!(
+        researched,
+        ["TOOLWORKING RESEARCHED", "WOODWORKING RESEARCHED"]
+    );
+
+    // The axe opens the axeman at the Barracks, until the notice is gone.
+    app.issue(CommandKind::Research {
+        building: barracks,
+        tech: tech::AXE,
+    });
+    step(&mut app, tech::info(tech::AXE).unwrap().ticks() + 3);
+    assert!(ringed(&mut app, barracks, Action::Train(kinds::AXEMAN)));
+    step(&mut app, view::hud::FRESH_TICKS as u32);
+    assert!(!ringed(&mut app, barracks, Action::Train(kinds::AXEMAN)));
+}
+
 fn research_settlement(app: &mut App) -> (EntityId, EntityId, EntityId) {
     // The Storehouse has a lower ID than the TC, so mixed selection shows
     // its queue while a search for a trainer would mistakenly return the TC.
@@ -1767,6 +1829,93 @@ fn villagers_hunt_an_animal_on_a_right_click() {
     ));
 }
 
+/// A farm's panel holds its own reseed switch (`GD-ECON-05`): R on a
+/// selected farm flips that farm and no other, and the Town Center's R
+/// sets them all.
+///
+/// REQ: GD-ECON-05
+#[test]
+fn r_on_a_farm_flips_that_farm_and_on_the_town_center_every_farm() {
+    let mut app = app();
+    let tc = spawn(&mut app, kinds::TOWN_CENTER, 20, 20);
+    let a = spawn(&mut app, kinds::FARM, 12, 12);
+    let b = spawn(&mut app, kinds::FARM, 16, 12);
+    app.selection.set(vec![a]);
+    draw(&mut app);
+    assert_eq!(button(&app, "RESEED ON").action, Action::ToggleFarmReseed);
+    assert!(app.hotkey('R'));
+    step(&mut app, 4);
+    let pl = app.sim.player(ME).unwrap();
+    assert!(!pl.farm_reseeds(a), "the selected farm is off");
+    assert!(pl.farm_reseeds(b), "the other is not");
+    assert!(pl.auto_reseed, "nor the side");
+    draw(&mut app);
+    assert!(app.hud.buttons.iter().any(|b| b.label == "RESEED OFF"));
+
+    app.selection.set(vec![tc]);
+    draw(&mut app);
+    assert_eq!(button(&app, "RESEED ON").action, Action::ToggleReseed);
+    assert!(app.hotkey('R'));
+    step(&mut app, 4);
+    let pl = app.sim.player(ME).unwrap();
+    assert!(
+        !pl.auto_reseed && !pl.farm_reseeds(a) && !pl.farm_reseeds(b),
+        "all off"
+    );
+    assert!(pl.reseed_exceptions.is_empty());
+}
+
+/// A panel letter is moved on the settings screen's second page, kept in
+/// the file, and answers in a match to its new key and not its old one;
+/// the button shows the new key (`GD-A11Y-02`).
+///
+/// REQ: GD-A11Y-02
+#[test]
+fn a_panel_letter_moved_on_the_settings_screen_answers_to_its_new_key() {
+    let mut app = app();
+    let path = app.settings_path.clone();
+    app.shell = Shell::Title;
+    press(&mut app, ShellAction::Settings);
+    press(
+        &mut app,
+        ShellAction::SettingsPage(view::SettingsPage::Letters),
+    );
+    press(&mut app, ShellAction::RebindLetter('H'));
+    assert_eq!(app.capturing, Some(view::Capture::Letter('H')));
+    assert!(!app.keyboard_input(KeyCode::F6, ElementState::Pressed, false));
+    assert_eq!(app.capturing, None);
+    assert_eq!(app.settings.letter_key('H'), "F6");
+    assert!(std::fs::read_to_string(&path).unwrap().contains("F6"));
+    // A key a general control holds is refused, with the reason.
+    press(&mut app, ShellAction::RebindLetter('B'));
+    app.keyboard_input(KeyCode::Space, ElementState::Pressed, false);
+    assert!(app.settings_error.as_deref().unwrap().contains("PAUSE"));
+    assert_eq!(app.settings.letter_key('B'), "KeyB");
+
+    // In a match: F6 places a house, H does nothing, the button says F6.
+    app.shell = Shell::Match;
+    let v = spawn(&mut app, kinds::VILLAGER, 10, 10);
+    app.selection.set(vec![v]);
+    draw(&mut app);
+    let house = app
+        .hud
+        .buttons
+        .iter()
+        .find(|b| b.action == Action::Build(kinds::HOUSE))
+        .unwrap()
+        .clone();
+    assert_eq!(house.hotkey, 'H', "the letter stays the command's");
+    assert!(house.tip[0].ends_with("(F6)"), "{:?}", house.tip);
+    app.keyboard_input(KeyCode::KeyH, ElementState::Pressed, false);
+    assert_eq!(app.build_mode, None, "H is free now");
+    app.keyboard_input(KeyCode::F6, ElementState::Pressed, false);
+    assert_eq!(app.build_mode, Some(kinds::HOUSE));
+    let [_, orders] = view::hud::controls(&app.settings);
+    assert!(orders
+        .iter()
+        .any(|(k, what)| k == "F6" && what.contains("HOUSE")));
+}
+
 fn on_screen(app: &App, x: f32, y: f32, lift: f32) -> (f32, f32) {
     let g = view::iso::project(x, y, view::iso::ground_height(app.sim.map(), x, y));
     app.camera.to_window(g.0, g.1 - lift)
@@ -2035,6 +2184,32 @@ fn bus_volumes_are_set_on_the_settings_screen_and_kept() {
     assert_eq!(app.settings.volume(Bus::Music), 70, "the default");
 }
 
+/// The beds are positional (`docs/05` §5.1): the explored field around
+/// the villager, in the middle of the view, sits in the middle; with the
+/// camera moved so it lies to the left, the field's bed moves left.
+#[test]
+fn a_bed_sits_toward_the_side_of_the_view_its_ground_is_on() {
+    let mut app = app();
+    two_sides(&mut app);
+    app.clock.set_paused(true);
+    let field = |app: &mut App| {
+        app.speaker
+            .take_fades()
+            .into_iter()
+            .find(|f| f.layer == Layer::Bed(Bed::Field))
+    };
+    app.camera.look_at_tile(8.0, 8.0);
+    draw(&mut app);
+    let middle = field(&mut app).expect("the field");
+    assert!(middle.level > 0.0 && middle.pan.abs() < 0.1, "{middle:?}");
+    app.camera.look_at_tile(16.0, 0.0);
+    step(&mut app, SURVEY_TICKS as u32);
+    draw(&mut app);
+    let left = field(&mut app).expect("the field moved");
+    assert!(left.pan < -0.3, "{left:?}");
+    assert!(left.level > 0.0);
+}
+
 /// The score follows the match: the Stone stem fades in at the start and
 /// the field's bed sits under it; the Tool Age cross-fades the stems over
 /// four seconds; six units fighting in view bring the combat stem in; and
@@ -2044,13 +2219,17 @@ fn the_score_follows_the_age_and_the_fight_and_the_beds_the_ground() {
     let mut app = app();
     two_sides(&mut app);
     app.clock.set_paused(true);
+    // The explored ground is around the villager; only what is on screen
+    // is heard.
+    app.camera.look_at_tile(8.0, 8.0);
     draw(&mut app);
     let fades = app.speaker.take_fades();
     assert!(
         fades.contains(&Fade {
             layer: Layer::Stem(Age::Stone),
             level: 1.0,
-            ms: CROSSFADE_MS
+            ms: CROSSFADE_MS,
+            pan: 0.0
         }),
         "{fades:?}"
     );
@@ -2091,14 +2270,16 @@ fn the_score_follows_the_age_and_the_fight_and_the_beds_the_ground() {
         fades.contains(&Fade {
             layer: Layer::Stem(Age::Stone),
             level: 0.0,
-            ms: CROSSFADE_MS
+            ms: CROSSFADE_MS,
+            pan: 0.0
         }),
         "{fades:?}"
     );
     assert!(fades.contains(&Fade {
         layer: Layer::Stem(Age::Tool),
         level: 1.0,
-        ms: CROSSFADE_MS
+        ms: CROSSFADE_MS,
+        pan: 0.0
     }));
     // Six clubmen sent at an enemy in view.
     app.camera.look_at_tile(30.0, 30.0);
@@ -2131,7 +2312,8 @@ fn the_score_follows_the_age_and_the_fight_and_the_beds_the_ground() {
         fades.contains(&Fade {
             layer: Layer::Combat,
             level: 1.0,
-            ms: COMBAT_IN_MS
+            ms: COMBAT_IN_MS,
+            pan: 0.0
         }),
         "{fades:?}"
     );

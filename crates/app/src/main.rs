@@ -39,8 +39,9 @@ use view::hud::{Action, BOTTOM_PANEL, TOP_BAR};
 use view::minimap::{Minimap, MinimapRect};
 use view::shell::{self, Results, Side};
 use view::{
-    Atlas, Camera, Control, FogLights, Ghost, Hud, HudInput, LoadRow, Notice, NoticeKind, Notices,
-    Scene, SceneOptions, Screen, Settings, Setup, ShellAction, ShellInput, Sweep, SWEEP_MS,
+    Atlas, Camera, Capture, Control, FogLights, Ghost, Hud, HudInput, LoadRow, Notice, NoticeKind,
+    Notices, Scene, SceneOptions, Screen, Settings, SettingsPage, Setup, ShellAction, ShellInput,
+    Sweep, SWEEP_MS,
 };
 
 /// How long "SAVED ..." stays up, in ms.
@@ -244,15 +245,22 @@ struct App {
     settings: Settings,
     /// Where they are kept.
     settings_path: PathBuf,
-    /// The control waiting for its new key on the settings screen.
-    capturing: Option<Control>,
+    /// The control or panel letter waiting for its new key on the
+    /// settings screen.
+    capturing: Option<Capture>,
+    /// Which page of the settings screen is up.
+    settings_page: SettingsPage,
     /// Why the last key was refused, or the file could not be written.
     settings_error: Option<String>,
     /// The notification stack (`docs/03` §6.3).
     notices: Notices,
-    /// How many technologies the viewer had last frame, to notice a new
-    /// one.
-    last_researched: usize,
+    /// The technologies the viewer had last frame, to notice a new one.
+    /// The side's list is in id order, not the order they finished, so a
+    /// new one is found by comparing, not by counting.
+    last_researched: Vec<sim::TechId>,
+    /// The viewer's technologies and ages finished lately, with the tick
+    /// each finished at: the panels ring what they opened (`docs/03` §6.3).
+    fresh: Vec<(sim::TechId, u64)>,
     /// What plays: the mixer decides (`docs/04` §8).
     mixer: audio::Mixer,
     /// Where it plays: the device, a recorder in tests, or nowhere.
@@ -467,9 +475,11 @@ impl App {
             settings: Settings::default(),
             settings_path: data_dir("NEW_EMPIRE_SETTINGS", "settings.ron"),
             capturing: None,
+            settings_page: SettingsPage::Keys,
             settings_error: None,
             notices: Notices::default(),
-            last_researched: 0,
+            last_researched: Vec::new(),
+            fresh: Vec::new(),
             mixer: audio::Mixer::new(library),
             speaker: Speaker::Silent,
             started: Instant::now(),
@@ -561,14 +571,16 @@ impl App {
         self.save_settings();
     }
 
-    /// The settings screen's new key for the control being rebound: a
-    /// pan key must be one the camera can read while held.
-    fn capture_key(&mut self, control: Control, code: KeyCode) {
+    /// The settings screen's new key for the control or panel letter
+    /// being rebound: a pan key must be one the camera can read while held.
+    fn capture_key(&mut self, what: Capture, code: KeyCode) {
         let name = keys::name(code);
-        let bound = if control.pans() && keys::code(&name).is_none() {
-            Err(format!("{} CANNOT PAN", view::settings::pretty(&name)))
-        } else {
-            self.settings.bind(control, &name)
+        let bound = match what {
+            Capture::Control(control) if control.pans() && keys::code(&name).is_none() => {
+                Err(format!("{} CANNOT PAN", view::settings::pretty(&name)))
+            }
+            Capture::Control(control) => self.settings.bind(control, &name),
+            Capture::Letter(letter) => self.settings.bind_letter(letter, &name),
         };
         self.capturing = None;
         match bound {
@@ -740,31 +752,46 @@ impl App {
             .count()
     }
 
-    /// The ground under the view, as fractions of its tiles: unexplored
-    /// ground is nothing, since it has no sound.
+    /// The ground under the view, as fractions of the tiles on screen,
+    /// and where each kind lies across it (`docs/05` §5.1): unexplored
+    /// ground is nothing, since it has no sound. The box `rect` is a
+    /// rectangle of tiles around a diamond of screen, so a tile whose
+    /// middle is off screen is left out.
     fn ground_in(&self, (x0, y0, x1, y1): (i32, i32, i32, i32)) -> Ground {
         let map = self.sim.map();
         let fog = self.viewer.and_then(|p| self.sim.fog(p));
-        let mut g = Ground::default();
-        let total = ((x1 - x0 + 1) * (y1 - y0 + 1)).max(1) as f32;
+        let (vw, vh) = self.camera.viewport;
+        let (mut count, mut across) = ([0.0f32; 4], [0.0f32; 4]);
+        let mut total = 0.0f32;
         for y in y0..=y1 {
             for x in x0..=x1 {
+                let (sx, sy) = view::iso::project(x as f32 + 0.5, y as f32 + 0.5, 0.0);
+                let (px, py) = self.camera.to_window(sx, sy);
+                if !(0.0..=vw).contains(&px) || !(0.0..=vh).contains(&py) {
+                    continue;
+                }
+                total += 1.0;
                 if fog.is_some_and(|f| !f.explored(x, y)) {
                     continue;
                 }
-                match map.terrain(x, y) {
-                    Terrain::ForestFloor => g.forest += 1.0,
-                    Terrain::ShallowWater | Terrain::DeepWater => g.water += 1.0,
-                    Terrain::Desert | Terrain::Sand => g.sand += 1.0,
-                    Terrain::Grass | Terrain::Dirt | Terrain::Snow => g.open += 1.0,
-                }
+                // In `Bed::ALL` order: forest, surf, wind, field.
+                let k = match map.terrain(x, y) {
+                    Terrain::ForestFloor => 0,
+                    Terrain::ShallowWater | Terrain::DeepWater => 1,
+                    Terrain::Desert | Terrain::Sand => 2,
+                    Terrain::Grass | Terrain::Dirt | Terrain::Snow => 3,
+                };
+                count[k] += 1.0;
+                across[k] += px / vw.max(1.0) * 2.0 - 1.0;
             }
         }
+        let total = total.max(1.0);
         Ground {
-            forest: g.forest / total,
-            water: g.water / total,
-            sand: g.sand / total,
-            open: g.open / total,
+            forest: count[0] / total,
+            water: count[1] / total,
+            sand: count[2] / total,
+            open: count[3] / total,
+            across: std::array::from_fn(|k| across[k] / count[k].max(1.0)),
         }
     }
 
@@ -1046,7 +1073,14 @@ impl App {
             .sim
             .player(me)
             .map_or_else(Vec::new, |p| p.researched.clone());
-        for id in researched.iter().skip(self.last_researched) {
+        let tick = self.sim.tick();
+        self.fresh
+            .retain(|(_, at)| tick.saturating_sub(*at) < view::hud::FRESH_TICKS);
+        for id in researched
+            .iter()
+            .filter(|t| self.last_researched.binary_search(t).is_err())
+        {
+            self.fresh.push((*id, tick));
             if let Some(t) = tech::info(*id).filter(|t| t.advances_age().is_none()) {
                 self.notices.push(Notice {
                     kind: NoticeKind::Research,
@@ -1056,7 +1090,7 @@ impl App {
                 });
             }
         }
-        self.last_researched = researched.len();
+        self.last_researched = researched;
         let since = self.age_up.map(|(t, _)| t.elapsed().as_millis());
         let sweep = since.filter(|&ms| ms < SWEEP_MS as u128).map(|ms| Sweep {
             player: ME,
@@ -1178,6 +1212,7 @@ impl App {
                     .filter(|(at, _)| at.elapsed().as_millis() < FLASH_MS)
                     .map_or([false; 4], |(_, lacks)| lacks),
                 perf: readout.as_ref(),
+                fresh: &self.fresh,
             },
         );
         scene.ui.extend(hud.sprites.iter().cloned());
@@ -1273,6 +1308,7 @@ impl App {
                 &self.atlas,
                 &input,
                 &self.settings,
+                self.settings_page,
                 self.capturing,
                 self.settings_error.as_deref(),
             ),
@@ -1511,7 +1547,17 @@ impl App {
             ShellAction::Watch(row) => self.watch_replay(row),
             ShellAction::Settings => {
                 self.shell = Shell::Settings;
+                self.settings_page = SettingsPage::Keys;
                 self.capturing = None;
+                self.settings_error = None;
+            }
+            ShellAction::SettingsPage(page) => {
+                self.settings_page = page;
+                self.capturing = None;
+                self.settings_error = None;
+            }
+            ShellAction::RebindLetter(letter) => {
+                self.capturing = Some(Capture::Letter(letter));
                 self.settings_error = None;
             }
             ShellAction::SettingScale(delta) => {
@@ -1535,7 +1581,7 @@ impl App {
                 self.apply_and_save_settings();
             }
             ShellAction::Rebind(control) => {
-                self.capturing = Some(control);
+                self.capturing = Some(Capture::Control(control));
                 self.settings_error = None;
             }
             ShellAction::ResetSettings => {
@@ -1646,7 +1692,11 @@ impl App {
         self.results = ResultsState::Pending;
         self.viewer = Some(ME);
         self.notices.clear();
-        self.last_researched = self.sim.player(ME).map_or(0, |p| p.researched.len());
+        self.last_researched = self
+            .sim
+            .player(ME)
+            .map_or_else(Vec::new, |p| p.researched.clone());
+        self.fresh.clear();
         self.match_started = now_secs();
         self.recording = None;
         self.shell = Shell::Match;
@@ -2121,6 +2171,25 @@ impl App {
                     });
                 }
             }
+            Action::ToggleFarmReseed => {
+                // The selected farms, all to the opposite of the first's.
+                let farms: Vec<EntityId> = self
+                    .selection
+                    .ids
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        let w = self.sim.world();
+                        w.slot(*id).is_some_and(|s| {
+                            w.owner[s.index()] == ME && w.kind[s.index()] == kinds::FARM
+                        })
+                    })
+                    .collect();
+                if let (Some(first), Some(pl)) = (farms.first(), self.sim.player(ME)) {
+                    let enabled = !pl.farm_reseeds(*first);
+                    self.issue(CommandKind::SetFarmReseed { farms, enabled });
+                }
+            }
             Action::ToggleReseed => {
                 let on = self.sim.player(ME).is_some_and(|p| p.auto_reseed);
                 self.issue(CommandKind::SetAutoReseed { enabled: !on });
@@ -2206,7 +2275,7 @@ impl App {
             Shell::Settings => {
                 match (self.capturing, code) {
                     (Some(_), KeyCode::Escape) => self.capturing = None,
-                    (Some(control), code) => self.capture_key(control, code),
+                    (Some(what), code) => self.capture_key(what, code),
                     (None, KeyCode::Escape) => self.shell_action(ShellAction::Back),
                     _ => {}
                 }
@@ -2233,7 +2302,10 @@ impl App {
         }
         // The performance readout is a meter, not a control: `F4` unless
         // the player has bound `F4` to something.
-        if code == KeyCode::F4 && self.settings.control("F4").is_none() {
+        if code == KeyCode::F4
+            && self.settings.control("F4").is_none()
+            && self.settings.letter_for("F4").is_none()
+        {
             self.show_perf = !self.show_perf;
             return false;
         }
@@ -2315,7 +2387,8 @@ impl App {
                 self.last_researched = self
                     .sim
                     .player(self.hud_player())
-                    .map_or(0, |p| p.researched.len());
+                    .map_or_else(Vec::new, |p| p.researched.clone());
+                self.fresh.clear();
                 self.notices.clear();
                 self.last_fog_tick = None;
                 self.last_minimap = Instant::now() - Duration::from_secs(10);
@@ -2363,7 +2436,9 @@ impl App {
                     }
                 }
                 code => {
-                    if let Some(ch) = letter(code) {
+                    // A panel letter by the key the player bound it to
+                    // (`GD-A11Y-02`).
+                    if let Some(ch) = self.settings.letter_for(&keys::name(code)) {
                         if self.playback.is_none() {
                             self.hotkey(ch);
                         }
@@ -2436,39 +2511,6 @@ fn gatherable_by_me(sim: &Simulation, i: usize) -> bool {
 fn huntable_by_me(sim: &Simulation, i: usize) -> bool {
     let world = sim.world();
     world.owner[i] == kinds::GAIA && world.dying[i] == 0 && kinds::huntable(world.kind[i])
-}
-
-/// The letter a key carries, for command hotkeys.
-fn letter(code: KeyCode) -> Option<char> {
-    Some(match code {
-        KeyCode::KeyA => 'A',
-        KeyCode::KeyB => 'B',
-        KeyCode::KeyC => 'C',
-        KeyCode::KeyD => 'D',
-        KeyCode::KeyE => 'E',
-        KeyCode::KeyF => 'F',
-        KeyCode::KeyG => 'G',
-        KeyCode::KeyH => 'H',
-        KeyCode::KeyI => 'I',
-        KeyCode::KeyJ => 'J',
-        KeyCode::KeyK => 'K',
-        KeyCode::KeyL => 'L',
-        KeyCode::KeyM => 'M',
-        KeyCode::KeyN => 'N',
-        KeyCode::KeyO => 'O',
-        KeyCode::KeyP => 'P',
-        KeyCode::KeyQ => 'Q',
-        KeyCode::KeyR => 'R',
-        KeyCode::KeyS => 'S',
-        KeyCode::KeyT => 'T',
-        KeyCode::KeyU => 'U',
-        KeyCode::KeyV => 'V',
-        KeyCode::KeyW => 'W',
-        KeyCode::KeyX => 'X',
-        KeyCode::KeyY => 'Y',
-        KeyCode::KeyZ => 'Z',
-        _ => return None,
-    })
 }
 
 impl ApplicationHandler for App {
