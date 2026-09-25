@@ -124,8 +124,10 @@ villager can be sent to walk here, build this, then gather that in one
 go; a dotted line and flags on the ground show the queue for the
 selected units, and the panel counts it. An order given without Shift,
 or STOP, clears the queue.
-Right-click an animal with villagers selected to hunt it: it runs when
-hit, and the carcass lies where it fell for the hunters to gather.
+Right-click an animal with villagers selected to hunt it: two hits kill a
+gazelle, it bolts a couple of tiles after the first, and the carcass lies
+where it fell for the hunters to gather. Meat comes faster than berries,
+and every start has four gazelles about seven tiles from its Town Center.
 Right-click a damaged building of yours with villagers selected to repair
 it, at build speed, for half its cost in proportion to the damage, paid
 as the repair starts. `F4` opens a performance readout: the frame and the tick, the tick's

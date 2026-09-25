@@ -612,6 +612,15 @@ Tool Age researched cross-fades the stems, six clubmen sent at an enemy
 in view bring the combat stem in, and the title takes the stem, the
 combat stem and the bed out.
 
+**Hunting that pays from the start.** `crates/sim/tests/behaviour_hunting.rs`:
+every start on the map has four gazelles within ten tiles of its Town
+Center; a villager kills one in two hits and it bolts no farther than
+`BOLT_TILES` and a tile; the same villager fills its hands at the carcass
+in under 280 ticks and at a bush in over 430 (0.75 and 0.45 a second).
+The economy tests hold the opponents to their growth with the hunt from
+the opening, and the damage matrix shows the villager's bonus against
+animals.
+
 **Playtest-4, positional beds.** `crates/audio/src/score.rs`: water on
 the left puts the surf at the left as far as a world sound goes and the
 grass on the right the field there, a small shift is no fade, the ground

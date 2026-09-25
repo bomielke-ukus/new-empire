@@ -2178,7 +2178,13 @@ impl Simulation {
                     });
                 }
                 let modifiers = self.modifiers(me);
-                let rate = modifiers.gather_rate(resource) / TICKS_PER_SECOND as i32;
+                // Meat off a carcass has its own, faster base.
+                let base = if kinds::huntable(self.world.kind[n]) {
+                    kinds::MEAT_GATHER_RATE
+                } else {
+                    resource.gather_rate()
+                };
+                let rate = modifiers.gather_rate_from(resource, base) / TICKS_PER_SECOND as i32;
                 self.world.work[i] += rate;
                 if self.world.work[i] < Fx::ONE {
                     return;

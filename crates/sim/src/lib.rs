@@ -43,7 +43,8 @@ pub mod vec2;
 
 pub use angle::Angle;
 pub use battle::{
-    decay_ticks, Event, Projectile, Task, CARCASS_TICKS, DECAY_TICKS, RUBBLE_TICKS, WORK_PERIOD,
+    decay_ticks, Event, Projectile, Task, BOLT_TILES, CARCASS_TICKS, DECAY_TICKS, RUBBLE_TICKS,
+    WORK_PERIOD,
 };
 pub use combat::{Armour, Elevation};
 pub use command::{

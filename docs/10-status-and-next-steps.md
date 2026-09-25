@@ -1390,6 +1390,42 @@ The owner named the game and asked for the keys in the release notes.
   difference, so a key moved in the game cannot be left wrong in the
   notes. `playtest-4`'s text predates this; the next release carries it.
 
+### Work record: hunting that pays from the start (2026-09-25)
+
+The owner, playing: hunting should come earlier and be worth more. They
+chose the strong version: meat at 0.75 a second against 0.45 for
+berries, 200 food a gazelle, four gazelles seven tiles out, and the
+opponent hunting from the opening.
+
+- **What the numbers alone did not fix.** A hit gazelle ran six tiles
+  and a villager needed three hits, so every kill ended 19 to 22 tiles
+  from the Town Center after a chase of most of a minute, and each 10
+  food meant walking twenty tiles each way: slower than the bushes
+  however fast the meat came. Measured, not guessed: a Standard opponent
+  hunting from the opening fell to 8 villagers at eight minutes. So a
+  hit animal now bolts `BOLT_TILES` (2), and villagers carry +2 attack
+  against animals, so two hits take a gazelle and the kill lies about
+  nine tiles out.
+- `crates/sim`: `MEAT_GATHER_RATE` (0.75) as the base when the node is a
+  carcass, through `Modifiers::gather_rate_from`, so food bonuses apply
+  to meat as to berries; the gazelle holds 200; the start kit's herd is
+  four gazelles in a 2×2 group seven tiles out, searched for over five
+  tiles so every start gets all four (the old line of three could lose
+  one: seed 5's second player had two). Across 59 seeds every start's
+  fourth gazelle is within 9.9 tiles. One sim test.
+- `crates/ai`: the hunt starts with the match, up to the difficulty's
+  hunters (Easy 1, Standard 2, Hard 3), one carcass at a time; the
+  "food near home below 300" condition is gone. Food gathered by eight
+  minutes, seeds 1 to 5: Easy 560 to 800 (was 510 to 660), Standard 640
+  to 930 (was 540 to 630) with 10 to 14 villagers, Hard 740 to 940 (was
+  620 to 730).
+- The map generator changed, so every corpus replay on a generated map
+  was re-recorded from its scenario and its digest refreshed in the same
+  commit, deliberately: the old commands named entities whose ids the
+  extra gazelle had moved. The damage matrix shows the villager's bonus.
+  The Hard-against-Easy record is rewritten; see the commit for the
+  tally. Golden images on generated maps are rebaked.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):

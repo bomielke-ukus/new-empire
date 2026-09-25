@@ -49,6 +49,11 @@ pub const ALARM_TICKS: u64 = 200;
 const ACQUIRE_EVERY: u64 = 4;
 /// How far a fleeing villager runs when there is no Town Center to run to.
 const FLEE_TILES: i32 = 8;
+
+/// How far a hunted animal bolts when hit: far enough to be a chase, near
+/// enough that the kill lies close to where the hunt began
+/// (`GD-ECON-06`).
+pub const BOLT_TILES: i32 = 2;
 /// A gate shuts when an enemy comes this near (`docs/02` §6: "allies pass,
 /// enemies do not"), and opens again once none is within [`GATE_OPEN`].
 /// Nothing walks the gap between the two in a tick, so no enemy is ever
@@ -816,8 +821,8 @@ impl Simulation {
         });
         let owner = self.world.owner[t];
         if owner == GAIA {
-            // A hunted animal runs, straight away from the hunter, as far
-            // as its wander takes it.
+            // A hunted animal bolts, straight away from the hunter, a
+            // short way.
             if kinds::huntable(self.world.kind[t]) && self.world.health[t] > Fx::ZERO {
                 let away = pos - from;
                 let dir = if away.length().is_zero() {
@@ -825,7 +830,8 @@ impl Simulation {
                 } else {
                     away.scale_ratio(Fx::ONE, away.length())
                 };
-                let target = self.clamp_to_map(pos + dir.scale_ratio(Fx::from_int(6), Fx::ONE));
+                let target =
+                    self.clamp_to_map(pos + dir.scale_ratio(Fx::from_int(BOLT_TILES), Fx::ONE));
                 let tile = nav::tile_of(target);
                 if self.nav.passable(tile.0, tile.1) {
                     self.world.move_target[t] = Some(target);

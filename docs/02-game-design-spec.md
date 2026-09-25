@@ -69,7 +69,7 @@ late-game economies dependent on a shrinking forest.
 |---|---|---|
 | Tree | 75 wood | Removed from map when exhausted |
 | Berry bush | 150 food | Cluster of 5–7 near most starts |
-| Gazelle / deer | 140 food | Must be killed first; decays if left |
+| Gazelle / deer | 200 food | Must be killed first; decays if left; four within about seven tiles of every start |
 | Boar / elephant | 400 food | Fights back; a genuine early decision |
 | Fish (shallow) | 200 food | Reachable by villagers on shore |
 | Fish (deep) | 350 food | Requires a Fishing Boat |
@@ -80,7 +80,8 @@ late-game economies dependent on a shrinking forest.
 ### 3.3 Gathering
 
 - **[GD-ECON-02]** Base gather rate **0.45 resources/second**, carry capacity **10**, then walk to
-  the nearest valid drop-off and deposit.
+  the nearest valid drop-off and deposit. Meat off a carcass comes at **0.75/second**, so the
+  herd near home is the fastest food of the first minutes; food bonuses apply to it too.
 - **[GD-ECON-03] One drop-off building type — the Storehouse** — accepting all resources. The
   original's Granary/Storage Pit split was bookkeeping, not depth. The Town
   Center also accepts everything.
@@ -89,10 +90,11 @@ late-game economies dependent on a shrinking forest.
 - **[GD-ECON-05] Farms auto-reseed by default** (toggle per-farm and globally), and a
   notification fires when wood is too low to reseed.
 - **[GD-ECON-06] Hunting.** An animal is food only once killed: villagers or soldiers attack
-  it, it runs when hit, and the carcass lies where it fell with its yield on it, gatherable
+  it, it bolts two tiles when hit, and the carcass lies where it fell with its yield on it, gatherable
   by any villager until it is taken. It decays if left: after three minutes with nobody
   gathering it, it is gone, and the clock stands still while someone is. A villager that
-  makes the kill gathers the carcass without being told.
+  makes the kill gathers the carcass without being told. Villagers hunt: +2 attack against
+  animals, so two hits take a gazelle.
 
 ### 3.4 Population
 
@@ -356,8 +358,8 @@ that cheats produces an opponent you cannot learn from.
 | **Hardest** | Hard, plus explicit resource bonuses — declared honestly in the UI |
 
 **[GD-AI-02]** The AI's villagers do what a player's do, with the same orders: they
-gather, build, farm, **hunt the animals near their drop-offs** once the bushes and farms
-near home run low, and **repair damaged buildings** once no enemy is near them, paying
+gather, build, farm, **hunt the animals near their drop-offs** from the opening, and
+**repair damaged buildings** once no enemy is near them, paying
 for the repair as a player does.
 
 The AI is built as: a **build-order planner** (age goals, ratios), an **economy

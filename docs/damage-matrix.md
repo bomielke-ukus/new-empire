@@ -18,7 +18,7 @@ Elevation is five quarters of the attack downhill and three quarters uphill, rou
 
 | Kind | Class | HP | Attack | Range | Armour (melee/pierce) | Bonus |
 |---|---|---|---|---|---|---|
-| Villager | villagers | 25 | 3 melee | hand | 0/0 | — |
+| Villager | villagers | 25 | 3 melee | hand | 0/0 | +2 vs animals |
 | Scout | cavalry | 45 | 2 melee | hand | 0/0 | — |
 | Clubman | infantry | 40 | 3 melee | hand | 0/0 | — |
 | Axeman | infantry | 50 | 5 melee | hand | 0/0 | — |
