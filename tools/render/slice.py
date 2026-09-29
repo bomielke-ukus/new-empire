@@ -67,6 +67,22 @@ def bowman():
     return h.root
 
 
+def scout():
+    """A light rider bare-headed on a pale horse, a javelin in hand."""
+    r = kit.Rider("Scout", coat="straw", helmet=None)
+    r.hold(kit.javelin("javelin"))
+    r.animate()
+    return r.root
+
+
+def light_cavalry():
+    """A bronze-helmeted rider on a bay horse with a lance."""
+    r = kit.Rider("LightCavalry", coat="horse", helmet="cone")
+    r.hold(kit.lance("lance"))
+    r.animate()
+    return r.root
+
+
 # --------------------------------------------------------------------------
 # Buildings.
 
@@ -93,6 +109,8 @@ SUBJECTS = {
     "spearman": (spearman, "Foot", "unit"),
     "slinger": (slinger, "Foot", "unit"),
     "bowman": (bowman, "Foot", "unit"),
+    "scout": (scout, "Mounted", "unit"),
+    "light_cavalry": (light_cavalry, "Mounted", "unit"),
     "house": (house, "MediumBuilding", "building"),
 }
 

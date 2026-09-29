@@ -601,3 +601,172 @@ def walls(b, name, w, d, h, mat, door=True):
         b.add(box(name + "_door", (w * 0.22, 0.02, h * 0.62), "wood_dark",
                   (0.0, d / 2 + 0.005, 0.0)), FULL_WALLS)
     b.add(box(name + "_foundation", (w + 0.08, d + 0.08, 0.04), "stone"), FOUNDATION)
+
+
+# --------------------------------------------------------------------------
+# The horse and its rider.
+
+class Rider:
+    """A horse 0.72 units nose to tail with a rider on its back, facing +Y.
+
+    The horse's legs swing from the hip in diagonal pairs at the walk; the
+    rider sits, carries the `weapon` in the right hand and strikes with it.
+    Everything hangs off `body`, one level below the root, so the root stays
+    free for render_sheet.py's turntable.
+    """
+
+    LEG = 0.40
+    BACK = 0.62
+
+    def __init__(self, root_name, coat="horse", tunic="player", helmet=None,
+                 helmet_mat="bronze", saddle_cloth=True):
+        self.root = empty(root_name)
+        self.body = empty(root_name + "_body", parent=self.root)
+        self.parts = {}
+        add = self._add
+        leg, back = self.LEG, self.BACK
+        add("barrel", box("barrel", (0.24, 0.66, back - leg), coat, (0.0, 0.0, leg)))
+        add("neck", box("neck", (0.13, 0.16, 0.30), coat, (0.0, 0.30, back - 0.08),
+                        rotation=(_deg(-30.0), 0.0, 0.0)))
+        add("head", box("head", (0.12, 0.26, 0.12), coat, (0.0, 0.44, back + 0.16)))
+        add("mane", box("mane", (0.04, 0.16, 0.10), "horse_dark", (0.0, 0.26, back + 0.10),
+                        rotation=(_deg(-30.0), 0.0, 0.0)))
+        add("tail", box("tail", (0.05, 0.05, 0.28), "horse_dark", (0.0, -0.33, back - 0.02),
+                        "top", rotation=(_deg(-25.0), 0.0, 0.0)))
+        for key, x, y in (("leg_fl", -0.08, 0.25), ("leg_fr", 0.08, 0.25),
+                          ("leg_bl", -0.08, -0.25), ("leg_br", 0.08, -0.25)):
+            add(key, box(key, (0.07, 0.08, leg), coat, (x, y, leg), "top"))
+        if saddle_cloth:
+            add("cloth", box("cloth", (0.28, 0.24, 0.10), tunic, (0.0, -0.02, back - 0.06)))
+        # The rider, seated: legs down the horse's sides, torso on its back.
+        seat = back + 0.02
+        add("r_leg_l", box("r_leg_l", (0.08, 0.10, 0.24), "trouser", (-0.15, 0.02, seat), "top"))
+        add("r_leg_r", box("r_leg_r", (0.08, 0.10, 0.24), "trouser", (0.15, 0.02, seat), "top"))
+        add("r_torso", box("r_torso", (0.24, 0.15, 0.28), tunic, (0.0, -0.02, seat)))
+        add("r_head", box("r_head", (0.17, 0.16, 0.15), "skin", (0.0, -0.01, seat + 0.29)))
+        top = seat + 0.44
+        if helmet is None:
+            add("r_hair", box("r_hair", (0.18, 0.17, 0.05), "hair", (0.0, -0.01, top)))
+        elif helmet == "cone":
+            add("r_helmet", box("r_helmet", (0.19, 0.18, 0.04), helmet_mat, (0.0, -0.01, top)))
+            add("r_helmet_top", pyramid("r_helmet_top", (0.17, 0.16, 0.11), helmet_mat,
+                                        (0.0, -0.01, top + 0.04)))
+        else:
+            add("r_helmet", box("r_helmet", (0.19, 0.18, 0.07), helmet_mat, (0.0, -0.01, top)))
+        self.shoulder_z = seat + 0.27
+        add("r_arm_l", box("r_arm_l", (0.07, 0.08, 0.22), "skin", (-0.155, 0.0, self.shoulder_z), "top"))
+        add("r_arm_r", box("r_arm_r", (0.07, 0.08, 0.22), "skin", (0.155, 0.0, self.shoulder_z), "top"))
+        self.weapon = None
+
+    def _add(self, key, obj):
+        obj.parent = self.body
+        self.parts[key] = obj
+        return obj
+
+    def hold(self, weapon, lean=18.0):
+        weapon.parent = self.body
+        self.weapon = weapon
+        self.weapon_lean = _deg(lean)
+
+    def animate(self):
+        scene = bpy.context.scene
+        scene.frame_start, scene.frame_end = 1, 30
+        rest = {k: (tuple(o.location), tuple(o.rotation_euler)) for k, o in self.parts.items()}
+        for anim, (first, last) in MOBILE_SPANS.items():
+            count = last - first + 1
+            for i in range(count):
+                frame = first + i
+                body, swings, weapon_angle = rider_pose(anim, i, count)
+                self.body.location = (body["dx"], 0.0, body["dz"])
+                self.body.rotation_euler = (0.0, body["roll"], 0.0)
+                self.body.scale = (1.0, 1.0, body["scale_z"])
+                for path in ("location", "rotation_euler", "scale"):
+                    self.body.keyframe_insert(path, frame=frame)
+                for key, obj in self.parts.items():
+                    loc, rot = rest[key]
+                    obj.location = loc
+                    obj.rotation_euler = (rot[0] + swings.get(key, 0.0), rot[1], rot[2])
+                    obj.keyframe_insert("location", frame=frame)
+                    obj.keyframe_insert("rotation_euler", frame=frame)
+                if self.weapon is not None:
+                    arm = swings.get("r_arm_r", 0.0)
+                    self.weapon.location = (0.155, 0.22 * math.sin(arm),
+                                            self.shoulder_z - 0.22 * math.cos(arm))
+                    self.weapon.rotation_euler = (weapon_angle, self.weapon_lean, 0.0)
+                    self.weapon.keyframe_insert("location", frame=frame)
+                    self.weapon.keyframe_insert("rotation_euler", frame=frame)
+        hold_frames([self.body, self.weapon] + list(self.parts.values()))
+
+
+# Rolled onto its side about its hooves, a horse and rider lie out along +X
+# with their middle about this far from the origin; the body slides back by
+# it as it falls, so the carcass stays on its own tile.
+FALLEN_HORSE = 0.45
+
+
+def rider_pose(anim, i, count):
+    """One frame for horse and rider: the body's bob, roll and slide, each
+    part's swing about x, the rider's weapon angle."""
+    body = {"dx": 0.0, "dz": 0.0, "roll": 0.0, "scale_z": 1.0}
+    s = {}
+    weapon = _deg(-15.0)
+
+    if anim == "idle":
+        s["head"] = _deg(4.0) * math.sin(2.0 * math.pi * i / count)
+        s["tail"] = _deg(6.0) * math.sin(2.0 * math.pi * i / count + 1.0)
+        s["r_arm_r"] = _deg(15.0)
+
+    elif anim == "walk":
+        phase = 2.0 * math.pi * i / count
+        a = _deg(24.0) * math.sin(phase)
+        # Diagonal pairs: near fore with off hind, then the other two.
+        s["leg_fl"], s["leg_br"] = a, a
+        s["leg_fr"], s["leg_bl"] = -a, -a
+        s["head"] = _deg(5.0) * math.sin(2.0 * phase)
+        s["tail"] = _deg(8.0) * math.sin(phase)
+        body["dz"] = 0.015 * abs(math.sin(phase))
+        s["r_arm_r"] = _deg(15.0)
+        s["r_arm_l"] = _deg(10.0)
+
+    elif anim == "attack":
+        keys = [20.0, 40.0, 10.0, 85.0, 70.0, 35.0]
+        s["r_arm_r"] = _deg(keys[i])
+        s["r_arm_l"] = _deg(20.0)
+        weapon = _deg(-90.0) if i >= 2 else _deg(-55.0)
+        s["head"] = _deg(-8.0) if i == 3 else 0.0
+
+    elif anim in ("death", "decay"):
+        t = i / float(count - 1) if anim == "death" else 1.0
+        ease = t * t
+        body["roll"] = _deg(85.0) * ease
+        body["dx"] = -FALLEN_HORSE * ease
+        body["dz"] = -0.02 * t
+        for leg in ("leg_fl", "leg_fr", "leg_bl", "leg_br"):
+            s[leg] = _deg(20.0) * t
+        s["head"] = _deg(25.0) * t
+        s["r_arm_r"] = _deg(-40.0) * t
+        weapon = _deg(-15.0) + _deg(-60.0) * t
+        if anim == "decay":
+            k = (i + 1) / float(count)
+            body["scale_z"] = 1.0 - 0.15 * k
+            body["dz"] = -0.02 - 0.02 * k
+
+    return body, s, weapon
+
+
+def lance(name):
+    grip = empty(name)
+    shaft = cylinder(name + "_shaft", 0.024, 1.05, "wood", (0.0, 0.0, -0.40), sides=6)
+    tip = cone(name + "_tip", 0.045, 0.14, "bronze", (0.0, 0.0, 0.65), sides=6)
+    for part in (shaft, tip):
+        part.parent = grip
+    return grip
+
+
+def javelin(name):
+    grip = empty(name)
+    shaft = cylinder(name + "_shaft", 0.022, 0.60, "wood", (0.0, 0.0, -0.20), sides=6)
+    tip = cone(name + "_tip", 0.04, 0.10, "bronze", (0.0, 0.0, 0.40), sides=6)
+    for part in (shaft, tip):
+        part.parent = grip
+    return grip

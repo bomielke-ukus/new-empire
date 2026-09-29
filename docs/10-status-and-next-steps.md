@@ -1471,6 +1471,11 @@ The owner took the look and said go; `playtest-5` went out first.
   feet fell through to the ground and became a move (the app test on
   attack-move and stances caught it). `selection::pick` now takes a click
   within `PICK_SLACK` (3) window pixels of a drawn pixel.
+- **The riders.** `kit.Rider`: a horse whose legs swing in diagonal pairs at
+  the walk, a seated rider who carries the weapon and thrusts with it, and a
+  fall onto the side that slides back onto its own tile. The scout (a pale
+  horse, a javelin, bare-headed) and the light cavalry (a bay, a bronze cone,
+  a lance).
 
 ### Resume here next session
 
