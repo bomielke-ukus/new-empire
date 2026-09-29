@@ -1447,8 +1447,30 @@ or models made here by code, they chose the last (`docs/08` §9 step 3).
   shield, a thrust) and the house (mudbrick, thatch, the owner's cloth over
   the door; three construction stages, finished, rubble). Golden images with
   the villager, the spearman or a house are rebaked.
-- **Next:** the other ten units and eight buildings once the owner has seen
-  these two.
+- **Next:** the other units and buildings once the owner has seen these two.
+
+### Work record: the art, the infantry (2026-09-29)
+
+The owner took the look and said go; `playtest-5` went out first.
+
+- The clubman (a club), axeman (bronze cap, axe), slinger (headband,
+  sling whirled overhead), bowman (linen cap, a bow in the left hand drawn
+  with the right, a quiver over the shoulder) join the spearman. Weapons are
+  thicker than the first spear and lean out from the body, so they show
+  past the figure's outline when it faces the viewer; at 34 px the headgear
+  and the weapon are what tells the soldiers apart.
+- **A bug fixed in `atlas`:** `Palette::nearest` skipped the player ramp but
+  not the reserve (233 to 238), so a bronze helmet quantised into an index
+  with no colour of its own and `validate` rejected the set. It skips the
+  reserve now; a unit test sweeps colours through it.
+- The swordsman, heavy cavalry, priest and stone thrower in `docs/05`'s slice
+  list have no kinds in the simulation yet, so they are not modelled.
+- **A regression caught and fixed in picking.** Units are picked by the
+  opaque pixel under the cursor. The rendered figures have a gap between
+  their legs, so a right-click on the middle of an enemy soldier near its
+  feet fell through to the ground and became a move (the app test on
+  attack-move and stances caught it). `selection::pick` now takes a click
+  within `PICK_SLACK` (3) window pixels of a drawn pixel.
 
 ### Resume here next session
 

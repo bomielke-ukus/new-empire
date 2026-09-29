@@ -258,6 +258,9 @@ class Humanoid:
         elif helmet == "crest":
             add("helmet", box("helmet", (0.21, 0.20, 0.08), helmet_mat, (0.0, 0.01, 0.79)))
             add("crest", box("crest", (0.04, 0.22, 0.07), "player", (0.0, 0.0, 0.86)))
+        elif helmet == "band":
+            add("hair", box("hair", (0.20, 0.19, 0.05), "hair", (0.0, 0.01, 0.81)))
+            add("helmet", box("band", (0.205, 0.195, 0.04), "linen", (0.0, 0.01, 0.76)))
         elif helmet == "cone":
             add("helmet", box("helmet_rim", (0.21, 0.20, 0.04), helmet_mat, (0.0, 0.01, 0.79)))
             add("helmet_top", pyramid("helmet_top", (0.19, 0.18, 0.12), helmet_mat,
@@ -267,6 +270,8 @@ class Humanoid:
         add("arm_r", box("arm_r", (0.075, 0.09, ARM_LENGTH), "skin",
                          (0.17, 0.0, SHOULDER_Z), "top"))
         self.weapon = None
+        self.weapon_hand = "right"
+        self.weapon_lean = 0.0
         self.shield = None
 
     def _add(self, key, obj):
@@ -274,11 +279,19 @@ class Humanoid:
         self.parts[key] = obj
         return obj
 
-    def hold(self, weapon):
+    def hold(self, weapon, hand="right", lean=22.0):
         """`weapon` is an empty whose children are the weapon, gripped at its
-        origin. It follows the right hand and keeps its own angle."""
+        origin. It follows the `hand` and keeps its own angle, leaned `lean`
+        degrees out from the body so it shows past the figure's outline
+        when the figure faces the viewer."""
         weapon.parent = self.body
         self.weapon = weapon
+        self.weapon_hand = hand
+        self.weapon_lean = _deg(lean) * (1.0 if hand == "right" else -1.0)
+
+    def wear(self, key, obj):
+        """Something that rides on the body, a quiver say, and moves with it."""
+        return self._add(key, obj)
 
     def carry_shield(self, shield):
         """`shield` hangs on the left forearm and swings with it."""
@@ -308,8 +321,10 @@ class Humanoid:
                     obj.keyframe_insert("location", frame=frame)
                     obj.keyframe_insert("rotation_euler", frame=frame)
                 if self.weapon is not None:
-                    self.weapon.location = hand(limbs.get("arm_r", 0.0), side=1.0)
-                    self.weapon.rotation_euler = (weapon_angle, 0.0, 0.0)
+                    arm, side = (("arm_l", -1.0) if self.weapon_hand == "left"
+                                 else ("arm_r", 1.0))
+                    self.weapon.location = hand(limbs.get(arm, 0.0), side=side)
+                    self.weapon.rotation_euler = (weapon_angle, self.weapon_lean, 0.0)
                     self.weapon.keyframe_insert("location", frame=frame)
                     self.weapon.keyframe_insert("rotation_euler", frame=frame)
         hold_frames([self.body, self.weapon] + list(self.parts.values()))
@@ -414,8 +429,8 @@ def humanoid_pose(anim, i, count, style):
 
 def spear(name):
     grip = empty(name)
-    shaft = cylinder(name + "_shaft", 0.018, 0.95, "wood", (0.0, 0.0, -0.30), sides=6)
-    tip = cone(name + "_tip", 0.035, 0.12, "bronze", (0.0, 0.0, 0.65), sides=6)
+    shaft = cylinder(name + "_shaft", 0.026, 1.00, "wood", (0.0, 0.0, -0.32), sides=6)
+    tip = cone(name + "_tip", 0.05, 0.16, "bronze", (0.0, 0.0, 0.68), sides=6)
     for part in (shaft, tip):
         part.parent = grip
     return grip
@@ -423,9 +438,9 @@ def spear(name):
 
 def club(name, head="wood_dark"):
     grip = empty(name)
-    handle = cylinder(name + "_handle", 0.022, 0.30, "wood", (0.0, 0.0, -0.05), sides=6)
-    knob = cylinder(name + "_head", 0.045, 0.12, head, (0.0, 0.0, 0.22), sides=8,
-                    top_radius=0.035)
+    handle = cylinder(name + "_handle", 0.03, 0.32, "wood", (0.0, 0.0, -0.06), sides=6)
+    knob = cylinder(name + "_head", 0.075, 0.18, head, (0.0, 0.0, 0.22), sides=8,
+                    top_radius=0.06)
     for part in (handle, knob):
         part.parent = grip
     return grip
@@ -433,8 +448,8 @@ def club(name, head="wood_dark"):
 
 def axe(name):
     grip = empty(name)
-    handle = cylinder(name + "_handle", 0.02, 0.38, "wood", (0.0, 0.0, -0.08), sides=6)
-    blade = box(name + "_blade", (0.03, 0.14, 0.10), "bronze", (0.0, 0.06, 0.20))
+    handle = cylinder(name + "_handle", 0.028, 0.42, "wood", (0.0, 0.0, -0.10), sides=6)
+    blade = box(name + "_blade", (0.045, 0.20, 0.15), "bronze", (0.0, 0.08, 0.18))
     for part in (handle, blade):
         part.parent = grip
     return grip
@@ -442,9 +457,9 @@ def axe(name):
 
 def sword(name):
     grip = empty(name)
-    hilt = box(name + "_hilt", (0.03, 0.03, 0.08), "wood_dark", (0.0, 0.0, -0.04))
-    guard = box(name + "_guard", (0.10, 0.03, 0.02), "bronze", (0.0, 0.0, 0.04))
-    blade = box(name + "_blade", (0.04, 0.015, 0.34), "iron", (0.0, 0.0, 0.06))
+    hilt = box(name + "_hilt", (0.035, 0.035, 0.09), "wood_dark", (0.0, 0.0, -0.05))
+    guard = box(name + "_guard", (0.13, 0.04, 0.03), "bronze", (0.0, 0.0, 0.04))
+    blade = box(name + "_blade", (0.055, 0.02, 0.38), "iron", (0.0, 0.0, 0.07))
     for part in (hilt, guard, blade):
         part.parent = grip
     return grip
@@ -452,10 +467,11 @@ def sword(name):
 
 def bow(name):
     grip = empty(name)
-    upper = box(name + "_upper", (0.025, 0.025, 0.28), "wood", (0.0, 0.03, 0.0), rotation=(_deg(-12.0), 0, 0))
-    lower = box(name + "_lower", (0.025, 0.025, 0.28), "wood", (0.0, 0.03, 0.0), pivot="top",
-                rotation=(_deg(12.0), 0, 0))
-    string = box(name + "_string", (0.008, 0.008, 0.54), "linen", (0.0, -0.03, -0.27))
+    upper = box(name + "_upper", (0.035, 0.035, 0.34), "wood", (0.0, 0.04, 0.0),
+                rotation=(_deg(-14.0), 0, 0))
+    lower = box(name + "_lower", (0.035, 0.035, 0.34), "wood", (0.0, 0.04, 0.0), pivot="top",
+                rotation=(_deg(14.0), 0, 0))
+    string = box(name + "_string", (0.012, 0.012, 0.66), "linen", (0.0, -0.04, -0.33))
     for part in (upper, lower, string):
         part.parent = grip
     return grip
@@ -463,8 +479,8 @@ def bow(name):
 
 def sling(name):
     grip = empty(name)
-    cord = box(name + "_cord", (0.012, 0.012, 0.22), "rope", (0.0, 0.0, -0.22))
-    pouch = box(name + "_pouch", (0.05, 0.05, 0.05), "hide", (0.0, 0.0, -0.26))
+    cord = box(name + "_cord", (0.018, 0.018, 0.24), "rope", (0.0, 0.0, -0.24))
+    pouch = box(name + "_pouch", (0.075, 0.075, 0.075), "hide", (0.0, 0.0, -0.30))
     for part in (cord, pouch):
         part.parent = grip
     return grip
@@ -472,11 +488,23 @@ def sling(name):
 
 def staff(name):
     grip = empty(name)
-    shaft = cylinder(name + "_shaft", 0.02, 0.80, "wood", (0.0, 0.0, -0.30), sides=6)
-    top = box(name + "_top", (0.08, 0.08, 0.08), "bronze", (0.0, 0.0, 0.50))
+    shaft = cylinder(name + "_shaft", 0.026, 0.84, "wood", (0.0, 0.0, -0.32), sides=6)
+    top = box(name + "_top", (0.10, 0.10, 0.10), "bronze", (0.0, 0.0, 0.52))
     for part in (shaft, top):
         part.parent = grip
     return grip
+
+
+def quiver(name):
+    """A quiver on the back, its arrows showing over the right shoulder."""
+    root = empty(name)
+    case = box(name + "_case", (0.07, 0.07, 0.30), "hide", (0.07, -0.11, 0.42),
+               rotation=(0.0, _deg(-18.0), 0.0))
+    fletch = box(name + "_fletch", (0.06, 0.06, 0.08), "white", (0.12, -0.11, 0.70),
+                 rotation=(0.0, _deg(-18.0), 0.0))
+    for part in (case, fletch):
+        part.parent = root
+    return root
 
 
 def round_shield(name, face="player"):

@@ -224,15 +224,17 @@ impl Palette {
 
     /// The index of the closest palette entry to `target`, measured in Oklab.
     ///
-    /// Excludes index 0 (transparent), the reserved player ramp and the
-    /// specials: a render must never be quantised *into* player colour by
-    /// accident, because that would repaint parts of the sprite per owner.
+    /// Excludes index 0 (transparent), the reserved player ramp, the
+    /// reserve and the specials: a render must never be quantised *into*
+    /// player colour by accident, because that would repaint parts of the
+    /// sprite per owner; nor into the reserve, which has no colour of its
+    /// own yet and which `validate` rejects.
     pub fn nearest(&self, target: Srgb) -> u8 {
         let want = Oklab::from(Linear::from(target));
         let mut best = (1u8, f64::MAX);
         for i in 1..248u16 {
             let i = i as u8;
-            if Self::is_player_index(i) {
+            if Self::is_player_index(i) || self.owner[i as usize].as_deref() == Some("reserve") {
                 continue;
             }
             let d = want.distance(Oklab::from(Linear::from(self.entries[i as usize])));
@@ -310,6 +312,29 @@ mod tests {
         assert_eq!(baked.entries.len(), 256);
         assert!(baked.owner.iter().all(Option::is_some));
         assert_eq!(baked.players.len(), 8);
+    }
+
+    /// No colour quantises into the reserve: a bronze helmet did, before
+    /// `nearest` skipped it, and the set failed validation.
+    #[test]
+    fn nothing_quantises_into_the_reserve() {
+        let baked = spec().bake().unwrap();
+        for r in (0..=255u16).step_by(15) {
+            for g in (0..=255u16).step_by(15) {
+                for b in (0..=255u16).step_by(15) {
+                    let i = baked.nearest(Srgb {
+                        r: r as u8,
+                        g: g as u8,
+                        b: b as u8,
+                    });
+                    assert_ne!(
+                        baked.owner[i as usize].as_deref(),
+                        Some("reserve"),
+                        "{r},{g},{b}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -34,6 +34,39 @@ def spearman():
     return h.root
 
 
+def clubman():
+    """Stone Age: bare-headed, a hide kilt, a club."""
+    h = kit.Humanoid("Clubman")
+    h.hold(kit.club("club"))
+    h.animate("swing")
+    return h.root
+
+
+def axeman():
+    """The clubman's line upgraded: a bronze cap and a bronze axe."""
+    h = kit.Humanoid("Axeman", helmet="cap", helmet_mat="bronze")
+    h.hold(kit.axe("axe"))
+    h.animate("swing")
+    return h.root
+
+
+def slinger():
+    """A sling whirled overhead; a headband and no armour to slow him."""
+    h = kit.Humanoid("Slinger", helmet="band")
+    h.hold(kit.sling("sling"))
+    h.animate("sling")
+    return h.root
+
+
+def bowman():
+    """A bow held out in the left hand, drawn with the right."""
+    h = kit.Humanoid("Bowman", helmet="cap", helmet_mat="linen")
+    h.hold(kit.bow("bow"), hand="left", lean=0.0)
+    h.wear("quiver", kit.quiver("quiver"))
+    h.animate("shoot")
+    return h.root
+
+
 # --------------------------------------------------------------------------
 # Buildings.
 
@@ -55,7 +88,11 @@ def house():
 
 # name: (builder, size class, "unit" or "building")
 SUBJECTS = {
+    "clubman": (clubman, "Foot", "unit"),
+    "axeman": (axeman, "Foot", "unit"),
     "spearman": (spearman, "Foot", "unit"),
+    "slinger": (slinger, "Foot", "unit"),
+    "bowman": (bowman, "Foot", "unit"),
     "house": (house, "MediumBuilding", "building"),
 }
 
