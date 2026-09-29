@@ -444,6 +444,20 @@ impl Rig {
                     class.camera_up_shift, class.anchor_px[1]
                 ));
             }
+            // The renderer draws a building by the centre of its footprint
+            // (`crates/view/src/scene.rs`), which lies half the footprint's
+            // height above the frame's bottom, where its front corner is.
+            if spec.kind() == crate::manifest::Kind::Building {
+                let want_y = frame[1]
+                    - spec.footprint() * self.projection.tile_px[1] / 2
+                        * self.projection.authoring_scale;
+                if class.anchor_px[1] != want_y {
+                    out.push(format!(
+                        "class {name} anchors at y {}; a building anchors at its                          footprint's centre, y {want_y}",
+                        class.anchor_px[1]
+                    ));
+                }
+            }
             if class.anchor_px[1] >= frame[1] {
                 out.push(format!(
                     "class {name} anchors at y {}, outside its {} px frame",
@@ -607,6 +621,9 @@ mod tests {
             .any(|p| p.contains("puts the origin at")));
     }
 
+    /// Terrain anchors at the tile centre, a unit near its feet, and a
+    /// building at its footprint's centre, which is where the renderer puts
+    /// the building's position.
     #[test]
     fn terrain_anchors_at_the_tile_centre_and_everything_else_near_its_feet() {
         let rig = rig();
@@ -617,15 +634,22 @@ mod tests {
             [terrain.sprite_px[0], terrain.sprite_px[1]]
         );
         for (name, c) in &rig.classes {
-            if name == "Terrain" {
-                continue;
-            }
             let frame_h = c.sprite_px[1] * rig.projection.authoring_scale;
-            assert!(
-                c.anchor_px[1] > frame_h * 3 / 4,
-                "{name} anchors at {} in a {frame_h} px frame, nowhere near the ground",
-                c.anchor_px[1]
-            );
+            match class_by_name(name).map(|k| (k, k.kind())) {
+                Some((_, crate::manifest::Kind::Terrain)) => {}
+                Some((k, crate::manifest::Kind::Building)) => assert_eq!(
+                    c.anchor_px[1],
+                    frame_h
+                        - k.footprint() * rig.projection.tile_px[1] / 2
+                            * rig.projection.authoring_scale,
+                    "{name} anchors off its footprint's centre"
+                ),
+                _ => assert!(
+                    c.anchor_px[1] > frame_h * 3 / 4,
+                    "{name} anchors at {} in a {frame_h} px frame, nowhere near the ground",
+                    c.anchor_px[1]
+                ),
+            }
         }
     }
 

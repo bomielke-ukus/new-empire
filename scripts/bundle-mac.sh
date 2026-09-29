@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Assembles "New Empire.app": the release game binary, its sprite sets and
-# a manifest, so the game runs from a double-click on a Mac that has no
-# toolchain; then a "New Empire" folder holding the app and the player's
+# Assembles "Brenden's Empires.app": the release game binary, its sprite
+# sets and a manifest, so the game runs from a double-click on a Mac that
+# has no toolchain; then a "Brenden's Empires" folder holding the app and the
+# player's
 # READ ME FIRST.txt, zipped. The Mac build workflow attaches that zip to
 # its run and the Playtest build workflow publishes it as a release; it
 # also works from a checkout on a Mac.
@@ -19,7 +20,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 out="${1:-target/bundle}"
-app="$out/New Empire.app"
+# The name the player sees (docs/07 D27). The binary, the crate and the data
+# folder keep the code name `new-empire`.
+name="Brenden's Empires"
+app="$out/$name.app"
 version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
 build="${GITHUB_RUN_NUMBER:-0}"
 
@@ -56,22 +60,22 @@ fi
 # to open it and what to send back. `ditto` copies the signed bundle whole;
 # `cp -R` is the Linux stand-in for the dry run.
 echo "== staging the folder the player unzips =="
-stage="$out/New Empire"
+stage="$out/$name"
 rm -rf "$stage"
 mkdir -p "$stage"
 if command -v ditto >/dev/null 2>&1; then
-  ditto "$app" "$stage/New Empire.app"
+  ditto "$app" "$stage/$name.app"
 else
-  cp -R "$app" "$stage/New Empire.app"
+  cp -R "$app" "$stage/$name.app"
 fi
 cp "packaging/macos/READ ME FIRST.txt" "$stage/READ ME FIRST.txt"
 test -f "$stage/READ ME FIRST.txt"
-test -f "$stage/New Empire.app/Contents/MacOS/new-empire"
+test -f "$stage/$name.app/Contents/MacOS/new-empire"
 
 if command -v ditto >/dev/null 2>&1; then
   echo "== zipping =="
-  rm -f "$out/New Empire.zip"
-  ditto -c -k --keepParent "$stage" "$out/New Empire.zip"
+  rm -f "$out/$name.zip"
+  ditto -c -k --keepParent "$stage" "$out/$name.zip"
 fi
 
 echo "bundled: $app (version $version, build $build); the player's folder is $stage"

@@ -24,7 +24,7 @@ use crate::sprites::{Atlas, Ink};
 
 /// The name on the title screen. `docs/07` Q5 is open: this is the
 /// repository's placeholder until the game is named.
-pub const TITLE: &str = "NEW EMPIRE";
+pub const TITLE: &str = "BRENDEN'S EMPIRES";
 
 /// The line under the name.
 const TAGLINE: &str = "FROM HAND-AXES TO IRON IN HALF AN HOUR";

@@ -1,4 +1,4 @@
-//! The deterministic simulation core of New Empire.
+//! The deterministic simulation core of Brenden's Empires.
 //!
 //! Everything in this crate obeys one rule: **given the same seed and the same
 //! command log, every machine produces bit-identical state, forever.** That is
@@ -43,7 +43,8 @@ pub mod vec2;
 
 pub use angle::Angle;
 pub use battle::{
-    decay_ticks, Event, Projectile, Task, CARCASS_TICKS, DECAY_TICKS, RUBBLE_TICKS, WORK_PERIOD,
+    decay_ticks, Event, Projectile, Task, BOLT_TILES, CARCASS_TICKS, DECAY_TICKS, RUBBLE_TICKS,
+    WORK_PERIOD,
 };
 pub use combat::{Armour, Elevation};
 pub use command::{

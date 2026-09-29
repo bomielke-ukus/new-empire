@@ -305,6 +305,19 @@ binding away on the settings screen, and a player who binds it gives up
 letters. The alternative, `A` meaning attack-move only with soldiers
 selected and panning otherwise, was a modal key and was turned down.
 
+### D27 — The game is called *Brenden's Empires*
+**Date:** 2026-09-25 · **Decided by:** the owner
+
+Answers Q5. The owner's first choice put *Age of Empires* in the name; that
+is Microsoft's trademark, the playtest builds are public downloads, and the
+project's position (`docs/08` §5.3) is an original game in that spirit, so
+the owner kept their name and dropped the trademarked words. Everything a
+player reads says *Brenden's Empires*: the title screen, the window, the
+app and its menu bar, the zip, the release and its note. The repository,
+the crates, the binary, the environment variables and the data folder keep
+the code name `new-empire`, so a player's settings, saves and recordings
+stay where they are. The pixel font gained an apostrophe for it.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?
@@ -326,7 +339,7 @@ Straight history is free, accurate and evocative. Original fiction gives us
 narrative control. **Recommendation:** history, told through a single narrator,
 in the style of the original's campaign intros.
 
-### Q5 — What is the game actually called?
+### Q5 — What is the game actually called? — **answered, see D27**
 "New Empire" is the repository name and a placeholder. Worth deciding before
 there is a main menu (M6). **Biting as of M6 chunk 1 (2026-09-19):** the
 title screen shows the placeholder, `view::shell::TITLE`, one constant to

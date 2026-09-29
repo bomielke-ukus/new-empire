@@ -556,7 +556,13 @@ pub struct Modifiers {
 impl Modifiers {
     /// Gather rate for a resource after modifiers, per second.
     pub fn gather_rate(&self, r: Resource) -> Fx {
-        r.gather_rate().mul_div(
+        self.gather_rate_from(r, r.gather_rate())
+    }
+
+    /// Gather rate after modifiers from a base of `base` per second: meat
+    /// has its own base, and food's bonuses apply to it as to berries.
+    pub fn gather_rate_from(&self, r: Resource, base: Fx) -> Fx {
+        base.mul_div(
             Fx::from_int(100 + self.gather_rate_pct[r.index()]),
             Fx::from_int(100),
         )

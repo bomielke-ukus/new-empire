@@ -64,4 +64,11 @@ check "damage matrix" \
   "docs/damage-matrix.md" \
   "cargo run --quiet -p simrunner -- matrix --out docs/damage-matrix.md"
 
+# The key list in the playtest release notes is the controls overlay
+# written out, so a key that moves in the game and not in the notes shows up
+# here rather than in a tester's confusion.
+check "release-note keys" \
+  "packaging/macos/KEYS.md" \
+  "cargo run --quiet -p mapview -- --keys packaging/macos/KEYS.md"
+
 exit $status

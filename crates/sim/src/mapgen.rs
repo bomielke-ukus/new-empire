@@ -392,7 +392,8 @@ fn paint_terrain(g: &mut Gen) {
 
 /// The guaranteed kit every player gets: a Town Center, three villagers, a
 /// scout, berries, gold, stone, a forest and a herd — the same for everyone,
-/// which is how the map is balanced.
+/// which is how the map is balanced. The herd is four gazelles seven tiles
+/// out, close enough to hunt from the first minute (`GD-ECON-06`).
 fn start_kit(g: &mut Gen, player: PlayerId) {
     let (sx, sy) = g.starts[player as usize];
     g.place_building(kinds::TOWN_CENTER, player, sx, sy);
@@ -421,9 +422,10 @@ fn start_kit(g: &mut Gen, player: PlayerId) {
     g.blob(kinds::TREE, fx, fy, 32);
 
     let herd = spread(g, 180);
-    let (hx, hy) = g.offset(sx, sy, herd, 10);
-    for i in 0..3 {
-        if let Some((ux, uy)) = g.nearest_free(hx + i, hy, 3) {
+    let (hx, hy) = g.offset(sx, sy, herd, 7);
+    // A tight group, searched for widely, so every start gets all four.
+    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+        if let Some((ux, uy)) = g.nearest_free(hx + dx, hy + dy, 5) {
             g.place_unit(kinds::GAZELLE, GAIA, ux, uy);
         }
     }

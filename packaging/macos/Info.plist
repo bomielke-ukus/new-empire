@@ -3,8 +3,8 @@
 <!--
   The bundle's manifest, filled in by scripts/bundle-mac.sh: @VERSION@ is
   the workspace version from Cargo.toml and @BUILD@ the CI run number (0
-  for a local bundle). The name and identifier are the placeholder until
-  the game is named (docs/07 Q5).
+  for a local bundle). The name is the game's (docs/07 D27); the
+  executable keeps the code name.
 -->
 <plist version="1.0">
 <dict>
@@ -13,13 +13,13 @@
   <key>CFBundleExecutable</key>
   <string>new-empire</string>
   <key>CFBundleIdentifier</key>
-  <string>dev.new-empire.game</string>
+  <string>dev.brendens-empires.game</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>New Empire</string>
+  <string>Brenden&apos;s Empires</string>
   <key>CFBundleDisplayName</key>
-  <string>New Empire</string>
+  <string>Brenden&apos;s Empires</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

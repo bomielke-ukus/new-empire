@@ -60,14 +60,9 @@ fn standard_hunters() -> u32 {
 }
 
 /// How far from a drop-off an animal may be for the opponent to hunt it,
-/// in tiles: the herd each start is given, about ten tiles out, and not
-/// the ones across the map.
+/// in tiles: the herd each start is given, seven tiles out, and not the
+/// ones across the map.
 pub const HUNT_RANGE: i32 = 12;
-
-/// Food left in the bushes and farms near home below which the opponent
-/// starts on the herd: about two bushes' worth, so the hunt begins as the
-/// home bushes give out and ends when the farms are in.
-pub const HUNT_WHEN_FOOD_BELOW: i32 = 300;
 
 /// A building is repaired once it is below this share of its health, in
 /// quarters: a scratch is not worth a villager's walk.
@@ -392,10 +387,9 @@ impl Economy {
         let known = |r: Resource| nodes.iter().any(|n| n.resource == r);
 
         // ----- The hunt (`GD-AI-02`, `GD-ECON-06`): live animals in sight
-        // within reach of a drop-off, nobody after them yet. Meat is
-        // gathered no faster than berries and the walk is longer, so the
-        // herd is kept for when the bushes and farms near home run low: the
-        // bridge from the bushes to the farms, not a rival to them. A new
+        // within reach of a drop-off, nobody after them yet. Meat comes
+        // faster than berries and the herd is near, so the hunt starts
+        // with the match, up to the difficulty's number of hunters. A new
         // hunt starts only while no carcass lies waiting near home, so one
         // animal is taken before the next is killed and left to rot.
         let dropoffs: Vec<Vec2Fx> = mine
@@ -418,12 +412,7 @@ impl Economy {
             .collect();
         let mut hunters = hunted.len() as u32;
         let carcass_waiting = nodes.iter().any(|n| n.carcass && near_home(n.pos));
-        let lasting_food_near: i32 = nodes
-            .iter()
-            .filter(|n| n.resource == Resource::Food && !n.carcass && near_home(n.pos))
-            .filter_map(|n| n.left)
-            .sum();
-        let hunting = !carcass_waiting && lasting_food_near < HUNT_WHEN_FOOD_BELOW;
+        let hunting = !carcass_waiting;
         let prey: Vec<&Sighting> = seen
             .iter()
             .filter(|s| {

@@ -1,5 +1,5 @@
-NEW EMPIRE - PLAYTEST BUILD
-===========================
+BRENDEN'S EMPIRES - PLAYTEST BUILD
+==================================
 
 Thank you for playing. This is an early build of a real-time strategy
 game in the spirit of the 1997 original. The art and every sound are
@@ -9,14 +9,15 @@ OPENING IT (once)
 
   The app is not notarised by Apple, so the first launch is refused.
 
-  macOS 15 or later: double-click New Empire.app and click Done. Open
-  System Settings > Privacy & Security, scroll down to the note that
-  "New Empire" was blocked, and click Open Anyway. Confirm once more.
+  macOS 15 or later: double-click Brenden's Empires.app and click Done.
+  Open System Settings > Privacy & Security, scroll down to the note
+  that "Brenden's Empires" was blocked, and click Open Anyway. Confirm
+  once more.
 
-  Older macOS: Control-click New Empire.app and choose Open.
+  Older macOS: Control-click Brenden's Empires.app and choose Open.
 
   Or, in Terminal, from the folder this file is in:
-      xattr -dr com.apple.quarantine "New Empire.app"
+      xattr -dr com.apple.quarantine "Brenden's Empires.app"
 
   After that it opens like any other app. Apple Silicon Macs only.
 

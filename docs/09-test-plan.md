@@ -1,6 +1,6 @@
 # Test Plan
 
-How we find out whether *New Empire* is any good before a player does.
+How we find out whether *Brenden's Empires* is any good before a player does.
 
 `docs/04-technical-architecture.md` §11 is the one-paragraph version this grew
 out of. Everything described here as landed exists and runs; everything marked
@@ -612,6 +612,15 @@ Tool Age researched cross-fades the stems, six clubmen sent at an enemy
 in view bring the combat stem in, and the title takes the stem, the
 combat stem and the bed out.
 
+**Hunting that pays from the start.** `crates/sim/tests/behaviour_hunting.rs`:
+every start on the map has four gazelles within ten tiles of its Town
+Center; a villager kills one in two hits and it bolts no farther than
+`BOLT_TILES` and a tile; the same villager fills its hands at the carcass
+in under 280 ticks and at a bush in over 430 (0.75 and 0.45 a second).
+The economy tests hold the opponents to their growth with the hunt from
+the opening, and the damage matrix shows the villager's bonus against
+animals.
+
 **Playtest-4, positional beds.** `crates/audio/src/score.rs`: water on
 the left puts the surf at the left as far as a world sound goes and the
 grass on the right the field there, a small shift is no fade, the ground
@@ -896,7 +905,7 @@ question is written down verbatim, because each one is a hint or a tooltip
 the game failed to give.
 
 **Setup.** The playtest release named on the sheet (README, "Playtest
-builds"): the `Playtest build` workflow publishes `New Empire.app` zipped
+builds"): the `Playtest build` workflow publishes `Brenden's Empires.app` zipped
 with the player's `READ ME FIRST.txt`, which says how to open it, where
 the recordings are and what to send back; a fresh `settings.ron` (hints
 on, the default volumes, the default keys); the setup screen's defaults

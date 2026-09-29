@@ -1366,6 +1366,90 @@ whole.
   tested as the numbers the device is given. Whether they sound right is
   for the Mac.
 
+### Work record: the name, and the keys in the release notes (2026-09-25)
+
+The owner named the game and asked for the keys in the release notes.
+
+- **The name** (`docs/07` D27). The owner's first choice was *Brenden's
+  Age of Empires*; *Age of Empires* is Microsoft's trademark and the
+  builds are public downloads, which was raised, and the owner chose
+  *Brenden's Empires*. The title screen, the window, the bundle's name,
+  display name and identifier (`dev.brendens-empires.game`), the app,
+  folder and zip the player unzips, the release title and asset
+  (`Brendens-Empires-macOS-<name>.zip`), the note, the README and the
+  specs' titles say it. The code name `new-empire` stays on the
+  repository, crates, binary, environment variables and the data folder,
+  so settings, saves and recordings made so far are found. The pixel font
+  gained an apostrophe.
+- **The keys** in every playtest release's text: `mapview --keys` writes
+  the controls overlay's two columns, from the same tables and the
+  default settings, as `packaging/macos/KEYS.md`, with the mouse spelled
+  out; the release workflow appends it after the note, and a rerun of a
+  release now replaces its text as well as its zip.
+  `scripts/check-generated.sh` regenerates it and fails on any
+  difference, so a key moved in the game cannot be left wrong in the
+  notes. `playtest-4`'s text predates this; the next release carries it.
+
+### Work record: hunting that pays from the start (2026-09-25)
+
+The owner, playing: hunting should come earlier and be worth more. They
+chose the strong version: meat at 0.75 a second against 0.45 for
+berries, 200 food a gazelle, four gazelles seven tiles out, and the
+opponent hunting from the opening.
+
+- **What the numbers alone did not fix.** A hit gazelle ran six tiles
+  and a villager needed three hits, so every kill ended 19 to 22 tiles
+  from the Town Center after a chase of most of a minute, and each 10
+  food meant walking twenty tiles each way: slower than the bushes
+  however fast the meat came. Measured, not guessed: a Standard opponent
+  hunting from the opening fell to 8 villagers at eight minutes. So a
+  hit animal now bolts `BOLT_TILES` (2), and villagers carry +2 attack
+  against animals, so two hits take a gazelle and the kill lies about
+  nine tiles out.
+- `crates/sim`: `MEAT_GATHER_RATE` (0.75) as the base when the node is a
+  carcass, through `Modifiers::gather_rate_from`, so food bonuses apply
+  to meat as to berries; the gazelle holds 200; the start kit's herd is
+  four gazelles in a 2×2 group seven tiles out, searched for over five
+  tiles so every start gets all four (the old line of three could lose
+  one: seed 5's second player had two). Across 59 seeds every start's
+  fourth gazelle is within 9.9 tiles. One sim test.
+- `crates/ai`: the hunt starts with the match, up to the difficulty's
+  hunters (Easy 1, Standard 2, Hard 3), one carcass at a time; the
+  "food near home below 300" condition is gone. Food gathered by eight
+  minutes, seeds 1 to 5: Easy 560 to 800 (was 510 to 660), Standard 640
+  to 930 (was 540 to 630) with 10 to 14 villagers, Hard 740 to 940 (was
+  620 to 730).
+- The map generator changed, so every corpus replay on a generated map
+  was re-recorded from its scenario and its digest refreshed in the same
+  commit, deliberately: the old commands named entities whose ids the
+  extra gazelle had moved. The damage matrix shows the villager's bonus.
+  The Hard-against-Easy record is rewritten; see the commit for the
+  tally. Golden images on generated maps are rebaked.
+
+### Work record: the art, first step (2026-09-25)
+
+The owner asked where art could come from; of free packs, a hired modeller
+or models made here by code, they chose the last (`docs/08` §9 step 3).
+
+- **Rendering here.** Blender 4.5 LTS renders on this machine's CPU. The rig
+  now names Cycles with no bounces as its engine: EEVEE without a GPU ran at
+  about twenty seconds a frame, Cycles under one. The engine fallback in
+  `rig.py` never reached Cycles (the engine property's static list holds
+  only built-in engines), which is fixed. The villager is re-rendered on
+  Cycles so every set comes from one engine.
+- **Buildings.** The rig anchored buildings like units, at the frame's
+  bottom; the renderer places a building by its footprint's centre, so the
+  building classes now anchor there (`rig.json`; `atlas rig` checks it; the
+  lowest-pixel rule in `atlas validate` allows the footprint's half-height).
+  `render_sheet.py --still` renders a building square to the grid.
+- **The kit and the first two.** `tools/render/kit.py`, `slice.py` and
+  `scripts/render-sprites.sh`; the spearman (bronze cone helmet, spear,
+  shield, a thrust) and the house (mudbrick, thatch, the owner's cloth over
+  the door; three construction stages, finished, rubble). Golden images with
+  the villager, the spearman or a house are rebaked.
+- **Next:** the other ten units and eight buildings once the owner has seen
+  these two.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1574,8 +1658,8 @@ Stated so they are not rediscovered.
 - **One notification row stays open**: no Wonder to announce.
 - **The Mac build is not notarised, Apple Silicon only, and has no icon.**
   Notarising needs an Apple Developer account and a signing identity in
-  the workflow's secrets; an Intel slice needs a second target and `lipo`;
-  the icon waits on the name (`docs/07` Q5).
+  the workflow's secrets; an Intel slice needs a second target and `lipo`
+  (the owner has no Intel Mac, so none is planned); the icon is not drawn.
 - The age-up **fanfare** waits for audio (M7). The sweep and banner exist.
 - **Age variants exist for placeholders only.** Rendered sets carry no
   variants yet; `Atlas::variant` answers with the base kind for them. The
@@ -1596,7 +1680,7 @@ in the order they bite:
 | Q9 — A second ownership cue besides colour | M4 (readability of a fight), M7 | Decide before combat art is commissioned; a banner glyph per player is the cheapest candidate |
 | Q1 — Naval in the vertical slice? | M4 scope | Leave it out of the slice; the map generator has water but nothing sails |
 | Q8 — Four ages or five? | Content tables | Four, as `docs/02` stands; M3 shipped the four-age structure |
-| Q5 — The game's name | M6 (menus), M9 | Biting now: the title screen shows the placeholder, one constant (`view::shell::TITLE`) to change |
+| Q5 — The game's name | M6 (menus), M9 | Answered: *Brenden's Empires* (`docs/07` D27) |
 
 ---
 

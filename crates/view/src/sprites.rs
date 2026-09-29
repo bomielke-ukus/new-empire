@@ -1840,7 +1840,10 @@ mod tests {
         let (sheets, errors) = crate::sheets::load_all(&dir);
         assert!(errors.is_empty(), "{errors:?}");
         let a = Atlas::with_sheets(&sheets);
-        assert_eq!(a.loaded_sets, vec!["villager".to_string()]);
+        assert!(a.loaded_sets.contains(&"villager".to_string()));
+        for set in &a.loaded_sets {
+            assert!(kind_for_set(set).is_some(), "{set} draws no kind");
+        }
         assert!(
             a.width == ATLAS_WIDTH && a.height <= 8192,
             "{}x{}",

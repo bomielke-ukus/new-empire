@@ -395,13 +395,31 @@ proves a fresh clone can produce what the game loads.
    walk, work and idle animations in place of the placeholder. `mapview`
    renders it headlessly, and the golden images include it.
 3. **Model the slice**: 12 units and 10 buildings, with the age costume and
-   architecture variants as mesh swaps.
+   architecture variants as mesh swaps. **Under way** (2026-09-25, the
+   owner's choice of source, over free packs and a hired modeller): modelled
+   by code from a shared kit (`tools/render/kit.py`, `slice.py`,
+   `scripts/render-sprites.sh`), low-poly by design, rendered on the CPU. The
+   spearman and the house are in; the villager is re-rendered on the same
+   engine. Being code-authored, these models carry no copyright of their own
+   (§5.1); that matters only for a sale, and a modeller's work can replace any
+   of them by name.
 4. **Commission the icons and UI panel set** (§4.3) in parallel — they are off
    the critical path and do not depend on the render rig.
 
 ---
 
 ## 10. What the greybox unit found
+
+*Addendum, the first building (2026-09-25).* Four more, all fixed: the rig
+anchored buildings at the bottom of the frame like a unit's feet, but the
+renderer places a building by its footprint's centre, so a two-tile house
+rendered half below its frame (building anchors now sit at the footprint's
+centre, and `atlas rig` checks it); `render_sheet.py` turned buildings to the
+S facing, 45° off the tile grid (`--still`); colours written as screen
+colours rendered pale, because a material's base colour is linear
+(`kit.srgb`); and the engine fallback never reached Cycles, because the
+engine property's static list holds only Blender's built-in engines, so every
+"Cycles" render had been EEVEE on software OpenGL at twenty seconds a frame.
 
 The point of building one real subject early is to find the things that no
 amount of checking a specification against itself can find. Three, in order of

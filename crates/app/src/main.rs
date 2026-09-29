@@ -1,4 +1,4 @@
-//! New Empire — the game binary.
+//! Brenden's Empires — the game binary.
 //!
 //! The shell (`docs/06` M6) opens on a title screen; a skirmish is set up
 //! on the next one and played against computer opponents that think on
@@ -912,7 +912,10 @@ impl App {
                     )
                 }
             };
-            w.set_title(&format!("New Empire — {state} — {:.0} fps", self.fps));
+            w.set_title(&format!(
+                "Brenden's Empires — {state} — {:.0} fps",
+                self.fps
+            ));
         }
     }
 
@@ -2519,7 +2522,7 @@ impl ApplicationHandler for App {
             return;
         }
         let attrs = Window::default_attributes()
-            .with_title("New Empire")
+            .with_title("Brenden's Empires")
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0))
             .with_fullscreen(
                 self.settings

@@ -255,9 +255,9 @@
       "ortho_scale": 1.414214,
       "anchor_px": [
         64,
-        125
+        96
       ],
-      "camera_up_shift": 0.673961
+      "camera_up_shift": 0.353553
     },
     "MediumBuilding": {
       "sprite_px": [
@@ -271,9 +271,9 @@
       "ortho_scale": 2.828427,
       "anchor_px": [
         128,
-        189
+        128
       ],
-      "camera_up_shift": 1.027515
+      "camera_up_shift": 0.353553
     },
     "LargeBuilding": {
       "sprite_px": [
@@ -287,9 +287,9 @@
       "ortho_scale": 4.242641,
       "anchor_px": [
         192,
-        285
+        192
       ],
-      "camera_up_shift": 1.557845
+      "camera_up_shift": 0.53033
     },
     "Wonder": {
       "sprite_px": [
@@ -303,9 +303,9 @@
       "ortho_scale": 8.485281,
       "anchor_px": [
         384,
-        637
+        480
       ],
-      "camera_up_shift": 3.502388
+      "camera_up_shift": 1.767767
     },
     "Terrain": {
       "sprite_px": [
@@ -326,8 +326,8 @@
   },
   "classes_note": "ortho_scale is the world width Blender fits across the LARGER render dimension. Derived, not chosen: max(render_px) * sqrt(2) / tile_px_at_render. anchor_px is the ground contact point within the authored frame, and camera_up_shift slides the camera that far along its own up axis so the subject's origin lands there. Without the shift the origin sits at the frame centre and half of every frame is empty ground.",
   "render": {
-    "engine": "BLENDER_EEVEE_NEXT",
-    "engine_fallback": "BLENDER_EEVEE",
+    "engine": "CYCLES",
+    "engine_fallback": "BLENDER_EEVEE_NEXT",
     "samples": 64,
     "film_transparent": true,
     "filter_width": 1.2,

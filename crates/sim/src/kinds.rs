@@ -301,6 +301,10 @@ const fn ranged(attack: i32, range: i32, pierce_armour: i32) -> Combat {
 /// The base gather rate, resources per second.
 pub const BASE_GATHER_RATE: Fx = Fx::from_ratio(45, 100);
 
+/// Meat off a carcass comes faster than anything else, so the herd near
+/// home is worth hunting from the first minute (`docs/02` `GD-ECON-06`).
+pub const MEAT_GATHER_RATE: Fx = Fx::from_ratio(75, 100);
+
 /// How much a villager carries before walking it home.
 pub const CARRY_CAPACITY: i32 = 10;
 /// Villagers that may work on one site at once; more do nothing.
@@ -450,8 +454,12 @@ const fn node(id: KindId, name: &'static str, hp: i32, r: Resource, amount: i32)
 const TABLE: &[KindInfo] = &[
     KindInfo {
         class: Class::Villager,
-        // Fights badly (`docs/02` §5.1).
-        combat: melee(3, 0, 0),
+        // Fights badly (`docs/02` §5.1), but hunts: two hits take a
+        // gazelle (`GD-ECON-06`).
+        combat: Combat {
+            bonuses: &[(Class::Animal, 2)],
+            ..melee(3, 0, 0)
+        },
         trained_at: Some(TOWN_CENTER),
         ..unit(VILLAGER, "Villager", 25, 9, [50, 0, 0, 0], 25)
     },
@@ -612,7 +620,7 @@ const TABLE: &[KindInfo] = &[
         class: Class::Animal,
         mobile: true,
         speed_per_second: Fx::from_ratio(14, 10),
-        resource: Some((Resource::Food, 140)),
+        resource: Some((Resource::Food, 200)),
         ..BASE
     },
 ];

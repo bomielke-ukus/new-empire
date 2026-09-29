@@ -7,6 +7,7 @@
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
 //!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0]
 //!         [--screen title|setup|load|settings] [--difficulty easy,standard,hard,hardest]
+//! mapview --keys KEYS.md
 //! ```
 //!
 //! Generates a map, runs it for `--ticks`, and writes a frame rendered by the
@@ -14,7 +15,10 @@
 //! their fog applies (`GD-FOG-01`) unless `--fog 0` shows the whole map.
 //! `--screen` renders one of the shell's screens instead, as the game
 //! shows it: the setup screen for `--seed`, `--size` and one opponent per
-//! `--difficulty` entry.
+//! `--difficulty` entry. `--keys` writes the controls overlay's two
+//! columns, as the default settings have them, as Markdown for the
+//! playtest release notes (`packaging/macos/KEYS.md`, checked by
+//! `scripts/check-generated.sh`).
 
 use sim::kinds;
 use std::process::ExitCode;
@@ -66,6 +70,8 @@ struct Args {
     fog: bool,
     screen: Option<String>,
     difficulty: Option<String>,
+    /// Write the controls as Markdown here, and nothing else.
+    keys: Option<String>,
 }
 
 fn parse() -> Result<Args, String> {
@@ -104,6 +110,7 @@ fn parse() -> Result<Args, String> {
         fog: true,
         screen: None,
         difficulty: None,
+        keys: None,
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -153,6 +160,7 @@ fn parse() -> Result<Args, String> {
             "--hint" => a.hint = val == "1" || val == "true",
             "--perf" => a.perf = val == "1" || val == "true",
             "--fresh" => a.fresh = val == "1" || val == "true",
+            "--keys" => a.keys = Some(val.clone()),
             "--hover" => {
                 let (x, y) = val.split_once(',').ok_or("--hover wants X,Y")?;
                 a.hover = Some((num(x)?, num(y)?));
@@ -266,6 +274,10 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
 
 fn run() -> Result<(), String> {
     let a = parse()?;
+    if let Some(path) = &a.keys {
+        let text = keys_markdown(&view::Settings::default());
+        return std::fs::write(path, text).map_err(|e| format!("{path}: {e}"));
+    }
     if let Some(name) = &a.screen {
         return render_screen(&a, name);
     }
@@ -1020,6 +1032,46 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
         other => return Err(format!("unknown scenario {other}")),
     }
     Ok(())
+}
+
+/// The controls overlay (`F1`) as Markdown, for the release notes: the
+/// same two columns from the same tables, so the notes cannot disagree
+/// with the game. The overlay's short names for the mouse are spelled out.
+fn keys_markdown(settings: &view::Settings) -> String {
+    let [general, orders] = view::hud::controls(settings);
+    // On the panels a click is on the button, which has no key.
+    let spelled = |k: &str, panel: bool| match k {
+        "RIGHT" => "RIGHT-CLICK".to_string(),
+        "CLICK" if panel => "ITS BUTTON".to_string(),
+        "CLICK" => "LEFT-CLICK".to_string(),
+        "DBL CLICK" => "DOUBLE-CLICK".to_string(),
+        "MID DRAG" => "MIDDLE-DRAG".to_string(),
+        "WHEEL +-" => "WHEEL".to_string(),
+        _ => k.to_string(),
+    };
+    let table = |rows: &[(String, String)], panel: bool| {
+        let mut out = String::from("| Key | What it does |\n|---|---|\n");
+        for (k, what) in rows {
+            let what = if what == "THIS OVERLAY" {
+                "THIS LIST, ON SCREEN"
+            } else {
+                what
+            };
+            out.push_str(&format!("| `{}` | {what} |\n", spelled(k, panel)));
+        }
+        out
+    };
+    format!(
+        "## Keys\n\n\
+         Press `F1` in a match for this list on screen. These are the \
+         defaults; the title's SETTINGS screen moves any of them.\n\n\
+         ### Camera, selection and orders\n\n{}\n\
+         ### Building, training and research\n\n\
+         A letter works while the building or villager that has the \
+         button is selected.\n\n{}",
+        table(&general, false),
+        table(&orders, true)
+    )
 }
 
 fn main() -> ExitCode {

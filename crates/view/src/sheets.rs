@@ -355,15 +355,15 @@ mod tests {
     /// ancestors, which is how a checkout finds the committed sets.
     #[test]
     fn a_bundle_and_an_install_find_their_own_art_before_the_working_directory() {
-        let exe = Path::new("/Applications/New Empire.app/Contents/MacOS/new-empire");
+        let exe = Path::new("/Applications/Brenden's Empires.app/Contents/MacOS/new-empire");
         let c = candidates(Some(exe), Some(Path::new("/")));
         assert_eq!(
             c[0],
-            Path::new("/Applications/New Empire.app/Contents/MacOS/assets/sprites")
+            Path::new("/Applications/Brenden's Empires.app/Contents/MacOS/assets/sprites")
         );
         assert_eq!(
             c[1],
-            Path::new("/Applications/New Empire.app/Contents/Resources/assets/sprites")
+            Path::new("/Applications/Brenden's Empires.app/Contents/Resources/assets/sprites")
         );
         assert_eq!(c[2], Path::new("/assets/sprites"));
         assert_eq!(c.len(), 3, "the root has no ancestors");
