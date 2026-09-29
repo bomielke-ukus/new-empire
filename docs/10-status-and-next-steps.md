@@ -26,7 +26,7 @@ Six milestones landed; the vertical slice wants only the feel pass, M7.
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
 | M6 — Game shell | **Landed 2026-09-19** | Configure, play, save, reload and watch a replay without a terminal: the run in `crates/app/src/tests.rs`; the owner played the Mac build 2026-09-20 |
-| M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest and the real sprite art are the owner's (§4d) |
+| M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest is the owner's (§4d); the sprite art is code-built (`docs/08` §9) for every unit, building and node but the walls, gate and terrain |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
 The Mac checks of 2026-09-12 exercised the economy and age progression
@@ -73,12 +73,14 @@ building coming down raises a cloud over its rubble; a site rises in
 three stages under hammering villagers; a bush thins and a vein shrinks
 as they are used; a tree falls toward whoever felled it; an attack on
 your own out of view is a red chevron at the screen's edge, and a
-flash on the minimap; a loss pings the minimap. Every unit, building
-and technology button has a tooltip with its cost, time, what it
-counters and what counters it, and its key. Five first-time hints come
-in context, each at most twice, and SETTINGS turns them off. A refused
-click flashes the resource it is short of; a new unit standing idle
-chimes.
+flash on the minimap; a loss pings the minimap. The villagers,
+soldiers, riders, buildings, trees, bushes, veins and the herd are
+rendered models; the walls, the gate and the ground are still drawn
+procedurally. Every unit, building and technology button has a tooltip
+with its cost, time, what it counters and what counters it, and its
+key. Five first-time hints come in context, each at most twice, and
+SETTINGS turns them off. A refused click flashes the resource it is
+short of; a new unit standing idle chimes.
 
 ```sh
 cargo run --release -p new-empire           # the game window
@@ -93,9 +95,10 @@ Work has run as three streams that merge into this branch:
 - **Core** (simulation, view, app, tools): M0–M3 above, and M4 to step 5.
 - **Art pipeline** (`docs/08`): the render-to-sprite pipeline is built and
   proven end to end. The camera and light rig are frozen, `atlas` validates
-  and composes sheets against the one palette (`docs/07` D19), and the
-  greybox villager renders, loads and animates in-game in place of its
-  placeholder. Everything else still draws as a procedural placeholder.
+  and composes sheets against the one palette (`docs/07` D19). Every
+  unit, building and map node the simulation has is modelled by code in
+  `tools/render/` and rendered through it, except the walls, the gate and
+  the terrain, which still draw as procedural placeholders.
 - **Test and automation** (`docs/09`): CI runs the unit and behaviour tests,
   the replay corpus, the golden images, requirement traceability, the perf
   budget, generated-file drift, CLI-caller and workflow checks, and the art
@@ -1501,9 +1504,10 @@ The owner took the look and said go; `playtest-5` went out first.
 the measurement on the Mac with `F4` open during a big fight, recorded
 against `docs/09` §8's table; the six players through the `RM-M7-01`
 sheet (`docs/09` §9.1), whose tally decides the milestone and admits
-`RM-M7` to `TRACEABILITY_LANDED`; and the real sprite art (`docs/08` §9
-step 3), which needs a modeller and Blender. The name (`docs/07` Q5)
-still bites. The parallel track (§4b) runs on its own branch. After M7,
+`RM-M7` to `TRACEABILITY_LANDED`. The sprite art is code-built
+(`docs/08` §9) for everything but the walls, the gate and the terrain,
+and a modeller's work can replace any set by name; the name is settled
+(`docs/07` D27). The parallel track (§4b) runs on its own branch. After M7,
 `docs/06` M8.
 
 ## 4. What M4 completed — Combat
