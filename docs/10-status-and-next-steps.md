@@ -1476,6 +1476,19 @@ The owner took the look and said go; `playtest-5` went out first.
   fall onto the side that slides back onto its own tile. The scout (a pale
   horse, a javelin, bare-headed) and the light cavalry (a bay, a bronze cone,
   a lance).
+- **The buildings.** Every building kind the simulation has but the walls
+  and gate, which the renderer draws as joined runs: the Town Center
+  (three tiles, a hall with an upper storey and a flag), Storehouse (an
+  open shed of sacks and jars), Barracks (flat roof, a spear rack), Farm
+  (rows of crop), Archery Range (hut and targets), Stable (stalls and a
+  paddock), Market (awnings of the owner's colour), Watch Tower (one tile),
+  and the Bronze Age Temple, Academy, Siege Workshop and Government Centre.
+  Each has three construction stages (slab, half walls, full walls under
+  scaffolding), the building and its rubble. Until now the renderer drew
+  a rising site as generic pegs and then the finished frame cut short, and
+  rubble as a generic pile; `Atlas::stage_frame` and `Atlas::own_rubble`
+  now give a rendered set's own frames, and the old drawing remains for
+  kinds without one.
 
 ### Resume here next session
 

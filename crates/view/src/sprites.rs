@@ -89,6 +89,10 @@ pub enum Anim {
     Death = 3,
     /// Lying dead.
     Decay = 4,
+    /// A building rising: one frame per stage (`docs/03` §6.2).
+    Construction = 5,
+    /// What a fallen building leaves.
+    Rubble = 6,
 }
 
 impl Anim {
@@ -100,6 +104,8 @@ impl Anim {
             "attack" => Some(Anim::Work),
             "death" => Some(Anim::Death),
             "decay" => Some(Anim::Decay),
+            "construction" => Some(Anim::Construction),
+            "rubble" => Some(Anim::Rubble),
             _ => None,
         }
     }
@@ -526,6 +532,21 @@ impl Atlas {
             .map(|(f, _)| f)
     }
 
+    /// A building's own frame for construction stage `stage` (0 to 2), if
+    /// its rendered set has one.
+    pub fn stage_frame(&self, kind: KindId, stage: u8) -> Option<&Frame> {
+        self.lookup
+            .get(&(kind, 0, Anim::Construction, stage))
+            .map(|&i| &self.frames[i])
+    }
+
+    /// A building's own rubble, if its rendered set has one.
+    pub fn own_rubble(&self, kind: KindId) -> Option<&Frame> {
+        self.lookup
+            .get(&(kind, 0, Anim::Rubble, 0))
+            .map(|&i| &self.frames[i])
+    }
+
     /// Rubble for a footprint: what a fallen building leaves.
     pub fn rubble(&self, footprint: u8) -> Option<&Frame> {
         self.frame(UI_RUBBLE + footprint.clamp(1, 3) as KindId, 0)
@@ -690,6 +711,16 @@ pub fn kind_for_set(name: &str) -> Option<KindId> {
         "town_center" => kinds::TOWN_CENTER,
         "house" => kinds::HOUSE,
         "storehouse" => kinds::STOREHOUSE,
+        "barracks" => kinds::BARRACKS,
+        "farm" => kinds::FARM,
+        "archery_range" => kinds::ARCHERY_RANGE,
+        "stable" => kinds::STABLE,
+        "market" => kinds::MARKET,
+        "watch_tower" => kinds::WATCH_TOWER,
+        "temple" => kinds::TEMPLE,
+        "academy" => kinds::ACADEMY,
+        "siege_workshop" => kinds::SIEGE_WORKSHOP,
+        "government_centre" => kinds::GOVERNMENT_CENTRE,
         "tree" => kinds::TREE,
         "berry_bush" => kinds::BERRY_BUSH,
         "gold_mine" => kinds::GOLD_MINE,
@@ -1867,9 +1898,18 @@ mod tests {
         let (e, flip) = a.frame_at(kinds::VILLAGER, 7, Anim::Idle, 0).unwrap();
         assert!(flip && e.facing == 3, "east mirrors west");
         // Kinds without a set still get placeholders, and UI frames still exist.
-        let (tc, _) = a.frame(kinds::TOWN_CENTER, 0).unwrap();
-        assert_eq!(tc.scale, 1);
+        let (wall, _) = a.frame(kinds::PALISADE_WALL, 0).unwrap();
+        assert_eq!(wall.scale, 1);
         assert!(a.glyph('A', false).is_some());
+        // A rendered building brings its own construction stages and rubble;
+        // a placeholder does not, and the scene falls back to the generic ones.
+        for stage in 0..3 {
+            let f = a.stage_frame(kinds::TOWN_CENTER, stage).unwrap();
+            assert_eq!((f.anim, f.index), (Anim::Construction, stage));
+        }
+        assert_eq!(a.own_rubble(kinds::TOWN_CENTER).unwrap().anim, Anim::Rubble);
+        assert!(a.stage_frame(kinds::PALISADE_WALL, 0).is_none());
+        assert!(a.own_rubble(kinds::PALISADE_WALL).is_none());
         // A kind with only placeholders falls back to its single frame for any anim.
         let (g, _) = a.frame_at(kinds::GAZELLE, 1, Anim::Walk, 500).unwrap();
         assert_eq!((g.anim, g.index), (Anim::Idle, 0));

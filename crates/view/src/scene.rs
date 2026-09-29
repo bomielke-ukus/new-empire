@@ -257,11 +257,20 @@ impl Scene {
                     + (alpha * TICK_MS as f32) as u32
                     + (i as u32 * 61) % 1000
             };
-            let looked_up = if stage == Some(0) {
+            // A rendered building draws its own stages and rubble; without
+            // them, a site is pegs, then the building cropped, and rubble is
+            // the footprint's.
+            let own_stage = stage.and_then(|s| atlas.stage_frame(look, s as u8));
+            let looked_up = if let Some(f) = own_stage {
+                Some((f, false))
+            } else if stage == Some(0) {
                 atlas.site(info.footprint).map(|f| (f, false))
             } else if !info.mobile && world.dying[i] > 0 {
                 // Rubble where it stood, for as long as it lies.
-                atlas.rubble(info.footprint).map(|f| (f, false))
+                atlas
+                    .own_rubble(look)
+                    .or_else(|| atlas.rubble(info.footprint))
+                    .map(|f| (f, false))
             } else {
                 atlas.frame_at(look, world.facing[i], anim, time_ms)
             };
@@ -337,7 +346,7 @@ impl Scene {
                 light: fog::VISIBLE,
             };
             // Rising: only the lower part of the building is there yet.
-            if let Some(stage @ 1..=2) = stage {
+            if let (Some(stage @ 1..=2), None) = (stage, own_stage) {
                 let keep = if stage == 1 { 0.5 } else { 0.85 };
                 let cut = (f32::from(frame.h) * (1.0 - keep)) as u16;
                 sprite.v += cut;
@@ -356,7 +365,9 @@ impl Scene {
                 let info = kinds::info(m.kind);
                 let fp = info.footprint.max(1) as i32;
                 let frame = if m.site {
-                    atlas.site(info.footprint)
+                    atlas
+                        .stage_frame(atlas.variant(m.kind, m.age), 0)
+                        .or_else(|| atlas.site(info.footprint))
                 } else {
                     atlas
                         .frame(atlas.variant(m.kind, m.age), 0)

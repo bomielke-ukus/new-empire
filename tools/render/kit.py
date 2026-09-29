@@ -73,6 +73,8 @@ COLOURS = {
     "rope": srgb(0.64, 0.54, 0.36),
     "earth": srgb(0.42, 0.32, 0.22),
     "straw": srgb(0.80, 0.70, 0.40),
+    "crop": srgb(0.46, 0.58, 0.24),
+    "slab": srgb(0.55, 0.51, 0.45),
     "white": srgb(0.88, 0.86, 0.80),
 }
 
@@ -600,7 +602,42 @@ def walls(b, name, w, d, h, mat, door=True):
     if door:
         b.add(box(name + "_door", (w * 0.22, 0.02, h * 0.62), "wood_dark",
                   (0.0, d / 2 + 0.005, 0.0)), FULL_WALLS)
-    b.add(box(name + "_foundation", (w + 0.08, d + 0.08, 0.04), "stone"), FOUNDATION)
+    b.add(box(name + "_foundation", (w + 0.08, d + 0.08, 0.04), "slab"), FOUNDATION)
+
+
+def foundation(b, name, w, d, mat="slab"):
+    """The plot marked out: a low slab, there from the first stage on."""
+    b.add(box(name + "_foundation", (w, d, 0.04), mat), FOUNDATION)
+
+
+def flag(b, name, x, y, base, height=0.55, frames=FINISHED):
+    """A pole with a flag of the owner's colour, flying toward +X so the
+    camera sees it broadside."""
+    b.add(cylinder(name + "_pole", 0.02, height, "wood_dark", (x, y, base), sides=5), frames)
+    b.add(box(name + "_flag", (0.22, 0.02, 0.14), "player",
+              (x + 0.11, y, base + height - 0.16)), frames)
+
+
+def posts(b, name, points, height, frames, radius=0.035, mat="wood"):
+    """Upright posts at `points`, standing on the ground."""
+    for i, (x, y) in enumerate(points):
+        b.add(cylinder("%s_%d" % (name, i), radius, height, mat, (x, y, 0.0), sides=6), frames)
+
+
+def rail(b, name, a, c, z, frames, mat="wood", thick=0.035):
+    """A rail from point `a` to point `c` at height `z`."""
+    (x0, y0), (x1, y1) = a, c
+    length = math.hypot(x1 - x0, y1 - y0)
+    angle = math.atan2(y1 - y0, x1 - x0)
+    b.add(box(name, (length, thick, thick), mat, ((x0 + x1) / 2, (y0 + y1) / 2, z),
+              pivot="centre", rotation=(0.0, 0.0, angle)), frames)
+
+
+def disc(b, name, radius, thick, mat, location, frames, facing="y"):
+    """A flat disc standing on edge, its face toward +Y (or +X)."""
+    rot = (_deg(90.0), 0.0, 0.0) if facing == "y" else (0.0, _deg(90.0), 0.0)
+    b.add(cylinder(name, radius, thick, mat, location, sides=12, pivot="centre",
+                   rotation=rot), frames)
 
 
 # --------------------------------------------------------------------------
