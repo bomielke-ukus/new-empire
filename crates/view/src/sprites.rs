@@ -1911,8 +1911,11 @@ mod tests {
         assert!(a.stage_frame(kinds::PALISADE_WALL, 0).is_none());
         assert!(a.own_rubble(kinds::PALISADE_WALL).is_none());
         // A kind with only placeholders falls back to its single frame for any anim.
-        let (g, _) = a.frame_at(kinds::GAZELLE, 1, Anim::Walk, 500).unwrap();
+        let (g, _) = a.frame_at(kinds::PALISADE_WALL, 1, Anim::Walk, 500).unwrap();
         assert_eq!((g.anim, g.index), (Anim::Idle, 0));
+        // The herd has its own walk now.
+        let (g, _) = a.frame_at(kinds::GAZELLE, 1, Anim::Walk, 500).unwrap();
+        assert_eq!(g.anim, Anim::Walk);
     }
 
     #[test]

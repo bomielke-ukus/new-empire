@@ -1489,6 +1489,11 @@ The owner took the look and said go; `playtest-5` went out first.
   rubble as a generic pile; `Atlas::stage_frame` and `Atlas::own_rubble`
   now give a rendered set's own frames, and the old drawing remains for
   kinds without one.
+- **What the map is made of.** The tree, berry bush, gold and stone veins
+  (one standing frame each) and the gazelle (`kit.Animal`: it grazes at
+  rest, walks, tosses its head, falls onto its side and lies as the
+  carcass). They belong to nobody, so `atlas` knows them as neutral sets:
+  no player colour, and a node needs only its idle frame.
 
 ### Resume here next session
 
@@ -1691,10 +1696,13 @@ Stated so they are not rediscovered.
 - **`RM-M7-01` is unrun.** The sheet is written (`docs/09` §9.1); the
   six players are the owner's, and `RM-M7` stays out of the traceability
   gate until their tally is in.
-- **Death animations and the hammering animation are art** (`docs/03`
-  §6.2, `docs/06` M7): the placeholders have a fall and a corpse and no
-  more; a building's collapse is a cloud over the rubble, not an
-  animation.
+- **The art is code-built and low-poly** (`docs/08` §9): every unit,
+  building and node the simulation has is modelled, with its deaths,
+  construction stages and rubble, except the walls and the gate, which are
+  still drawn as runs of placeholder segments, and the terrain tiles. No
+  villager has a hammering or task-specific animation (the attack swing
+  stands in), and a building's collapse is a cloud over its rubble. A
+  modeller's work can replace any set by name.
 - **One notification row stays open**: no Wonder to announce.
 - **The Mac build is not notarised, Apple Silicon only, and has no icon.**
   Notarising needs an Apple Developer account and a signing identity in

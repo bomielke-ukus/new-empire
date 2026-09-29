@@ -119,11 +119,25 @@ pub fn validate(manifest_path: &Path, palette: &Palette) -> Result<Report, Strin
     })
 }
 
+/// The sets of what the map is made of rather than what a player owns: the
+/// nodes and the herd animals. They wear no player colour, and a node, being
+/// neither built nor knocked down, needs only its standing frame.
+pub const NEUTRAL_SETS: [&str; 5] = ["tree", "berry_bush", "gold_mine", "stone_mine", "gazelle"];
+
+/// A neutral node's one animation.
+const REQUIRED_STILL: [(&str, u32); 1] = [("idle", 1)];
+
+fn is_neutral(name: &str) -> bool {
+    NEUTRAL_SETS.contains(&name)
+}
+
 /// The animation set is a contract with the simulation: it schedules damage on
 /// a tick and the renderer has to land the blow on the matching frame.
 fn check_animations(set: &SpriteSet, problems: &mut Vec<String>) {
     let required: &[(&str, u32)] = match set.class.kind() {
         Kind::Mobile => &REQUIRED_MOBILE,
+        // A tree or a vein is not built and does not fall into rubble.
+        Kind::Building if is_neutral(&set.name) => &REQUIRED_STILL,
         Kind::Building => &REQUIRED_BUILDING,
         Kind::Terrain => &[],
     };
@@ -245,7 +259,9 @@ fn check_pixels(
 
     // Ownership has to be visible. A unit with no player colour anywhere on it
     // belongs to nobody as far as the player is concerned.
-    let needs_owner = matches!(set.class.kind(), Kind::Mobile | Kind::Building);
+    // What the map is made of belongs to nobody, and wears no owner's colour.
+    let needs_owner =
+        matches!(set.class.kind(), Kind::Mobile | Kind::Building) && !is_neutral(&set.name);
     if needs_owner && player_pixels == 0 {
         problems.push(format!(
             "{}: uses no player colour at all. Draw some of it in indices \

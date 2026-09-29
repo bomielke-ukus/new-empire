@@ -400,7 +400,8 @@ proves a fresh clone can produce what the game loads.
    by code from a shared kit (`tools/render/kit.py`, `slice.py`,
    `scripts/render-sprites.sh`), low-poly by design, rendered on the CPU. The
    spearman and the house came first; the villager is re-rendered on the same
-   engine; the four other infantry followed. Being code-authored, these models carry no copyright of their own
+   engine; the other infantry, the riders, every building but the walls
+   and gate, and the map's nodes and herd followed. Being code-authored, these models carry no copyright of their own
    (§5.1); that matters only for a sale, and a modeller's work can replace any
    of them by name.
 4. **Commission the icons and UI panel set** (§4.3) in parallel — they are off

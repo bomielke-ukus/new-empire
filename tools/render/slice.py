@@ -419,7 +419,83 @@ def government_centre():
     return b.root
 
 
-# name: (builder, size class, "unit" or "building")
+# --------------------------------------------------------------------------
+# What the map is made of. These belong to nobody, so they wear no player
+# colour (`atlas` knows them as neutral sets); a node has one standing frame.
+
+def tree():
+    """A broadleaf tree: a trunk and a rounded, two-tone canopy."""
+    root = kit.empty("Tree")
+    parts = [
+        kit.cylinder("tree_trunk", 0.07, 0.5, "bark", sides=7, top_radius=0.05),
+        kit.cylinder("tree_crown_low", 0.34, 0.28, "leaf_dark", (0.0, 0.0, 0.42), sides=8,
+                     top_radius=0.36),
+        kit.cylinder("tree_crown_mid", 0.36, 0.22, "leaf", (0.0, 0.0, 0.70), sides=8,
+                     top_radius=0.28),
+        kit.cone("tree_crown_top", 0.28, 0.22, "leaf", (0.0, 0.0, 0.92), sides=8),
+    ]
+    for p in parts:
+        p.parent = root
+    return root
+
+
+def berry_bush():
+    """A low round bush dotted with red berries."""
+    root = kit.empty("BerryBush")
+    parts = [
+        kit.cylinder("bush_low", 0.30, 0.18, "leaf_dark", sides=8, top_radius=0.33),
+        kit.cylinder("bush_top", 0.33, 0.14, "leaf", (0.0, 0.0, 0.18), sides=8, top_radius=0.2),
+    ]
+    import math as _m
+    for i in range(9):
+        a = 2 * _m.pi * i / 9 + 0.3
+        r = 0.26 if i % 2 else 0.18
+        z = 0.14 if i % 2 else 0.26
+        parts.append(kit.box("bush_berry_%d" % i, (0.06, 0.06, 0.06), "berry",
+                             (r * _m.cos(a), r * _m.sin(a), z)))
+    for p in parts:
+        p.parent = root
+    return root
+
+
+def _vein(name, rock, fleck):
+    """A heap of broken rock with flecks of what it is worth."""
+    import random
+    rng = random.Random(7 if fleck == "gold" else 11)
+    root = kit.empty(name)
+    parts = []
+    for i, (x, y, s) in enumerate([(0.0, 0.0, 0.34), (-0.2, 0.12, 0.24), (0.18, -0.15, 0.26),
+                                   (0.12, 0.2, 0.2), (-0.15, -0.18, 0.2)]):
+        parts.append(kit.box("%s_rock_%d" % (name, i), (s, s * 0.9, s * 0.8), rock if i % 2 else
+                             "rock", (x, y, 0.0), rotation=(0.0, 0.0, rng.uniform(0.0, 1.5))))
+    for i in range(11):
+        parts.append(kit.box("%s_fleck_%d" % (name, i), (0.08, 0.08, 0.08), fleck,
+                             (rng.uniform(-0.22, 0.22), rng.uniform(-0.22, 0.22),
+                              rng.uniform(0.14, 0.28))))
+    for p in parts:
+        p.parent = root
+    return root
+
+
+def gold_mine():
+    return _vein("GoldMine", "rock", "gold")
+
+
+def stone_mine():
+    return _vein("StoneMine", "rock_light", "white")
+
+
+def gazelle():
+    """A gazelle: tawny coat, pale belly, short dark horns."""
+    a = kit.Animal("Gazelle")
+    a.animate()
+    # A quarter larger than life, like everything at this scale, so the herd
+    # can be seen and clicked.
+    a.root.scale = (1.25, 1.25, 1.25)
+    return a.root
+
+
+# name: (builder, size class, "unit", "building" or "node")
 SUBJECTS = {
     "clubman": (clubman, "Foot", "unit"),
     "axeman": (axeman, "Foot", "unit"),
@@ -441,6 +517,11 @@ SUBJECTS = {
     "academy": (academy, "MediumBuilding", "building"),
     "siege_workshop": (siege_workshop, "MediumBuilding", "building"),
     "government_centre": (government_centre, "MediumBuilding", "building"),
+    "tree": (tree, "SmallBuilding", "node"),
+    "berry_bush": (berry_bush, "SmallBuilding", "node"),
+    "gold_mine": (gold_mine, "SmallBuilding", "node"),
+    "stone_mine": (stone_mine, "SmallBuilding", "node"),
+    "gazelle": (gazelle, "Foot", "unit"),
 }
 
 

@@ -75,6 +75,14 @@ COLOURS = {
     "straw": srgb(0.80, 0.70, 0.40),
     "crop": srgb(0.46, 0.58, 0.24),
     "slab": srgb(0.55, 0.51, 0.45),
+    "horn": srgb(0.30, 0.26, 0.22),
+    "leaf": srgb(0.26, 0.46, 0.18),
+    "leaf_dark": srgb(0.18, 0.34, 0.14),
+    "bark": srgb(0.34, 0.24, 0.15),
+    "berry": srgb(0.72, 0.14, 0.14),
+    "gold": srgb(0.92, 0.74, 0.22),
+    "rock": srgb(0.50, 0.49, 0.47),
+    "rock_light": srgb(0.66, 0.64, 0.60),
     "white": srgb(0.88, 0.86, 0.80),
 }
 
@@ -807,3 +815,101 @@ def javelin(name):
     for part in (shaft, tip):
         part.parent = grip
     return grip
+
+
+# --------------------------------------------------------------------------
+# A grazing animal: the herd the villagers hunt.
+
+class Animal:
+    """A light four-legged animal, a gazelle's size (0.5 units nose to tail),
+    facing +Y. Legs swing in diagonal pairs at the walk; at rest it grazes;
+    its 'attack' is a head toss; it falls onto its side and slides back onto
+    its own tile, where it lies as the carcass."""
+
+    LEG = 0.30
+    BACK = 0.46
+
+    def __init__(self, root_name, coat="hide", belly="white", horns="horn"):
+        self.root = empty(root_name)
+        self.body = empty(root_name + "_body", parent=self.root)
+        self.parts = {}
+        leg, back = self.LEG, self.BACK
+        add = self._add
+        add("barrel", box("barrel", (0.16, 0.46, back - leg), coat, (0.0, 0.0, leg)))
+        add("belly", box("belly", (0.14, 0.36, 0.04), belly, (0.0, 0.0, leg - 0.01)))
+        add("neck", box("neck", (0.08, 0.10, 0.24), coat, (0.0, 0.20, back - 0.06), "bottom",
+                        rotation=(_deg(-25.0), 0.0, 0.0)))
+        add("head", box("head", (0.08, 0.16, 0.08), coat, (0.0, 0.33, back + 0.12)))
+        add("horn_l", box("horn_l", (0.02, 0.02, 0.14), horns, (-0.03, 0.29, back + 0.19),
+                          rotation=(_deg(-25.0), 0.0, 0.0)))
+        add("horn_r", box("horn_r", (0.02, 0.02, 0.14), horns, (0.03, 0.29, back + 0.19),
+                          rotation=(_deg(-25.0), 0.0, 0.0)))
+        add("tail", box("tail", (0.03, 0.03, 0.10), belly, (0.0, -0.23, back - 0.02), "top",
+                        rotation=(_deg(-30.0), 0.0, 0.0)))
+        for key, x, y in (("leg_fl", -0.05, 0.17), ("leg_fr", 0.05, 0.17),
+                          ("leg_bl", -0.05, -0.17), ("leg_br", 0.05, -0.17)):
+            add(key, box(key, (0.035, 0.04, leg), coat, (x, y, leg), "top"))
+
+    def _add(self, key, obj):
+        obj.parent = self.body
+        self.parts[key] = obj
+        return obj
+
+    def animate(self):
+        scene = bpy.context.scene
+        scene.frame_start, scene.frame_end = 1, 30
+        rest = {k: (tuple(o.location), tuple(o.rotation_euler)) for k, o in self.parts.items()}
+        for anim, (first, last) in MOBILE_SPANS.items():
+            count = last - first + 1
+            for i in range(count):
+                frame = first + i
+                body, swings = animal_pose(anim, i, count)
+                self.body.location = (body["dx"], 0.0, body["dz"])
+                self.body.rotation_euler = (0.0, body["roll"], 0.0)
+                for path in ("location", "rotation_euler"):
+                    self.body.keyframe_insert(path, frame=frame)
+                for key, obj in self.parts.items():
+                    loc, rot = rest[key]
+                    obj.location = loc
+                    obj.rotation_euler = (rot[0] + swings.get(key, 0.0), rot[1], rot[2])
+                    obj.keyframe_insert("location", frame=frame)
+                    obj.keyframe_insert("rotation_euler", frame=frame)
+        hold_frames([self.body] + list(self.parts.values()))
+
+
+# Rolled onto its side, the animal's middle lies about this far along +X.
+FALLEN_ANIMAL = 0.24
+
+
+def animal_pose(anim, i, count):
+    body = {"dx": 0.0, "dz": 0.0, "roll": 0.0}
+    s = {}
+    graze = ("neck", "head", "horn_l", "horn_r")
+    if anim == "idle":
+        # Head down to graze and up again.
+        dip = _deg(45.0) * (0.5 - 0.5 * math.cos(2.0 * math.pi * i / count))
+        for k in graze:
+            s[k] = dip
+        s["tail"] = _deg(10.0) * math.sin(2.0 * math.pi * i / count)
+    elif anim == "walk":
+        phase = 2.0 * math.pi * i / count
+        a = _deg(30.0) * math.sin(phase)
+        s["leg_fl"], s["leg_br"] = a, a
+        s["leg_fr"], s["leg_bl"] = -a, -a
+        body["dz"] = 0.02 * abs(math.sin(phase))
+    elif anim == "attack":
+        toss = [0.0, 20.0, 40.0, -30.0, -10.0, 0.0]
+        for k in graze:
+            s[k] = _deg(toss[i])
+    else:
+        t = i / float(count - 1) if anim == "death" else 1.0
+        ease = t * t
+        body["roll"] = _deg(85.0) * ease
+        body["dx"] = -FALLEN_ANIMAL * ease
+        for leg in ("leg_fl", "leg_fr", "leg_bl", "leg_br"):
+            s[leg] = _deg(25.0) * t
+        for k in graze:
+            s[k] = _deg(30.0) * t
+        if anim == "decay":
+            body["dz"] = -0.01 * (i + 1)
+    return body, s
