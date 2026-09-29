@@ -2,8 +2,9 @@ BRENDEN'S EMPIRES - PLAYTEST BUILD
 ==================================
 
 Thank you for playing. This is an early build of a real-time strategy
-game in the spirit of the 1997 original. The art and every sound are
-stand-ins; the game underneath is what we want you to play.
+game in the spirit of the 1997 original. Every sound is a stand-in,
+and so are the walls, the gate and the ground; the game underneath is
+what we want you to play.
 
 OPENING IT (once)
 
