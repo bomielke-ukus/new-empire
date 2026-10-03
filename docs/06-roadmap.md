@@ -251,7 +251,8 @@ record are in `docs/10` §4d. What remains of M7 is the owner's: the Mac
 measurement and the six players. The sprite art is being modelled by code
 (`docs/08` §9 step 3, the owner's choice): every unit, building and node
 the simulation has is rendered, villagers at their tasks and with their
-loads; the terrain and the later ages' looks are not yet.
+loads, and the ground carries a rendered grain (`docs/07` D28); the later
+ages' looks are not yet.
 
 - Full audio: acknowledgments, work loops, positional world SFX, ambience,
   age fanfares, music stems, combat ducking

@@ -347,6 +347,19 @@ fn run() -> Result<(), String> {
 
     // Rendered sprite sets replace placeholders wherever they exist.
     let sheet_dir = a.assets.clone().or_else(view::sheets::default_dir);
+    // The ground's grain, beside the sprites (`view::detail`).
+    let detail = sheet_dir
+        .as_ref()
+        .and_then(|d| d.parent())
+        .map(|assets| assets.join("terrain").join("detail.png"))
+        .filter(|p| p.exists())
+        .map(|p| {
+            view::detail::Detail::load(&p).unwrap_or_else(|e| {
+                eprintln!("warning: {e}");
+                view::detail::Detail::flat()
+            })
+        })
+        .unwrap_or_else(view::detail::Detail::flat);
     let (sheets, errors) = sheet_dir
         .map(|d| view::sheets::load_all(&d))
         .unwrap_or_default();
@@ -532,7 +545,7 @@ fn run() -> Result<(), String> {
     }
     let mut img = raster::Image::new(a.width, a.height, [12, 10, 14, 255]);
     let lights = viewer.and_then(|p| sim.fog(p)).map(FogLights::from_fog);
-    raster::draw_terrain(&mut img, &cam, &chunks, lights.as_ref());
+    raster::draw_terrain(&mut img, &cam, &chunks, lights.as_ref(), &detail);
     let palette = view::palette::texture();
     raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.sprites);
     raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.ui);

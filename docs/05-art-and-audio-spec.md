@@ -123,6 +123,10 @@ should go.
 - Decorative clutter (rocks, shrubs, bones) scattered by the map generator,
   purely visual, no collision.
 
+**As built** (`docs/07` D28): the ground's colours blend per vertex between
+types, and each tile carries its type's rendered grain over them, one layer
+per type; the variants and mask transitions above are not built.
+
 ---
 
 ## 4. UI art

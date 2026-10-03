@@ -508,8 +508,12 @@ anticipate:
   buffers the GPU does. `tools/mapview` uses it to render PNGs; the render
   crate's only unit test is naga validation of its WGSL. Any divergence
   between the two paths is a bug in `render`, by definition.
-- **Terrain blending is per-vertex colour** for now: each corner averages the
-  tiles that share it. Mask-texture blending (§7) waits for real terrain art.
+- **Terrain blending is per-vertex colour**: each corner averages the tiles
+  that share it. Over it each tile carries its type's grain (`view::detail`,
+  `docs/07` D28): `TerrainVertex` names the texel of the grain sheet each
+  corner maps to, and the terrain shader (in its fragment stage) and the
+  rasteriser (per pixel) read that sheet nearest and scale the colour by it,
+  so the two agree. Mask-texture blending (§7) is not built.
 - **Depth sorting is CPU-side** in `view::Scene` by `(x + y + footprint
   offset, slot)`; the GPU draws the instance buffer in that order with no
   depth buffer.

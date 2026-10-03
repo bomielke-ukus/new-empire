@@ -676,8 +676,172 @@ def gazelle():
     return a.root
 
 
-# name: (builder, size class, "unit", "villager", "building", "wall", "gate" or
-# "node")
+# --------------------------------------------------------------------------
+# The ground's grain. Not sprites: each is a patch of one tile of a ground
+# type, rendered through the terrain view and turned by `atlas detail` into
+# a greyscale layer the game multiplies over its blended ground colours
+# (`crates/view/src/detail.rs`). Whatever is scattered on the tile is laid
+# again on the eight tiles around it, so the render is one period of an
+# endless field and the layer tiles without a seam. Colour does not survive,
+# only light and shade, so the materials matter only for how light or dark
+# each part is against the rest.
+
+def _ground(name, base, scatter, seed):
+    """A tile of ground: a base under three tiles each way, and
+    `scatter(rng)`'s pieces, each (builder, kwargs) placed on every one of
+    the nine tiles."""
+    import random
+    rng = random.Random(seed)
+    root = kit.empty(name)
+    floor = kit.box(name + "_floor", (3.0, 3.0, 0.02), base, pivot="top")
+    floor.parent = root
+    pieces = scatter(rng)
+    n = 0
+    for ox in (-1.0, 0.0, 1.0):
+        for oy in (-1.0, 0.0, 1.0):
+            for make, (x, y), kw in pieces:
+                obj = make("%s_%d" % (name, n), (x + ox, y + oy), **kw)
+                obj.parent = root
+                n += 1
+    return root
+
+
+def _cell(rng):
+    return (rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5))
+
+
+def _blade(name, at, mat, h, tilt):
+    blade = kit.cone(name, 0.014, h, mat, (at[0], at[1], 0.0), sides=4)
+    blade.rotation_euler = (tilt[0], tilt[1], 0.0)
+    return blade
+
+
+def _chip(name, at, mat, size, turn, z=0.0):
+    return kit.box(name, size, mat, (at[0], at[1], z), rotation=(0.0, 0.0, turn))
+
+
+def _stripe(name, at, mat, width, height, axis):
+    """A low ridge right across the tile, so the copies either side carry
+    it on without a break."""
+    size = (1.0, width, height) if axis == "x" else (width, 1.0, height)
+    return kit.gable(name, size, mat, (at[0], at[1], 0.0), ridge=axis)
+
+
+def ground_grass():
+    """Blades of three greens over dark soil."""
+    def scatter(rng):
+        out = []
+        for _ in range(120):
+            mat = rng.choice(["leaf", "leaf", "crop", "leaf_dark"])
+            tilt = (rng.uniform(-0.45, 0.45), rng.uniform(-0.45, 0.45))
+            out.append((_blade, _cell(rng), dict(mat=mat, h=rng.uniform(0.035, 0.075),
+                                                  tilt=tilt)))
+        return out
+    return _ground("GroundGrass", "leaf_dark", scatter, 21)
+
+
+def ground_dirt():
+    """Packed earth with pebbles and clods."""
+    def scatter(rng):
+        out = []
+        for _ in range(45):
+            s = rng.uniform(0.015, 0.04)
+            out.append((_chip, _cell(rng), dict(mat=rng.choice(["rock", "rock_light", "slab"]),
+                                                 size=(s, s * 0.8, s * 0.6),
+                                                 turn=rng.uniform(0, 3.14))))
+        for _ in range(16):
+            out.append((_chip, _cell(rng), dict(mat="earth", size=(0.06, 0.045, 0.014),
+                                                 turn=rng.uniform(0, 3.14))))
+        return out
+    return _ground("GroundDirt", "earth", scatter, 22)
+
+
+def ground_desert():
+    """Hardpan split into plates, a few stones on it."""
+    def scatter(rng):
+        out = []
+        # Plates on a loose grid, each shoved and turned so the cracks
+        # between them wander rather than rule lines.
+        k = 4
+        for i in range(k):
+            for j in range(k):
+                at = (-0.5 + (i + 0.5) / k + rng.uniform(-0.05, 0.05),
+                      -0.5 + (j + 0.5) / k + rng.uniform(-0.05, 0.05))
+                sz = rng.uniform(0.19, 0.25)
+                out.append((_chip, at, dict(mat="straw", size=(sz, sz * rng.uniform(0.7, 1.0),
+                                                               rng.uniform(0.006, 0.011)),
+                                             turn=rng.uniform(-0.6, 0.6))))
+        for _ in range(10):
+            out.append((_chip, _cell(rng), dict(mat="rock_light", size=(0.025, 0.02, 0.015),
+                                                 turn=rng.uniform(0, 3.14), z=0.008)))
+        return out
+    return _ground("GroundDesert", "earth", scatter, 23)
+
+
+def ground_sand():
+    """Wind ripples."""
+    def scatter(rng):
+        return [(_stripe, (0.0, -0.5 + (k + 0.5) / 7), dict(mat="straw", width=0.08,
+                                                             height=rng.uniform(0.008, 0.013),
+                                                             axis="x"))
+                for k in range(7)]
+    return _ground("GroundSand", "straw", scatter, 24)
+
+
+def ground_shallow_water():
+    """Small, close ripples."""
+    def scatter(rng):
+        return [(_stripe, (-0.5 + (k + 0.5) / 6, 0.0), dict(mat="stone_light", width=0.09,
+                                                             height=0.006, axis="y"))
+                for k in range(6)]
+    return _ground("GroundShallowWater", "stone_light", scatter, 25)
+
+
+def ground_deep_water():
+    """Long, slow swells."""
+    def scatter(rng):
+        return [(_stripe, (-0.5 + (k + 0.5) / 3, 0.0), dict(mat="stone", width=0.22,
+                                                             height=0.012, axis="y"))
+                for k in range(3)]
+    return _ground("GroundDeepWater", "stone", scatter, 26)
+
+
+def ground_forest_floor():
+    """Fallen leaves and twigs on dark soil."""
+    def scatter(rng):
+        out = []
+        for _ in range(75):
+            out.append((_chip, _cell(rng), dict(mat=rng.choice(["leaf_dark", "leaf", "straw",
+                                                                 "earth"]),
+                                                 size=(0.04, 0.025, 0.006),
+                                                 turn=rng.uniform(0, 3.14))))
+        for _ in range(6):
+            out.append((_chip, _cell(rng), dict(mat="wood", size=(0.13, 0.012, 0.012),
+                                                 turn=rng.uniform(0, 3.14))))
+        return out
+    return _ground("GroundForestFloor", "bark", scatter, 27)
+
+
+def ground_snow():
+    """Soft drifts."""
+    def mound(name, at, r, h):
+        return kit.cylinder(name, r, h, "white", (at[0], at[1], 0.0), sides=10,
+                            top_radius=r * 0.4)
+
+    def scatter(rng):
+        return [(mound, _cell(rng), dict(r=rng.uniform(0.04, 0.09), h=rng.uniform(0.008, 0.016)))
+                for _ in range(26)]
+    return _ground("GroundSnow", "white", scatter, 28)
+
+
+# The game's ground types in `sim::Terrain` order: `atlas detail` stacks the
+# layers so.
+GROUNDS = ["grass", "dirt", "desert", "sand", "shallow_water", "deep_water", "forest_floor",
+           "snow"]
+
+
+# name: (builder, size class, "unit", "villager", "building", "wall", "gate",
+# "node" or "ground")
 SUBJECTS = {
     "villager": (villager, "Foot", "villager"),
     "clubman": (clubman, "Foot", "unit"),
@@ -709,6 +873,7 @@ SUBJECTS = {
     "stone_mine": (stone_mine, "SmallBuilding", "node"),
     "gazelle": (gazelle, "Foot", "unit"),
 }
+SUBJECTS.update({"ground_" + g: (globals()["ground_" + g], "Terrain", "ground") for g in GROUNDS})
 
 
 def main():

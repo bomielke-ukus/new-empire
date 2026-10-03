@@ -8,6 +8,7 @@
 //! atlas placeholder [--out DIR] [--palette FILE]
 //! atlas quantize    --in FILE --out FILE [--downsample N] [--palette FILE]
 //! atlas compose     --renders DIR --set NAME --class CLASS --out DIR
+//! atlas detail      --renders DIR [--out FILE]
 //! ```
 //!
 //! `validate` is the one CI runs. `docs/05` §6 requires that non-conformant art
@@ -15,6 +16,7 @@
 
 mod colour;
 mod compose;
+mod detail;
 mod image;
 mod manifest;
 mod palette;
@@ -38,6 +40,8 @@ const DEFAULT_ASSETS: &str = "assets/sprites";
 /// can never overwrite a rendered sprite set.
 const DEFAULT_PLACEHOLDERS: &str = "assets/placeholder-sprites";
 const DEFAULT_RIG: &str = "assets/render/rig.json";
+/// The ground's grain, a layer per ground type (`atlas detail`).
+const DEFAULT_DETAIL: &str = "assets/terrain/detail.png";
 
 struct Args {
     palette: PathBuf,
@@ -435,6 +439,25 @@ fn validate_all(args: &[String]) -> ExitCode {
         }
     }
 
+    // The ground's grain, alongside the sprite sets it is rendered with.
+    let detail = Path::new(DEFAULT_DETAIL);
+    if a.assets == Path::new(DEFAULT_ASSETS) && detail.exists() {
+        match detail::check(detail) {
+            Ok(p) if p.is_empty() => println!("ok    terrain detail"),
+            Ok(p) => {
+                failed += 1;
+                println!("FAIL  terrain detail");
+                for p in &p {
+                    println!("        {p}");
+                }
+            }
+            Err(e) => {
+                failed += 1;
+                println!("FAIL  terrain detail\n        {e}");
+            }
+        }
+    }
+
     println!("\n{} sprite set(s), {failed} failing", manifests.len());
     if failed == 0 {
         ExitCode::SUCCESS
@@ -591,6 +614,35 @@ fn compose_set(args: &[String]) -> ExitCode {
     }
 }
 
+/// Turns the ground renders into the grain the game lays over the ground
+/// (`detail.rs`), and checks the result.
+fn compose_detail(args: &[String]) -> ExitCode {
+    let a = match parse(args, DEFAULT_DETAIL) {
+        Ok(a) => a,
+        Err(e) => return usage(&e),
+    };
+    let Some(renders) = a.renders.as_ref() else {
+        return usage("detail needs --renders");
+    };
+    if let Err(e) = detail::compose(renders, &a.out) {
+        return fail(&e);
+    }
+    match detail::check(&a.out) {
+        Ok(p) if p.is_empty() => {
+            println!("ok    terrain detail: {}", a.out.display());
+            ExitCode::SUCCESS
+        }
+        Ok(p) => {
+            println!("FAIL  terrain detail");
+            for p in &p {
+                println!("        {p}");
+            }
+            ExitCode::FAILURE
+        }
+        Err(e) => fail(&e),
+    }
+}
+
 /// Rewrites every sprite sheet's PLTE against the current palette, leaving
 /// its indices untouched.
 ///
@@ -654,6 +706,7 @@ fn usage(err: &str) -> ExitCode {
     eprintln!("  atlas placeholder [--out DIR] [--palette FILE]");
     eprintln!("  atlas quantize    --in FILE --out FILE [--downsample N] [--palette FILE]");
     eprintln!("  atlas compose     --renders DIR --set NAME --class CLASS --out DIR");
+    eprintln!("  atlas detail      --renders DIR [--out FILE]");
     ExitCode::FAILURE
 }
 
@@ -673,6 +726,7 @@ fn main() -> ExitCode {
         Some("placeholder") => placeholders(&args[1..]),
         Some("quantize") => quantize_render(&args[1..]),
         Some("compose") => compose_set(&args[1..]),
+        Some("detail") => compose_detail(&args[1..]),
         Some(other) => usage(&format!("unknown command {other}")),
         None => usage("no command given"),
     }

@@ -4,7 +4,8 @@
 //! Colour is per vertex. Each tile has its own colour (terrain type, a little
 //! per-tile variation, slope shading); each vertex blends its tile's colour
 //! with the tiles sharing that corner, which softens type boundaries without
-//! any mask textures. Real blended textures arrive with real art.
+//! any mask textures. Over that, each tile carries its type's grain
+//! (`detail.rs`): each corner names the texel of its type's layer it maps to.
 
 use bytemuck::{Pod, Zeroable};
 use sim::{Terrain, TileMap};
@@ -24,6 +25,8 @@ pub struct TerrainVertex {
     pub colour: [u8; 4],
     /// The tile corner this is, for the fog light (`crate::fog`).
     pub corner: [u16; 2],
+    /// The texel of the grain sheet this corner maps to (`crate::detail`).
+    pub detail: [u16; 2],
 }
 
 /// The geometry for one chunk.
@@ -151,9 +154,10 @@ pub fn build_chunk(map: &TileMap, cx: i32, cy: i32) -> ChunkMesh {
     for y in y0..y1 {
         for x in x0..x1 {
             let own = tile_colour(map, x, y);
+            let terrain = map.terrain(x, y);
             let corners = [(x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1)];
             let base = vertices.len() as u32;
-            for (cxi, cyi) in corners {
+            for (k, (cxi, cyi)) in corners.into_iter().enumerate() {
                 let h = map.corner(cxi, cyi) as f32;
                 let (sx, sy) = iso::project(cxi as f32, cyi as f32, h);
                 let blend = corner_colour(map, cxi, cyi);
@@ -166,6 +170,7 @@ pub fn build_chunk(map: &TileMap, cx: i32, cy: i32) -> ChunkMesh {
                     pos: [sx, sy],
                     colour: to_rgba(colour),
                     corner: [cxi as u16, cyi as u16],
+                    detail: crate::detail::corner_texel(terrain, k),
                 });
                 bounds.0 = bounds.0.min(sx);
                 bounds.1 = bounds.1.min(sy);
@@ -228,6 +233,9 @@ mod tests {
         assert_eq!(m.vertices[0].pos, [0.0, 0.0]);
         assert_eq!(m.vertices[2].corner, [1, 1]);
         assert_eq!(m.vertices[0].corner, [0, 0]);
+        // Each corner of a grass tile maps to its corner of the grass layer.
+        assert_eq!(m.vertices[0].detail, [64, 0]);
+        assert_eq!(m.vertices[2].detail, [64, 64]);
     }
 
     #[test]

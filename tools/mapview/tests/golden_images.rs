@@ -205,7 +205,9 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
-        // Zoomed out: a different terrain chunk path and sprite scale.
+        // Zoomed out: a different terrain chunk path and sprite scale. On
+        // another player's start, so without fog: through player 0's eyes
+        // it is ground never seen, and the frame was black.
         name: "zoomed-out",
         args: &[
             "--seed",
@@ -220,6 +222,8 @@ const SCENES: &[Scene] = &[
             "0.5",
             "--start",
             "1",
+            "--fog",
+            "0",
             "--width",
             "960",
             "--height",

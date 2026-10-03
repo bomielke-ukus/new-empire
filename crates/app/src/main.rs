@@ -2531,6 +2531,9 @@ impl ApplicationHandler for App {
             );
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let mut gpu = Gpu::new(window.clone(), &self.atlas);
+        // The ground's grain, beside the sprites; plain ground without it.
+        gpu.renderer
+            .upload_detail(&gpu.device, &gpu.queue, &view::detail::Detail::find());
         let chunks = view::terrain::build_all(self.sim.map());
         gpu.renderer.upload_terrain(&gpu.device, &chunks);
         let size = window.inner_size();

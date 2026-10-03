@@ -318,6 +318,21 @@ the crates, the binary, the environment variables and the data folder keep
 the code name `new-empire`, so a player's settings, saves and recordings
 stay where they are. The pixel font gained an apostrophe for it.
 
+### D28 — The ground is blended colour with a rendered grain, not tile sets
+**Date:** 2026-10-03 · **Decided by:** the owner
+
+`docs/05` §3 asks for four tile variants per ground type and alpha-mask
+transitions between types. Of a grain over today's ground, full tile sets
+with transitions, or leaving the ground for later, the owner chose the
+grain. The ground keeps its per-vertex colours, which blend between types
+at every corner and shade the slopes; over them each tile carries its
+type's grain, a greyscale layer rendered from a modelled patch (blades,
+pebbles, cracked hardpan, ripples, leaf litter, drifts) and multiplied in
+by the terrain shader and the rasteriser alike (`view::detail`). One
+layer per type repeats on every tile, softened by the per-tile colour
+variation; there are no variants and no transition tiles. Tile sets can
+still replace it: the sheet is one file, and the colours under it stay.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?

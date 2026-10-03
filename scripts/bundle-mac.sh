@@ -35,6 +35,8 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/assets"
 cp target/release/new-empire "$app/Contents/MacOS/new-empire"
 cp -R assets/sprites "$app/Contents/Resources/assets/sprites"
+# The ground's grain (view::detail), found beside the sprites.
+cp -R assets/terrain "$app/Contents/Resources/assets/terrain"
 # Recordings, once there are any; the placeholders are in the binary.
 if [ -d assets/sounds ]; then
   cp -R assets/sounds "$app/Contents/Resources/assets/sounds"
@@ -47,6 +49,7 @@ printf 'APPL????' > "$app/Contents/PkgInfo"
 # (view::sheets::candidates), so a set that did not copy is a silent
 # fallback to placeholders. Check it copied.
 test -f "$app/Contents/Resources/assets/sprites/villager/"*.ron
+test -f "$app/Contents/Resources/assets/terrain/detail.png"
 
 if command -v plutil >/dev/null 2>&1; then
   plutil -lint "$app/Contents/Info.plist"

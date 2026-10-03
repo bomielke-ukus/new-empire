@@ -52,14 +52,14 @@ impl Default for Options {
     }
 }
 
-struct Rgba {
-    width: u32,
-    height: u32,
+pub(crate) struct Rgba {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
     /// Four bytes per pixel.
-    pixels: Vec<u8>,
+    pub(crate) pixels: Vec<u8>,
 }
 
-fn read_rgba(path: &Path) -> Result<Rgba, String> {
+pub(crate) fn read_rgba(path: &Path) -> Result<Rgba, String> {
     let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut reader = png::Decoder::new(file)
         .read_info()

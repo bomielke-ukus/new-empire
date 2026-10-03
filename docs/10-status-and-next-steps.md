@@ -26,7 +26,7 @@ Six milestones landed; the vertical slice wants only the feel pass, M7.
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
 | M6 — Game shell | **Landed 2026-09-19** | Configure, play, save, reload and watch a replay without a terminal: the run in `crates/app/src/tests.rs`; the owner played the Mac build 2026-09-20 |
-| M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest is the owner's (§4d); the sprite art is code-built (`docs/08` §9) for every unit, building and node; the terrain is still procedural |
+| M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest is the owner's (§4d); the sprite art is code-built (`docs/08` §9) for every unit, building and node, and the ground has a rendered grain |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
 The Mac checks of 2026-09-12 exercised the economy and age progression
@@ -77,8 +77,9 @@ flash on the minimap; a loss pings the minimap. The villagers,
 soldiers, riders, buildings, walls, gates, trees, bushes, veins and the
 herd are rendered models, a wall's tiles joined into one run; a
 villager chops, mines, picks, hoes and hammers at its job and walks
-its load home on its shoulder or in its arms; the ground is still
-drawn procedurally. Every unit, building and technology button has a tooltip
+its load home on its shoulder or in its arms; the ground's colours
+blend from type to type under a rendered grain of grass blades,
+pebbles, cracked hardpan, ripples, leaf litter or drifts. Every unit, building and technology button has a tooltip
 with its cost, time, what it counters and what counters it, and its
 key. Five first-time hints come in context, each at most twice, and
 SETTINGS turns them off. A refused click flashes the resource it is
@@ -99,8 +100,8 @@ Work has run as three streams that merge into this branch:
   proven end to end. The camera and light rig are frozen, `atlas` validates
   and composes sheets against the one palette (`docs/07` D19). Every
   unit, building and map node the simulation has is modelled by code in
-  `tools/render/` and rendered through it; the terrain still draws as
-  procedural placeholders.
+  `tools/render/` and rendered through it, and the ground carries a grain
+  rendered from modelled patches (`docs/07` D28).
 - **Test and automation** (`docs/09`): CI runs the unit and behaviour tests,
   the replay corpus, the golden images, requirement traceability, the perf
   budget, generated-file drift, CLI-caller and workflow checks, and the art
@@ -1566,6 +1567,36 @@ The attack swing stood in for every job; now each job has its own.
   and walks as before.
 - **Goldens:** every scene with a villager rebaked.
 
+### Work record: the ground's grain (2026-10-03)
+
+The owner chose a grain over the blended ground, over full tile sets
+(`docs/07` D28).
+
+- **The patches.** `slice.py` models a tile of each ground type: blades
+  of three greens, pebbles and clods on earth, hardpan cracked into
+  plates, wind ripples on sand, close ripples and long swells on water,
+  leaf litter and twigs on the forest floor, drifts on snow. Each is laid
+  again on the eight tiles round it and rendered through the terrain
+  view, so the render is one period of an endless field and tiles without
+  a seam.
+- **The sheet.** `atlas detail` turns the eight renders into
+  `assets/terrain/detail.png`: a greyscale layer each, 128 by 64, its
+  diamond averaging 128 (no change to the colour) and varying by a set
+  contrast per type, strongest on grass and litter, faint on water and
+  snow. `atlas validate` checks it; `scripts/render-sprites.sh` renders
+  the `ground_*` subjects and composes them.
+- **Drawing it.** `TerrainVertex` names the texel each tile corner maps
+  to in its type's layer; the terrain shader reads it nearest in the
+  fragment stage and the rasteriser per pixel, and both multiply the
+  colour by it (`view::detail`). The app and `mapview` load the sheet
+  from beside the sprites, and the Mac bundle carries it; without it the
+  ground draws as before. The GPU path is checked by naga here and needs
+  a look on the Mac.
+- **A golden that saw nothing.** `zoomed-out` looked at another player's
+  start through player 0's fog, which had never seen it, and had been a
+  black frame since fog of war came in. It is drawn without fog now.
+- **Goldens:** every one rebaked.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1573,7 +1604,7 @@ the measurement on the Mac with `F4` open during a big fight, recorded
 against `docs/09` §8's table; the six players through the `RM-M7-01`
 sheet (`docs/09` §9.1), whose tally decides the milestone and admits
 `RM-M7` to `TRACEABILITY_LANDED`. The sprite art is code-built
-(`docs/08` §9) for everything but the terrain, and a modeller's work can replace any set by name; the name is settled
+(`docs/08` §9) for everything, the ground's grain included, and a modeller's work can replace any set by name; the name is settled
 (`docs/07` D27). The parallel track (§4b) runs on its own branch. After M7,
 `docs/06` M8.
 
@@ -1769,8 +1800,9 @@ Stated so they are not rediscovered.
   gate until their tally is in.
 - **The art is code-built and low-poly** (`docs/08` §9): every unit,
   building and node the simulation has is modelled, with its deaths,
-  construction stages and rubble; the terrain tiles are not. A
-  building's collapse is a cloud over its rubble, nobody fishes (the
+  construction stages and rubble. The ground is blended colour under one
+  grain per type, repeated on every tile, with no variants or transition
+  tiles (`docs/07` D28). A building's collapse is a cloud over its rubble, nobody fishes (the
   simulation has no boats), and no rendered set has its later ages' look
   or a second civilisation's. A modeller's work can replace any set by
   name.
