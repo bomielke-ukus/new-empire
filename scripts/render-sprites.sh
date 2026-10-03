@@ -19,7 +19,7 @@ mkdir -p "$work"
 subjects=("$@")
 if [ ${#subjects[@]} -eq 0 ]; then
   mapfile -t subjects < <("$blender" --background --python tools/render/slice.py -- --list 2>/dev/null \
-    | awk 'NF == 3 && ($3 == "unit" || $3 == "building") { print $1 }')
+    | awk 'NF == 3 && ($3 == "unit" || $3 == "building" || $3 == "node") { print $1 }')
 fi
 
 for name in "${subjects[@]}"; do
@@ -40,8 +40,12 @@ for name in "${subjects[@]}"; do
   if [ "$what" = unit ]; then
     anims=(--anim idle=1-4 --anim walk=5-12 --anim attack=13-18 --anim death=19-26 --anim decay=27-30)
     facings=()
-  else
+  elif [ "$what" = building ]; then
     anims=(--anim construction=1-3 --anim idle=4-4 --anim rubble=5-5)
+    facings=(--still 1)
+  else
+    # A node of the map: one standing frame.
+    anims=(--anim idle=1-1)
     facings=(--still 1)
   fi
   "$blender" "$work/$name.blend" --background --python tools/render/render_sheet.py -- \

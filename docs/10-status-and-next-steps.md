@@ -26,7 +26,7 @@ Six milestones landed; the vertical slice wants only the feel pass, M7.
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
 | M6 — Game shell | **Landed 2026-09-19** | Configure, play, save, reload and watch a replay without a terminal: the run in `crates/app/src/tests.rs`; the owner played the Mac build 2026-09-20 |
-| M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest and the real sprite art are the owner's (§4d) |
+| M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest is the owner's (§4d); the sprite art is code-built (`docs/08` §9) for every unit, building and node but the walls, gate and terrain |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
 The Mac checks of 2026-09-12 exercised the economy and age progression
@@ -73,12 +73,14 @@ building coming down raises a cloud over its rubble; a site rises in
 three stages under hammering villagers; a bush thins and a vein shrinks
 as they are used; a tree falls toward whoever felled it; an attack on
 your own out of view is a red chevron at the screen's edge, and a
-flash on the minimap; a loss pings the minimap. Every unit, building
-and technology button has a tooltip with its cost, time, what it
-counters and what counters it, and its key. Five first-time hints come
-in context, each at most twice, and SETTINGS turns them off. A refused
-click flashes the resource it is short of; a new unit standing idle
-chimes.
+flash on the minimap; a loss pings the minimap. The villagers,
+soldiers, riders, buildings, trees, bushes, veins and the herd are
+rendered models; the walls, the gate and the ground are still drawn
+procedurally. Every unit, building and technology button has a tooltip
+with its cost, time, what it counters and what counters it, and its
+key. Five first-time hints come in context, each at most twice, and
+SETTINGS turns them off. A refused click flashes the resource it is
+short of; a new unit standing idle chimes.
 
 ```sh
 cargo run --release -p new-empire           # the game window
@@ -93,9 +95,10 @@ Work has run as three streams that merge into this branch:
 - **Core** (simulation, view, app, tools): M0–M3 above, and M4 to step 5.
 - **Art pipeline** (`docs/08`): the render-to-sprite pipeline is built and
   proven end to end. The camera and light rig are frozen, `atlas` validates
-  and composes sheets against the one palette (`docs/07` D19), and the
-  greybox villager renders, loads and animates in-game in place of its
-  placeholder. Everything else still draws as a procedural placeholder.
+  and composes sheets against the one palette (`docs/07` D19). Every
+  unit, building and map node the simulation has is modelled by code in
+  `tools/render/` and rendered through it, except the walls, the gate and
+  the terrain, which still draw as procedural placeholders.
 - **Test and automation** (`docs/09`): CI runs the unit and behaviour tests,
   the replay corpus, the golden images, requirement traceability, the perf
   budget, generated-file drift, CLI-caller and workflow checks, and the art
@@ -1447,8 +1450,53 @@ or models made here by code, they chose the last (`docs/08` §9 step 3).
   shield, a thrust) and the house (mudbrick, thatch, the owner's cloth over
   the door; three construction stages, finished, rubble). Golden images with
   the villager, the spearman or a house are rebaked.
-- **Next:** the other ten units and eight buildings once the owner has seen
-  these two.
+- **Next:** the other units and buildings once the owner has seen these two.
+
+### Work record: the art, the infantry (2026-09-29)
+
+The owner took the look and said go; `playtest-5` went out first.
+
+- The clubman (a club), axeman (bronze cap, axe), slinger (headband,
+  sling whirled overhead), bowman (linen cap, a bow in the left hand drawn
+  with the right, a quiver over the shoulder) join the spearman. Weapons are
+  thicker than the first spear and lean out from the body, so they show
+  past the figure's outline when it faces the viewer; at 34 px the headgear
+  and the weapon are what tells the soldiers apart.
+- **A bug fixed in `atlas`:** `Palette::nearest` skipped the player ramp but
+  not the reserve (233 to 238), so a bronze helmet quantised into an index
+  with no colour of its own and `validate` rejected the set. It skips the
+  reserve now; a unit test sweeps colours through it.
+- The swordsman, heavy cavalry, priest and stone thrower in `docs/05`'s slice
+  list have no kinds in the simulation yet, so they are not modelled.
+- **A regression caught and fixed in picking.** Units are picked by the
+  opaque pixel under the cursor. The rendered figures have a gap between
+  their legs, so a right-click on the middle of an enemy soldier near its
+  feet fell through to the ground and became a move (the app test on
+  attack-move and stances caught it). `selection::pick` now takes a click
+  within `PICK_SLACK` (3) window pixels of a drawn pixel.
+- **The riders.** `kit.Rider`: a horse whose legs swing in diagonal pairs at
+  the walk, a seated rider who carries the weapon and thrusts with it, and a
+  fall onto the side that slides back onto its own tile. The scout (a pale
+  horse, a javelin, bare-headed) and the light cavalry (a bay, a bronze cone,
+  a lance).
+- **The buildings.** Every building kind the simulation has but the walls
+  and gate, which the renderer draws as joined runs: the Town Center
+  (three tiles, a hall with an upper storey and a flag), Storehouse (an
+  open shed of sacks and jars), Barracks (flat roof, a spear rack), Farm
+  (rows of crop), Archery Range (hut and targets), Stable (stalls and a
+  paddock), Market (awnings of the owner's colour), Watch Tower (one tile),
+  and the Bronze Age Temple, Academy, Siege Workshop and Government Centre.
+  Each has three construction stages (slab, half walls, full walls under
+  scaffolding), the building and its rubble. Until now the renderer drew
+  a rising site as generic pegs and then the finished frame cut short, and
+  rubble as a generic pile; `Atlas::stage_frame` and `Atlas::own_rubble`
+  now give a rendered set's own frames, and the old drawing remains for
+  kinds without one.
+- **What the map is made of.** The tree, berry bush, gold and stone veins
+  (one standing frame each) and the gazelle (`kit.Animal`: it grazes at
+  rest, walks, tosses its head, falls onto its side and lies as the
+  carcass). They belong to nobody, so `atlas` knows them as neutral sets:
+  no player colour, and a node needs only its idle frame.
 
 ### Resume here next session
 
@@ -1456,9 +1504,10 @@ or models made here by code, they chose the last (`docs/08` §9 step 3).
 the measurement on the Mac with `F4` open during a big fight, recorded
 against `docs/09` §8's table; the six players through the `RM-M7-01`
 sheet (`docs/09` §9.1), whose tally decides the milestone and admits
-`RM-M7` to `TRACEABILITY_LANDED`; and the real sprite art (`docs/08` §9
-step 3), which needs a modeller and Blender. The name (`docs/07` Q5)
-still bites. The parallel track (§4b) runs on its own branch. After M7,
+`RM-M7` to `TRACEABILITY_LANDED`. The sprite art is code-built
+(`docs/08` §9) for everything but the walls, the gate and the terrain,
+and a modeller's work can replace any set by name; the name is settled
+(`docs/07` D27). The parallel track (§4b) runs on its own branch. After M7,
 `docs/06` M8.
 
 ## 4. What M4 completed — Combat
@@ -1651,10 +1700,13 @@ Stated so they are not rediscovered.
 - **`RM-M7-01` is unrun.** The sheet is written (`docs/09` §9.1); the
   six players are the owner's, and `RM-M7` stays out of the traceability
   gate until their tally is in.
-- **Death animations and the hammering animation are art** (`docs/03`
-  §6.2, `docs/06` M7): the placeholders have a fall and a corpse and no
-  more; a building's collapse is a cloud over the rubble, not an
-  animation.
+- **The art is code-built and low-poly** (`docs/08` §9): every unit,
+  building and node the simulation has is modelled, with its deaths,
+  construction stages and rubble, except the walls and the gate, which are
+  still drawn as runs of placeholder segments, and the terrain tiles. No
+  villager has a hammering or task-specific animation (the attack swing
+  stands in), and a building's collapse is a cloud over its rubble. A
+  modeller's work can replace any set by name.
 - **One notification row stays open**: no Wonder to announce.
 - **The Mac build is not notarised, Apple Silicon only, and has no icon.**
   Notarising needs an Apple Developer account and a signing identity in

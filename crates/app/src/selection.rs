@@ -148,8 +148,12 @@ impl Selection {
     }
 }
 
-/// The entity under a window point: the top-most sprite whose opaque pixel
-/// is under the cursor. Overlays (rings, ghosts) are skipped.
+/// How far from a sprite's drawn pixels a click still picks it, in window
+/// pixels.
+pub const PICK_SLACK: f32 = 3.0;
+
+/// The entity under a window point: the top-most sprite with an opaque pixel
+/// within [`PICK_SLACK`] of the cursor. Overlays (rings, ghosts) are skipped.
 pub fn pick(
     scene: &Scene,
     atlas: &Atlas,
@@ -174,8 +178,23 @@ pub fn pick(
         if s.flip {
             sx = s.uw as u32 - 1 - sx.min(s.uw as u32 - 1);
         }
-        let idx = atlas.index_at(s.u as u32 + sx, s.v as u32 + sy);
-        if idx == 0 || idx == view::palette::SHADOW {
+        // A near miss counts: a rendered figure has a gap between its legs
+        // and a spear a pixel wide, and a click meant for a soldier that
+        // lands in the gap would otherwise fall through to the ground and
+        // become a move. PICK_SLACK window pixels, in the sheet's pixels.
+        let reach = (PICK_SLACK / (s.w * zoom) * s.uw as f32).ceil() as i32;
+        let solid = |x: i32, y: i32| {
+            if x < 0 || y < 0 || x >= s.uw as i32 || y >= s.vh as i32 {
+                return false;
+            }
+            let idx = atlas.index_at(s.u as u32 + x as u32, s.v as u32 + y as u32);
+            idx != 0 && idx != view::palette::SHADOW
+        };
+        let (cx, cy) = (sx as i32, sy as i32);
+        let hit = (-reach..=reach)
+            .flat_map(|oy| (-reach..=reach).map(move |ox| (ox, oy)))
+            .any(|(ox, oy)| solid(cx + ox, cy + oy));
+        if !hit {
             continue;
         }
         // Rings share the unit's slot; only the unit's own frame counts.
