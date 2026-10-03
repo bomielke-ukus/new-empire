@@ -400,7 +400,8 @@ proves a fresh clone can produce what the game loads.
    architecture variants as mesh swaps. **Under way** (2026-09-25, the
    owner's choice of source, over free packs and a hired modeller): modelled
    by code from a shared kit (`tools/render/kit.py`, `slice.py`,
-   `scripts/render-sprites.sh`), low-poly by design, rendered on the CPU. The
+   `scripts/render-sprites.sh`), rendered on the CPU: rounded, textured and
+   shadowed since 2026-10-03, when the owner asked for more realism. The
    spearman and the house came first; the villager is re-rendered on the same
    engine; the other infantry, the riders, every building, and the map's
    nodes and herd followed, then the walls and the gate, which join from

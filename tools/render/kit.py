@@ -72,7 +72,7 @@ COLOURS = {
     "stone_light": srgb(0.72, 0.70, 0.66),
     "bronze": srgb(0.72, 0.50, 0.24),
     "iron": srgb(0.55, 0.56, 0.60),
-    "thatch": srgb(0.70, 0.58, 0.32),
+    "thatch": srgb(0.62, 0.53, 0.34),
     "mudbrick": srgb(0.62, 0.45, 0.30),
     "plaster": srgb(0.86, 0.80, 0.68),
     "clay_roof": srgb(0.62, 0.30, 0.18),
@@ -92,6 +92,51 @@ COLOURS = {
     "rock": srgb(0.50, 0.49, 0.47),
     "rock_light": srgb(0.66, 0.64, 0.60),
     "white": srgb(0.88, 0.86, 0.80),
+    # The dark of a window or a doorway: the room behind it, unlit.
+    "opening": srgb(0.10, 0.08, 0.07),
+}
+
+
+# How each material's surface is broken up, so a wall reads as brick and a
+# post as wood rather than as flat colour: a pattern in object space, how far
+# it moves the colour either side of the base (which stays the material's
+# colour on average, so the palette match does not move), and how much relief
+# it gives the surface. Patterns: "noise", "grain" (noise drawn out along
+# the object's length), "brick" (courses on the vertical faces) and
+# "courses" (horizontal bands, roof tiles).
+SURFACES = {
+    "player": ("noise", 30.0, 0.05, 0.1),
+    "skin": ("noise", 30.0, 0.04, 0.05),
+    "hair": ("grain", 60.0, 0.10, 0.2),
+    "trouser": ("noise", 40.0, 0.06, 0.1),
+    "hide": ("noise", 35.0, 0.10, 0.2),
+    "linen": ("noise", 45.0, 0.06, 0.1),
+    "rope": ("grain", 60.0, 0.12, 0.2),
+    "wood": ("grain", 30.0, 0.16, 0.25),
+    "wood_dark": ("grain", 30.0, 0.16, 0.25),
+    "bark": ("grain", 45.0, 0.24, 0.5),
+    "stone": ("noise", 18.0, 0.14, 0.4),
+    "stone_light": ("brick", 3.0, 0.10, 0.3),
+    "rock": ("noise", 16.0, 0.16, 0.5),
+    "rock_light": ("noise", 16.0, 0.14, 0.5),
+    "slab": ("noise", 20.0, 0.10, 0.3),
+    "mudbrick": ("brick", 4.0, 0.12, 0.3),
+    "plaster": ("noise", 10.0, 0.06, 0.1),
+    "white": ("noise", 10.0, 0.05, 0.1),
+    "thatch": ("grain", 24.0, 0.12, 0.3),
+    "straw": ("grain", 24.0, 0.10, 0.2),
+    "clay_roof": ("courses", 40.0, 0.14, 0.3),
+    "earth": ("noise", 25.0, 0.12, 0.3),
+    "crop": ("noise", 30.0, 0.20, 0.5),
+    "leaf": ("noise", 30.0, 0.20, 0.6),
+    "leaf_dark": ("noise", 30.0, 0.20, 0.6),
+    "horse": ("noise", 30.0, 0.06, 0.1),
+    "horse_dark": ("noise", 30.0, 0.06, 0.1),
+    "horn": ("grain", 40.0, 0.10, 0.1),
+    "bronze": ("noise", 30.0, 0.08, 0.1),
+    "iron": ("noise", 30.0, 0.08, 0.1),
+    "gold": ("noise", 30.0, 0.10, 0.1),
+    "berry": ("noise", 40.0, 0.06, 0.1),
 }
 
 
@@ -101,9 +146,9 @@ def material(name):
         return mat
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    bsdf = nodes.get("Principled BSDF")
     r, g, b = COLOURS[name]
-    bsdf.inputs["Base Color"].default_value = (r, g, b, 1.0)
     # Matte: a highlight on a 34 px figure is one bright pixel that moves
     # between frames, which reads as noise rather than as shine.
     bsdf.inputs["Roughness"].default_value = 0.9
@@ -111,7 +156,75 @@ def material(name):
         if maybe in bsdf.inputs:
             bsdf.inputs[maybe].default_value = 0.1
             break
+    surface = SURFACES.get(name)
+    if surface is None:
+        bsdf.inputs["Base Color"].default_value = (r, g, b, 1.0)
+        return mat
+    pattern, scale, vary, relief = surface
+    fac = _pattern(nodes, links, pattern, scale)
+    # The base colour times a factor about 1. A brick wall is mostly brick
+    # (the pattern's light end) with thin dark mortar, so its factor is
+    # skewed for the wall as a whole to average the base colour.
+    spread = nodes.new("ShaderNodeMapRange")
+    low, high = (1.6, 0.2) if pattern == "brick" else (1.0, 1.0)
+    spread.inputs["To Min"].default_value = 1.0 - vary * low
+    spread.inputs["To Max"].default_value = 1.0 + vary * high
+    links.new(fac, spread.inputs["Value"])
+    mix = nodes.new("ShaderNodeMix")
+    mix.data_type = "RGBA"
+    mix.blend_type = "MULTIPLY"
+    mix.inputs["Factor"].default_value = 1.0
+    mix.inputs["A"].default_value = (r, g, b, 1.0)
+    links.new(spread.outputs["Result"], mix.inputs["B"])
+    links.new(mix.outputs["Result"], bsdf.inputs["Base Color"])
+    bump = nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = relief
+    bump.inputs["Distance"].default_value = 0.02
+    links.new(fac, bump.inputs["Height"])
+    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
     return mat
+
+
+def _pattern(nodes, links, pattern, scale):
+    """A 0-1 pattern socket in object space."""
+    coord = nodes.new("ShaderNodeTexCoord").outputs["Object"]
+    if pattern == "brick":
+        # Courses on the walls whichever way they face: along x + y, up z.
+        sep = nodes.new("ShaderNodeSeparateXYZ")
+        links.new(coord, sep.inputs["Vector"])
+        add = nodes.new("ShaderNodeMath")
+        add.operation = "ADD"
+        links.new(sep.outputs["X"], add.inputs[0])
+        links.new(sep.outputs["Y"], add.inputs[1])
+        comb = nodes.new("ShaderNodeCombineXYZ")
+        links.new(add.outputs["Value"], comb.inputs["X"])
+        links.new(sep.outputs["Z"], comb.inputs["Y"])
+        brick = nodes.new("ShaderNodeTexBrick")
+        brick.inputs["Scale"].default_value = scale
+        brick.inputs["Color1"].default_value = (1.0, 1.0, 1.0, 1.0)
+        brick.inputs["Color2"].default_value = (0.8, 0.8, 0.8, 1.0)
+        brick.inputs["Mortar"].default_value = (0.35, 0.35, 0.35, 1.0)
+        brick.inputs["Mortar Size"].default_value = 0.025
+        links.new(comb.outputs["Vector"], brick.inputs["Vector"])
+        grey = nodes.new("ShaderNodeRGBToBW")
+        links.new(brick.outputs["Color"], grey.inputs["Color"])
+        return grey.outputs["Val"]
+    if pattern == "courses":
+        wave = nodes.new("ShaderNodeTexWave")
+        wave.wave_type = "BANDS"
+        wave.bands_direction = "Z"
+        wave.inputs["Scale"].default_value = scale
+        wave.inputs["Distortion"].default_value = 1.0
+        links.new(coord, wave.inputs["Vector"])
+        return wave.outputs["Fac"]
+    mapping = nodes.new("ShaderNodeMapping")
+    stretch = 0.12 if pattern == "grain" else 1.0
+    mapping.inputs["Scale"].default_value = (scale, scale, scale * stretch)
+    links.new(coord, mapping.inputs["Vector"])
+    noise = nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Detail"].default_value = 4.0
+    links.new(mapping.outputs["Vector"], noise.inputs["Vector"])
+    return noise.outputs["Fac"]
 
 
 def clear():
@@ -130,6 +243,39 @@ def _mesh(name, verts, faces, mat, location=(0.0, 0.0, 0.0), rotation=(0.0, 0.0,
     obj.location = location
     obj.rotation_euler = rotation
     bpy.context.scene.collection.objects.link(obj)
+    soften(obj, 0.12, 2)
+    return obj
+
+
+# The parts of a figure or an animal that are flesh, and so rounded.
+BODY_PARTS = {
+    "leg_l", "leg_r", "arm_l", "arm_r", "torso", "head", "skirt",
+    "r_leg_l", "r_leg_r", "r_arm_l", "r_arm_r", "r_torso", "r_head",
+    "barrel", "neck", "belly", "mane", "tail",
+    "leg_fl", "leg_fr", "leg_bl", "leg_br",
+}
+
+
+def soften(obj, fraction, segments, limit=0.03):
+    """Rounds `obj`'s sharp edges by `fraction` of its thinnest side (at
+    most `limit`) in `segments` steps, smooth-shaded with the flat faces
+    kept flat: an edge that catches the light reads as made, a hard box
+    edge as a placeholder. Called again, it rounds further."""
+    if obj.type != "MESH" or not obj.data.vertices:
+        return obj
+    xs = [v.co for v in obj.data.vertices]
+    dims = [max(c[i] for c in xs) - min(c[i] for c in xs) for i in range(3)]
+    sides = [d for d in dims if d > 1e-6]
+    if not sides:
+        return obj
+    bevel = obj.modifiers.get("soften") or obj.modifiers.new("soften", "BEVEL")
+    bevel.width = min(limit, min(sides) * fraction)
+    bevel.segments = segments
+    bevel.limit_method = "ANGLE"
+    bevel.angle_limit = math.radians(40.0)
+    bevel.harden_normals = True
+    for poly in obj.data.polygons:
+        poly.use_smooth = True
     return obj
 
 
@@ -205,6 +351,31 @@ def cone(name, radius, height, mat, location=(0.0, 0.0, 0.0), sides=10):
     faces = [tuple(reversed(range(sides)))]
     faces += [(i, (i + 1) % sides, sides) for i in range(sides)]
     return _mesh(name, verts, faces, mat, location)
+
+
+def clump(name, radius, mat, location=(0.0, 0.0, 0.0), seed=0, lumps=0.28, squash=1.0):
+    """A lumpy ball of leaves: an icosphere pushed in and out by noise, so
+    a crown reads as foliage rather than as a solid."""
+    import bmesh
+    from mathutils import Vector, noise
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=3, radius=radius)
+    offset = Vector((seed * 7.31, seed * 3.17, seed * 5.53))
+    for v in bm.verts:
+        d = v.co.normalized()
+        n = noise.noise(d * 2.6 + offset) + 0.5 * noise.noise(d * 6.0 + offset)
+        v.co = d * radius * (1.0 + lumps * n)
+        v.co.z *= squash
+    mesh = bpy.data.meshes.new(name)
+    bm.to_mesh(mesh)
+    bm.free()
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+    mesh.materials.append(material(mat))
+    obj = bpy.data.objects.new(name, mesh)
+    obj.location = location
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
 
 
 def empty(name, parent=None, location=(0.0, 0.0, 0.0)):
@@ -295,6 +466,10 @@ class Humanoid:
     def _add(self, key, obj):
         obj.parent = self.body
         self.parts[key] = obj
+        # A body is rounded, limbs, head and trunk all but capsules; what it
+        # wears keeps its shape, or a cone helmet's rim turns into a brim.
+        if key in BODY_PARTS:
+            soften(obj, 0.42, 3, limit=0.06)
         return obj
 
     def hold(self, weapon, hand="right", lean=22.0):
@@ -612,16 +787,95 @@ def scaffold(b, name, w, d, h):
     b.add(box(name + "_rail_y1", (0.04, d, 0.04), "wood", (w / 2, 0.0, h * 0.7)), SCAFFOLD)
 
 
-def walls(b, name, w, d, h, mat, door=True):
+def walls(b, name, w, d, h, mat, door=True, windows=True):
     """A walled block with its full height on the finished frames and half
-    its height on the second stage; a door on the +Y face, one of the two the
-    camera sees (it sits out at +X +Y)."""
+    its height on the second stage, on a stone plinth; a framed door on the
+    +Y face and small windows on the two faces the camera sees (it sits out
+    at +X +Y)."""
     b.add(box(name + "_walls_half", (w, d, h * 0.5), mat), HALF_WALLS)
     b.add(box(name + "_walls", (w, d, h), mat), FULL_WALLS)
+    b.add(box(name + "_plinth", (w + 0.05, d + 0.05, min(0.08, h * 0.14)), "stone"), WALLS)
     if door:
-        b.add(box(name + "_door", (w * 0.22, 0.02, h * 0.62), "wood_dark",
-                  (0.0, d / 2 + 0.005, 0.0)), FULL_WALLS)
+        dw, dh, y = w * 0.22, h * 0.62, d / 2
+        b.add(box(name + "_door", (dw, 0.02, dh), "wood_dark", (0.0, y + 0.005, 0.0)),
+              FULL_WALLS)
+        for side in (-1.0, 1.0):
+            b.add(box("%s_jamb%d" % (name, side > 0), (0.035, 0.04, dh), "wood",
+                      (side * (dw / 2 + 0.0175), y + 0.01, 0.0)), FULL_WALLS)
+        b.add(box(name + "_lintel", (dw + 0.14, 0.05, 0.045), "wood", (0.0, y + 0.015, dh)),
+              FULL_WALLS)
+        b.add(box(name + "_step", (dw + 0.08, 0.08, 0.025), "stone", (0.0, y + 0.04, 0.0)),
+              FULL_WALLS)
+    if windows:
+        z = h * 0.42
+        along_x = [-w * 0.33, w * 0.33] if door else [0.0]
+        along_y = [-d * 0.25, d * 0.25] if d >= 0.9 else [0.0]
+        for i, x in enumerate(along_x if w >= 0.9 else []):
+            window(b, "%s_win_y%d" % (name, i), (x, d / 2, z), "y")
+        for i, y in enumerate(along_y):
+            window(b, "%s_win_x%d" % (name, i), (w / 2, y, z), "x")
     b.add(box(name + "_foundation", (w + 0.08, d + 0.08, 0.04), "slab"), FOUNDATION)
+
+
+def window(b, name, at, face, frames=FULL_WALLS):
+    """A small window in the wall face at `at`, facing +X or +Y: the dark
+    of the room behind, a lintel above and a sill below."""
+    x, y, z = at
+    def sized(along, out, tall):
+        return (out, along, tall) if face == "x" else (along, out, tall)
+    off = (0.006, 0.0) if face == "x" else (0.0, 0.006)
+    b.add(box(name, sized(0.1, 0.02, 0.09), "opening", (x + off[0], y + off[1], z)), frames)
+    b.add(box(name + "_lintel", sized(0.15, 0.035, 0.025), "wood",
+              (x + 2 * off[0], y + 2 * off[1], z + 0.09)), frames)
+    b.add(box(name + "_sill", sized(0.14, 0.04, 0.018), "wood",
+              (x + 2 * off[0], y + 2 * off[1], z - 0.018)), frames)
+
+
+def thatch_roof(b, name, size, location, frames=FINISHED):
+    """A thatched roof in two courses over a thick eave, with a knot of
+    straw at the top: the edge of a real thatch is a hand's breadth deep,
+    and a single pyramid reads as a lid."""
+    w, d, h = size
+    x, y, z = location
+    root2 = math.sqrt(2.0)
+    b.add(cylinder(name + "_eave", (max(w, d) + 0.04) / root2, 0.07, "thatch", (x, y, z - 0.05),
+                   sides=4, top_radius=(max(w, d) - 0.06) / root2,
+                   rotation=(0.0, 0.0, math.radians(45.0))), frames)
+    b.add(pyramid(name, (w, d, h), "thatch", (x, y, z)), frames)
+    b.add(pyramid(name + "_cap", (w * 0.5, d * 0.5, h * 0.52), "thatch", (x, y, z + h * 0.5)),
+          frames)
+    b.add(cylinder(name + "_knot", 0.03, 0.06, "wood_dark", (x, y, z + h - 0.01), sides=6),
+          frames)
+
+
+def ridge(b, name, length, location, mat, axis="x", frames=FINISHED, radius=0.035):
+    """A roll along a gable's ridge: bound straw, or ridge tiles."""
+    rot = (0.0, math.radians(90.0), 0.0) if axis == "x" else (math.radians(90.0), 0.0, 0.0)
+    b.add(cylinder(name, radius, length, mat, location, sides=8, pivot="centre", rotation=rot),
+          frames)
+
+
+def vigas(b, name, w, d, z, frames=FINISHED):
+    """Roof beams whose ends stand out of the two walls the camera sees."""
+    for i, t in enumerate([-0.35, -0.12, 0.12, 0.35]):
+        b.add(cylinder("%s_y%d" % (name, i), 0.025, 0.12, "wood", (t * w, d / 2 + 0.03, z),
+                       sides=6, pivot="centre", rotation=(math.radians(90.0), 0.0, 0.0)), frames)
+        b.add(cylinder("%s_x%d" % (name, i), 0.025, 0.12, "wood", (w / 2 + 0.03, t * d, z),
+                       sides=6, pivot="centre", rotation=(0.0, math.radians(90.0), 0.0)), frames)
+
+
+def woodpile(b, name, at, frames=FINISHED):
+    """A stack of split logs against a wall."""
+    x, y = at
+    for i, (dx, dz) in enumerate([(-0.05, 0.0), (0.05, 0.0), (0.0, 0.07)]):
+        b.add(cylinder("%s_%d" % (name, i), 0.035, 0.26, "wood", (x + dx, y, 0.035 + dz),
+                       sides=6, pivot="centre", rotation=(math.radians(90.0), 0.0, 0.0)), frames)
+
+
+def jar(b, name, at, frames=FINISHED, h=0.2):
+    """A clay storage jar."""
+    x, y = at
+    b.add(cylinder(name, 0.06, h, "clay_roof", (x, y, 0.0), sides=10, top_radius=0.045), frames)
 
 
 def foundation(b, name, w, d, mat="slab"):
@@ -991,6 +1245,10 @@ class Rider:
     def _add(self, key, obj):
         obj.parent = self.body
         self.parts[key] = obj
+        # A body is rounded, limbs, head and trunk all but capsules; what it
+        # wears keeps its shape, or a cone helmet's rim turns into a brim.
+        if key in BODY_PARTS:
+            soften(obj, 0.42, 3, limit=0.06)
         return obj
 
     def hold(self, weapon, lean=18.0):
@@ -1138,6 +1396,10 @@ class Animal:
     def _add(self, key, obj):
         obj.parent = self.body
         self.parts[key] = obj
+        # A body is rounded, limbs, head and trunk all but capsules; what it
+        # wears keeps its shape, or a cone helmet's rim turns into a brim.
+        if key in BODY_PARTS:
+            soften(obj, 0.42, 3, limit=0.06)
         return obj
 
     def animate(self):

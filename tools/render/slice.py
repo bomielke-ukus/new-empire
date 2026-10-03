@@ -101,8 +101,9 @@ def house():
     w, d, wall = 1.30, 1.30, 0.50
     kit.walls(b, "house", w, d, wall, "mudbrick")
     kit.scaffold(b, "house", w + 0.1, d + 0.1, wall + 0.25)
-    b.add(kit.pyramid("house_roof", (w + 0.25, d + 0.25, 0.55), "thatch", (0.0, 0.0, wall)),
-          kit.FINISHED)
+    kit.thatch_roof(b, "house_roof", (w + 0.25, d + 0.25, 0.55), (0.0, 0.0, wall))
+    kit.woodpile(b, "house_wood", (w / 2 + 0.1, -0.35))
+    kit.jar(b, "house_jar", (-0.4, d / 2 + 0.1))
     b.add(kit.box("house_cloth", (w * 0.36, 0.03, 0.12), "player",
                   (0.0, d / 2 + 0.02, wall * 0.62)), kit.FINISHED)
     kit.rubble(b, "house", 1.3, 0.28, mats=("mudbrick", "thatch"))
@@ -120,8 +121,13 @@ def town_center():
     b.add(kit.box("tc_upper", (1.3, 1.3, 0.38), "plaster", (0.0, 0.0, wall)), kit.FINISHED)
     b.add(kit.box("tc_eave", (w + 0.1, w + 0.1, 0.06), "wood_dark", (0.0, 0.0, wall)),
           kit.FINISHED)
-    b.add(kit.pyramid("tc_roof", (1.6, 1.6, 0.5), "thatch", (0.0, 0.0, wall + 0.38)),
-          kit.FINISHED)
+    kit.thatch_roof(b, "tc_roof", (1.6, 1.6, 0.5), (0.0, 0.0, wall + 0.38))
+    for i, x in enumerate([-0.45, 0.45]):
+        kit.window(b, "tc_up_y%d" % i, (x * 0.8, 0.65, wall + 0.17), "y", kit.FINISHED)
+        kit.window(b, "tc_up_x%d" % i, (0.65, x * 0.8, wall + 0.17), "x", kit.FINISHED)
+    for i, at in enumerate([(-0.85, w / 2 + 0.12), (0.75, w / 2 + 0.1), (w / 2 + 0.12, 0.7)]):
+        kit.jar(b, "tc_jar_%d" % i, at)
+    kit.woodpile(b, "tc_wood", (w / 2 + 0.12, -0.6))
     b.add(kit.box("tc_cloth", (0.6, 0.03, 0.16), "player", (0.0, w / 2 + 0.02, wall * 0.7)),
           kit.FINISHED)
     b.add(kit.box("tc_cloth_x", (0.03, 0.6, 0.16), "player", (w / 2 + 0.02, 0.0, wall * 0.7)),
@@ -145,6 +151,7 @@ def storehouse():
     b.add(kit.box("store_side", (0.06, d, h), "wood", (-w / 2, 0.0, 0.0)), kit.FULL_WALLS)
     b.add(kit.gable("store_roof", (w + 0.25, d + 0.25, 0.45), "thatch", (0.0, 0.0, h)),
           kit.FINISHED)
+    kit.ridge(b, "store_ridge", w + 0.3, (0.0, 0.0, h + 0.45), "straw")
     b.add(kit.box("store_cloth", (w * 0.8, 0.03, 0.10), "player", (0.0, d / 2 + 0.14, h - 0.02)),
           kit.FINISHED)
     for i, (x, y) in enumerate([(-0.4, -0.3), (-0.15, -0.35), (0.15, -0.3), (-0.4, 0.05)]):
@@ -165,6 +172,7 @@ def barracks():
     w, d, wall = 1.5, 1.4, 0.58
     kit.walls(b, "barracks", w, d, wall, "mudbrick")
     kit.scaffold(b, "barracks", w + 0.1, d + 0.1, wall + 0.2)
+    kit.vigas(b, "barracks_viga", w, d, wall - 0.06)
     b.add(kit.box("barracks_roof", (w + 0.1, d + 0.1, 0.07), "wood_dark", (0.0, 0.0, wall)),
           kit.FINISHED)
     b.add(kit.box("barracks_parapet", (w + 0.1, 0.06, 0.1), "mudbrick",
@@ -199,8 +207,11 @@ def farm():
                       (-s * 0.25, y, 0.03)), kit.HALF_WALLS)
         b.add(kit.box("farm_furrow_%d" % i, (s * 0.92, 0.12, 0.05), "earth",
                       (0.0, y, 0.03)), (3,))
-        b.add(kit.box("farm_crop_%d" % i, (s * 0.92, 0.14, 0.12), "crop",
-                      (0.0, y, 0.03)), kit.FINISHED)
+        # A row of plants, each its own leafy tuft.
+        for j in range(9):
+            x = -s * 0.44 + (j + 0.5) * s * 0.88 / 9
+            b.add(kit.clump("farm_crop_%d_%d" % (i, j), 0.075, "crop", (x, y, 0.08),
+                            seed=100 + i * 9 + j, lumps=0.35, squash=0.9), kit.FINISHED)
     c = s / 2
     for i, (x, y) in enumerate([(-c, -c), (c, -c), (c, c), (-c, c)]):
         b.add(kit.cylinder("farm_stake_%d" % i, 0.03, 0.18, "wood", (x, y, 0.0), sides=5),
@@ -229,8 +240,7 @@ def archery_range():
     b.add(kit.box("range_hut", (hw, hw, hh), "mudbrick", (hx, hy, 0.0)), kit.FULL_WALLS)
     b.add(kit.box("range_door", (0.2, 0.02, 0.3), "wood_dark", (hx, hy + hw / 2 + 0.005, 0.0)),
           kit.FULL_WALLS)
-    b.add(kit.pyramid("range_roof", (hw + 0.2, hw + 0.2, 0.4), "thatch", (hx, hy, hh)),
-          kit.FINISHED)
+    kit.thatch_roof(b, "range_roof", (hw + 0.2, hw + 0.2, 0.4), (hx, hy, hh))
     kit.scaffold(b, "range", hw + 0.1, hw + 0.1, hh + 0.2)
     for i, (x, y) in enumerate([(0.45, 0.1), (0.1, 0.55)]):
         kit.posts(b, "range_stand_%d" % i, [(x - 0.12, y), (x + 0.12, y)], 0.42,
@@ -260,6 +270,7 @@ def stable():
                       (x, y0 + d / 2 + 0.005, 0.0)), kit.FULL_WALLS)
     b.add(kit.gable("stable_roof", (w + 0.2, d + 0.3, 0.4), "thatch", (0.0, y0, wall)),
           kit.FINISHED)
+    kit.ridge(b, "stable_ridge", w + 0.25, (0.0, y0, wall + 0.4), "straw")
     b.add(kit.box("stable_cloth", (0.03, d * 0.7, 0.12), "player", (w / 2 + 0.02, y0, wall * 0.6)),
           kit.FINISHED)
     kit.scaffold(b, "stable", w + 0.1, d + 0.1, wall + 0.2)
@@ -313,8 +324,7 @@ def watch_tower():
     for i, (x, y) in enumerate([(-c, -c), (c, -c), (c, c), (-c, c)]):
         b.add(kit.cylinder("tower_post_%d" % i, 0.025, 0.2, "wood", (x, y, h + 0.05), sides=5),
               kit.FINISHED)
-    b.add(kit.pyramid("tower_roof", (w + 0.2, w + 0.2, 0.2), "thatch", (0.0, 0.0, h + 0.25)),
-          kit.FINISHED)
+    kit.thatch_roof(b, "tower_roof", (w + 0.2, w + 0.2, 0.2), (0.0, 0.0, h + 0.25))
     b.add(kit.box("tower_band", (w * 0.7, 0.03, 0.1), "player", (0.0, w / 2 + 0.02, h * 0.7)),
           kit.FINISHED)
     kit.scaffold(b, "tower", w + 0.08, w + 0.08, h + 0.1)
@@ -342,6 +352,8 @@ def temple():
           kit.FINISHED)
     b.add(kit.gable("temple_roof", (1.1, 1.35, 0.35), "clay_roof", (0.0, 0.05, base + wall),
                     ridge="y"), kit.FINISHED)
+    kit.ridge(b, "temple_ridge", 1.4, (0.0, 0.05, base + wall + 0.35), "clay_roof", axis="y",
+              radius=0.03)
     # The owner's colour where the columns and eaves do not hide it: along
     # the lintel's face and the lower step's +X side.
     b.add(kit.box("temple_cloth", (0.8, 0.03, 0.07), "player",
@@ -370,6 +382,7 @@ def academy():
           kit.FINISHED)
     b.add(kit.gable("academy_roof", (1.8, 1.8, 0.34), "clay_roof", (0.12, 0.12, wall + 0.06)),
           kit.FINISHED)
+    kit.ridge(b, "academy_ridge", 1.85, (0.12, 0.12, wall + 0.4), "clay_roof", radius=0.03)
     b.add(kit.box("academy_band", (0.03, 0.8, 0.1), "player", (w / 2 + 0.02, 0.0, wall * 0.65)),
           kit.FINISHED)
     kit.flag(b, "academy", -0.5, 0.12, wall + 0.3, height=0.4)
@@ -605,54 +618,67 @@ def gate():
 # colour (`atlas` knows them as neutral sets); a node has one standing frame.
 
 def tree():
-    """A broadleaf tree: a trunk and a rounded, two-tone canopy."""
+    """A broadleaf tree: a tapering trunk forking into boughs under a crown
+    of leaf clumps, darker beneath and lit on top."""
+    import math as _m
     root = kit.empty("Tree")
-    parts = [
-        kit.cylinder("tree_trunk", 0.07, 0.5, "bark", sides=7, top_radius=0.05),
-        kit.cylinder("tree_crown_low", 0.34, 0.28, "leaf_dark", (0.0, 0.0, 0.42), sides=8,
-                     top_radius=0.36),
-        kit.cylinder("tree_crown_mid", 0.36, 0.22, "leaf", (0.0, 0.0, 0.70), sides=8,
-                     top_radius=0.28),
-        kit.cone("tree_crown_top", 0.28, 0.22, "leaf", (0.0, 0.0, 0.92), sides=8),
-    ]
+    parts = [kit.cylinder("tree_trunk", 0.075, 0.55, "bark", sides=10, top_radius=0.04)]
+    for i, (a, tilt) in enumerate([(0.3, 28.0), (2.4, 34.0), (4.3, 30.0)]):
+        bough = kit.cylinder("tree_bough_%d" % i, 0.03, 0.3, "bark", (0.0, 0.0, 0.42), sides=6,
+                             top_radius=0.015)
+        bough.rotation_euler = (kit._deg(tilt) * _m.cos(a), kit._deg(tilt) * _m.sin(a), 0.0)
+        parts.append(bough)
+    clumps = [(0.0, 0.0, 0.86, 0.26, "leaf"), (0.17, 0.08, 0.72, 0.21, "leaf_dark"),
+              (-0.15, 0.12, 0.74, 0.2, "leaf"), (0.04, -0.18, 0.7, 0.2, "leaf_dark"),
+              (-0.08, -0.06, 1.0, 0.18, "leaf"), (0.12, -0.04, 0.97, 0.16, "leaf"),
+              (-0.17, -0.12, 0.62, 0.15, "leaf_dark"), (0.14, 0.18, 0.9, 0.15, "leaf")]
+    for i, (x, y, z, r, mat) in enumerate(clumps):
+        parts.append(kit.clump("tree_crown_%d" % i, r, mat, (x, y, z), seed=i + 1,
+                               squash=0.85))
     for p in parts:
         p.parent = root
     return root
 
 
 def berry_bush():
-    """A low round bush dotted with red berries."""
-    root = kit.empty("BerryBush")
-    parts = [
-        kit.cylinder("bush_low", 0.30, 0.18, "leaf_dark", sides=8, top_radius=0.33),
-        kit.cylinder("bush_top", 0.33, 0.14, "leaf", (0.0, 0.0, 0.18), sides=8, top_radius=0.2),
-    ]
+    """A low bush of leaf clumps hung with red berries."""
     import math as _m
-    for i in range(9):
-        a = 2 * _m.pi * i / 9 + 0.3
-        r = 0.26 if i % 2 else 0.18
-        z = 0.14 if i % 2 else 0.26
-        parts.append(kit.box("bush_berry_%d" % i, (0.06, 0.06, 0.06), "berry",
-                             (r * _m.cos(a), r * _m.sin(a), z)))
+    root = kit.empty("BerryBush")
+    parts = []
+    for i, (x, y, z, r) in enumerate([(0.0, 0.0, 0.16, 0.2), (0.16, 0.06, 0.12, 0.15),
+                                      (-0.14, 0.1, 0.12, 0.15), (0.05, -0.15, 0.11, 0.14),
+                                      (-0.08, -0.1, 0.22, 0.13)]):
+        parts.append(kit.clump("bush_%d" % i, r, "leaf_dark" if i % 2 else "leaf", (x, y, z),
+                               seed=20 + i, squash=0.75))
+    for i in range(14):
+        a = 2 * _m.pi * i / 14 + 0.3
+        r = 0.24 if i % 2 else 0.15
+        z = 0.12 if i % 2 else 0.27
+        parts.append(kit.clump("bush_berry_%d" % i, 0.035, "berry",
+                               (r * _m.cos(a), r * _m.sin(a), z), seed=40 + i, lumps=0.05))
     for p in parts:
         p.parent = root
     return root
 
 
 def _vein(name, rock, fleck):
-    """A heap of broken rock with flecks of what it is worth."""
+    """A heap of broken rock, lumpy as rock is, with nuggets of what it is
+    worth showing through."""
     import random
     rng = random.Random(7 if fleck == "gold" else 11)
     root = kit.empty(name)
     parts = []
-    for i, (x, y, s) in enumerate([(0.0, 0.0, 0.34), (-0.2, 0.12, 0.24), (0.18, -0.15, 0.26),
-                                   (0.12, 0.2, 0.2), (-0.15, -0.18, 0.2)]):
-        parts.append(kit.box("%s_rock_%d" % (name, i), (s, s * 0.9, s * 0.8), rock if i % 2 else
-                             "rock", (x, y, 0.0), rotation=(0.0, 0.0, rng.uniform(0.0, 1.5))))
-    for i in range(11):
-        parts.append(kit.box("%s_fleck_%d" % (name, i), (0.08, 0.08, 0.08), fleck,
-                             (rng.uniform(-0.22, 0.22), rng.uniform(-0.22, 0.22),
-                              rng.uniform(0.14, 0.28))))
+    for i, (x, y, s) in enumerate([(0.0, 0.0, 0.2), (-0.2, 0.12, 0.15), (0.18, -0.15, 0.16),
+                                   (0.12, 0.2, 0.13), (-0.15, -0.18, 0.13), (0.24, 0.04, 0.1)]):
+        parts.append(kit.clump("%s_rock_%d" % (name, i), s, rock if i % 2 else "rock",
+                               (x, y, s * 0.45), seed=60 + i, lumps=0.38, squash=0.75))
+    for i in range(14):
+        a = rng.uniform(0.0, 6.28)
+        r = rng.uniform(0.05, 0.24)
+        import math as _m
+        parts.append(kit.clump("%s_fleck_%d" % (name, i), rng.uniform(0.03, 0.05), fleck,
+                               (r * _m.cos(a), r * _m.sin(a), rng.uniform(0.08, 0.24)),
+                               seed=80 + i, lumps=0.3))
     for p in parts:
         p.parent = root
     return root
@@ -791,10 +817,10 @@ def ground_sand():
 def ground_shallow_water():
     """Small, close ripples."""
     def scatter(rng):
-        return [(_stripe, (-0.5 + (k + 0.5) / 6, 0.0), dict(mat="stone_light", width=0.09,
+        return [(_stripe, (-0.5 + (k + 0.5) / 6, 0.0), dict(mat="plaster", width=0.09,
                                                              height=0.006, axis="y"))
                 for k in range(6)]
-    return _ground("GroundShallowWater", "stone_light", scatter, 25)
+    return _ground("GroundShallowWater", "plaster", scatter, 25)
 
 
 def ground_deep_water():

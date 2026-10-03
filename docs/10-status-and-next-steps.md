@@ -1597,6 +1597,40 @@ The owner chose a grain over the blended ground, over full tile sets
   black frame since fog of war came in. It is drawn without fog now.
 - **Goldens:** every one rebaked.
 
+### Work record: more realistic art (2026-10-03)
+
+The owner, looking at the screenshots, asked for more realistic graphics.
+Every sprite set and the ground's grain are re-rendered.
+
+- **Light.** A dim sky joins the three suns (rig.json `sky`). It is direct
+  light, so it reaches only what nothing shades: creases, undersides and
+  the ground under a body darken as they do outdoors. Bounces stay off;
+  they would tint whatever stands beside the magenta player colour pink.
+- **Shadows on the ground.** The rig lays a shadow catcher under every
+  subject but the ground patches, lit only by a sun of its own (rig.json
+  `shadow`, light-linked so it lights the ground and nothing else while
+  the three suns do not reach the ground). The shadow is short, falls back
+  and to the right, and stays inside each class's frame; `atlas quantize`
+  keeps it, however strong, as the palette's translucent shadow index.
+- **Surfaces.** Each material has a pattern in object space
+  (`kit.SURFACES`): wood grain, brick courses on mudbrick and dressed
+  stone, rows on tiled roofs, mottled stone and earth, leafy variation,
+  with relief; the colour moves either side of the base and averages it.
+- **Shapes.** Every mesh has its edges bevelled and smooth-shaded
+  (`kit.soften`); the flesh of a figure, a horse or a gazelle is rounded
+  nearly to capsules, what it wears much less. Trees, bushes, veins and
+  crops are built of lumpy clumps (`kit.clump`) rather than stacked
+  cylinders and boxes.
+- **Buildings.** A stone plinth, a framed door with a lintel and a step,
+  small windows with sills on the faces the camera sees, thatch over a
+  thick eave in two courses with a knot at the top, ridges on gables, roof
+  beams through flat-roofed walls, jars and a woodpile.
+- **A quantiser bug, fixed.** `Palette::nearest` skipped the specials at
+  248 and above but not the shadow at 239, which is black: the darkest
+  shading of every set landed on it and was drawn see-through, a horse's
+  legs most of all. It is skipped now; every set is recomposed.
+- **Goldens:** every one rebaked.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1798,7 +1832,8 @@ Stated so they are not rediscovered.
 - **`RM-M7-01` is unrun.** The sheet is written (`docs/09` §9.1); the
   six players are the owner's, and `RM-M7` stays out of the traceability
   gate until their tally is in.
-- **The art is code-built and low-poly** (`docs/08` §9): every unit,
+- **The art is code-built** (`docs/08` §9), rounded and textured but
+  simple in form: every unit,
   building and node the simulation has is modelled, with its deaths,
   construction stages and rubble. The ground is blended colour under one
   grain per type, repeated on every tile, with no variants or transition

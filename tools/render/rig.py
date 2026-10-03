@@ -45,6 +45,9 @@ def clear_rig():
     loud, because it means the file was lit for something else.
     """
     for obj in list(bpy.data.objects):
+        if obj.name == "ne_ground":
+            bpy.data.objects.remove(obj, do_unlink=True)
+            continue
         if obj.type not in ("CAMERA", "LIGHT"):
             continue
         if obj.type == "LIGHT" and not obj.name.startswith("ne_"):
@@ -86,6 +89,44 @@ def build_lights(rig, scene):
         scene.collection.objects.link(obj)
         lights.append(obj)
     return lights
+
+
+def build_ground(rig, scene, lights):
+    """The ground the shadows fall on (rig.json "shadow"): a shadow catcher
+    under the subject, lit by a sun of its own that lights nothing else,
+    while the key, fill and rim do not reach it. So the subject is lit as
+    before and its shadow on the ground is short and soft, falling inside
+    the frame."""
+    spec = rig.get("shadow")
+    if spec is None:
+        return None
+    from mathutils import Vector
+    mesh = bpy.data.meshes.new("ne_ground")
+    h = 10.0
+    mesh.from_pydata([(-h, -h, 0.0), (h, -h, 0.0), (h, h, 0.0), (-h, h, 0.0)], [],
+                     [(0, 1, 2, 3)])
+    ground = bpy.data.objects.new("ne_ground", mesh)
+    ground.is_shadow_catcher = True
+    scene.collection.objects.link(ground)
+    only = bpy.data.collections.new("ne_ground_only")
+    only.objects.link(ground)
+    only.collection_objects[0].light_linking.link_state = "INCLUDE"
+    not_ground = bpy.data.collections.new("ne_not_ground")
+    not_ground.objects.link(ground)
+    not_ground.collection_objects[0].light_linking.link_state = "EXCLUDE"
+    for light in lights:
+        light.light_linking.receiver_collection = not_ground
+    data = bpy.data.lights.new("ne_shadow", type="SUN")
+    data.energy = spec["energy"]
+    data.angle = math.radians(spec["angle_deg"])
+    sun = bpy.data.objects.new("ne_shadow", data)
+    toward = Vector(spec["direction_toward_light"]).normalized()
+    sun.location = toward * 10.0
+    # A sun shines down its local -Z: point +Z at the light.
+    sun.rotation_euler = toward.to_track_quat("Z", "Y").to_euler()
+    sun.light_linking.receiver_collection = only
+    scene.collection.objects.link(sun)
+    return ground
 
 
 def configure_render(rig, scene):
@@ -137,12 +178,20 @@ def configure_render(rig, scene):
     image.color_mode = spec["colour_mode"]
     image.color_depth = spec["colour_depth"]
 
-    # No world lighting: the three suns are the whole lighting model, and an
-    # ambient world colour would flatten them.
+    # The world is a dim sky (rig.json "sky"), lighting directly whatever
+    # nothing shades: creases, undersides and the ground beneath a body go
+    # dark as they do outdoors. Without the section, no world light at all.
     if scene.world is None:
         scene.world = bpy.data.worlds.new("ne_world")
-    scene.world.use_nodes = False
-    scene.world.color = (0.0, 0.0, 0.0)
+    sky = rig.get("sky")
+    if sky is None:
+        scene.world.use_nodes = False
+        scene.world.color = (0.0, 0.0, 0.0)
+    else:
+        scene.world.use_nodes = True
+        bg = scene.world.node_tree.nodes.get("Background")
+        bg.inputs["Color"].default_value = list(sky["colour"]) + [1.0]
+        bg.inputs["Strength"].default_value = sky["strength"]
 
 
 def set_class(rig, scene, class_name):
@@ -154,6 +203,10 @@ def set_class(rig, scene, class_name):
     out and half of every frame is empty ground below the subject's feet.
     """
     spec = rig["classes"][class_name]
+    # Terrain is the ground itself: nothing for a shadow to fall on.
+    ground = bpy.data.objects.get("ne_ground")
+    if ground is not None:
+        ground.hide_render = class_name == "Terrain"
     scene.render.resolution_x = spec["render_px"][0]
     scene.render.resolution_y = spec["render_px"][1]
     scene.render.resolution_percentage = 100
@@ -185,6 +238,7 @@ def build(rig=None, scene=None):
     clear_rig()
     cam = build_camera(rig, scene)
     lights = build_lights(rig, scene)
+    build_ground(rig, scene, lights)
     configure_render(rig, scene)
     return rig, cam, lights
 
