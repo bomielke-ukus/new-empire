@@ -672,13 +672,15 @@ def _vein(name, rock, fleck):
                                    (0.12, 0.2, 0.13), (-0.15, -0.18, 0.13), (0.24, 0.04, 0.1)]):
         parts.append(kit.clump("%s_rock_%d" % (name, i), s, rock if i % 2 else "rock",
                                (x, y, s * 0.45), seed=60 + i, lumps=0.38, squash=0.75))
-    for i in range(14):
+    # What it is worth has to show from across the map: big nuggets, many
+    # of them, sitting on the rock rather than buried in it.
+    import math as _m
+    for i in range(20):
         a = rng.uniform(0.0, 6.28)
-        r = rng.uniform(0.05, 0.24)
-        import math as _m
-        parts.append(kit.clump("%s_fleck_%d" % (name, i), rng.uniform(0.03, 0.05), fleck,
-                               (r * _m.cos(a), r * _m.sin(a), rng.uniform(0.08, 0.24)),
-                               seed=80 + i, lumps=0.3))
+        r = rng.uniform(0.0, 0.22)
+        z = 0.2 * (1.0 - r / 0.3) + 0.05
+        parts.append(kit.clump("%s_fleck_%d" % (name, i), rng.uniform(0.045, 0.07), fleck,
+                               (r * _m.cos(a), r * _m.sin(a), z), seed=80 + i, lumps=0.3))
     for p in parts:
         p.parent = root
     return root
