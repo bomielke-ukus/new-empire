@@ -368,6 +368,25 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // Walls joined into runs (`crates/view/src/walls.rs`): a palisade
+        // turning a corner with a T off it and a gate in it, a stone wall
+        // on each diagonal with a gate across it, one along x whose gate a
+        // soldier of theirs keeps shut, and a lone tile, its post alone.
+        name: "walls",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "walls",
+            "--ticks",
+            "5",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The tooltip (`UX-TIP-01`): the barracks selected and the clubman's
         // button hovered, its cost, time, counters and key in a box above
         // the panel.

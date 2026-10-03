@@ -27,6 +27,7 @@ pub mod sheets;
 pub mod shell;
 pub mod sprites;
 pub mod terrain;
+pub mod walls;
 
 pub use camera::Camera;
 pub use fog::FogLights;

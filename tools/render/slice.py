@@ -420,6 +420,179 @@ def government_centre():
 
 
 # --------------------------------------------------------------------------
+# Walls and the gate. A wall tile's finished frame is its post alone; the
+# game adds an arm toward each wall beside it (kit.WALL_DIRECTIONS), and the
+# arms of two tiles meet at the edge or the corner they share.
+
+POST_R = 0.10          # the palisade's post
+STAKE_R = 0.045        # and the stakes of its arms
+STAKE_STEP = 0.10
+
+
+def palisade_wall():
+    """Sharpened logs: a stout post with the owner's band, and from it a row
+    of stakes lashed with rope toward each neighbour."""
+    b = kit.Building("PalisadeWall", 1, frames=13)
+    b.add(kit.box("palisade_found", (0.4, 0.4, 0.03), "earth"), kit.STAGES)
+    b.add(kit.cylinder("palisade_post_half", POST_R, 0.3, "wood_dark", sides=8),
+          kit.HALF_WALLS)
+    b.add(kit.cylinder("palisade_post", POST_R, 0.62, "wood_dark", sides=8), kit.FULL_WALLS)
+    b.add(kit.cone("palisade_post_tip", POST_R, 0.1, "wood_dark", (0.0, 0.0, 0.62), sides=8),
+          kit.FINISHED)
+    b.add(kit.cylinder("palisade_band", POST_R + 0.008, 0.08, "player", (0.0, 0.0, 0.42),
+                       sides=8), kit.FINISHED)
+    for k in range(8):
+        unit, angle, reach = kit.wall_direction(k)
+        frames = kit.arm_frames(k)
+        # Packed from the edge in, so the gap where two tiles' rows meet is
+        # the same as the gap between any two stakes.
+        s, i = reach - STAKE_STEP / 2.0, 0
+        while s - STAKE_R >= POST_R:
+            x, y = kit.along(unit, s)
+            h = 0.47 if i % 2 else 0.5
+            b.add(kit.cylinder("palisade_arm%d_stake%d" % (k, i), STAKE_R, h, "wood",
+                               (x, y, 0.0), sides=6), frames)
+            b.add(kit.cone("palisade_arm%d_tip%d" % (k, i), STAKE_R, 0.07, "wood", (x, y, h),
+                           sides=6), frames)
+            s -= STAKE_STEP
+            i += 1
+        x, y = kit.along(unit, (POST_R + reach) / 2.0)
+        for j, z in enumerate((0.12, 0.34)):
+            b.add(kit.box("palisade_arm%d_lash%d" % (k, j), (reach - POST_R, 2 * STAKE_R + 0.02,
+                                                             0.03), "rope", (x, y, z),
+                          rotation=(0.0, 0.0, angle)), frames)
+    for i, (x, y, a) in enumerate([(-0.12, 0.05, 0.4), (0.1, -0.1, -0.9), (0.02, 0.18, 1.6)]):
+        b.add(kit.cylinder("palisade_log_%d" % i, 0.05, 0.5, "wood", (x, y, 0.05), sides=6,
+                           pivot="centre", rotation=(0.0, kit._deg(90.0), a)), kit.RUBBLE)
+    b.add(kit.cylinder("palisade_stump", POST_R, 0.12, "wood_dark", sides=8), kit.RUBBLE)
+    b.finish()
+    return b.root
+
+
+PIER = 0.16            # half the stone wall's pier
+STONE_W = 0.26         # its arms' thickness
+
+
+def stone_arm(b, name, k, frames, pier=PIER, reach=None):
+    """A stretch of stone wall from a pier of half-size `pier` toward
+    direction `k`: the courses, a coping and merlons along the top."""
+    unit, _, edge = kit.wall_direction(k)
+    reach = edge if reach is None else reach
+    b.add(kit.prism(name + "_body", _cut(kit.arm_plan(k, pier, STONE_W), unit, edge, reach),
+                    0.44, "stone_light"), frames)
+    b.add(kit.prism(name + "_coping", _cut(kit.arm_plan(k, pier, STONE_W + 0.04), unit, edge,
+                                           reach), 0.04, "stone", z=0.44), frames)
+    dx, dy = kit.WALL_DIRECTIONS[k]
+    inner = pier * (2.0 ** 0.5 if dx and dy else 1.0)
+    s, i = reach - 0.075, 0
+    while s - 0.035 >= inner + 0.035:
+        x, y = kit.along(unit, s)
+        b.add(kit.box("%s_merlon%d" % (name, i), (0.07, STONE_W + 0.04, 0.08), "stone_light",
+                      (x, y, 0.48), rotation=(0.0, 0.0, kit.wall_direction(k)[1])), frames)
+        s -= 0.15
+        i += 1
+
+
+def _cut(plan, unit, edge, reach):
+    """`plan` with its far end pulled back from `edge` to `reach`."""
+    if abs(reach - edge) < 1e-9:
+        return plan
+    out = []
+    for x, y in plan:
+        s = x * unit[0] + y * unit[1]
+        if abs(s - edge) < 1e-6:
+            x, y = x - unit[0] * (edge - reach), y - unit[1] * (edge - reach)
+        out.append((x, y))
+    return out
+
+
+def stone_wall():
+    """Dressed stone: a square pier banded in the owner's colour under its
+    cap, and a crenellated wall toward each neighbour."""
+    b = kit.Building("StoneWall", 1, frames=13)
+    b.add(kit.box("stone_found", (0.46, 0.46, 0.04), "slab"), kit.STAGES)
+    b.add(kit.box("stone_pier_half", (2 * PIER, 2 * PIER, 0.3), "stone_light"), kit.HALF_WALLS)
+    b.add(kit.box("stone_pier", (2 * PIER, 2 * PIER, 0.6), "stone_light"), kit.FULL_WALLS)
+    b.add(kit.box("stone_band", (2 * PIER + 0.01, 2 * PIER + 0.01, 0.07), "player",
+                  (0.0, 0.0, 0.5)), kit.FINISHED)
+    b.add(kit.box("stone_cap", (2 * PIER + 0.05, 2 * PIER + 0.05, 0.05), "stone",
+                  (0.0, 0.0, 0.6)), kit.FINISHED)
+    kit.scaffold(b, "stone", 2 * PIER + 0.1, 2 * PIER + 0.1, 0.62)
+    for k in range(8):
+        stone_arm(b, "stone_arm%d" % k, k, kit.arm_frames(k))
+    kit.rubble(b, "stone", 0.62, 0.18, mats=("stone_light", "stone"), count=7, seed=5)
+    b.finish()
+    return b.root
+
+
+GATE_PASSAGE = 0.44
+GATE_TOWER = 0.28
+
+
+def gate():
+    """A stone gatehouse across the wall's line: two towers with the owner's
+    banners, a lintel over the passage, and two doors, shut or swung back.
+    It stands in one of four orientations, the line of the wall it is set
+    into; the game picks one (kit.GATE_SPANS). The stages are square, the
+    same whichever way it will face."""
+    b = kit.Building("Gate", 1, frames=13)
+    shut0 = kit.GATE_SPANS["shut"][0]
+    open0 = kit.GATE_SPANS["open"][0]
+    b.add(kit.box("gate_found", (0.8, 0.8, 0.04), "slab"), kit.STAGES)
+    b.add(kit.box("gate_half", (0.6, 0.6, 0.26), "stone_light"), kit.HALF_WALLS)
+    b.add(kit.box("gate_block", (0.6, 0.6, 0.52), "stone_light"), kit.SCAFFOLD)
+    kit.scaffold(b, "gate", 0.7, 0.7, 0.62)
+    p, t = GATE_PASSAGE, GATE_TOWER
+    for o in range(4):
+        unit, angle, length = kit.gate_orientation(o)
+        # Shown shut on the finished frame as well, in the first orientation.
+        both = (shut0 + o, open0 + o) + ((4,) if o == 0 else ())
+        shut = (shut0 + o,) + ((4,) if o == 0 else ())
+        opened = (open0 + o,)
+        # The side away from the camera (it sits out at +X +Y), where the
+        # doors swing to so the passage shows.
+        left = (-unit[1], unit[0])
+        away = -1.0 if left[0] + left[1] > 0.0 else 1.0
+        rot = (0.0, 0.0, angle)
+        for side in (-1.0, 1.0):
+            mid = side * (p / 2.0 + t / 2.0)
+            x, y = kit.along(unit, mid)
+            b.add(kit.box("gate%d_tower%d" % (o, side > 0), (t, 0.38, 0.7), "stone_light",
+                          (x, y, 0.0), rotation=rot), both)
+            b.add(kit.box("gate%d_cap%d" % (o, side > 0), (t + 0.04, 0.42, 0.05), "stone",
+                          (x, y, 0.7), rotation=rot), both)
+            for face in (-1.0, 1.0):
+                bx, by = kit.along(unit, mid, face * 0.2)
+                b.add(kit.box("gate%d_banner%d%d" % (o, side > 0, face > 0),
+                              (0.12, 0.02, 0.22), "player", (bx, by, 0.36), rotation=rot),
+                      both)
+            # A diagonal wall is longer than a tile is wide: a stretch of
+            # wall carries each tower out to the corner.
+            if length > 1.01:
+                k = o if side > 0 else (o + 4) % 8
+                stone_arm(b, "gate%d_stub%d" % (o, side > 0), k, both,
+                          pier=(p / 2.0 + t) / 2.0 ** 0.5)
+            # The doors: across the passage, or each swung back to lie along
+            # its tower's inner face.
+            leaf = p / 2.0 - 0.01
+            x, y = kit.along(unit, side * p / 4.0)
+            b.add(kit.box("gate%d_door%d" % (o, side > 0), (leaf, 0.05, 0.5), "wood_dark",
+                          (x, y, 0.0), rotation=rot), shut)
+            b.add(kit.box("gate%d_bar%d" % (o, side > 0), (leaf, 0.07, 0.04), "iron",
+                          (x, y, 0.3), rotation=rot), shut)
+            x, y = kit.along(unit, side * (p / 2.0 - 0.035), away * leaf / 2.0)
+            b.add(kit.box("gate%d_open%d" % (o, side > 0), (0.05, leaf, 0.5), "wood_dark",
+                          (x, y, 0.0), rotation=rot), opened)
+        x, y = kit.along(unit, 0.0)
+        b.add(kit.box("gate%d_lintel" % o, (p + 0.04, 0.38, 0.12), "stone_light",
+                      (x, y, 0.5), rotation=rot), both)
+    kit.rubble(b, "gate", 0.8, 0.22, mats=("stone_light", "wood_dark", "stone"), count=8,
+               seed=9)
+    b.finish()
+    return b.root
+
+
+# --------------------------------------------------------------------------
 # What the map is made of. These belong to nobody, so they wear no player
 # colour (`atlas` knows them as neutral sets); a node has one standing frame.
 
@@ -495,7 +668,7 @@ def gazelle():
     return a.root
 
 
-# name: (builder, size class, "unit", "building" or "node")
+# name: (builder, size class, "unit", "building", "wall", "gate" or "node")
 SUBJECTS = {
     "clubman": (clubman, "Foot", "unit"),
     "axeman": (axeman, "Foot", "unit"),
@@ -517,6 +690,9 @@ SUBJECTS = {
     "academy": (academy, "MediumBuilding", "building"),
     "siege_workshop": (siege_workshop, "MediumBuilding", "building"),
     "government_centre": (government_centre, "MediumBuilding", "building"),
+    "palisade_wall": (palisade_wall, "SmallBuilding", "wall"),
+    "stone_wall": (stone_wall, "SmallBuilding", "wall"),
+    "gate": (gate, "SmallBuilding", "gate"),
     "tree": (tree, "SmallBuilding", "node"),
     "berry_bush": (berry_bush, "SmallBuilding", "node"),
     "gold_mine": (gold_mine, "SmallBuilding", "node"),

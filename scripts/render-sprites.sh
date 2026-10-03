@@ -19,7 +19,8 @@ mkdir -p "$work"
 subjects=("$@")
 if [ ${#subjects[@]} -eq 0 ]; then
   mapfile -t subjects < <("$blender" --background --python tools/render/slice.py -- --list 2>/dev/null \
-    | awk 'NF == 3 && ($3 == "unit" || $3 == "building" || $3 == "node") { print $1 }')
+    | awk 'NF == 3 && ($3 == "unit" || $3 == "building" || $3 == "wall" || $3 == "gate" \
+                       || $3 == "node") { print $1 }')
 fi
 
 for name in "${subjects[@]}"; do
@@ -42,6 +43,16 @@ for name in "${subjects[@]}"; do
     facings=()
   elif [ "$what" = building ]; then
     anims=(--anim construction=1-3 --anim idle=4-4 --anim rubble=5-5)
+    facings=(--still 1)
+  elif [ "$what" = wall ]; then
+    # The post alone as the finished frame, then an arm toward each of the
+    # eight neighbours (tools/render/kit.py, WALL_SPANS).
+    anims=(--anim construction=1-3 --anim idle=4-4 --anim rubble=5-5 --anim arm=6-13)
+    facings=(--still 1)
+  elif [ "$what" = gate ]; then
+    # Shut and open in each of four orientations (kit.py, GATE_SPANS).
+    anims=(--anim construction=1-3 --anim idle=4-4 --anim rubble=5-5 \
+      --anim shut=6-9 --anim open=10-13)
     facings=(--still 1)
   else
     # A node of the map: one standing frame.

@@ -93,6 +93,13 @@ pub enum Anim {
     Construction = 5,
     /// What a fallen building leaves.
     Rubble = 6,
+    /// A wall's arm toward a neighbour, one frame per direction
+    /// ([`crate::walls::WALL_DIRECTIONS`]).
+    Arm = 7,
+    /// A gate shut, one frame per orientation.
+    Shut = 8,
+    /// A gate open, one frame per orientation.
+    Open = 9,
 }
 
 impl Anim {
@@ -106,6 +113,9 @@ impl Anim {
             "decay" => Some(Anim::Decay),
             "construction" => Some(Anim::Construction),
             "rubble" => Some(Anim::Rubble),
+            "arm" => Some(Anim::Arm),
+            "shut" => Some(Anim::Shut),
+            "open" => Some(Anim::Open),
             _ => None,
         }
     }
@@ -304,10 +314,18 @@ impl Atlas {
                     for frame in 0..animation.frames {
                         let (x, y, w, h) = sheet.frame_rect(ai, fi, frame);
                         let (ax, ay) = sheet.anchor_for(ai, fi, frame);
-                        let mut c = Canvas::new(w, h, (ax as i16, ay as i16));
-                        for yy in 0..h {
-                            for xx in 0..w {
-                                c.set(xx as i32, yy as i32, sheet.index_at(x + xx, y + yy));
+                        // Trimmed to what is drawn: a rendered frame is
+                        // mostly transparent, and the atlas has to fit the
+                        // GPU's texture limit (8192 a side by default). The
+                        // anchor moves with the trim, so it lands as before.
+                        let (bx, by, bw, bh) = drawn_bounds(sheet, x, y, w, h, sheet.scale);
+                        // A wall's arm is anchored on its post, outside it.
+                        let anchor = (ax as i32 - bx as i32, ay as i32 - by as i32);
+                        let mut c = Canvas::new(bw, bh, (anchor.0 as i16, anchor.1 as i16));
+                        for yy in 0..bh {
+                            for xx in 0..bw {
+                                let idx = sheet.index_at(x + bx + xx, y + by + yy);
+                                c.set(xx as i32, yy as i32, idx);
                             }
                         }
                         canvases.push(Entry {
@@ -540,6 +558,23 @@ impl Atlas {
             .map(|&i| &self.frames[i])
     }
 
+    /// A wall's arm toward its neighbour in direction `k`
+    /// ([`crate::walls::WALL_DIRECTIONS`]), if its rendered set has arms.
+    pub fn wall_arm(&self, kind: KindId, k: u8) -> Option<&Frame> {
+        self.lookup
+            .get(&(kind, 0, Anim::Arm, k))
+            .map(|&i| &self.frames[i])
+    }
+
+    /// The gate standing across line `line` (0 to 3), shut or open, if its
+    /// rendered set has the orientations.
+    pub fn gate_frame(&self, kind: KindId, line: u8, open: bool) -> Option<&Frame> {
+        let anim = if open { Anim::Open } else { Anim::Shut };
+        self.lookup
+            .get(&(kind, 0, anim, line))
+            .map(|&i| &self.frames[i])
+    }
+
     /// A building's own rubble, if its rendered set has one.
     pub fn own_rubble(&self, kind: KindId) -> Option<&Frame> {
         self.lookup
@@ -643,6 +678,38 @@ struct Entry {
     canvas: Canvas,
 }
 
+/// The smallest rectangle of a sheet's frame at (`x`, `y`), `w` by `h`,
+/// that holds every drawn pixel, relative to the frame, with its edges on
+/// multiples of `scale` so the frame samples down to 1× on the same pixels
+/// as before the trim; the whole frame if nothing is drawn.
+fn drawn_bounds(
+    sheet: &crate::sheets::Sheet,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+    scale: u32,
+) -> (u32, u32, u32, u32) {
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for yy in 0..h {
+        for xx in 0..w {
+            if sheet.index_at(x + xx, y + yy) != 0 {
+                x0 = x0.min(xx);
+                y0 = y0.min(yy);
+                x1 = x1.max(xx + 1);
+                y1 = y1.max(yy + 1);
+            }
+        }
+    }
+    if x1 == 0 {
+        return (0, 0, w, h);
+    }
+    let s = scale.max(1);
+    let (x0, y0) = (x0 / s * s, y0 / s * s);
+    let (x1, y1) = (x1.div_ceil(s) * s, y1.div_ceil(s) * s);
+    (x0, y0, x1.min(w) - x0, y1.min(h) - y0)
+}
+
 /// Shelf-packs canvases into an atlas of the given width. Taller frames go
 /// first so shelves waste less.
 fn pack(mut canvases: Vec<Entry>, width: u32) -> Atlas {
@@ -721,6 +788,9 @@ pub fn kind_for_set(name: &str) -> Option<KindId> {
         "academy" => kinds::ACADEMY,
         "siege_workshop" => kinds::SIEGE_WORKSHOP,
         "government_centre" => kinds::GOVERNMENT_CENTRE,
+        "palisade_wall" => kinds::PALISADE_WALL,
+        "stone_wall" => kinds::STONE_WALL,
+        "gate" => kinds::GATE,
         "tree" => kinds::TREE,
         "berry_bush" => kinds::BERRY_BUSH,
         "gold_mine" => kinds::GOLD_MINE,
@@ -1883,8 +1953,12 @@ mod tests {
         );
         let (idle, flip) = a.frame(kinds::VILLAGER, 1).unwrap();
         assert!(!flip);
-        assert_eq!((idle.w, idle.h, idle.scale), (80, 96, 2));
-        assert_eq!((idle.draw_w(), idle.draw_h()), (40.0, 48.0));
+        // Trimmed to the figure inside its 80 x 96 cell, the anchor at its
+        // feet still.
+        assert_eq!(idle.scale, 2);
+        assert!(idle.w < 80 && idle.h < 96, "{}x{}", idle.w, idle.h);
+        assert!((0..idle.w as i16).contains(&idle.anchor_x));
+        assert!((idle.h as i16 - 8..=idle.h as i16).contains(&idle.anchor_y));
         let walk = a.anim_info(kinds::VILLAGER, Anim::Walk).unwrap();
         assert_eq!((walk.frames, walk.frame_ms, walk.loops), (8, 100, true));
         let (f0, _) = a.frame_at(kinds::VILLAGER, 2, Anim::Walk, 0).unwrap();
@@ -1897,10 +1971,22 @@ mod tests {
         assert_eq!(d.index, 7, "death holds its last frame");
         let (e, flip) = a.frame_at(kinds::VILLAGER, 7, Anim::Idle, 0).unwrap();
         assert!(flip && e.facing == 3, "east mirrors west");
-        // Kinds without a set still get placeholders, and UI frames still exist.
-        let (wall, _) = a.frame(kinds::PALISADE_WALL, 0).unwrap();
-        assert_eq!(wall.scale, 1);
+        // Every kind the simulation has is drawn from its rendered set, and
+        // the UI frames still exist.
+        for k in kinds::all() {
+            assert_eq!(a.frame(k.id, 1).unwrap().0.scale, 2, "{}", k.name);
+        }
         assert!(a.glyph('A', false).is_some());
+        // A wall has an arm toward each of its eight neighbours; the gate
+        // stands shut and open in four orientations.
+        for wall in [kinds::PALISADE_WALL, kinds::STONE_WALL] {
+            assert!((0..8).all(|k| a.wall_arm(wall, k).is_some()));
+            assert!(a.wall_arm(wall, 8).is_none());
+        }
+        for open in [false, true] {
+            assert!((0..4).all(|o| a.gate_frame(kinds::GATE, o, open).is_some()));
+        }
+        assert!(a.wall_arm(kinds::HOUSE, 0).is_none());
         // A rendered building brings its own construction stages and rubble;
         // a placeholder does not, and the scene falls back to the generic ones.
         for stage in 0..3 {
@@ -1908,12 +1994,10 @@ mod tests {
             assert_eq!((f.anim, f.index), (Anim::Construction, stage));
         }
         assert_eq!(a.own_rubble(kinds::TOWN_CENTER).unwrap().anim, Anim::Rubble);
-        assert!(a.stage_frame(kinds::PALISADE_WALL, 0).is_none());
-        assert!(a.own_rubble(kinds::PALISADE_WALL).is_none());
-        // A kind with only placeholders falls back to its single frame for any anim.
-        let (g, _) = a
-            .frame_at(kinds::PALISADE_WALL, 1, Anim::Walk, 500)
-            .unwrap();
+        assert!(a.stage_frame(kinds::PALISADE_WALL, 2).is_some());
+        assert!(a.own_rubble(kinds::GATE).is_some());
+        // A kind without an animation falls back to its standing frame.
+        let (g, _) = a.frame_at(kinds::HOUSE, 1, Anim::Walk, 500).unwrap();
         assert_eq!((g.anim, g.index), (Anim::Idle, 0));
         // The herd has its own walk now.
         let (g, _) = a.frame_at(kinds::GAZELLE, 1, Anim::Walk, 500).unwrap();

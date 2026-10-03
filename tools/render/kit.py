@@ -37,6 +37,14 @@ BUILDING_SPANS = {
     "rubble": (5, 5),
 }
 
+# A wall: the building's five frames, its post alone as the finished one,
+# then an arm toward each of the eight neighbours it can join.
+WALL_SPANS = dict(BUILDING_SPANS, arm=(6, 13))
+
+# A gate: the building's five, the finished one shut along the game's x,
+# then shut and open in each of its four orientations.
+GATE_SPANS = dict(BUILDING_SPANS, shut=(6, 9), open=(10, 13))
+
 def srgb(r, g, b):
     """A colour as it should look on screen, in the linear values Blender's
     materials take: a base colour is linear light, so 0.5 renders as a pale
@@ -534,15 +542,17 @@ def round_shield(name, face="player"):
 
 class Building:
     """A building as five frames: construction stages 1-3, the finished
-    building (4), its rubble (5). Each object is tagged with the frames it
+    building (4), its rubble (5), and for walls and gates the pieces after
+    them (WALL_SPANS, GATE_SPANS). Each object is tagged with the frames it
     appears on and keyed visible there and hidden elsewhere, so one file
     renders them all. The footprint is `tiles` on a side, centred on the
     origin. The camera sits out at +X +Y, so the +X and +Y faces and the top
     are what shows: doors, banners and player colour go there."""
 
-    def __init__(self, root_name, tiles):
+    def __init__(self, root_name, tiles, frames=5):
         self.root = empty(root_name)
         self.tiles = tiles
+        self.frames = frames
         self.shown = []
 
     def add(self, obj, frames):
@@ -552,9 +562,9 @@ class Building:
 
     def finish(self):
         scene = bpy.context.scene
-        scene.frame_start, scene.frame_end = 1, 5
+        scene.frame_start, scene.frame_end = 1, self.frames
         for obj, frames in self.shown:
-            for frame in range(1, 6):
+            for frame in range(1, self.frames + 1):
                 hidden = frame not in frames
                 obj.hide_render = hidden
                 obj.hide_viewport = hidden
@@ -567,6 +577,7 @@ class Building:
 # the walls from the second, the roof and dressing only when finished, and a
 # scaffold during the last stage.
 FOUNDATION = (1, 2, 3, 4)
+STAGES = (1, 2, 3)
 WALLS = (2, 3, 4)
 HALF_WALLS = (2,)
 FULL_WALLS = (3, 4)
@@ -646,6 +657,74 @@ def disc(b, name, radius, thick, mat, location, frames, facing="y"):
     rot = (_deg(90.0), 0.0, 0.0) if facing == "y" else (0.0, _deg(90.0), 0.0)
     b.add(cylinder(name, radius, thick, mat, location, sides=12, pivot="centre",
                    rotation=rot), frames)
+
+
+def prism(name, plan, height, mat, z=0.0):
+    """A solid standing on the polygon `plan` (XY points, counter-clockwise,
+    concave allowed), `height` tall from `z`."""
+    n = len(plan)
+    verts = [(x, y, z) for x, y in plan] + [(x, y, z + height) for x, y in plan]
+    faces = [tuple(reversed(range(n))), tuple(range(n, 2 * n))]
+    faces += [(i, (i + 1) % n, n + (i + 1) % n, n + i) for i in range(n)]
+    return _mesh(name, verts, faces, mat)
+
+
+# --------------------------------------------------------------------------
+# Walls and gates.
+#
+# A wall is laid a tile at a time, and the game draws each tile as its post
+# plus an arm toward each wall of the same owner beside it
+# (`crates/view/src/scene.rs`). The arms are frames of their own, one per
+# direction, in this order of the game's tile offsets. The game's +x is
+# Blender's +Y and its +y is Blender's +X (the camera's right is (-1, 1, 0),
+# rig.json), so a direction (dx, dy) points along Blender (dy, dx).
+WALL_DIRECTIONS = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]
+
+
+def wall_direction(k):
+    """Direction `k` as a unit vector in Blender's XY, its angle, and how
+    far an arm reaches along it: the tile's edge, or its corner for a
+    diagonal, where the neighbour's arm meets it."""
+    dx, dy = WALL_DIRECTIONS[k]
+    x, y = float(dy), float(dx)
+    n = math.hypot(x, y)
+    return (x / n, y / n), math.atan2(y, x), 0.5 * n
+
+
+def arm_frames(k):
+    """The one frame arm `k` shows on."""
+    return (WALL_SPANS["arm"][0] + k,)
+
+
+def along(unit, s, v=0.0):
+    """The point `s` along `unit` and `v` to its left."""
+    ux, uy = unit
+    return (ux * s - uy * v, uy * s + ux * v)
+
+
+def arm_plan(k, pier, width):
+    """The plan of a solid arm `width` wide from a square pier of half-size
+    `pier` to the edge of the tile. A diagonal arm leaves by the pier's
+    corner, so its inner end follows the pier's two faces: the arms are
+    drawn as sprites apart from the pier, and an end cut square would
+    either leave a gap beside the corner or poke out through it."""
+    unit, _, reach = wall_direction(k)
+    h = width / 2.0
+    dx, dy = WALL_DIRECTIONS[k]
+    if dx and dy:
+        c = pier * math.sqrt(2.0)
+        pts = [(c - h, -h), (reach, -h), (reach, h), (c - h, h), (c, 0.0)]
+    else:
+        pts = [(pier, -h), (reach, -h), (reach, h), (pier, h)]
+    return [along(unit, s, v) for s, v in pts]
+
+
+def gate_orientation(o):
+    """Orientation `o` (0-3) of a gate: the direction of its wall's line,
+    WALL_DIRECTIONS[o], as a unit vector, its angle and the run's length
+    across the tile."""
+    unit, angle, reach = wall_direction(o)
+    return unit, angle, 2.0 * reach
 
 
 # --------------------------------------------------------------------------

@@ -23,6 +23,8 @@ use crate::fx_to_f32;
 use crate::iso;
 use crate::palette;
 use crate::sprites::{Anim, Atlas};
+use crate::walls::{self, Piece};
+use std::collections::HashMap;
 
 /// One sprite to draw, in world-screen space at 1×.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -167,6 +169,16 @@ impl Scene {
             let (lo, hi) = xs.fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
             (lo <= hi).then_some((s, lo, hi))
         });
+        let pieces = wall_pieces(sim, fog, viewer);
+        // What of `owner`'s stands on a tile, for joining a wall's tiles.
+        let piece_of = |owner: u8| {
+            let pieces = &pieces;
+            move |x: i32, y: i32| {
+                pieces
+                    .get(&(x, y))
+                    .and_then(|&(o, p)| (o == owner).then_some(p))
+            }
+        };
         for slot in world.slots() {
             let i = slot.index();
             if world.inside[i].is_some() {
@@ -261,7 +273,16 @@ impl Scene {
             // them, a site is pegs, then the building cropped, and rubble is
             // the footprint's.
             let own_stage = stage.and_then(|s| atlas.stage_frame(look, s as u8));
+            let tile = sim::nav::anchor_tile(world.pos[i], info.footprint as i32);
+            let at = piece_of(world.owner[i]);
+            let standing = stage.is_none() && world.dying[i] == 0;
+            // A gate stands across the line of its walls, shut or open.
+            let gate = (kind == kinds::GATE && standing)
+                .then(|| atlas.gate_frame(look, walls::gate_line(tile, &at), anim == Anim::Work))
+                .flatten();
             let looked_up = if let Some(f) = own_stage {
+                Some((f, false))
+            } else if let Some(f) = gate {
                 Some((f, false))
             } else if stage == Some(0) {
                 atlas.site(info.footprint).map(|f| (f, false))
@@ -356,6 +377,19 @@ impl Scene {
                 sprite.y += full - sprite.h;
             }
             sprites.push(sprite);
+            // A wall reaches for the walls beside it.
+            if kinds::is_wall(kind) && standing {
+                push_arms(
+                    atlas,
+                    look,
+                    walls::wall_links(tile, &at),
+                    (gx, gy),
+                    row,
+                    depth,
+                    i as u32,
+                    &mut sprites,
+                );
+            }
         }
         // What was seen once and is out of sight now, as it was then, in the
         // explored light: buildings and nodes only, never a unit, and not
@@ -364,14 +398,17 @@ impl Scene {
             for ((x, y), m) in f.memories() {
                 let info = kinds::info(m.kind);
                 let fp = info.footprint.max(1) as i32;
+                let look = atlas.variant(m.kind, m.age);
+                let at = piece_of(m.owner);
+                let gate = (m.kind == kinds::GATE && !m.site)
+                    .then(|| atlas.gate_frame(look, walls::gate_line((x, y), &at), false))
+                    .flatten();
                 let frame = if m.site {
                     atlas
-                        .stage_frame(atlas.variant(m.kind, m.age), 0)
+                        .stage_frame(look, 0)
                         .or_else(|| atlas.site(info.footprint))
                 } else {
-                    atlas
-                        .frame(atlas.variant(m.kind, m.age), 0)
-                        .map(|(frame, _)| frame)
+                    gate.or_else(|| atlas.frame(look, 0).map(|(frame, _)| frame))
                 };
                 let Some(frame) = frame else {
                     continue;
@@ -391,6 +428,22 @@ impl Scene {
                 );
                 s.light = fog::EXPLORED;
                 sprites.push(s);
+                if kinds::is_wall(m.kind) && !m.site {
+                    let from = sprites.len();
+                    push_arms(
+                        atlas,
+                        look,
+                        walls::wall_links((x, y), &at),
+                        (gx, gy),
+                        palette::row_for_owner(m.owner),
+                        depth,
+                        u32::MAX,
+                        &mut sprites,
+                    );
+                    for arm in &mut sprites[from..] {
+                        arm.light = fog::EXPLORED;
+                    }
+                }
             }
         }
         // Direction and team-coloured fletching connect flight to its source.
@@ -433,14 +486,40 @@ impl Scene {
                     .collect(),
                 None => vec![((g.x, g.y), g.ok && known((g.x, g.y)))],
             };
+            // The run joins up as it will stand, and onto the player's walls
+            // at its ends; a gate turns along the walls it would go into.
+            let run: Vec<(i32, i32)> = tiles.iter().map(|&(t, _)| t).collect();
+            let at = |x: i32, y: i32| {
+                if run.contains(&(x, y)) {
+                    Some(Piece::Wall)
+                } else {
+                    piece_of(g.player)(x, y)
+                }
+            };
+            let look = atlas.variant(g.kind, g.age);
             for ((x, y), ok) in tiles {
                 let centre = sim::nav::building_centre(x, y, fp as i32);
                 let (cx, cy) = (fx_to_f32(centre.x), fx_to_f32(centre.y));
                 let h = iso::ground_height(map, cx, cy);
                 let (gx, gy) = iso::project(cx, cy, h);
                 let depth = cx + cy + (fp as f32 - 1.0) * 0.5;
-                if let Some((frame, _)) = atlas.frame(atlas.variant(g.kind, g.age), 0) {
+                let gate = (g.kind == kinds::GATE)
+                    .then(|| atlas.gate_frame(look, walls::gate_line((x, y), &at), false))
+                    .flatten();
+                if let Some(frame) = gate.or_else(|| atlas.frame(look, 0).map(|(f, _)| f)) {
                     sprites.push(overlay(frame, gx, gy, g.row, depth + 0.5, u32::MAX));
+                }
+                if kinds::is_wall(g.kind) {
+                    push_arms(
+                        atlas,
+                        look,
+                        walls::wall_links((x, y), &at),
+                        (gx, gy),
+                        g.row,
+                        depth + 0.5,
+                        u32::MAX,
+                        &mut sprites,
+                    );
                 }
                 // The valid/blocked hatch draws over the ghost so it always shows.
                 if let Some(f) = atlas.footprint(fp, ok) {
@@ -542,6 +621,72 @@ fn waypoint_marks(
                 mark(&edge, to.0, to.1, 2.0, 6.0);
             }
             from = to;
+        }
+    }
+}
+
+/// The walls and gates in view or remembered, by tile, with their owners:
+/// what a wall's tiles join to (`walls.rs`). Only what the viewer is shown
+/// counts, so a wall's arm never points at one hidden in the fog.
+fn wall_pieces(
+    sim: &Simulation,
+    fog: Option<&sim::fog::Fog>,
+    viewer: Option<u8>,
+) -> HashMap<(i32, i32), (u8, Piece)> {
+    let piece = |kind| {
+        if kinds::is_wall(kind) {
+            Some(Piece::Wall)
+        } else if kind == kinds::GATE {
+            Some(Piece::Gate)
+        } else {
+            None
+        }
+    };
+    let world = sim.world();
+    let mut out = HashMap::new();
+    for slot in world.slots() {
+        let i = slot.index();
+        let Some(p) = piece(world.kind[i]) else {
+            continue;
+        };
+        if world.dying[i] > 0 {
+            continue;
+        }
+        let (x, y) = sim::nav::anchor_tile(world.pos[i], 1);
+        if fog.is_some_and(|f| Some(world.owner[i]) != viewer && !f.in_sight(world.kind[i], x, y)) {
+            continue;
+        }
+        out.insert((x, y), (world.owner[i], p));
+    }
+    if let Some(f) = fog {
+        for (t, m) in f.memories() {
+            if let Some(p) = piece(m.kind) {
+                out.entry(t).or_insert((m.owner, p));
+            }
+        }
+    }
+    out
+}
+
+/// A wall tile's arms toward the neighbours in `links`, placed on its post's
+/// ground point and ordered about the post's `depth`.
+#[allow(clippy::too_many_arguments)]
+fn push_arms(
+    atlas: &Atlas,
+    look: sim::KindId,
+    links: u8,
+    (gx, gy): (f32, f32),
+    row: u8,
+    depth: f32,
+    slot: u32,
+    sprites: &mut Vec<SpriteInstance>,
+) {
+    for k in 0..walls::WALL_DIRECTIONS.len() {
+        if links & 1 << k == 0 {
+            continue;
+        }
+        if let Some(arm) = atlas.wall_arm(look, k as u8) {
+            sprites.push(overlay(arm, gx, gy, row, depth + walls::arm_depth(k), slot));
         }
     }
 }
@@ -1062,5 +1207,120 @@ mod tests {
             guarded.sprites[0].x, gx_none,
             "teleports are not interpolated"
         );
+    }
+
+    /// A wall's tiles join into a run: each draws its post and an arm toward
+    /// each wall beside it, a gate stands across its walls' line, and a run
+    /// being dragged joins up as it will stand (`walls.rs`).
+    #[test]
+    fn walls_join_into_runs_and_gates_turn_along_them() {
+        use sim::{Command, CommandKind};
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
+        let (sheets, errors) = crate::sheets::load_all(&dir);
+        assert!(errors.is_empty(), "{errors:?}");
+        let atlas = Atlas::with_sheets(&sheets);
+        let mut sim = Simulation::new(
+            5,
+            SimConfig {
+                map: MapSpec {
+                    kind: MapKind::Flat,
+                    size: 48,
+                    players: 1,
+                },
+                wander: false,
+                ..SimConfig::default()
+            },
+        );
+        let layout = [
+            (kinds::PALISADE_WALL, (10, 10)),
+            (kinds::PALISADE_WALL, (11, 10)),
+            (kinds::PALISADE_WALL, (12, 10)),
+            (kinds::GATE, (13, 10)),
+            (kinds::PALISADE_WALL, (14, 10)),
+            (kinds::STONE_WALL, (20, 20)),
+            (kinds::STONE_WALL, (21, 21)),
+        ];
+        for (kind, t) in layout {
+            sim.issue(Command {
+                player: 0,
+                kind: CommandKind::Spawn {
+                    kind,
+                    pos: sim::nav::centre(t),
+                },
+            });
+        }
+        for _ in 0..3 {
+            sim.step();
+        }
+        let ghost = Ghost {
+            kind: kinds::PALISADE_WALL,
+            x: 33,
+            y: 30,
+            ok: true,
+            row: 1,
+            player: 0,
+            age: 0,
+            run: Some((30, 30)),
+        };
+        let scene = Scene::build_with(&sim, &atlas, None, 0.0, &[], Some(ghost));
+        let w = sim.world();
+        let slot_at = |t: (i32, i32)| {
+            w.slots()
+                .map(|s| s.index())
+                .find(|&i| sim::nav::anchor_tile(w.pos[i], 1) == t && w.kind[i] != kinds::VILLAGER)
+                .unwrap() as u32
+        };
+        let is = |s: &SpriteInstance, f: &crate::sprites::Frame| (s.u, s.v) == (f.x, f.y);
+        // The arms each tile shows, by direction.
+        let arms = |t: (i32, i32), kind| -> Vec<u8> {
+            let slot = slot_at(t);
+            (0..8u8)
+                .filter(|&k| {
+                    let f = atlas.wall_arm(kind, k).unwrap();
+                    scene.sprites.iter().any(|s| s.slot == slot && is(s, f))
+                })
+                .collect()
+        };
+        let pal = kinds::PALISADE_WALL;
+        assert_eq!(arms((10, 10), pal), [0]);
+        assert_eq!(arms((11, 10), pal), [0, 4]);
+        assert_eq!(arms((12, 10), pal), [0, 4], "into the gate along its line");
+        assert_eq!(arms((14, 10), pal), [4]);
+        assert_eq!(arms((20, 20), kinds::STONE_WALL), [1]);
+        assert_eq!(arms((21, 21), kinds::STONE_WALL), [5]);
+        // Nothing hostile near, so the gate stands open across x.
+        let gate = slot_at((13, 10));
+        let open = atlas.gate_frame(kinds::GATE, 0, true).unwrap();
+        assert!(scene.sprites.iter().any(|s| s.slot == gate && is(s, open)));
+        // Arms toward the viewer sort after their post, the rest before.
+        let slot = slot_at((11, 10));
+        let post = scene
+            .sprites
+            .iter()
+            .position(|s| s.slot == slot && is(s, atlas.frame(pal, 0).unwrap().0))
+            .unwrap();
+        let arm = |k| {
+            let f = atlas.wall_arm(pal, k).unwrap();
+            scene
+                .sprites
+                .iter()
+                .position(|s| s.slot == slot && is(s, f))
+                .unwrap()
+        };
+        assert!(arm(4) < post && post < arm(0));
+        // The dragged run: four posts and the three joints between them,
+        // an arm from each side.
+        let ghosts: Vec<_> = scene
+            .sprites
+            .iter()
+            .filter(|s| s.slot == u32::MAX)
+            .collect();
+        let ghost_arms = (0..8u8)
+            .map(|k| {
+                let f = atlas.wall_arm(pal, k).unwrap();
+                ghosts.iter().filter(|s| is(s, f)).count()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ghost_arms, [3, 0, 0, 0, 3, 0, 0, 0]);
     }
 }

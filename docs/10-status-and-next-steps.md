@@ -26,7 +26,7 @@ Six milestones landed; the vertical slice wants only the feel pass, M7.
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
 | M6 — Game shell | **Landed 2026-09-19** | Configure, play, save, reload and watch a replay without a terminal: the run in `crates/app/src/tests.rs`; the owner played the Mac build 2026-09-20 |
-| M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest is the owner's (§4d); the sprite art is code-built (`docs/08` §9) for every unit, building and node but the walls, gate and terrain |
+| M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest is the owner's (§4d); the sprite art is code-built (`docs/08` §9) for every unit, building and node; the terrain is still procedural |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
 The Mac checks of 2026-09-12 exercised the economy and age progression
@@ -74,9 +74,9 @@ three stages under hammering villagers; a bush thins and a vein shrinks
 as they are used; a tree falls toward whoever felled it; an attack on
 your own out of view is a red chevron at the screen's edge, and a
 flash on the minimap; a loss pings the minimap. The villagers,
-soldiers, riders, buildings, trees, bushes, veins and the herd are
-rendered models; the walls, the gate and the ground are still drawn
-procedurally. Every unit, building and technology button has a tooltip
+soldiers, riders, buildings, walls, gates, trees, bushes, veins and the
+herd are rendered models, a wall's tiles joined into one run; the
+ground is still drawn procedurally. Every unit, building and technology button has a tooltip
 with its cost, time, what it counters and what counters it, and its
 key. Five first-time hints come in context, each at most twice, and
 SETTINGS turns them off. A refused click flashes the resource it is
@@ -97,8 +97,8 @@ Work has run as three streams that merge into this branch:
   proven end to end. The camera and light rig are frozen, `atlas` validates
   and composes sheets against the one palette (`docs/07` D19). Every
   unit, building and map node the simulation has is modelled by code in
-  `tools/render/` and rendered through it, except the walls, the gate and
-  the terrain, which still draw as procedural placeholders.
+  `tools/render/` and rendered through it; the terrain still draws as
+  procedural placeholders.
 - **Test and automation** (`docs/09`): CI runs the unit and behaviour tests,
   the replay corpus, the golden images, requirement traceability, the perf
   budget, generated-file drift, CLI-caller and workflow checks, and the art
@@ -1498,6 +1498,49 @@ The owner took the look and said go; `playtest-5` went out first.
   carcass). They belong to nobody, so `atlas` knows them as neutral sets:
   no player colour, and a node needs only its idle frame.
 
+### Work record: the art, walls and the gate (2026-10-03)
+
+The last kinds drawn by the old placeholder code are rendered now.
+
+- **A wall is a post and its arms.** A wall is laid a tile at a time, each
+  tile its own entity, and a run has to read as one wall whatever way it
+  turns. A wall's set holds its post as the finished frame and, as frames
+  of their own, an arm from the post to the tile's edge or corner in each
+  of the eight directions (`arm`). The scene draws each tile's post and an
+  arm toward every wall or gate of the same owner beside it
+  (`crates/view/src/walls.rs`): a diagonal is joined only when neither
+  tile between holds a piece, so a corner turns through its tile, and
+  both tiles of a joint always reach for each other. Only what the viewer
+  is shown counts, so an arm never points at a wall hidden in the fog.
+  An arm toward the viewer is drawn over its post and one away under it;
+  one running sideways on screen goes under too, because a diagonal arm's
+  inner end is cut to the pier's corner and that cut faces the viewer
+  from behind the pier. The run being dragged joins up the same way.
+- **The gate turns along its wall.** Its set holds it `shut` and `open`
+  in four orientations, the line of the walls it stands in (x, y, either
+  diagonal), and the scene picks the line from its neighbours; a wall
+  joins a gate only along that line. Its stages are square, the same
+  whichever way it will face.
+- **The models.** The palisade: a stout post banded in the owner's
+  colour, rows of sharpened stakes lashed with rope; the stone wall: a
+  square pier banded under its cap, crenellated stretches; the gate: two
+  towers with the owner's banners, a lintel, two doors across the passage
+  or swung back. `atlas` knows the new frames (`WALL_PIECES`,
+  `GATE_PIECES`) and requires them of those sets alone; an arm is the one
+  frame whose anchor may lie beside its pixels, since it is drawn on its
+  post's.
+- **The atlas is trimmed.** With these three sets the atlas passed 8192
+  rows, the texture size the GPU path asks wgpu for. Each rendered frame
+  is now packed as its drawn pixels rather than its whole cell, to edges
+  on the sheet's scale so a frame drawn at 1× samples the same pixels; the
+  rendered art takes half the room it did. At zoom 0.5 a trimmed frame
+  samples from a different starting pixel, which moved some shading in
+  `fog-scout`; the falling tree leans by the tree's drawn height now,
+  which moved a few pixels in four others.
+- **Goldens:** `siege-hud` rebaked with the joined palisade and its gate,
+  and a new `walls` scene (`mapview --scenario walls`): a corner, a T, both
+  diagonals, gates open and one held shut, a lone post.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1505,8 +1548,7 @@ the measurement on the Mac with `F4` open during a big fight, recorded
 against `docs/09` §8's table; the six players through the `RM-M7-01`
 sheet (`docs/09` §9.1), whose tally decides the milestone and admits
 `RM-M7` to `TRACEABILITY_LANDED`. The sprite art is code-built
-(`docs/08` §9) for everything but the walls, the gate and the terrain,
-and a modeller's work can replace any set by name; the name is settled
+(`docs/08` §9) for everything but the terrain, and a modeller's work can replace any set by name; the name is settled
 (`docs/07` D27). The parallel track (§4b) runs on its own branch. After M7,
 `docs/06` M8.
 
@@ -1678,9 +1720,9 @@ verified headless before anyone hears or sees it on the Mac:
 
 **Not in these chunks:** the real sprite art for two civilisations across
 three ages and its animations (`docs/06` M7 bullets 2 and 3). They are
-the art pipeline's step 3 (`docs/08` §9), which needs a modeller and a
-Blender install; nothing here can produce them. The vertical slice is not
-complete without them, and the owner decides when and by whom.
+the art pipeline's step 3 (`docs/08` §9). The owner chose on 2026-09-25
+to have them modelled here by code; every kind the simulation has is
+done (the work records above), and what is left of them is in §5.
 
 ---
 
@@ -1702,11 +1744,11 @@ Stated so they are not rediscovered.
   gate until their tally is in.
 - **The art is code-built and low-poly** (`docs/08` §9): every unit,
   building and node the simulation has is modelled, with its deaths,
-  construction stages and rubble, except the walls and the gate, which are
-  still drawn as runs of placeholder segments, and the terrain tiles. No
-  villager has a hammering or task-specific animation (the attack swing
-  stands in), and a building's collapse is a cloud over its rubble. A
-  modeller's work can replace any set by name.
+  construction stages and rubble; the terrain tiles are not. No villager
+  has a hammering or task-specific animation (the attack swing stands
+  in), a building's collapse is a cloud over its rubble, and no rendered
+  set has its later ages' look or a second civilisation's. A modeller's
+  work can replace any set by name.
 - **One notification row stays open**: no Wonder to announce.
 - **The Mac build is not notarised, Apple Silicon only, and has no icon.**
   Notarising needs an Apple Developer account and a signing identity in

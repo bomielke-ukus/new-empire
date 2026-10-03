@@ -988,6 +988,54 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
             });
             let _ = tc;
         }
+        "walls" => {
+            // How walls join (`crates/view/src/walls.rs`): a palisade along
+            // x turning a corner down y, with a T off it and a gate in it;
+            // a stone wall on each diagonal with a gate across it; one along
+            // x whose gate a soldier of theirs keeps shut; a lone tile. Run
+            // `--ticks 5` from here.
+            let mut lay = |kind, tiles: &[(i32, i32)]| {
+                for &(dx, dy) in tiles {
+                    sim.issue(cmd(CommandKind::Spawn {
+                        kind,
+                        pos: sim::nav::centre((sx + dx, sy + dy)),
+                    }));
+                }
+            };
+            let palisade: Vec<(i32, i32)> = (4..=10)
+                .map(|x| (x, -5))
+                .chain((-4..=1).filter(|&y| y != -2).map(|y| (10, y)))
+                .chain([(7, -4), (7, -3)])
+                .collect();
+            lay(kinds::PALISADE_WALL, &palisade);
+            lay(kinds::GATE, &[(10, -2)]);
+            lay(
+                kinds::STONE_WALL,
+                &[
+                    (-9, -3),
+                    (-8, -2),
+                    (-6, 0),
+                    (-5, 1),
+                    (-4, 7),
+                    (-3, 6),
+                    (-1, 4),
+                    (0, 3),
+                ],
+            );
+            lay(kinds::GATE, &[(-7, -1), (-2, 5)]);
+            lay(
+                kinds::STONE_WALL,
+                &[(3, 5), (4, 5), (6, 5), (7, 5), (8, 5), (12, 2)],
+            );
+            lay(kinds::GATE, &[(5, 5)]);
+            sim.issue(Command {
+                player: 1,
+                kind: CommandKind::Spawn {
+                    kind: kinds::CLUBMAN,
+                    pos: sim::nav::centre((sx + 5, sy + 7)),
+                },
+            });
+        }
         "scout" => {
             // The scout rides away from the settlement past a house of
             // theirs into ground nobody has seen (`GD-FOG-01`): behind it

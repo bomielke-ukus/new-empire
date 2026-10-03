@@ -10,7 +10,9 @@
 //! phrases each one as what to change rather than as what is wrong.
 
 use crate::image::read_png;
-use crate::manifest::{Class, Kind, SpriteSet, REQUIRED_BUILDING, REQUIRED_MOBILE, VILLAGER_TASKS};
+use crate::manifest::{
+    pieces, Class, Kind, SpriteSet, REQUIRED_BUILDING, REQUIRED_MOBILE, VILLAGER_TASKS,
+};
 use crate::palette::{Palette, TRANSPARENT};
 use std::path::Path;
 
@@ -134,15 +136,17 @@ fn is_neutral(name: &str) -> bool {
 /// The animation set is a contract with the simulation: it schedules damage on
 /// a tick and the renderer has to land the blow on the matching frame.
 fn check_animations(set: &SpriteSet, problems: &mut Vec<String>) {
-    let required: &[(&str, u32)] = match set.class.kind() {
+    let class: &[(&str, u32)] = match set.class.kind() {
         Kind::Mobile => &REQUIRED_MOBILE,
         // A tree or a vein is not built and does not fall into rubble.
         Kind::Building if is_neutral(&set.name) => &REQUIRED_STILL,
         Kind::Building => &REQUIRED_BUILDING,
         Kind::Terrain => &[],
     };
+    // A wall's arms and the gate's orientations, on top.
+    let required: Vec<(&str, u32)> = class.iter().chain(pieces(&set.name)).copied().collect();
 
-    for (name, frames) in required {
+    for (name, frames) in &required {
         match set.animations.iter().find(|a| a.name == *name) {
             None => problems.push(format!(
                 "is missing the '{name}' animation, which docs/05 §2.2 requires \
@@ -331,8 +335,10 @@ fn check_frames_and_anchors(
 
                 // The anchor is the ground contact point (docs/05 §2.3). If it
                 // is not horizontally under the sprite, the sprite will sit
-                // beside where the simulation thinks the unit is.
-                if ax < bx || ax >= bx + bw {
+                // beside where the simulation thinks the unit is. A wall's
+                // arm is the exception: it is drawn at its post's anchor and
+                // reaches out from beside the post, which it never covers.
+                if anim.name != "arm" && (ax < bx || ax >= bx + bw) {
                     problems.push(format!(
                         "{} {} frame {frame}: anchor x {ax} is outside the drawn \
                          sprite (x {bx}..{}), so it would not stand where the \

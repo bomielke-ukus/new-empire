@@ -57,6 +57,13 @@ Villagers add per-task animations: **chop, mine, forage, farm, fish, build,
 repair, carry** (carry variants show the resource being carried — this is a small
 detail that does an enormous amount of work for readability).
 
+Buildings ship with three construction stages, the finished building and its
+rubble. A wall is laid a tile at a time, so its finished frame is its post
+alone and its set adds an **arm** toward each of the eight neighbours; the game
+draws each tile's post with an arm toward each wall of the same owner beside it.
+The gate adds itself **shut** and **open** in each of four orientations, the
+line of the wall it stands in.
+
 ### 2.3 Sizes
 
 | Subject | Sprite size at 1× |
