@@ -244,6 +244,8 @@ pub fn default_animation(name: &str, frames: u32) -> AnimationSpec {
         "variants" => (1000, false, None),
         // A wall's arms and a gate's orientations are picked by index too.
         "arm" | "shut" | "open" => (1000, false, None),
+        // A carry is a walk with a load, at the walk's pace.
+        n if n.starts_with("carry_") => (100, true, None),
         // Villager tasks and carry variants: a working loop.
         _ => (140, true, None),
     };

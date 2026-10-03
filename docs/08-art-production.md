@@ -385,10 +385,12 @@ proves a fresh clone can produce what the game loads.
    `atlas rig`. The one thing left that no test can prove is that the rig looks
    good, which needs a Blender install and a first model.
 2. **Greybox one unit** — model, render, quantise, validate. **Done**, and what
-   it found is §10. `tools/render/greybox_villager.py` builds the subject,
-   `render_sheet.py` renders 150 frames through the rig, `atlas compose` turns
-   them into `assets/sprites/villager`, and it passes the gate. The player
-   colour key survives shading into 7 of the ramp's 8 steps.
+   it found is §10. A greybox script built the subject, `render_sheet.py`
+   rendered 150 frames through the rig, `atlas compose` turned them into
+   `assets/sprites/villager`, and it passed the gate. The player colour key
+   survives shading into 7 of the ramp's 8 steps. The villager is now built
+   in `slice.py` like every other subject, with its tasks and loads (step 3),
+   and the greybox script is gone; git history has it.
 
    **The same unit in-game: done** (D19). The renderer now bakes this palette,
    loads every set under `assets/sprites`, and draws the villager with its

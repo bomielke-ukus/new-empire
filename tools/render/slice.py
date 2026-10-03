@@ -26,6 +26,14 @@ import kit  # noqa: E402
 # --------------------------------------------------------------------------
 # Units.
 
+def villager():
+    """The owner's tunic, a stone hatchet, and a tool or a load for each job
+    (kit.Villager)."""
+    v = kit.Villager("Villager")
+    v.animate()
+    return v.root
+
+
 def spearman():
     h = kit.Humanoid("Spearman", helmet="cone")
     h.hold(kit.spear("spear"))
@@ -668,8 +676,10 @@ def gazelle():
     return a.root
 
 
-# name: (builder, size class, "unit", "building", "wall", "gate" or "node")
+# name: (builder, size class, "unit", "villager", "building", "wall", "gate" or
+# "node")
 SUBJECTS = {
+    "villager": (villager, "Foot", "villager"),
     "clubman": (clubman, "Foot", "unit"),
     "axeman": (axeman, "Foot", "unit"),
     "spearman": (spearman, "Foot", "unit"),

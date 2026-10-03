@@ -250,8 +250,8 @@ the `RM-M7-01` observation sheet (`docs/09` §9.1). The plan and the
 record are in `docs/10` §4d. What remains of M7 is the owner's: the Mac
 measurement and the six players. The sprite art is being modelled by code
 (`docs/08` §9 step 3, the owner's choice): every unit, building and node
-the simulation has is rendered; the terrain, the villagers' task
-animations and the later ages' looks are not yet.
+the simulation has is rendered, villagers at their tasks and with their
+loads; the terrain and the later ages' looks are not yet.
 
 - Full audio: acknowledgments, work loops, positional world SFX, ambience,
   age fanfares, music stems, combat ducking

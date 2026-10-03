@@ -75,8 +75,10 @@ as they are used; a tree falls toward whoever felled it; an attack on
 your own out of view is a red chevron at the screen's edge, and a
 flash on the minimap; a loss pings the minimap. The villagers,
 soldiers, riders, buildings, walls, gates, trees, bushes, veins and the
-herd are rendered models, a wall's tiles joined into one run; the
-ground is still drawn procedurally. Every unit, building and technology button has a tooltip
+herd are rendered models, a wall's tiles joined into one run; a
+villager chops, mines, picks, hoes and hammers at its job and walks
+its load home on its shoulder or in its arms; the ground is still
+drawn procedurally. Every unit, building and technology button has a tooltip
 with its cost, time, what it counters and what counters it, and its
 key. Five first-time hints come in context, each at most twice, and
 SETTINGS turns them off. A refused click flashes the resource it is
@@ -1541,6 +1543,29 @@ The last kinds drawn by the old placeholder code are rendered now.
   and a new `walls` scene (`mapview --scenario walls`): a corner, a T, both
   diagonals, gates open and one held shut, a lone post.
 
+### Work record: the art, the villager at work (2026-10-03)
+
+The attack swing stood in for every job; now each job has its own.
+
+- **The villager is built like the rest.** It was the greybox script's
+  until now; `kit.Villager` builds it on the soldiers' figure (the same
+  proportions, the owner's tunic, a stone hatchet) in `slice.py`, and the
+  greybox script is gone. Its five animations are every unit's.
+- **Tasks** (`docs/05` §2.2), six frames each, looping: **chop** (the
+  hatchet swung into the trunk), **mine** (a pick brought down to the
+  vein), **farm** (a hoe to the ground), **build** (a mallet, for repair
+  too) and **forage** (bent to the bush, picking with one hand and then
+  the other, and for butchering a carcass). Each tool shows only on its
+  own animation.
+- **Carry walks**, eight frames at the walk's pace: logs on the shoulder,
+  a basket of berries, a basket of gold, a stone block in both arms.
+- **The game picks** (`scene::villager_anim`): a villager working a tree
+  chops, a vein mines, a farm hoes, anything else forages; building or
+  repairing hammers (repairing showed the villager standing idle until
+  now); walking with a load carries it. A set without these frames swings
+  and walks as before.
+- **Goldens:** every scene with a villager rebaked.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1744,11 +1769,11 @@ Stated so they are not rediscovered.
   gate until their tally is in.
 - **The art is code-built and low-poly** (`docs/08` §9): every unit,
   building and node the simulation has is modelled, with its deaths,
-  construction stages and rubble; the terrain tiles are not. No villager
-  has a hammering or task-specific animation (the attack swing stands
-  in), a building's collapse is a cloud over its rubble, and no rendered
-  set has its later ages' look or a second civilisation's. A modeller's
-  work can replace any set by name.
+  construction stages and rubble; the terrain tiles are not. A
+  building's collapse is a cloud over its rubble, nobody fishes (the
+  simulation has no boats), and no rendered set has its later ages' look
+  or a second civilisation's. A modeller's work can replace any set by
+  name.
 - **One notification row stays open**: no Wonder to announce.
 - **The Mac build is not notarised, Apple Silicon only, and has no icon.**
   Notarising needs an Apple Developer account and a signing identity in

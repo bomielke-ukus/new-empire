@@ -728,6 +728,212 @@ def gate_orientation(o):
 
 
 # --------------------------------------------------------------------------
+# The villager: the figure, a tool for each job, and the loads it carries
+# home. Its five animations are every unit's; the tasks and the carry walks
+# come after them (docs/05 section 2.2), and the game picks one by what the
+# villager is doing (`crates/view/src/scene.rs`).
+
+VILLAGER_SPANS = dict(MOBILE_SPANS, **{
+    "chop": (31, 36),
+    "mine": (37, 42),
+    "forage": (43, 48),
+    "farm": (49, 54),
+    "build": (55, 60),
+    "carry_wood": (61, 68),
+    "carry_food": (69, 76),
+    "carry_gold": (77, 84),
+    "carry_stone": (85, 92),
+})
+
+
+def _tool(name, handle, head_size, head_mat, head_at, below=0.06):
+    """A handle standing up from the grip with a head at `head_at` along
+    it, sticking out toward +Y."""
+    grip = empty(name)
+    parts = [cylinder(name + "_handle", 0.024, handle, "wood", (0.0, 0.0, -below), sides=6),
+             box(name + "_head", head_size, head_mat, (0.0, head_size[1] / 2 - 0.02, head_at))]
+    for p in parts:
+        p.parent = grip
+    return grip
+
+
+def hatchet(name):
+    """The villager's own tool, a stone-headed hatchet: it fells trees and
+    fights with it."""
+    return _tool(name, 0.36, (0.05, 0.12, 0.09), "stone", 0.21)
+
+
+def pick(name):
+    """A pick for stone and gold: a long head across the handle."""
+    grip = _tool(name, 0.40, (0.04, 0.14, 0.04), "stone", 0.30)
+    back = box(name + "_back", (0.04, 0.10, 0.035), "stone", (0.0, -0.06, 0.30))
+    back.parent = grip
+    return grip
+
+
+def hoe(name):
+    """A long-handled hoe, its blade flat and forward."""
+    return _tool(name, 0.58, (0.10, 0.12, 0.02), "stone", 0.46, below=0.12)
+
+
+def mallet(name):
+    """A wooden mallet for building and repair."""
+    return _tool(name, 0.26, (0.08, 0.13, 0.08), "wood_dark", 0.16, below=0.04)
+
+
+def logs(name):
+    """Three logs on the right shoulder, lying fore and aft."""
+    root = empty(name)
+    for i, (x, z) in enumerate([(0.12, 0.70), (0.19, 0.70), (0.155, 0.76)]):
+        log = cylinder("%s_%d" % (name, i), 0.04, 0.46, "wood", (x, 0.02, z), sides=6,
+                       pivot="centre", rotation=(_deg(90.0), 0.0, 0.0))
+        log.parent = root
+    return root
+
+
+def basket(name, fill):
+    """A basket held in front in both hands, heaped with `fill`."""
+    root = empty(name)
+    parts = [cylinder(name + "_basket", 0.10, 0.10, "straw", (0.0, 0.17, 0.38), sides=8,
+                      top_radius=0.12)]
+    for i, (x, y) in enumerate([(-0.04, 0.15), (0.04, 0.19), (0.0, 0.13), (0.03, 0.12),
+                                (-0.03, 0.2)]):
+        parts.append(box("%s_%d" % (name, i), (0.06, 0.06, 0.05), fill, (x, y, 0.47)))
+    for p in parts:
+        p.parent = root
+    return root
+
+
+def block(name):
+    """A dressed stone block held in front in both hands."""
+    root = empty(name)
+    b = box(name + "_stone", (0.18, 0.15, 0.13), "rock_light", (0.0, 0.17, 0.38))
+    b.parent = root
+    return root
+
+
+def villager_pose(anim, i, count):
+    """One frame of a task or a carry walk: the body, each limb's swing, and
+    the held tool's angle about X (0 holds it head up, -90 forward, 180
+    down). Every task loops, so its last frame leads back to its first;
+    the blow lands on the fourth."""
+    body = {"dy": 0.0, "dz": 0.0, "rot_x": 0.0, "scale_z": 1.0}
+    limbs = {"leg_l": _deg(12.0), "leg_r": _deg(-10.0), "arm_l": 0.0, "arm_r": 0.0}
+    tool = 0.0
+    swings = {
+        # (right arm, tool, body pitch), a key per frame.
+        "chop": [(150, 50, 0), (170, 75, 2), (130, -20, -2), (75, -105, -8), (60, -120, -9),
+                 (105, -40, -4)],
+        "mine": [(140, 40, 0), (170, 70, 4), (120, -40, -4), (45, -155, -16), (38, -165, -18),
+                 (90, -70, -8)],
+        "farm": [(100, -30, -8), (130, 20, -4), (90, -70, -10), (45, -145, -18),
+                 (35, -155, -20), (65, -110, -14)],
+        "build": [(110, -10, -4), (140, 40, -2), (100, -60, -5), (62, -120, -8),
+                  (55, -125, -8), (80, -80, -6)],
+    }
+    if anim in swings:
+        arm, angle, pitch = swings[anim][i % len(swings[anim])]
+        limbs["arm_r"] = _deg(arm)
+        # Both hands on the long tools; the free hand steadies the work.
+        limbs["arm_l"] = _deg(arm * 0.85) if anim in ("mine", "farm") else _deg(55.0)
+        tool = _deg(angle)
+        body["rot_x"] = _deg(pitch)
+        if anim in ("mine", "farm"):
+            limbs["leg_l"], limbs["leg_r"] = _deg(18.0), _deg(-14.0)
+    elif anim == "forage":
+        # Bent to the bush, picking with one hand and then the other.
+        reach = [(80, 30), (95, 50), (70, 85), (40, 95), (60, 70), (85, 40)][i % 6]
+        limbs["arm_r"], limbs["arm_l"] = _deg(reach[0]), _deg(reach[1])
+        body["rot_x"] = _deg(-14.0 if i % 3 else -10.0)
+    elif anim.startswith("carry_"):
+        phase = 2.0 * math.pi * i / count
+        limbs["leg_l"] = _deg(24.0) * math.sin(phase)
+        limbs["leg_r"] = _deg(24.0) * math.sin(phase + math.pi)
+        body["dz"] = 0.016 * abs(math.sin(phase))
+        if anim == "carry_wood":
+            # A hand up to the logs on the shoulder; the other arm swings.
+            limbs["arm_r"] = _deg(125.0)
+            limbs["arm_l"] = _deg(16.0) * math.sin(phase + math.pi)
+        else:
+            # Both arms under the load in front.
+            limbs["arm_r"] = limbs["arm_l"] = _deg(38.0)
+    return body, limbs, tool
+
+
+class Villager(Humanoid):
+    """The villager: the soldiers' figure in the owner's tunic, hatchet in
+    hand, with a tool for each job and the loads it carries home. Each tool
+    and load is shown only on the frames of its own animation."""
+
+    def __init__(self, root_name):
+        super().__init__(root_name)
+        self.hold(hatchet(root_name + "_hatchet"), lean=0.0)
+        hatchet_frames = set(range(1, 31)) | _span("chop")
+        self.tools = [(self.weapon, hatchet_frames)]
+        for tool, anim in [(pick, "mine"), (hoe, "farm"), (mallet, "build")]:
+            obj = tool("%s_%s" % (root_name, anim))
+            obj.parent = self.body
+            self.tools.append((obj, _span(anim)))
+        self.loads = []
+        for make, anim in [(lambda n: logs(n), "carry_wood"),
+                           (lambda n: basket(n, "berry"), "carry_food"),
+                           (lambda n: basket(n, "gold"), "carry_gold"),
+                           (lambda n: block(n), "carry_stone")]:
+            obj = make("%s_%s" % (root_name, anim))
+            obj.parent = self.body
+            self.loads.append((obj, _span(anim)))
+
+    def animate(self, style="swing"):
+        """Keys the five animations, then the tasks and the carry walks."""
+        super().animate(style)
+        scene = bpy.context.scene
+        last = max(b for _, b in VILLAGER_SPANS.values())
+        scene.frame_start, scene.frame_end = 1, last
+        # Limbs only turn; where each one hangs never changes.
+        rest = {k: tuple(o.location) for k, o in self.parts.items()}
+        for anim, (first, end) in VILLAGER_SPANS.items():
+            if anim in MOBILE_SPANS:
+                continue
+            count = end - first + 1
+            for i in range(count):
+                frame = first + i
+                body, limbs, angle = villager_pose(anim, i, count)
+                self.body.location = (0.0, body["dy"], body["dz"])
+                self.body.rotation_euler = (body["rot_x"], 0.0, 0.0)
+                self.body.scale = (1.0, 1.0, body["scale_z"])
+                for path in ("location", "rotation_euler", "scale"):
+                    self.body.keyframe_insert(path, frame=frame)
+                for key, obj in self.parts.items():
+                    obj.location = rest[key]
+                    obj.rotation_euler = (limbs.get(key, 0.0), 0.0, 0.0)
+                    obj.keyframe_insert("location", frame=frame)
+                    obj.keyframe_insert("rotation_euler", frame=frame)
+                for tool, _ in self.tools:
+                    tool.location = hand(limbs.get("arm_r", 0.0), side=1.0)
+                    tool.rotation_euler = (angle, 0.0, 0.0)
+                    tool.keyframe_insert("location", frame=frame)
+                    tool.keyframe_insert("rotation_euler", frame=frame)
+        for obj, frames in self.tools + self.loads:
+            meshes = [c for c in obj.children_recursive if c.type == "MESH"]
+            for frame in range(1, last + 1):
+                hidden = frame not in frames
+                for m in meshes:
+                    m.hide_render = hidden
+                    m.hide_viewport = hidden
+                    m.keyframe_insert("hide_render", frame=frame)
+                    m.keyframe_insert("hide_viewport", frame=frame)
+        everything = [self.body] + list(self.parts.values())
+        everything += [o for o, _ in self.tools]
+        everything += [c for o, _ in self.tools + self.loads for c in o.children_recursive]
+        hold_frames(everything)
+
+
+def _span(anim):
+    first, last = VILLAGER_SPANS[anim]
+    return set(range(first, last + 1))
+
+
+# --------------------------------------------------------------------------
 # The horse and its rider.
 
 class Rider:

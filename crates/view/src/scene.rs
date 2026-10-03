@@ -218,6 +218,7 @@ impl Scene {
                         phase: GatherPhase::Working,
                         ..
                     } | Order::Build { working: true, .. }
+                        | Order::Repair { working: true, .. }
                 ) || (world.reload[i] > 0
                     && info
                         .combat
@@ -249,6 +250,12 @@ impl Scene {
                 Anim::Work
             } else {
                 Anim::Idle
+            };
+            // A villager shows its job: the task it is at, the load it walks
+            // home. A set without them swings and walks as before.
+            let anim = match villager_anim(sim, i, anim) {
+                Some(task) if atlas.anim_info(look, task).is_some() => task,
+                _ => anim,
             };
             let time_ms = if world.dying[i] > 0 {
                 let span = if info.mobile {
@@ -622,6 +629,44 @@ fn waypoint_marks(
             }
             from = to;
         }
+    }
+}
+
+/// What villager `i` is doing, as the animation its set may have for it:
+/// a task while `anim` is the work swing, a load while it is the walk.
+fn villager_anim(sim: &Simulation, i: usize, anim: Anim) -> Option<Anim> {
+    let world = sim.world();
+    match anim {
+        Anim::Walk => match world.carry[i] {
+            Some((res, n)) if n > 0 => Some(match res {
+                kinds::Resource::Food => Anim::CarryFood,
+                kinds::Resource::Wood => Anim::CarryWood,
+                kinds::Resource::Stone => Anim::CarryStone,
+                kinds::Resource::Gold => Anim::CarryGold,
+            }),
+            _ => None,
+        },
+        Anim::Work => match world.order[i] {
+            Order::Gather {
+                node,
+                phase: GatherPhase::Working,
+                ..
+            } => {
+                let node = world.slot(node)?.index();
+                Some(match world.kind[node] {
+                    kinds::TREE => Anim::Chop,
+                    kinds::GOLD_MINE | kinds::STONE_MINE => Anim::Mine,
+                    kinds::FARM => Anim::Farm,
+                    // A bush, or a carcass being butchered.
+                    _ => Anim::Forage,
+                })
+            }
+            Order::Build { working: true, .. } | Order::Repair { working: true, .. } => {
+                Some(Anim::Build)
+            }
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -1322,5 +1367,76 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(ghost_arms, [3, 0, 0, 0, 3, 0, 0, 0]);
+    }
+
+    /// A villager shows its job (`docs/05` §2.2): the chop at a tree, then
+    /// the wood carried home on the walk back.
+    #[test]
+    fn a_villager_chops_and_carries_the_wood_home() {
+        use sim::{Command, CommandKind};
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
+        let (sheets, errors) = crate::sheets::load_all(&dir);
+        assert!(errors.is_empty(), "{errors:?}");
+        let atlas = Atlas::with_sheets(&sheets);
+        let mut sim = Simulation::new(
+            1,
+            SimConfig {
+                map: MapSpec {
+                    kind: MapKind::Inland,
+                    size: 64,
+                    players: 1,
+                },
+                wander: false,
+                ..SimConfig::default()
+            },
+        );
+        let w = sim.world();
+        let v = w
+            .slots()
+            .find(|s| w.kind[s.index()] == kinds::VILLAGER)
+            .unwrap();
+        let (vi, vid) = (v.index(), w.id_at(v));
+        let tree = w
+            .slots()
+            .filter(|s| w.kind[s.index()] == kinds::TREE)
+            .min_by_key(|s| (w.pos[vi].distance_sq_raw(w.pos[s.index()]), s.index()))
+            .map(|s| w.id_at(s))
+            .unwrap();
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Gather {
+                ids: vec![vid],
+                node: tree,
+            },
+        });
+        // The animation the villager's sprite is drawn from.
+        let anim_of = |sim: &Simulation| {
+            let scene = Scene::build(sim, &atlas, None, 0.0);
+            let s = scene.sprites.iter().find(|s| s.slot == vi as u32).unwrap();
+            atlas
+                .frames()
+                .iter()
+                .find(|f| (f.x, f.y) == (s.u, s.v))
+                .map(|f| f.anim)
+                .unwrap()
+        };
+        let mut seen = Vec::new();
+        for _ in 0..3000 {
+            sim.step();
+            let a = anim_of(&sim);
+            if seen.last() != Some(&a) {
+                seen.push(a);
+            }
+            if a == Anim::CarryWood {
+                break;
+            }
+        }
+        let chop = seen.iter().position(|&a| a == Anim::Chop);
+        let carry = seen.iter().position(|&a| a == Anim::CarryWood);
+        assert!(
+            matches!((chop, carry), (Some(c), Some(k)) if c < k),
+            "chops, then carries: {seen:?}"
+        );
+        assert!(!seen.contains(&Anim::Work), "no swing stands in: {seen:?}");
     }
 }

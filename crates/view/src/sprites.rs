@@ -100,6 +100,24 @@ pub enum Anim {
     Shut = 8,
     /// A gate open, one frame per orientation.
     Open = 9,
+    /// A villager felling a tree.
+    Chop = 10,
+    /// A villager working a vein.
+    Mine = 11,
+    /// A villager picking a bush or butchering a carcass.
+    Forage = 12,
+    /// A villager tending a farm.
+    Farm = 13,
+    /// A villager building or repairing.
+    Build = 14,
+    /// A villager walking a load of food home.
+    CarryFood = 15,
+    /// A villager walking a load of wood home.
+    CarryWood = 16,
+    /// A villager walking a load of stone home.
+    CarryStone = 17,
+    /// A villager walking a load of gold home.
+    CarryGold = 18,
 }
 
 impl Anim {
@@ -116,6 +134,15 @@ impl Anim {
             "arm" => Some(Anim::Arm),
             "shut" => Some(Anim::Shut),
             "open" => Some(Anim::Open),
+            "chop" => Some(Anim::Chop),
+            "mine" => Some(Anim::Mine),
+            "forage" => Some(Anim::Forage),
+            "farm" => Some(Anim::Farm),
+            "build" => Some(Anim::Build),
+            "carry_food" => Some(Anim::CarryFood),
+            "carry_wood" => Some(Anim::CarryWood),
+            "carry_stone" => Some(Anim::CarryStone),
+            "carry_gold" => Some(Anim::CarryGold),
             _ => None,
         }
     }

@@ -19,8 +19,8 @@ mkdir -p "$work"
 subjects=("$@")
 if [ ${#subjects[@]} -eq 0 ]; then
   mapfile -t subjects < <("$blender" --background --python tools/render/slice.py -- --list 2>/dev/null \
-    | awk 'NF == 3 && ($3 == "unit" || $3 == "building" || $3 == "wall" || $3 == "gate" \
-                       || $3 == "node") { print $1 }')
+    | awk 'NF == 3 && ($3 == "unit" || $3 == "villager" || $3 == "building" \
+                       || $3 == "wall" || $3 == "gate" || $3 == "node") { print $1 }')
 fi
 
 for name in "${subjects[@]}"; do
@@ -40,6 +40,14 @@ for name in "${subjects[@]}"; do
   rm -rf "$work/$name"
   if [ "$what" = unit ]; then
     anims=(--anim idle=1-4 --anim walk=5-12 --anim attack=13-18 --anim death=19-26 --anim decay=27-30)
+    facings=()
+  elif [ "$what" = villager ]; then
+    # Every unit's five, then the tasks and the carry walks
+    # (tools/render/kit.py, VILLAGER_SPANS).
+    anims=(--anim idle=1-4 --anim walk=5-12 --anim attack=13-18 --anim death=19-26 --anim decay=27-30
+      --anim chop=31-36 --anim mine=37-42 --anim forage=43-48 --anim farm=49-54 --anim build=55-60
+      --anim carry_wood=61-68 --anim carry_food=69-76 --anim carry_gold=77-84
+      --anim carry_stone=85-92)
     facings=()
   elif [ "$what" = building ]; then
     anims=(--anim construction=1-3 --anim idle=4-4 --anim rubble=5-5)
