@@ -7,13 +7,15 @@
 //! compile-fail tests in `tests/` prove the world is unnameable from here
 //! (`TA-AI-01`).
 //!
-//! The economy manager and the build orders are in [`economy`]; the
-//! military manager follows in M5's later steps.
+//! The economy manager and the build orders are in [`economy`], the
+//! military manager in [`military`], the technologies in [`research`] and
+//! the priests in [`temple`].
 
 #![warn(missing_docs)]
 
 pub mod economy;
 pub mod military;
+pub mod research;
 pub mod temple;
 
 use economy::{BuildOrder, Economy};
@@ -119,8 +121,10 @@ impl Opponent {
     /// One tick: the commands to issue this tick, in order. It listens
     /// every tick, thinks every `cadence` ticks of its order, on a tick of
     /// its own so two opponents do not think together, and answers with
-    /// nothing between. The economy spends first; the military gets what
-    /// is left.
+    /// nothing between. The economy spends first. Until the army has gone
+    /// out once the military spends next and the technologies get what it
+    /// leaves; from then the technologies (with a reserve kept) go before
+    /// the military. The priests get what is left.
     pub fn think(&mut self, view: &FoggedView<'_>) -> Vec<Command> {
         debug_assert_eq!(view.player(), self.player, "a view of someone else's side");
         self.military.observe(view);
@@ -139,10 +143,19 @@ impl Opponent {
         for (have, saved) in stock.iter_mut().zip(self.economy.saving()) {
             *have = (*have - saved).max(0);
         }
+        // Until the army has gone out once it comes first, so the first
+        // attack goes out on time; from then the technologies do.
+        let army_first = !self.military.sent_out();
+        if !army_first {
+            kinds.extend(research::think(view, &self.order, &mut stock));
+        }
         kinds.extend(
             self.military
                 .think(view, &self.order, &mut self.rng, &mut stock),
         );
+        if army_first {
+            kinds.extend(research::think(view, &self.order, &mut stock));
+        }
         kinds.extend(temple::think(
             view,
             &self.order,

@@ -1080,9 +1080,17 @@ fn ai(f: &Flags) -> ExitCode {
                         view.can_train(id, kinds::VILLAGER)
                             .map_or_else(|e| e.to_string(), |_| "ok".into())
                     });
+                    let researched: Vec<&str> = me
+                        .researched
+                        .iter()
+                        .filter_map(|t| sim::tech::info(*t))
+                        .filter(|t| t.advances_age().is_none())
+                        .map(|t| t.name)
+                        .collect();
                     line.push_str(&format!(
-                        "\n     jobs {jobs:?}\n     buildings {buildings:?}\n     trained {:?}\n     queue {queue:?}, train villager: {train:?}\n     food in sight: {} nodes, {} left\n     relics held {}",
+                        "\n     jobs {jobs:?}\n     buildings {buildings:?}\n     trained {:?}\n     researched {researched:?}\n     gathered {:?}\n     queue {queue:?}, train villager: {train:?}\n     food in sight: {} nodes, {} left\n     relics held {}",
                         trained[p as usize],
+                        me.gathered,
                         food.len(),
                         food.iter().sum::<i32>(),
                         sim.relics_held(p)

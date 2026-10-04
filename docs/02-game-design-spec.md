@@ -402,6 +402,16 @@ manager** (villager assignment, drop-off placement), a **military manager**
 (composition, grouping, attack timing), and a **scouting/threat model** driven by
 its own fog state.
 
+**As built** (2026-10-04): Standard and Hard research the economy's and the
+army's technologies as each becomes worth having (Woodworking first; armour and
+arrows for the soldiers they field; the farming technologies once they farm);
+Easy researches none. Until the army has gone out once, research gets only what
+the army leaves, so the first attack is not late. The economy builds a new
+Storehouse by the trees or the mine once a third of their gatherers walk more
+than eight tiles to drop off, moves gatherers from a resource piled past 1000 to
+one running short, and saves for the next age after ten minutes in an age
+whatever its army. Hard saves for a Wonder after ten minutes in the Iron Age.
+
 ---
 
 ## 13. Game modes

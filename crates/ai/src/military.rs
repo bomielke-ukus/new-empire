@@ -43,6 +43,9 @@ pub struct Military {
     /// from home, for the priests to follow.
     #[serde(default)]
     army_at: Option<Vec2Fx>,
+    /// The army has gone out at least once. A save from before reads no.
+    #[serde(default)]
+    sent_out: bool,
 }
 
 /// A soldier: mobile, armed, and not a villager or the scout.
@@ -56,6 +59,11 @@ fn is_soldier_kind(kind: KindId) -> bool {
 }
 
 impl Military {
+    /// Whether the army has gone out at least once.
+    pub fn sent_out(&self) -> bool {
+        self.sent_out
+    }
+
     /// Where the army is while it is out, for the priests to follow.
     pub fn army_at(&self) -> Option<Vec2Fx> {
         self.army_at
@@ -272,6 +280,7 @@ impl Military {
                 });
                 out.push(CommandKind::AttackMove { ids: idle, target });
                 self.attack = Some((target, tick));
+                self.sent_out = true;
             }
         }
         let n_home = idle_home.len() as u32;
@@ -285,6 +294,7 @@ impl Military {
                 });
                 out.push(order);
                 self.attack = Some((target, tick));
+                self.sent_out = true;
             }
         }
         let idle_away: Vec<EntityId> = soldiers

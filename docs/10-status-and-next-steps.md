@@ -1972,6 +1972,59 @@ tier waits for it).
 - **Not yet.** The other three architecture sets: every civilization's
   buildings look the same.
 
+### Work record: the opponent's technologies and its economy (2026-10-04)
+
+The opponent researched only the ages and the line upgrades, and a Hard
+opponent reached the Iron Age in about half its long matches. Now it
+researches like a player, and the reason it stalled is fixed.
+
+- **Technologies** (`ai::research`). Standard and Hard research the ten
+  that are neither an age nor a line upgrade, each once it is worth
+  having to the side: Woodworking first; Toolworking, Leather Armour
+  and Fletching for the soldiers it fields; Domestication and Plough
+  once it farms; Gold and Stone Mining for what its villagers gather;
+  Carrying Baskets and Scaffolding. One at a time, with a reserve kept
+  and nothing the economy is saving for touched. Until the army has gone
+  out once, research gets only what the army leaves (an earlier version
+  that went first held Hard's first raid back by four minutes on
+  average). Easy researches nothing.
+- **What research is worth.** Over 80 Hard-against-Hard matches with
+  one side researching and the sides swapped halfway, the researching
+  side won 39 to 43 (49–54%, both orders tried): what it spends on
+  technology it does not spend on soldiers. It is in because a player
+  researches and the opponent's later soldiers are the stronger for it,
+  not because it wins more.
+- **Why Hard stalled in the Bronze Age.** Its wood ran out. The forest
+  by its one Storehouse was cut, its woodcutters walked across the map,
+  and twelve of them brought in 75 wood a minute while thirteen farms
+  reseeding ate it. The Siege Workshop, the second building the Iron Age
+  needs, was never paid for while 2,700 food piled up. Three changes to
+  the economy (`ai::economy`):
+  - **A Storehouse by the work.** Once a third of the woodcutters or
+    miners (two at least) are more than eight tiles from every drop-off,
+    a new Storehouse by the node the furthest of them works; one at a
+    time, six at most. Wood gathered in the Bronze Age more than doubled
+    (2,133 against 910 over the same thirteen minutes of one match);
+    gold rose by 70%.
+  - **A glut.** A resource stocked past 1000 (and past what is saved
+    for it) gives half its gatherer share to the one furthest below what
+    is being saved for, or below 200. Stone counts as short only when
+    something saved for costs it.
+  - **Patience in every age.** The next age is saved for after ten
+    minutes in an age whatever the army, the Iron Age included (only
+    the Tool Age had it), and Hard saves for a Wonder after ten minutes
+    in the Iron Age.
+- **Results.** In 10 forty-minute Hard-against-Hard matches, the
+  surviving sides reached the Iron Age 11 times in 15 (6 in 13 before).
+  Against Easy, Hard reaches the Iron Age inside forty minutes and
+  raises a Wonder in five of six hour-long matches, from the ordinary
+  start. Hard still beats Easy 20 of 20 and Standard 10 of 10, and
+  Hard still raids Easy inside twenty minutes.
+- **Tests** (`tools/simrunner/tests/ai_research.rs`): Standard researches
+  and Easy does not; Hard reaches the Iron Age; Hard raises a Wonder
+  from the ordinary start. `simrunner ai --stats` lists what each side
+  researched and gathered. The Hard-against-Easy record is rewritten.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the
@@ -1979,8 +2032,9 @@ simulation (chunk 1) and the opponent fields them (chunk 2); the
 detailed soldiers and the new roster are rendered (chunk 3);
 priests, relics and the Wonder are in (chunk 4) and the opponent uses
 them (chunk 5); five map types are in (chunk 6) and the eight
-civilizations (chunk 7, above). Next: naval and Islands, and the other
-three architecture sets.
+civilizations (chunk 7); the opponent researches its technologies and
+builds Storehouses by its work (above). Next: naval and Islands, and the
+other three architecture sets.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded
@@ -2198,10 +2252,9 @@ Stated so they are not rediscovered.
   64 MB texture; 84 sets). 8192 is the widest texture the GPU limits
   allow, so a second civilisation's sets will need a second atlas page or
   a texture array.
-- **The opponent researches no technology but ages and line upgrades**:
-  no Toolworking, Leather Armour, Fletching, gathering or farming
-  technology. It reaches the Iron Age in some long matches, not all, so
-  its Temple, priests and Wonder come late or not at all.
+- **The opponent's Wonder comes late**: after ten minutes in the Iron
+  Age, which Hard reaches thirty-five to forty-five minutes in. Standard
+  never goes past the Bronze Age, by its order.
 - **The Mac build is not notarised and is Apple Silicon only.**
   Notarising needs an Apple Developer account and a signing identity in
   the workflow's secrets; an Intel slice needs a second target and `lipo`
