@@ -644,6 +644,14 @@ fn train_hotkey(kind: KindId) -> char {
         kinds::SLINGER => 'G',
         kinds::BOWMAN => 'B',
         kinds::LIGHT_CAVALRY => 'L',
+        kinds::SWORDSMAN => 'O',
+        kinds::HOPLITE | kinds::LEGIONARY => 'H',
+        kinds::CHARIOT_ARCHER => 'H',
+        kinds::HORSE_ARCHER => 'O',
+        kinds::HEAVY_CAVALRY => 'H',
+        kinds::WAR_ELEPHANT => 'M',
+        kinds::STONE_THROWER | kinds::CATAPULT => 'O',
+        kinds::BALLISTA => 'B',
         _ => 'N',
     }
 }
@@ -652,6 +660,11 @@ fn train_hotkey(kind: KindId) -> char {
 fn unit_label(kind: KindId) -> String {
     match kind {
         kinds::LIGHT_CAVALRY => "CAVALRY".to_string(),
+        kinds::HEAVY_CAVALRY => "HEAVY CAV".to_string(),
+        kinds::CHARIOT_ARCHER => "CHARIOT".to_string(),
+        kinds::HORSE_ARCHER => "H. ARCHER".to_string(),
+        kinds::WAR_ELEPHANT => "ELEPHANT".to_string(),
+        kinds::STONE_THROWER => "THROWER".to_string(),
         other => kinds::info(other).name.to_uppercase(),
     }
 }
@@ -664,6 +677,9 @@ fn unit_plural(kind: KindId) -> String {
         kinds::SPEARMAN => "SPEARMEN".to_string(),
         kinds::BOWMAN => "BOWMEN".to_string(),
         kinds::LIGHT_CAVALRY => "LIGHT CAVALRY".to_string(),
+        kinds::HEAVY_CAVALRY => "HEAVY CAVALRY".to_string(),
+        kinds::SWORDSMAN => "SWORDSMEN".to_string(),
+        kinds::LEGIONARY => "LEGIONARIES".to_string(),
         other => format!("{}S", kinds::info(other).name.to_uppercase()),
     }
 }
@@ -689,6 +705,12 @@ fn unit_tooltip(kind: KindId) -> String {
         if c.range > 0 {
             t.push_str(&format!(" RANGE {}", c.range));
         }
+    }
+    if u.pop_cost > 1 {
+        t.push_str(&format!(", {} POP", u.pop_cost));
+    }
+    if c.blast_tenths > 0 {
+        t.push_str(". HITS ALL IT LANDS AMONG, FRIENDS TOO");
     }
     for (class, bonus) in c.bonuses {
         t.push_str(&format!(

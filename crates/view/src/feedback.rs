@@ -202,6 +202,14 @@ impl CombatFeedback {
                     kind: PuffKind::Hammer,
                     tick,
                 }),
+                // A stone comes down in a ring of dust a tile across, on
+                // something or on nothing.
+                Event::Landed { pos, .. } => self.puffs.push(Puff {
+                    pos: tile(pos),
+                    dir: (0.0, 0.0),
+                    kind: PuffKind::Collapse(1),
+                    tick,
+                }),
                 Event::Felled { kind, pos, toward } if kind == kinds::TREE => {
                     self.falls.push(Fall {
                         kind,

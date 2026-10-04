@@ -351,6 +351,24 @@ still replace any age's set by name (`house_bronze`). The roof colour is
 what reads at the camera's height, so it is the one change every
 building makes.
 
+### D30 — The Legionary ends the Hoplite line; a siege stone lands where it was aimed
+**Date:** 2026-10-04 · **Decided by:** Claude, on the owner's instruction to build the rest of M8
+
+Two things `docs/02` left open or said two ways. §7 gives the line
+upgrades as Clubman → Axeman → Swordsman → Legionary, while §5.2's table,
+which carries the numbers, makes the Legionary the Hoplite line's last
+tier and gives the Swordsman a cost of its own. The table wins: the Axe
+upgrades the Clubman, the Legion upgrade the Hoplite (at the Academy, in
+the Iron Age), and Torsion the Stone Thrower into the Catapult (at the
+Siege Workshop); the Swordsman is the Barracks' Bronze Age unit, trained
+beside the Axeman. Second, `GD-COMBAT-04` turns friendly fire on but does
+not say how a stone flies. It flies to where its target stood when it was
+thrown and comes down there, so a moving target can step out of the way,
+and hurts everything within its blast, friend or foe: half a tile for the
+Stone Thrower, a tile for the Catapult. The engine that threw it is never
+hit by its own stone; there is no minimum range. The Ballista's bolt is an
+arrow: it follows its target and has no blast.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?

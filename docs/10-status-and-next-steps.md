@@ -1690,7 +1690,48 @@ rendered sets had one look; only the placeholders changed with the age.
 - **Goldens:** the five scenes in a later age (`ages-*`, `army-hud`,
   `tooltip-hud`) rebaked; the Stone Age scenes are unchanged.
 
+### Work record: each age its own music (2026-10-04)
+
+The owner, playing, asked for the music to change with each age as the
+buildings do. The four stems had shared one tune, tempo and key and only
+added layers. Each is its own piece now (`docs/05` §5.3): Stone at 60
+beats a minute, frame drum and bone flute in A minor pentatonic; Tool at
+80, the lyre's figure, a shaker and the flute in D dorian; Bronze at 96, a
+processional horn over a walking bass and the chorus in G mixolydian; Iron
+at 112, doubled war drums, a snare, a hammering bass and the horn high in
+C harmonic minor. The synthesiser has a held horn, a bass, a shaker and a
+snare for them. Still placeholders, replaced by name.
+
+### Work record: M8 chunk 1 — the later ages' soldiers (2026-10-04)
+
+The owner asked for the rest of the roadmap after M7. M8 starts with the
+Bronze and Iron Ages' military, which the Academy and the Siege Workshop
+had stood empty for (`docs/02` §5.2-§5.4).
+
+- **Ten soldiers.** Bronze: the Swordsman (Barracks), Hoplite (Academy),
+  Chariot Archer (Archery Range), Heavy Cavalry (Stable), Stone Thrower
+  (Siege Workshop). Iron: the Legionary (the Hoplite line, after Legion),
+  Horse Archer, War Elephant, Catapult (the Stone Thrower line, after
+  Torsion) and Ballista. Siege and the elephant take two population.
+  Stats are `docs/02`'s opening values; the missing armour values are
+  ours (`docs/damage-matrix.md` lists every number).
+- **Siege throws at the ground** (`docs/07` D30): a stone lands where its
+  target stood and hurts everything within its blast, the thrower's own
+  side included (`GD-COMBAT-04`), with dust where it lands and a sound of
+  its own. The spec's §7 and §5.2 disagreed on the Legionary's line; the
+  table won.
+- **In the game:** a training letter for each (O, H, M, B; never W, A, S
+  or D), short labels where the name is long, tooltips that say two
+  population and that a stone hits friends too, and placeholder drawings
+  until the models are rendered.
+- **Goldens:** `army-hud` and `tooltip-hud` rebaked: the Barracks panel
+  shows the Swordsman, greyed until the Bronze Age.
+
 ### Resume here next session
+
+**M8 is under way** (`docs/06`): the later ages' soldiers are in the
+simulation (chunk 1, above); next the opponent learns to use them, then
+their models, then priests, relics and the Wonder.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded
@@ -1907,6 +1948,12 @@ Stated so they are not rediscovered.
 - **The sprite atlas is 83% full** (6802 of 8192 rows at 4096 wide). A
   second civilisation's sets, or another batch the size of the ages, will
   need a second atlas page or a texture array, not a wider texture.
+- **The later ages' soldiers are placeholders and the opponent ignores
+  them.** The ten Bronze and Iron Age units draw as code-drawn shapes
+  until their models are rendered (`sprites::AWAITING_ART` lists them),
+  and the computer opponent builds no Academy or Siege Workshop and
+  researches nothing but ages, so it never fields them, nor the Axeman.
+  M8 chunks 2 and 3.
 - **One notification row stays open**: no Wonder to announce.
 - **The Mac build is not notarised and is Apple Silicon only.**
   Notarising needs an Apple Developer account and a signing identity in

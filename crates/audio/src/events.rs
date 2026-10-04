@@ -77,6 +77,11 @@ pub fn cues(sim: &Simulation, viewer: Option<u8>) -> Vec<Placed> {
                     out.push((Cue::Work(task), Some(tile(pos))));
                 }
             }
+            Event::Landed { pos, .. } => {
+                if visible(pos) {
+                    out.push((Cue::Impact, Some(tile(pos))));
+                }
+            }
             // A node giving out is seen, not heard: the last swing was.
             Event::Felled { .. } => {}
             Event::Researched { owner, tech: id } => {

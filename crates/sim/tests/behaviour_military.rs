@@ -131,15 +131,30 @@ fn each_building_trains_its_own_roster_and_refuses_the_rest() {
     assert_eq!(sim.player(0).unwrap().stockpile, stock);
     assert_eq!(
         sim.roster(0, kinds::BARRACKS),
-        vec![kinds::CLUBMAN, kinds::AXEMAN, kinds::SPEARMAN]
+        vec![
+            kinds::CLUBMAN,
+            kinds::AXEMAN,
+            kinds::SPEARMAN,
+            kinds::SWORDSMAN
+        ]
     );
     assert_eq!(
         sim.roster(0, kinds::ARCHERY_RANGE),
-        vec![kinds::SLINGER, kinds::BOWMAN]
+        vec![
+            kinds::SLINGER,
+            kinds::BOWMAN,
+            kinds::CHARIOT_ARCHER,
+            kinds::HORSE_ARCHER
+        ]
     );
     assert_eq!(
         sim.roster(0, kinds::STABLE),
-        vec![kinds::SCOUT, kinds::LIGHT_CAVALRY]
+        vec![
+            kinds::SCOUT,
+            kinds::LIGHT_CAVALRY,
+            kinds::HEAVY_CAVALRY,
+            kinds::WAR_ELEPHANT
+        ]
     );
     assert_eq!(sim.roster(0, kinds::TOWN_CENTER), vec![kinds::VILLAGER]);
     assert!(sim.roster(0, kinds::HOUSE).is_empty());
@@ -260,7 +275,7 @@ fn the_axe_upgrade_moves_the_whole_clubman_line_on() {
     assert_eq!(sim.can_train(0, barracks, kinds::AXEMAN), Ok(()));
     assert_eq!(
         sim.roster(0, kinds::BARRACKS),
-        vec![kinds::AXEMAN, kinds::SPEARMAN]
+        vec![kinds::AXEMAN, kinds::SPEARMAN, kinds::SWORDSMAN]
     );
     // A Clubman queued after the upgrade lands comes out an Axeman.
     train(&mut sim, barracks, kinds::AXEMAN);

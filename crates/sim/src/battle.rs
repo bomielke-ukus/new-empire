@@ -88,6 +88,15 @@ pub struct Projectile {
     pub owner: PlayerId,
     /// What kind of hit it lands.
     pub kind: DamageType,
+    /// A siege engine's blast; zero for a shot that follows its target. A
+    /// shot with a blast flies to where the target stood when it was
+    /// loosed and lands on everything within this of that point, its own
+    /// side included (`GD-COMBAT-04`).
+    #[serde(default)]
+    pub blast: Fx,
+    /// What threw it, which its own blast spares.
+    #[serde(default)]
+    pub by: Option<EntityId>,
 }
 
 impl HashState for Projectile {
@@ -98,6 +107,14 @@ impl HashState for Projectile {
         h.write_i32(self.damage);
         h.write_u8(self.owner);
         h.write_u8(self.kind as u8);
+        // An arrow hashes as it always has, so replays from before siege
+        // keep their hashes.
+        if !self.blast.is_zero() {
+            h.write(&self.blast);
+            if let Some(by) = self.by {
+                h.write(&by);
+            }
+        }
     }
 }
 
@@ -200,6 +217,13 @@ pub enum Event {
         pos: Vec2Fx,
         /// Where the villager stood.
         toward: Vec2Fx,
+    },
+    /// A siege engine's shot came down, on something or on nothing.
+    Landed {
+        /// Where.
+        pos: Vec2Fx,
+        /// How far it reached.
+        blast: Fx,
     },
     /// A working villager's swing, once every [`WORK_PERIOD`] ticks.
     Work {
@@ -770,6 +794,8 @@ impl Simulation {
                         damage,
                         owner,
                         kind: k.combat.damage,
+                        blast: k.blast(),
+                        by: Some(attacker),
                     });
                 }
             } else {
@@ -778,12 +804,13 @@ impl Simulation {
         }
     }
 
-    /// Projectiles fly and land.
+    /// Projectiles fly and land. An arrow follows its target; a stone
+    /// flies to where its target stood and lands there.
     pub(crate) fn fly(&mut self) {
         let step = PROJECTILE_SPEED / TICKS_PER_SECOND as i32;
         let mut landed = Vec::new();
         for (n, p) in self.projectiles.iter_mut().enumerate() {
-            if let Some(ts) = self.world.slot(p.target) {
+            if let Some(ts) = self.world.slot(p.target).filter(|_| p.blast.is_zero()) {
                 let t = ts.index();
                 if self.world.dying[t] == 0 && self.world.inside[t].is_none() {
                     p.aim = self.world.pos[t];
@@ -798,9 +825,51 @@ impl Simulation {
         }
         for n in landed.into_iter().rev() {
             let p = self.projectiles.remove(n);
-            if let Some(ts) = self.target_slot(p.target) {
+            if !p.blast.is_zero() {
+                self.blast(&p);
+            } else if let Some(ts) = self.target_slot(p.target) {
                 self.hit(ts, p.damage, p.pos, p.owner);
             }
+        }
+    }
+
+    /// A stone lands: everything within its blast of where it came down
+    /// takes the hit, friend or foe (`GD-COMBAT-04`), bar the engine that
+    /// threw it, things sheltering inside a building, and the map's own
+    /// trees, mines and animals. A building is caught when the blast
+    /// reaches its footprint. Every one takes the same damage: siege meets
+    /// no armour, and no siege engine has a bonus against a class, so the
+    /// damage settled against the target is the damage against anything.
+    fn blast(&mut self, p: &Projectile) {
+        let reach = p.blast;
+        let caught: Vec<Slot> = self
+            .world
+            .slots()
+            .filter(|s| {
+                let i = s.index();
+                if self.world.owner[i] == GAIA
+                    || self.world.dying[i] > 0
+                    || self.world.inside[i].is_some()
+                    || p.by == Some(self.world.id_at(*s))
+                {
+                    return false;
+                }
+                let at = self.world.pos[i];
+                let k = kinds::info(self.world.kind[i]);
+                if k.mobile {
+                    at.distance(p.pos) <= reach
+                } else {
+                    let half = Fx::from_ratio(k.footprint as i32, 2) + reach;
+                    (at.x - p.pos.x).abs() <= half && (at.y - p.pos.y).abs() <= half
+                }
+            })
+            .collect();
+        self.events.push(Event::Landed {
+            pos: p.pos,
+            blast: p.blast,
+        });
+        for s in caught {
+            self.hit(s, p.damage, p.pos, p.owner);
         }
     }
 

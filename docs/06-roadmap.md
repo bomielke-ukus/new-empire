@@ -273,6 +273,9 @@ people.
 
 ## M8 — Breadth
 
+Under way (2026-10-04): the Bronze and Iron Ages' soldiers are in the
+simulation (`docs/10`).
+
 - Iron Age and its full unit and tech roster
 - All 8 civilizations with bonuses and tech-tree denials
 - Remaining map types: Coastal, Continental, Highland, Islands, Narrows, Oasis

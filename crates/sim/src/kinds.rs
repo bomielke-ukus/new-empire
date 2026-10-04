@@ -58,6 +58,29 @@ pub const STONE_WALL: KindId = 24;
 /// Gate: a wall segment the owner's units pass through (`docs/02` §6).
 pub const GATE: KindId = 25;
 
+/// Swordsman: the Bronze Age's line infantry, from the Barracks.
+pub const SWORDSMAN: KindId = 30;
+/// Hoplite: slow, brutal heavy infantry from the Academy.
+pub const HOPLITE: KindId = 31;
+/// Legionary: the Hoplite line's last tier, after the Legion upgrade.
+pub const LEGIONARY: KindId = 32;
+/// Chariot Archer: fast, high hit points, no armour.
+pub const CHARIOT_ARCHER: KindId = 33;
+/// Horse Archer: the Iron Age's raider.
+pub const HORSE_ARCHER: KindId = 34;
+/// Heavy Cavalry: the shock unit.
+pub const HEAVY_CAVALRY: KindId = 35;
+/// War Elephant: slow, huge, two population.
+pub const WAR_ELEPHANT: KindId = 36;
+/// Stone Thrower: the first siege engine; its stones hurt whatever they
+/// land among.
+pub const STONE_THROWER: KindId = 37;
+/// Catapult: the Stone Thrower line after the Torsion upgrade, with a
+/// wider blast.
+pub const CATAPULT: KindId = 38;
+/// Ballista: anti-unit siege, a bolt that flies like an arrow.
+pub const BALLISTA: KindId = 39;
+
 /// Wood to reseed a farm.
 pub const FARM_RESEED_COST: Cost = [0, 60, 0, 0];
 /// A tree. Removed when its wood is exhausted.
@@ -236,6 +259,11 @@ pub struct Combat {
     /// building adds one per unit garrisoned inside it, so a Town Center
     /// with none fires nothing.
     pub arrows: u8,
+    /// A siege engine's blast, in tenths of a tile: its shot lands where
+    /// the target stood when it was loosed and hurts everything within
+    /// this far of that point, its own side included (`GD-COMBAT-04`).
+    /// 0 for everything else, whose shots follow their target.
+    pub blast_tenths: i32,
 }
 
 /// Ticks between hits for most units: a hit and a half a second.
@@ -251,6 +279,7 @@ const NO_COMBAT: Combat = Combat {
     bonuses: &[],
     line_of_sight: 4,
     arrows: 1,
+    blast_tenths: 0,
 };
 
 /// A building that only takes hits: no attack, thick enough that arrows
@@ -283,6 +312,21 @@ const fn melee(attack: i32, melee_armour: i32, pierce_armour: i32) -> Combat {
         attack,
         melee_armour,
         pierce_armour,
+        ..NO_COMBAT
+    }
+}
+
+/// A siege engine's throw: `attack` siege damage over `range`, a hit every
+/// `reload_ticks`, landing in a blast `blast_tenths` of a tile across.
+const fn thrown(attack: i32, range: i32, reload_ticks: u32, blast_tenths: i32) -> Combat {
+    Combat {
+        attack,
+        damage: DamageType::Siege,
+        range,
+        reload_ticks,
+        pierce_armour: 2,
+        line_of_sight: range + 2,
+        blast_tenths,
         ..NO_COMBAT
     }
 }
@@ -362,6 +406,12 @@ pub struct KindInfo {
 pub const BUILD_WORK_PER_TICK: u32 = 100;
 
 impl KindInfo {
+    /// The blast of its shots in tiles, zero for a shot that follows its
+    /// target.
+    pub const fn blast(&self) -> Fx {
+        Fx::from_ratio(self.combat.blast_tenths, 10)
+    }
+
     /// Construction or training time in ticks.
     pub const fn build_ticks(&self) -> u32 {
         (self.build_seconds * crate::simulation::TICKS_PER_SECOND as i32) as u32
@@ -524,6 +574,94 @@ const TABLE: &[KindInfo] = &[
         trained_at: Some(STABLE),
         ..unit(LIGHT_CAVALRY, "Light Cavalry", 90, 20, [60, 0, 0, 20], 40)
     },
+    // The Bronze and Iron Ages' soldiers (`docs/02` §5.2-§5.4). The Legionary
+    // and the Catapult are line upgrades (`tech::LEGION`, `tech::TORSION`);
+    // siege and elephants take two population (`GD-POP-03`).
+    KindInfo {
+        age: Age::Bronze,
+        class: Class::Infantry,
+        combat: melee(8, 1, 1),
+        trained_at: Some(BARRACKS),
+        ..unit(SWORDSMAN, "Swordsman", 70, 11, [45, 0, 0, 25], 30)
+    },
+    KindInfo {
+        age: Age::Bronze,
+        class: Class::Infantry,
+        combat: melee(12, 4, 2),
+        trained_at: Some(ACADEMY),
+        ..unit(HOPLITE, "Hoplite", 120, 8, [60, 0, 0, 40], 36)
+    },
+    KindInfo {
+        age: Age::Iron,
+        class: Class::Infantry,
+        combat: melee(16, 5, 3),
+        trained_at: Some(ACADEMY),
+        ..unit(LEGIONARY, "Legionary", 160, 9, [60, 0, 0, 40], 36)
+    },
+    KindInfo {
+        age: Age::Bronze,
+        class: Class::Ranged,
+        combat: ranged(6, 5, 0),
+        trained_at: Some(ARCHERY_RANGE),
+        ..unit(CHARIOT_ARCHER, "Chariot Archer", 70, 17, [0, 40, 0, 60], 34)
+    },
+    KindInfo {
+        age: Age::Iron,
+        class: Class::Ranged,
+        combat: ranged(7, 6, 1),
+        trained_at: Some(ARCHERY_RANGE),
+        ..unit(HORSE_ARCHER, "Horse Archer", 60, 20, [0, 50, 0, 70], 34)
+    },
+    KindInfo {
+        age: Age::Bronze,
+        class: Class::Cavalry,
+        combat: Combat {
+            line_of_sight: 5,
+            ..melee(12, 1, 1)
+        },
+        trained_at: Some(STABLE),
+        ..unit(HEAVY_CAVALRY, "Heavy Cavalry", 150, 18, [70, 0, 0, 40], 40)
+    },
+    KindInfo {
+        age: Age::Iron,
+        class: Class::Cavalry,
+        pop_cost: 2,
+        combat: Combat {
+            reload_ticks: 40,
+            line_of_sight: 5,
+            ..melee(20, 1, 2)
+        },
+        trained_at: Some(STABLE),
+        ..unit(WAR_ELEPHANT, "War Elephant", 450, 7, [170, 0, 0, 40], 50)
+    },
+    KindInfo {
+        age: Age::Bronze,
+        class: Class::Siege,
+        pop_cost: 2,
+        combat: thrown(40, 8, 100, 5),
+        trained_at: Some(SIEGE_WORKSHOP),
+        ..unit(STONE_THROWER, "Stone Thrower", 75, 7, [0, 180, 0, 80], 45)
+    },
+    KindInfo {
+        age: Age::Iron,
+        class: Class::Siege,
+        pop_cost: 2,
+        combat: thrown(55, 9, 100, 10),
+        trained_at: Some(SIEGE_WORKSHOP),
+        ..unit(CATAPULT, "Catapult", 90, 7, [0, 180, 0, 100], 45)
+    },
+    KindInfo {
+        age: Age::Iron,
+        class: Class::Siege,
+        pop_cost: 2,
+        combat: Combat {
+            reload_ticks: 60,
+            line_of_sight: 10,
+            ..ranged(30, 9, 2)
+        },
+        trained_at: Some(SIEGE_WORKSHOP),
+        ..unit(BALLISTA, "Ballista", 80, 8, [0, 100, 0, 80], 40)
+    },
     KindInfo {
         pop_provided: 5,
         dropoff: true,
@@ -592,10 +730,12 @@ const TABLE: &[KindInfo] = &[
     },
     KindInfo {
         age: Age::Bronze,
+        trains: true,
         ..building(ACADEMY, "Academy", 400, 2, [0, 200, 0, 0], 60)
     },
     KindInfo {
         age: Age::Bronze,
+        trains: true,
         ..building(SIEGE_WORKSHOP, "Siege Workshop", 400, 2, [0, 200, 0, 0], 60)
     },
     KindInfo {
@@ -750,10 +890,17 @@ mod tests {
                 assert!(*b > 0 && *c != Class::Other, "{}: bonus vs {c:?}", k.name);
             }
         }
-        assert_eq!(trained_at(BARRACKS).count(), 3);
-        assert_eq!(trained_at(ARCHERY_RANGE).count(), 2);
-        assert_eq!(trained_at(STABLE).count(), 2);
+        assert_eq!(trained_at(BARRACKS).count(), 4);
+        assert_eq!(trained_at(ARCHERY_RANGE).count(), 4);
+        assert_eq!(trained_at(STABLE).count(), 4);
+        assert_eq!(trained_at(ACADEMY).count(), 2);
+        assert_eq!(trained_at(SIEGE_WORKSHOP).count(), 3);
         assert_eq!(trained_at(TOWN_CENTER).count(), 1);
+        // Siege and elephants take two population (`GD-POP-03`).
+        for k in all().iter().filter(|k| k.trained_at.is_some()) {
+            let two = k.class == Class::Siege || k.id == WAR_ELEPHANT;
+            assert_eq!(k.pop_cost, if two { 2 } else { 1 }, "{}", k.name);
+        }
         assert!(is_wall(PALISADE_WALL) && is_wall(STONE_WALL) && !is_wall(GATE));
         assert!(
             !counts_for_age(GATE) && !counts_for_age(STONE_WALL) && counts_for_age(WATCH_TOWER)

@@ -238,8 +238,10 @@ the Temple), matching the original's mental model.
 Three families:
 
 1. **Economy** — gather rate bonuses, carry capacity, farm yield, villager HP.
-2. **Military** — attack, armour, range and per-line upgrades (Clubman → Axeman →
-   Swordsman → Legionary), unlocked age by age.
+2. **Military** — attack, armour, range and per-line upgrades (Clubman → Axeman,
+   Hoplite → Legionary, Stone Thrower → Catapult), unlocked age by age. The
+   Swordsman is the Barracks' own Bronze Age unit, and the Legionary the
+   Hoplite line's last tier, as §5.2 has it (`docs/07` D30).
 3. **Civic** — population efficiency, building HP, tower range, priest faith,
    conversion resistance, trade rates.
 

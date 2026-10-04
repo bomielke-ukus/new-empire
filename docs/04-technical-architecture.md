@@ -1485,6 +1485,30 @@ siege are still owed, and a human will find this opponent predictable.
   Wonder, so no Wonder announcement; the hints are five lines, not a
   campaign.
 
+## 40. Implementation notes from M8, chunk 1: the later ages' soldiers
+
+- **Ten kinds, data only.** The Swordsman, Hoplite, Legionary, Chariot
+  Archer, Horse Archer, Heavy Cavalry, War Elephant, Stone Thrower,
+  Catapult and Ballista are rows in `kinds::TABLE`; training, rosters,
+  population, upgrades, the HUD's buttons and tooltips and the audio's
+  barks all read the table, so none of them needed new code. Two
+  technologies (`tech::LEGION`, `tech::TORSION`) are line upgrades like the
+  Axe. Siege and the elephant cost two population.
+- **A stone is a projectile with a blast** (`docs/07` D30). `Combat` has
+  `blast_tenths`; a projectile carries `blast` and `by`, the engine that
+  threw it. One with a blast does not follow its target: it flies to the
+  aim it was given and, landing, hits every live, unsheltered, owned
+  entity within the blast of that point (a building when the blast
+  reaches its footprint), the thrower excepted, and raises
+  `Event::Landed`, which the view answers with dust and the audio with
+  `Cue::Impact`. Every one caught takes the damage settled against the
+  target: siege meets no armour, and a test pins that no blast weapon has
+  a class bonus, which would make that wrong.
+- **Old replays keep their hashes.** The two new projectile fields hash
+  only when the blast is nonzero, and default when a save from before
+  lacks them, so every arrow ever fired hashes as it did and the replay
+  corpus is untouched.
+
 ## 39. Implementation notes from M7, chunk 5: the performance pass
 
 - **The tick is measured by phase, from outside.** `Simulation::step_timed`

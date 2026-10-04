@@ -476,6 +476,15 @@ impl Scene {
             if fog.is_some_and(|f| !f.visible(p.pos.x.floor(), p.pos.y.floor())) {
                 continue;
             }
+            // A stone is a stone whichever way it flies, and it flies high.
+            if !p.blast.is_zero() {
+                if let Some(stone) = atlas.stone() {
+                    let (x, y) = (fx_to_f32(p.pos.x), fx_to_f32(p.pos.y));
+                    let (gx, gy) = iso::project(x, y, iso::ground_height(map, x, y));
+                    sprites.push(overlay(stone, gx, gy - 32.0, 0, x + y + 0.75, u32::MAX));
+                }
+                continue;
+            }
             let facing = (p.aim - p.pos).angle().facing8();
             if let Some((arrow, flip)) = atlas.arrow(facing) {
                 let (x, y) = (fx_to_f32(p.pos.x), fx_to_f32(p.pos.y));
