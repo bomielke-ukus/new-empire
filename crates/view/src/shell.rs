@@ -579,7 +579,8 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
     } else {
         rows_h
     };
-    let ph = 40.0 + body_h + 16.0 + 14.0 + 12.0 + 40.0 + 16.0;
+    // Two lines more under the rows: what the civilization brings.
+    let ph = 40.0 + body_h + 16.0 + 28.0 + 14.0 + 12.0 + 40.0 + 16.0;
     let x = ((s.vw - pw) / 2.0).round();
     let y = ((s.vh - ph) / 2.0).max(4.0).round();
     s.panel(x, y, pw, ph);
@@ -655,7 +656,7 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
         &setup.civ.name().to_uppercase(),
         Field::Civ,
         true,
-        setup.civ.info().about,
+        "",
         Some(0),
     );
     row(
@@ -734,7 +735,36 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
         }
     });
 
-    let below = y + 40.0 + body_h + 16.0;
+    // The player's civilization in two lines (`docs/02` §11): what it
+    // has, and what it may not.
+    let civ = setup.civ.info();
+    let denied: Vec<String> = civ
+        .denied
+        .iter()
+        .map(|k| sim::kinds::info(*k).name.to_uppercase())
+        .chain(
+            civ.denied_techs
+                .iter()
+                .filter_map(|t| sim::tech::info(*t))
+                .map(|t| t.name.to_uppercase()),
+        )
+        .collect();
+    let civ_y = y + 40.0 + body_h + 16.0;
+    s.centred(
+        x + pw / 2.0,
+        civ_y,
+        &fit(&format!("{}: {}", civ.name.to_uppercase(), civ.about), pw - 32.0),
+        Ink::Gold,
+        1.0,
+    );
+    s.centred(
+        x + pw / 2.0,
+        civ_y + 12.0,
+        &fit(&format!("NOT FOR THEM: {}", denied.join(", ")), pw - 32.0),
+        Ink::White,
+        1.0,
+    );
+    let below = civ_y + 28.0;
     s.centred(
         x + pw / 2.0,
         below,
