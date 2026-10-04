@@ -999,6 +999,8 @@ fn has_age_variants(kind: KindId) -> bool {
         || k.class == kinds::Class::Infantry
         || (k.buildable
             && !k.mobile
+            // Iron Age only: its own look is the only one.
+            && kind != kinds::WONDER
             && kind != kinds::FARM
             && !kinds::is_wall(kind)
             && kind != kinds::GATE)
@@ -1628,6 +1630,67 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
             let mut c = block(fp, 44.0, true, st);
             let (x, y) = wall_point(&c, fp, 0.5);
             c.rect(x as i32 - 12, y as i32 - 40, 24, 3, GOLD);
+            c
+        }
+        kinds::WONDER => {
+            // Three tiers stepping up from a wide base, a gold capstone.
+            let mut c = block(fp, 48.0, true, st);
+            let cx = c.w as f32 / 2.0;
+            let top = c.h as f32 - fp as f32 * iso::TILE_H / 2.0 - 48.0;
+            for (k, (hw, rise)) in [(110.0f32, 30.0f32), (70.0, 26.0), (34.0, 22.0)]
+                .into_iter()
+                .enumerate()
+            {
+                let base = top - k as f32 * 26.0;
+                let hh = hw / 2.0;
+                c.convex(
+                    &[
+                        (cx - hw, base),
+                        (cx, base + hh),
+                        (cx, base + hh - rise),
+                        (cx - hw, base - rise),
+                    ],
+                    LIMESTONE,
+                );
+                c.convex(
+                    &[
+                        (cx, base + hh),
+                        (cx + hw, base),
+                        (cx + hw, base - rise),
+                        (cx, base + hh - rise),
+                    ],
+                    LIMESTONE_DARK,
+                );
+                c.diamond(cx, base - rise, hw, hh, SAND);
+            }
+            c.diamond(cx, top - 3.0 * 26.0 + 4.0, 12.0, 6.0, GOLD);
+            c.rect(
+                cx as i32 - 1,
+                (top - 3.0 * 26.0 - 22.0) as i32,
+                2,
+                22,
+                BLACK,
+            );
+            c.rect(
+                cx as i32 + 1,
+                (top - 3.0 * 26.0 - 22.0) as i32,
+                12,
+                7,
+                P_BASE,
+            );
+            c
+        }
+        kinds::RELIC => {
+            // A small gilded casket on its stand.
+            let mut c = Canvas::new(32, 32, (16, 26));
+            c.diamond(16.0, 26.0, 12.0, 6.0, SHADOW);
+            c.rect(8, 14, 16, 11, BLACK);
+            c.rect(9, 15, 14, 9, GOLD_DARK);
+            c.rect(9, 15, 14, 3, GOLD);
+            c.rect(7, 11, 18, 4, BLACK);
+            c.rect(8, 12, 16, 2, GOLD_LIGHT);
+            c.rect(15, 5, 2, 8, BLACK);
+            c.rect(12, 7, 8, 2, BLACK);
             c
         }
         kinds::PALISADE_WALL => palisade(),
@@ -2279,8 +2342,10 @@ mod tests {
 
     /// The Bronze and Iron Ages' soldiers, drawn as placeholders until
     /// their models are rendered (`docs/10` §5). The list only shrinks.
-    const AWAITING_ART: [KindId; 11] = [
+    const AWAITING_ART: [KindId; 13] = [
         kinds::PRIEST,
+        kinds::WONDER,
+        kinds::RELIC,
         kinds::SWORDSMAN,
         kinds::HOPLITE,
         kinds::LEGIONARY,

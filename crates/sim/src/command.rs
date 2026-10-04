@@ -200,6 +200,14 @@ pub enum CommandKind {
         /// Which resource.
         resource: Resource,
     },
+    /// Priests to a relic, to fetch it, or with their relics to a Temple of
+    /// their side's (`GD-WIN-03`).
+    Relic {
+        /// The priests.
+        ids: Vec<EntityId>,
+        /// The relic, or the Temple.
+        target: EntityId,
+    },
 }
 
 /// What one cheat code gives (`GD-CHEAT-01`).
@@ -234,6 +242,7 @@ impl CommandKind {
                 | CommandKind::AttackMove { .. }
                 | CommandKind::Patrol { .. }
                 | CommandKind::Garrison { .. }
+                | CommandKind::Relic { .. }
         )
     }
 
@@ -252,7 +261,8 @@ impl CommandKind {
             | CommandKind::Patrol { ids, .. }
             | CommandKind::SetStance { ids, .. }
             | CommandKind::SetFormation { ids, .. }
-            | CommandKind::Garrison { ids, .. } => ids,
+            | CommandKind::Garrison { ids, .. }
+            | CommandKind::Relic { ids, .. } => ids,
             _ => &[],
         }
     }
@@ -341,7 +351,8 @@ impl Command {
             | CommandKind::Patrol { ids, .. }
             | CommandKind::SetStance { ids, .. }
             | CommandKind::SetFormation { ids, .. }
-            | CommandKind::Garrison { ids, .. } => ids.len(),
+            | CommandKind::Garrison { ids, .. }
+            | CommandKind::Relic { ids, .. } => ids.len(),
             CommandKind::SetFarmReseed { farms, .. } => farms.len(),
             CommandKind::Ungarrison { .. }
             | CommandKind::Spawn { .. }
@@ -477,6 +488,11 @@ impl HashState for CommandKind {
             CommandKind::Cheat { resource } => {
                 h.write_u8(20);
                 h.write_u8(*resource as u8);
+            }
+            CommandKind::Relic { ids, target } => {
+                h.write_u8(23);
+                h.write(ids);
+                h.write(target);
             }
         }
     }

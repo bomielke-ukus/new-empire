@@ -335,6 +335,8 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
         l("T", "STOP"),
         l(&train_letters, "TRAIN AT A MILITARY BUILDING"),
         s("RIGHT", "ON AN ENEMY: ATTACK"),
+        s("RIGHT", "PRIEST ON AN ENEMY UNIT: CONVERT"),
+        s("RIGHT", "PRIEST ON A RELIC: TAKE IT TO A TEMPLE"),
         s("RIGHT", "ON A TOWER OR TOWN CENTER: GARRISON"),
         l("T", "AT A BUILDING: ALL OUT"),
         l("A, P", "ATTACK-MOVE, PATROL, THEN CLICK"),
@@ -373,8 +375,12 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
         .iter()
         .filter(|k| !in_defences(k.id))
         .map(|k| {
+            let key = match build_hotkey(k.id) {
+                ' ' => "CLICK".to_string(),
+                c => c.to_string(),
+            };
             (
-                build_hotkey(k.id).to_string(),
+                key,
                 format!("{} {}{}", short_name(k.id), cost_label(&k.cost), age_tag(k)),
             )
         })
@@ -631,6 +637,7 @@ fn short_name(kind: KindId) -> &'static str {
         kinds::SIEGE_WORKSHOP => "SIEGE",
         kinds::GOVERNMENT_CENTRE => "GOVT",
         kinds::TOWN_CENTER => "TOWN CTR",
+        kinds::WONDER => "WONDER",
         other => kinds::info(other).name,
     }
 }
@@ -639,9 +646,9 @@ fn short_name(kind: KindId) -> &'static str {
 /// so its keys need only be distinct from each other and the general keys.
 fn build_hotkey(kind: KindId) -> char {
     match kind {
-        // Every letter is spoken for (`docs/04` §23): the Town Center is
-        // placed by clicking its button.
-        kinds::TOWN_CENTER => ' ',
+        // Every letter is spoken for (`docs/04` §23): the Town Center and
+        // the Wonder are placed by clicking their buttons.
+        kinds::TOWN_CENTER | kinds::WONDER => ' ',
         kinds::PALISADE_WALL => 'P',
         kinds::STONE_WALL => 'N',
         kinds::GATE => 'G',
@@ -1352,6 +1359,44 @@ struct Seg {
 /// The resource bar. Reflows rather than overlaps: at widths where the
 /// large text and worker counts no longer fit beside the status, the counts
 /// go, then the text shrinks, then the status goes.
+/// The Wonder and relic clocks under the top bar's right end, one line
+/// each, for every side to see (`GD-WIN-02`, `GD-WIN-03`).
+fn victory_clocks(p: &mut Painter<'_>, sim: &Simulation, me: u8, vw: f32) {
+    let whose = |owner: u8| {
+        if owner == me {
+            "YOUR".to_string()
+        } else {
+            format!("PLAYER {}'S", owner + 1)
+        }
+    };
+    let mut lines: Vec<String> = sim
+        .wonder_clocks()
+        .into_iter()
+        .map(|(_, owner, left)| format!("{} WONDER {}", whose(owner), clock(left)))
+        .collect();
+    if let Some((owner, left)) = sim.relic_clock() {
+        let who = if owner == me {
+            "YOU HOLD".to_string()
+        } else {
+            format!("PLAYER {} HOLDS", owner + 1)
+        };
+        lines.push(format!("{who} EVERY RELIC {}", clock(left)));
+    }
+    for (k, line) in lines.iter().enumerate() {
+        let w = font::width(line) as f32 + 12.0;
+        let (x, y) = ((vw - w - 6.0).round(), TOP_BAR + 6.0 + k as f32 * 16.0);
+        p.rect(x, y, w, 14.0, BLACK, 0);
+        p.rect(x + 1.0, y + 1.0, w - 2.0, 12.0, BROWN_DARK, 0);
+        p.text_in(x + 6.0, y + 3.0, line, Ink::Gold, 1.0);
+    }
+}
+
+/// Ticks as minutes and seconds, rounded up: "9:41".
+fn clock(ticks: u64) -> String {
+    let s = ticks.div_ceil(sim::TICKS_PER_SECOND as u64);
+    format!("{}:{:02}", s / 60, s % 60)
+}
+
 fn top_bar(
     p: &mut Painter<'_>,
     sim: &Simulation,
@@ -1615,6 +1660,18 @@ impl Hud {
                     );
                     ty += 12.0;
                 }
+                if sim.carried_relic(world.id_at(selected[0])).is_some() {
+                    let line = if world.kind[i] == kinds::TEMPLE {
+                        format!(
+                            "RELICS {}, A GOLD EACH 2S",
+                            sim.relics_held_by(world.id_at(selected[0]))
+                        )
+                    } else {
+                        "CARRYING A RELIC".to_string()
+                    };
+                    p.text_in(10.0, ty, &fit(&line, text_w), Ink::Gold, 1.0);
+                    ty += 12.0;
+                }
                 if world.kind[i] == kinds::PRIEST {
                     // Faith: full at a spent reload (`GD-PRIEST-02`).
                     let spent = u32::from(world.reload[i]);
@@ -1672,6 +1729,12 @@ impl Hud {
                     Order::Patrol { .. } => "PATROLLING",
                     Order::Flee { .. } => "FLEEING",
                     Order::Garrison { .. } => "GOING INSIDE",
+                    Order::Relic { .. }
+                        if sim.carried_relic(world.id_at(selected[0])).is_some() =>
+                    {
+                        "TAKING THE RELIC HOME"
+                    }
+                    Order::Relic { .. } => "GOING FOR A RELIC",
                     Order::Convert { chant: 0, .. } => "GOING TO CONVERT",
                     Order::Convert { .. } => "CONVERTING",
                 };
@@ -1975,6 +2038,8 @@ impl Hud {
             }
         }
 
+        victory_clocks(&mut p, input.sim, me, vw);
+
         // Notifications share a frame; only an age-up announces unlocks ([GD-AGE-02]).
         if let Some(banner) = input.banner {
             let text = banner.title();
@@ -2109,7 +2174,7 @@ mod tests {
         let mut keys = std::collections::BTreeSet::from(['T', 'V', 'X', 'R', 'U']);
         for k in kinds::all()
             .iter()
-            .filter(|k| k.buildable && k.id != kinds::TOWN_CENTER && !in_defences(k.id))
+            .filter(|k| k.buildable && build_hotkey(k.id) != ' ' && !in_defences(k.id))
         {
             let key = build_hotkey(k.id);
             assert!(
@@ -2700,6 +2765,8 @@ mod tests {
         {
             let want = if in_defences(k.id) {
                 format!("{DEFENCES_KEY} {}", build_hotkey(k.id))
+            } else if build_hotkey(k.id) == ' ' {
+                "CLICK".to_string()
             } else {
                 build_hotkey(k.id).to_string()
             };

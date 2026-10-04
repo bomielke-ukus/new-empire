@@ -224,11 +224,14 @@ impl Scene {
                     } | Order::Build { working: true, .. }
                         | Order::Repair { working: true, .. }
                 ) || (world.reload[i] > 0
+                    && info.combat.attack > 0
                     && info
                         .combat
                         .reload_ticks
                         .saturating_sub(world.reload[i] as u32)
-                        < 6);
+                        < 6)
+                    // A priest at its chant (`GD-PRIEST-01`).
+                    || matches!(world.order[i], Order::Convert { chant, .. } if chant > 0);
                 if world.dying[i] > 0 {
                     // Falls, then lies: the death animation's length decides
                     // when the corpse frame takes over.
@@ -561,12 +564,57 @@ impl Scene {
                 }
             }
         }
+        carried_relics(sim, atlas, fog, viewer, prev, alpha, &mut sprites);
         waypoint_marks(sim, atlas, selected, &mut sprites);
         sprites.sort_by(|a, b| a.depth.total_cmp(&b.depth).then(a.slot.cmp(&b.slot)));
         Scene {
             sprites,
             ui: Vec::new(),
         }
+    }
+}
+
+/// A relic in a priest's hands is drawn over its head, so a carrier can be
+/// picked out of a crowd (`GD-WIN-03`). A relic in a Temple is not drawn.
+fn carried_relics(
+    sim: &Simulation,
+    atlas: &Atlas,
+    fog: Option<&sim::Fog>,
+    viewer: Option<u8>,
+    prev_pos: Option<&[Vec2Fx]>,
+    alpha: f32,
+    sprites: &mut Vec<SpriteInstance>,
+) {
+    let world = sim.world();
+    let Some((frame, _)) = atlas.frame(kinds::RELIC, 0) else {
+        return;
+    };
+    for s in world.slots() {
+        let r = s.index();
+        if world.kind[r] != kinds::RELIC {
+            continue;
+        }
+        let Some(cs) = world.inside[r].and_then(|c| world.slot(c)) else {
+            continue;
+        };
+        let c = cs.index();
+        if world.kind[c] != kinds::PRIEST || world.inside[c].is_some() || world.dying[c] > 0 {
+            continue;
+        }
+        let now = world.pos[c];
+        if let Some(f) = fog {
+            let t = sim::nav::tile_of(now);
+            if Some(world.owner[c]) != viewer && !f.in_sight(kinds::PRIEST, t.0, t.1) {
+                continue;
+            }
+        }
+        // Where the priest is drawn: between its last position and this
+        // one, as the scene draws it.
+        let was = prev_pos.and_then(|p| p.get(c)).copied().unwrap_or(now);
+        let x = fx_to_f32(was.x) + (fx_to_f32(now.x) - fx_to_f32(was.x)) * alpha;
+        let y = fx_to_f32(was.y) + (fx_to_f32(now.y) - fx_to_f32(was.y)) * alpha;
+        let (gx, gy) = iso::project(x, y, iso::ground_height(sim.map(), x, y));
+        sprites.push(overlay(frame, gx, gy - 40.0, 0, x + y + 0.02, c as u32));
     }
 }
 
@@ -583,6 +631,7 @@ pub fn order_point(sim: &Simulation, order: &Order) -> Option<Vec2Fx> {
         }
         Order::Patrol { to, .. } => Some(to),
         Order::Attack { target, .. } | Order::Convert { target, .. } => of(target),
+        Order::Relic { relic, temple } => temple.and_then(of).or_else(|| of(relic)),
         Order::Garrison { building } | Order::Repair { building, .. } => of(building),
         Order::Gather { node, .. } => of(node),
         Order::Build { site, .. } => of(site),

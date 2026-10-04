@@ -403,11 +403,35 @@ impl CombatFeedback {
     /// their own flashes red for three seconds, a loss of theirs pings
     /// white, large then small.
     pub fn minimap_marks(&self, sim: &Simulation, viewer: Option<u8>) -> Vec<Mark> {
+        let mut out = Vec::new();
+        // Every finished Wonder, in its owner's colour, gold-rimmed, for
+        // everyone and for as long as it stands (`GD-WIN-02`).
+        for (id, owner, _) in sim.wonder_clocks() {
+            let Some(s) = sim.world().slot(id) else {
+                continue;
+            };
+            let pos = sim.world().pos[s.index()];
+            let (x, y) = (pos.x.floor(), pos.y.floor());
+            let c = crate::palette::PLAYER_COLOURS
+                .get(owner as usize)
+                .map_or([255, 255, 255, 255], |c| [c[0], c[1], c[2], 255]);
+            out.push(Mark {
+                x,
+                y,
+                colour: [255, 214, 90, 255],
+                size: 7,
+            });
+            out.push(Mark {
+                x,
+                y,
+                colour: c,
+                size: 5,
+            });
+        }
         let Some(me) = viewer else {
-            return Vec::new();
+            return out;
         };
         let tick = sim.tick();
-        let mut out = Vec::new();
         for a in self.attacks.iter().filter(|a| a.owner == me) {
             let age = tick.saturating_sub(a.tick);
             if age < INDICATOR_TICKS && (age / 4).is_multiple_of(2) {

@@ -1026,6 +1026,39 @@ impl App {
                         tick,
                     });
                 }
+                // Every side is told of a Wonder and of the relics all held
+                // (`GD-WIN-02`, `GD-WIN-03`).
+                sim::Event::WonderRaised { owner, pos } => {
+                    let text = if owner == me {
+                        "OUR WONDER STANDS: HOLD IT TEN MINUTES".to_string()
+                    } else {
+                        format!(
+                            "PLAYER {}'S WONDER STANDS: TEN MINUTES TO BRING IT DOWN",
+                            owner + 1
+                        )
+                    };
+                    self.notices.push(Notice {
+                        kind: NoticeKind::Age,
+                        text,
+                        tile: Some(tile_of(pos)),
+                        tick,
+                    });
+                }
+                sim::Event::RelicsHeld { owner, held } => {
+                    let text = match (owner == me, held) {
+                        (true, true) => "WE HOLD EVERY RELIC: KEEP THEM TEN MINUTES".to_string(),
+                        (false, true) => {
+                            format!("PLAYER {} HOLDS EVERY RELIC: TEN MINUTES", owner + 1)
+                        }
+                        (_, false) => "THE RELIC CLOCK HAS STOPPED".to_string(),
+                    };
+                    self.notices.push(Notice {
+                        kind: NoticeKind::Age,
+                        text,
+                        tile: None,
+                        tick,
+                    });
+                }
                 // A priest's work, either way round (`GD-PRIEST-01`).
                 sim::Event::Converted {
                     kind,
@@ -1548,8 +1581,24 @@ impl App {
                 "REPLAY OVER",
                 format!("THE RECORDING ENDS AT {}", save::clock(p.replay.ticks)),
             ),
-            None if won => ("VICTORY", "EVERY OTHER SIDE IS OUT".to_string()),
+            None if won => (
+                "VICTORY",
+                match self.sim.victory() {
+                    Some((_, sim::Victory::Wonder)) => "YOUR WONDER STOOD TEN MINUTES",
+                    Some((_, sim::Victory::Relics)) => "YOU HELD EVERY RELIC TEN MINUTES",
+                    _ => "EVERY OTHER SIDE IS OUT",
+                }
+                .to_string(),
+            ),
             None if resigned => ("DEFEAT", "YOU RESIGNED".to_string()),
+            None if matches!(self.sim.victory(), Some((_, sim::Victory::Wonder))) => (
+                "DEFEAT",
+                "ANOTHER SIDE'S WONDER STOOD TEN MINUTES".to_string(),
+            ),
+            None if matches!(self.sim.victory(), Some((_, sim::Victory::Relics))) => (
+                "DEFEAT",
+                "ANOTHER SIDE HELD EVERY RELIC TEN MINUTES".to_string(),
+            ),
             None if !self.sim.standing(ME) => ("DEFEAT", "NOTHING LEFT TO FIGHT WITH".to_string()),
             None => ("DEFEAT", "ANOTHER SIDE WON".to_string()),
         };
@@ -1820,12 +1869,30 @@ impl App {
                 Some(Target::Attack) => CursorIcon::Crosshair,
                 // The spec's convert cursor; the system's nearest is help.
                 Some(Target::Convert) => CursorIcon::Help,
+                Some(Target::Relic) => CursorIcon::Grab,
                 Some(Target::Garrison) => CursorIcon::Copy,
                 _ => CursorIcon::Default,
             },
             _ => CursorIcon::Default,
         };
         w.set_cursor(icon);
+    }
+
+    /// The selected priests a right-click on `id` sends with a relic order:
+    /// all of them at a relic on the ground, those holding one at a Temple
+    /// of ours.
+    fn relic_carriers(&self, id: EntityId) -> Vec<EntityId> {
+        let priests = self.selection.own_priests(&self.sim, ME);
+        if self.sim.ground_relic(id).is_some() {
+            priests
+        } else if self.sim.relic_temple(id, ME).is_some() {
+            priests
+                .into_iter()
+                .filter(|&p| self.sim.carried_relic(p).is_some())
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     /// What a right-click at a point would do with the current selection.
@@ -1854,6 +1921,9 @@ impl App {
             && !self.selection.own_priests(&self.sim, ME).is_empty()
         {
             return Some(Target::Convert);
+        }
+        if !self.relic_carriers(id).is_empty() {
+            return Some(Target::Relic);
         }
         if shelter_of_me(&self.sim, i) && !self.selection.own_mobile(&self.sim, ME).is_empty() {
             return Some(Target::Garrison);
@@ -2103,6 +2173,16 @@ impl App {
             if !fighters.is_empty() && enemy_of_me(&self.sim, i) {
                 self.issue(CommandKind::Attack {
                     ids: fighters,
+                    target: id,
+                });
+                return;
+            }
+            // A relic: the selected priests fetch it; a Temple of ours:
+            // those with a relic take it in (`GD-WIN-03`).
+            let carriers = self.relic_carriers(id);
+            if !carriers.is_empty() {
+                self.issue(CommandKind::Relic {
+                    ids: carriers,
                     target: id,
                 });
                 return;
@@ -2573,6 +2653,7 @@ enum Target {
     Hunt,
     Attack,
     Convert,
+    Relic,
     Garrison,
     #[allow(dead_code)]
     Other(EntityId),

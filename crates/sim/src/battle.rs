@@ -247,6 +247,22 @@ pub enum Event {
         /// Where.
         pos: Vec2Fx,
     },
+    /// A Wonder's clock started: it stands finished (`GD-WIN-02`).
+    /// Announced to every side.
+    WonderRaised {
+        /// Whose.
+        owner: PlayerId,
+        /// Where.
+        pos: Vec2Fx,
+    },
+    /// A side came to hold every relic, or stopped (`GD-WIN-03`).
+    /// Announced to every side.
+    RelicsHeld {
+        /// Whose.
+        owner: PlayerId,
+        /// Whether the clock started; false, it stopped.
+        held: bool,
+    },
     /// A siege engine's shot came down, on something or on nothing.
     Landed {
         /// Where.
@@ -655,6 +671,11 @@ impl Simulation {
     /// its footprint, nearest first.
     pub(crate) fn eject(&mut self, bs: Slot) {
         let id = self.world.id_at(bs);
+        // A Temple's relics go back on the ground round it, each on a tile
+        // of its own (`GD-WIN-03`).
+        if self.world.kind[bs.index()] == kinds::TEMPLE {
+            self.drop_relics_of(id, self.world.pos[bs.index()]);
+        }
         let units: Vec<usize> = self
             .world
             .slots()
@@ -1057,6 +1078,10 @@ impl Simulation {
                 pos: self.world.pos[i],
             });
             if k.mobile {
+                // A priest's relic falls where it fell (`GD-WIN-03`).
+                if self.world.kind[i] == kinds::PRIEST {
+                    self.drop_relics_of(self.world.id_at(slot), self.world.pos[i]);
+                }
                 // A hunted animal lies as a carcass, its food still on it.
                 self.world.dying[i] = decay_ticks(self.world.kind[i]);
                 self.world.move_target[i] = None;

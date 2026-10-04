@@ -208,6 +208,11 @@ impl<'a> FoggedView<'a> {
                     return None;
                 }
                 let mine = world.owner[i] == self.player;
+                // Inside another side's building or in its priest's hands
+                // is out of sight, whatever the building's tile shows.
+                if !mine && world.inside[i].is_some() {
+                    return None;
+                }
                 let fp = kinds::info(kind).footprint as i32;
                 let (x, y) = sim::nav::anchor_tile(world.pos[i], fp);
                 if !mine && !fog.in_sight(kind, x, y) {

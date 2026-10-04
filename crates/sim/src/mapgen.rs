@@ -333,6 +333,8 @@ fn inland(rng: &mut Rng, spec: &MapSpec) -> Option<Generated> {
     if !all_starts_connected(&g) {
         return None;
     }
+    // Last, so everything else on the map is as it was before relics.
+    place_relics(&mut g);
     Some(Generated {
         tiles: g.tiles,
         spawns: g.spawns,
@@ -488,10 +490,49 @@ fn scatter_scenery(g: &mut Gen, players: u8) {
     }
 }
 
+/// The relics (`GD-WIN-03`): [`crate::relics::RELICS_PER_MAP`] of them in
+/// the open ground between the starts, apart from one another, each on a
+/// tile the first start's people can walk to and with open ground all
+/// round it, so none walls anything in. Fewer if the map has no room.
+fn place_relics(g: &mut Gen) {
+    let size = g.size;
+    let far = (size / 6).max(14);
+    let apart = (size / 8).max(10);
+    let reach = flood(g);
+    let open = |g: &Gen, x: i32, y: i32| {
+        g.free(x, y) && g.tiles.walkable(x, y) && reach.get(g.idx(x, y)) == Some(&true)
+    };
+    let mut placed: Vec<(i32, i32)> = Vec::new();
+    for _ in 0..crate::relics::RELICS_PER_MAP {
+        for _ in 0..200 {
+            let x = g.rng.range_i32(3, size - 3);
+            let y = g.rng.range_i32(3, size - 3);
+            let clear = (-1..=1).all(|dy| (-1..=1).all(|dx| open(g, x + dx, y + dy)));
+            if clear
+                && g.dist_to_nearest_start(x, y) >= far
+                && placed
+                    .iter()
+                    .all(|&(px, py)| (px - x).abs().max((py - y).abs()) >= apart)
+            {
+                g.place(kinds::RELIC, GAIA, x, y);
+                placed.push((x, y));
+                break;
+            }
+        }
+    }
+}
+
 /// Breadth-first flood over walkable, unblocked tiles from the first start;
 /// every other start must be reached. Starts are on reserved tiles next to
 /// their Town Center footprint, so they are themselves walkable.
 fn all_starts_connected(g: &Gen) -> bool {
+    let seen = flood(g);
+    !seen.is_empty() && g.starts.iter().all(|&(x, y)| seen[g.idx(x, y + 2)])
+}
+
+/// Every tile reachable on foot from the first start's villagers' row;
+/// empty if that row is itself blocked.
+fn flood(g: &Gen) -> Vec<bool> {
     let size = g.size;
     let mut seen = vec![false; (size * size) as usize];
     let mut queue = VecDeque::new();
@@ -502,7 +543,7 @@ fn all_starts_connected(g: &Gen) -> bool {
     // The TC blocks its own tile; begin from the villagers' row.
     let origin = (sx, sy + 2);
     if !walkable(origin.0, origin.1) {
-        return false;
+        return Vec::new();
     }
     seen[g.idx(origin.0, origin.1)] = true;
     queue.push_back(origin);
@@ -515,7 +556,7 @@ fn all_starts_connected(g: &Gen) -> bool {
             }
         }
     }
-    g.starts.iter().all(|&(x, y)| seen[g.idx(x, y + 2)])
+    seen
 }
 
 #[cfg(test)]

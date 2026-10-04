@@ -168,6 +168,57 @@ fn a_right_click_sends_a_priest_to_convert_an_enemy_unit() {
     );
 }
 
+/// A right-click on a relic sends the selected priests for it; with it in
+/// hand, a right-click on a Temple of ours takes it in.
+///
+/// REQ: GD-WIN-03
+#[test]
+fn a_right_click_fetches_a_relic_and_takes_it_into_the_temple() {
+    let mut app = app();
+    let relic = spawn(&mut app, kinds::RELIC, 16, 10);
+    let priest = spawn(&mut app, kinds::PRIEST, 12, 10);
+    let temple = spawn(&mut app, kinds::TEMPLE, 12, 16);
+    app.selection.set(vec![priest]);
+    app.camera.look_at_tile(14.0, 12.0);
+    draw(&mut app);
+    let r = app.sim.world().pos[app.sim.world().slot(relic).unwrap().index()];
+    let (px, py) = on_screen(&app, view::fx_to_f32(r.x), view::fx_to_f32(r.y), 8.0);
+    assert!(
+        matches!(app.hovered_target(px, py), Some(Target::Relic)),
+        "the cursor offers to fetch it"
+    );
+    app.right_press(px, py);
+    assert!(matches!(
+        app.sim.replay().commands.last().unwrap().1.kind,
+        CommandKind::Relic { target, .. } if target == relic
+    ));
+    for _ in 0..600 {
+        app.sim.step();
+        if app.sim.carried_relic(priest) == Some(relic) {
+            break;
+        }
+    }
+    assert_eq!(app.sim.carried_relic(priest), Some(relic), "in hand");
+    // Hold it: no Temple order yet, so stop the walk home and send it.
+    draw(&mut app);
+    let t = app.sim.world().pos[app.sim.world().slot(temple).unwrap().index()];
+    let (tx, ty) = (view::fx_to_f32(t.x), view::fx_to_f32(t.y));
+    let (qx, qy) = on_screen(&app, tx, ty, 20.0);
+    assert!(matches!(app.hovered_target(qx, qy), Some(Target::Relic)));
+    app.right_press(qx, qy);
+    for _ in 0..900 {
+        app.sim.step();
+        if app.sim.carried_relic(temple) == Some(relic) {
+            break;
+        }
+    }
+    assert_eq!(
+        app.sim.carried_relic(temple),
+        Some(relic),
+        "held in the Temple"
+    );
+}
+
 /// Enter opens the line, the code is typed, Enter gives 1000 of what it
 /// names; the letters typed are text, not orders, and the camera stays.
 ///

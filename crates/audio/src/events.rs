@@ -102,6 +102,21 @@ pub fn cues(sim: &Simulation, viewer: Option<u8>) -> Vec<Placed> {
             }
             // Seen, not heard: a gentle thing among the shouting.
             Event::Healed { .. } => {}
+            // Every side's news (`docs/02` §10): good news rings, another
+            // side's rings the bell.
+            Event::WonderRaised { owner, .. } | Event::RelicsHeld { owner, held: true } => {
+                if viewer.is_some() {
+                    out.push((
+                        if mine(owner) {
+                            Cue::Research
+                        } else {
+                            Cue::Alarm
+                        },
+                        None,
+                    ));
+                }
+            }
+            Event::RelicsHeld { held: false, .. } => {}
             // A node giving out is seen, not heard: the last swing was.
             Event::Felled { .. } => {}
             Event::Researched { owner, tech: id } => {

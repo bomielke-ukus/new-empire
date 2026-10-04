@@ -135,6 +135,13 @@ impl Simulation {
         self.world.move_target[t] = None;
         self.world.stance[t] = Stance::default_for(kind);
         self.world.queue_mut(t).clear();
+        // A priest turned brings its relic.
+        let id = self.world.id_at(ts);
+        if let Some(relic) = self.carried_relic(id) {
+            if let Some(rs) = self.world.slot(relic) {
+                self.world.owner[rs.index()] = to;
+            }
+        }
         self.world.reload[i] = FAITH_TICKS;
         self.world.order[i] = Order::Idle;
         self.world.nav[i] = None;

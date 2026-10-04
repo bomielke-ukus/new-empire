@@ -57,6 +57,8 @@ pub const PALISADE_WALL: KindId = 23;
 pub const STONE_WALL: KindId = 24;
 /// Gate: a wall segment the owner's units pass through (`docs/02` §6).
 pub const GATE: KindId = 25;
+/// Wonder: held ten minutes, it wins the match (`GD-WIN-02`).
+pub const WONDER: KindId = 26;
 
 /// Swordsman: the Bronze Age's line infantry, from the Barracks.
 pub const SWORDSMAN: KindId = 30;
@@ -93,6 +95,9 @@ pub const BERRY_BUSH: KindId = 101;
 pub const GOLD_MINE: KindId = 102;
 /// A stone vein.
 pub const STONE_MINE: KindId = 103;
+/// A relic: carried by a priest to a Temple, where it earns gold; all of
+/// them held ten minutes win the match (`GD-WIN-03`, `docs/07` D31).
+pub const RELIC: KindId = 104;
 /// A gazelle: huntable food that runs.
 pub const GAZELLE: KindId = 110;
 
@@ -764,10 +769,23 @@ const TABLE: &[KindInfo] = &[
             60,
         )
     },
+    // Enormous, slow to raise and hard to bring down (`docs/02` §6).
+    KindInfo {
+        age: Age::Iron,
+        ..building(WONDER, "Wonder", 4000, 5, [0, 1000, 1000, 1000], 1500)
+    },
     node(TREE, "Tree", 20, Resource::Wood, 75),
     node(BERRY_BUSH, "Berry Bush", 1, Resource::Food, 150),
     node(GOLD_MINE, "Gold Vein", 1, Resource::Gold, 400),
     node(STONE_MINE, "Stone Vein", 1, Resource::Stone, 350),
+    // Stands on its tile like a bush, and nothing can hurt it.
+    KindInfo {
+        id: RELIC,
+        name: "Relic",
+        footprint: 1,
+        max_health: 1,
+        ..BASE
+    },
     KindInfo {
         id: GAZELLE,
         name: "Gazelle",

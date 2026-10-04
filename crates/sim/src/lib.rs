@@ -35,12 +35,14 @@ pub mod nav;
 pub mod noise;
 pub mod orders;
 pub mod priests;
+pub mod relics;
 pub mod replay;
 pub mod rng;
 pub mod simulation;
 pub mod tech;
 mod trig_table;
 pub mod vec2;
+pub mod victory;
 
 pub use angle::Angle;
 pub use battle::{
@@ -74,3 +76,4 @@ pub use simulation::{
 };
 pub use tech::{Age, Effect, TechId, TechInfo};
 pub use vec2::Vec2Fx;
+pub use victory::Victory;

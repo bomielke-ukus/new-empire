@@ -1809,12 +1809,53 @@ for 125 gold: 25 hit points, no attack, passive like a villager.
   the player colour and a staff) until its model is rendered; the
   computer opponent trains none.
 
+### Work record: M8 chunk 4, second part — relics and the Wonder (2026-10-04)
+
+The two victories that end a match on a clock (`docs/02` §10), and the
+relics the second needs (`docs/07` D31, answering Q2).
+
+- **Relics** (`GD-WIN-03`). Five on every generated map, placed last so
+  the rest of the map is as it was: in the open ground at least a sixth of
+  the map from any start, apart, each with walkable ground all round it
+  that the first start can reach. A relic on the ground is nature's and
+  blocks its tile; it cannot be attacked. A right-click on one sends the
+  selected priests for it (the grab cursor); the first there takes it up
+  and carries it to the nearest Temple of its side's, or to the one
+  right-clicked; with no Temple it stands holding it. Held in a Temple a
+  relic earns a gold every two seconds. A fallen priest drops its relic
+  where it fell, a fallen Temple drops all it held round its rubble, a
+  converted priest brings its relic over. A carried relic is drawn over
+  its priest's head; the panel says CARRYING A RELIC, and a Temple's says
+  how many it holds.
+- **The Wonder** (`GD-WIN-02`). An Iron Age building, 1000 wood, stone
+  and gold, 5×5, 4,000 hit points and 1,500 builder-seconds, placed from
+  its button (every letter was taken). Its clock starts when it stands
+  finished and stops if it falls.
+- **The clocks.** Ten minutes each, read once a second, in the state hash
+  only once one has run (a match without them hashes as before). Shown to
+  every side under the top bar's right end; a finished Wonder and a side
+  coming to hold every relic are announced to every side with a notice
+  and a sound, and a Wonder is marked on every minimap, gold-rimmed in its
+  owner's colour. The results screen says which victory it was.
+- **The opponent's view.** Another side's units inside a building, and
+  its relics, are no longer in the computer opponent's sightings: the
+  garrisoned ones were showing through the building's tile.
+- **Recorded again.** Relics on generated maps change every generated
+  match: the eight corpus entries on them have new digests (the four on
+  flat maps do not), and the Hard-against-Easy record is rewritten.
+- **Not yet.** The opponent does not train priests, fetch relics, build a
+  Wonder or go after one; a player can win on either clock against it
+  unopposed. The Wonder and the relic are drawn as placeholders until
+  rendered.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the
 detailed soldiers and the new roster's models are rendering (chunk 3);
-priests are in (chunk 4, above), and relics and the Wonder are next.
+priests, relics and the Wonder are in (chunk 4, above). Next: the
+opponent's use of priests, relics and the Wonder, then the civilizations,
+the map types and naval.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded

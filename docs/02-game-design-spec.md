@@ -326,6 +326,15 @@ being killed. This one change removes most of the original's cruelty.
 Wonder and Relic victories exist to force endgames. Without them, two turtling
 players produce a stalemate, which is the worst outcome an RTS can have.
 
+**As built** (2026-10-04): every match has all three. A Wonder's clock
+starts when it stands finished, and stops for good if it falls; a second
+Wonder has its own. The relic clock runs while every relic on the map is
+in the Temples of one side, and starts over when that stops (`docs/07`
+D31). Both clocks are shown to every side under the top bar, a finished
+Wonder is announced to everyone and marked on everyone's minimap in its
+owner's colour, and so is a side coming to hold every relic. The Wonder
+takes 1,500 builder-seconds and has 4,000 hit points.
+
 ---
 
 ## 11. Civilizations

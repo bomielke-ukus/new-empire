@@ -369,13 +369,28 @@ Stone Thrower, a tile for the Catapult. The engine that threw it is never
 hit by its own stone; there is no minimum range. The Ballista's bolt is an
 arrow: it follows its target and has no blast.
 
+### D31 — Relics are carried by priests, held in Temples, and earn gold
+**Date:** 2026-10-04 · **Decided by:** Claude, on the owner's instruction to build the rest of M8; Q2's recommendation
+
+Q2 asked whether relics stand still where they lie, as the original's
+ruins did, or are carried. They are carried: five on a generated map, in
+the open ground between the starts and apart from one another. Only a
+priest can take one up; carried to a Temple of its side's, it earns that
+side a gold every two seconds for as long as the Temple stands. A priest
+that falls drops its relic where it fell, a Temple that falls drops all it
+held round its rubble, and a priest converted with a relic in hand brings
+it over. Holding every relic on the map in one side's Temples for ten
+minutes wins (`GD-WIN-03`). It gives priests a second job and puts five
+places on the map worth fighting over. A relic on the ground is nature's
+and blocks its tile like a bush; it cannot be attacked.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?
 Water doubles the pathfinding surface (separate navigation domain, transports,
 shore-landing edge cases) for one map type. **Recommendation:** hold until M8.
 
-### Q2 — Relics: static (AoE1 ruins) or carryable (AoE2)?
+### Q2 — Relics: static (AoE1 ruins) or carryable (AoE2)? — **answered, see D31**
 Carryable relics create better fights over specific objects; static ruins are
 simpler and match the original. **Recommendation:** carryable, held in the
 Temple, generating gold — it gives priests a second job and creates map tension.

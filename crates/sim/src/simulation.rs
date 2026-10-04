@@ -418,7 +418,7 @@ pub(crate) struct Scratch {
 
 impl Scratch {
     /// Notes an immobile thing standing on its footprint, for the fog.
-    fn place(&mut self, ax: i32, ay: i32, fp: i32, slot: usize, w: i32, h: i32) {
+    pub(crate) fn place(&mut self, ax: i32, ay: i32, fp: i32, slot: usize, w: i32, h: i32) {
         self.touched.push((ax, ay));
         if self.cover.len() != (w * h) as usize {
             return;
@@ -431,7 +431,7 @@ impl Scratch {
     }
 
     /// Notes an immobile thing leaving its footprint, for the fog.
-    fn vacate(&mut self, ax: i32, ay: i32, fp: i32, slot: usize, w: i32, h: i32) {
+    pub(crate) fn vacate(&mut self, ax: i32, ay: i32, fp: i32, slot: usize, w: i32, h: i32) {
         self.touched.push((ax, ay));
         if self.cover.len() != (w * h) as usize {
             return;
@@ -665,6 +665,10 @@ pub struct Simulation {
     /// since it steers only the alarm event and nothing a replay decides.
     #[serde(default)]
     pub(crate) last_alarm: Vec<u64>,
+    /// The Wonder and relic clocks, and what they decided
+    /// (`GD-WIN-02`, `GD-WIN-03`).
+    #[serde(default)]
+    pub(crate) clocks: crate::victory::Clocks,
     /// What happened this tick that the presentation may care about.
     #[serde(skip)]
     pub(crate) events: Vec<Event>,
@@ -699,6 +703,7 @@ impl Simulation {
             nav_seen: 0,
             projectiles: Vec::new(),
             last_alarm: Vec::new(),
+            clocks: crate::victory::Clocks::default(),
             events: Vec::new(),
             scratch: Scratch::default(),
             config,
@@ -1129,9 +1134,15 @@ impl Simulation {
         })
     }
 
-    /// The last side standing, once every other side is out. `None` while
-    /// two or more stand, and in a match with one side.
+    /// The side that won: the last standing, or one whose Wonder or relics
+    /// were held their ten minutes ([`Simulation::victory`]). `None` while
+    /// it is undecided, and in a match with one side.
     pub fn winner(&self) -> Option<PlayerId> {
+        self.victory().map(|(p, _)| p)
+    }
+
+    /// The last side standing, once every other side is out (`GD-WIN-01`).
+    pub(crate) fn conquered(&self) -> Option<PlayerId> {
         if self.players.len() < 2 {
             return None;
         }
@@ -1142,11 +1153,12 @@ impl Simulation {
 
     /// True once the match is decided: a winner, or nobody left.
     pub fn over(&self) -> bool {
-        self.players.len() >= 2
-            && (0..self.players.len() as PlayerId)
-                .filter(|&p| self.standing(p))
-                .count()
-                <= 1
+        self.clocks.won.is_some()
+            || self.players.len() >= 2
+                && (0..self.players.len() as PlayerId)
+                    .filter(|&p| self.standing(p))
+                    .count()
+                    <= 1
     }
 
     /// A side's score (`docs/02` §10): everything it has gathered plus
@@ -1242,6 +1254,8 @@ impl Simulation {
         self.construction();
         self.repairs();
         self.production();
+        self.relic_gold();
+        self.victory_clocks();
         self.recount_population();
         lap.mark(&mut t.economy);
         self.fog_of_war_update();
@@ -1274,6 +1288,11 @@ impl Simulation {
         h.write(&self.projectiles);
         for f in &self.fog {
             h.write(f);
+        }
+        // Only once a clock has run: a match without one hashes as it
+        // always did.
+        if !self.clocks.is_quiet() {
+            h.write(&self.clocks);
         }
         h.finish()
     }
@@ -1348,13 +1367,21 @@ impl Simulation {
                 });
             }
             if let Some(b) = self.world.inside[i] {
+                // A relic is carried by a priest or held in a Temple of
+                // its side's; a unit shelters in a building.
+                let relic = self.world.kind[i] == kinds::RELIC;
                 let ok = self.world.slot(b).is_some_and(|bs| {
                     let j = bs.index();
-                    self.world.owner[j] == self.world.owner[i]
-                        && self.world.dying[j] == 0
-                        && kinds::info(self.world.kind[j]).garrison > 0
-                        && kinds::info(self.world.kind[i]).mobile
-                        && self.world.dying[i] == 0
+                    let theirs =
+                        self.world.owner[j] == self.world.owner[i] && self.world.dying[j] == 0;
+                    if relic {
+                        theirs && matches!(self.world.kind[j], kinds::PRIEST | kinds::TEMPLE)
+                    } else {
+                        theirs
+                            && kinds::info(self.world.kind[j]).garrison > 0
+                            && kinds::info(self.world.kind[i]).mobile
+                            && self.world.dying[i] == 0
+                    }
                 });
                 if !ok {
                     return Err(Violation::BadGarrison { slot: s });
@@ -1499,7 +1526,11 @@ impl Simulation {
         };
         let i = slot.index();
         let info = kinds::info(self.world.kind[i]);
-        if info.footprint > 0 && self.world.dying[i] == 0 {
+        if self.world.kind[i] == kinds::PRIEST {
+            // A relic in hand stays on the map.
+            self.drop_relics_of(id, self.world.pos[i]);
+        }
+        if info.footprint > 0 && self.world.dying[i] == 0 && self.world.inside[i].is_none() {
             // A standing building goes: anyone inside steps out first, and
             // its footprint opens. Rubble opened its footprint when it fell.
             self.eject(slot);
@@ -1534,7 +1565,7 @@ impl Simulation {
                 p.refund(&back);
             }
         }
-        if !info.mobile {
+        if !info.mobile && self.world.inside[i].is_none() {
             let fp = info.footprint as i32;
             let (ax, ay) = nav::anchor_tile(self.world.pos[i], fp);
             let (w, h) = (self.map.width(), self.map.height());
@@ -1603,6 +1634,8 @@ impl Simulation {
                 }
             }
             CommandKind::Spawn { kind, pos } => {
+                // A relic is nature's until a priest takes it up.
+                let p = if kind == kinds::RELIC { GAIA } else { p };
                 if let Some(id) = self.spawn(kind, p, pos) {
                     if kind == kinds::GATE {
                         // A spawned gate is a finished gate, and stands open.
@@ -1663,6 +1696,15 @@ impl Simulation {
                             Then::Idle
                         };
                         self.engage(i, target, then, None);
+                    }
+                }
+            }
+            CommandKind::Relic { ids, target } => {
+                for id in ids {
+                    if let Some(slot) = self.owned_mobile(id, p) {
+                        if self.world.kind[slot.index()] == kinds::PRIEST {
+                            self.send_for_relic(slot.index(), target);
+                        }
                     }
                 }
             }
@@ -2127,6 +2169,7 @@ impl Simulation {
                     self.tick_work(slot, building, working, Job::Repair)
                 }
                 Order::Convert { target, chant } => self.tick_convert(slot, target, chant),
+                Order::Relic { relic, temple } => self.tick_relic(slot, relic, temple),
             }
         }
         self.advance_queues();
@@ -3421,7 +3464,8 @@ impl Simulation {
             for s in world.slots() {
                 let i = s.index();
                 let k = kinds::info(world.kind[i]);
-                if k.mobile {
+                // A relic in hand or in a Temple stands nowhere.
+                if k.mobile || world.inside[i].is_some() {
                     continue;
                 }
                 let fp = k.footprint as i32;
@@ -3497,7 +3541,10 @@ impl Simulation {
         // by every side that sees any tile of it, as it is now; a side
         // that sees the anchor of nothing remembers nothing there.
         let standing = |i: usize| {
-            world.is_live(i) && !kinds::info(world.kind[i]).mobile && world.dying[i] == 0
+            world.is_live(i)
+                && !kinds::info(world.kind[i]).mobile
+                && world.dying[i] == 0
+                && world.inside[i].is_none()
         };
         let memory_of = |i: usize| Memory {
             id: world.id_at(Slot::new(i)),
