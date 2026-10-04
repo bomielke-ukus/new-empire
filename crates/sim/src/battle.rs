@@ -88,6 +88,15 @@ pub struct Projectile {
     pub owner: PlayerId,
     /// What kind of hit it lands.
     pub kind: DamageType,
+    /// A siege engine's blast; zero for a shot that follows its target. A
+    /// shot with a blast flies to where the target stood when it was
+    /// loosed and lands on everything within this of that point, its own
+    /// side included (`GD-COMBAT-04`).
+    #[serde(default)]
+    pub blast: Fx,
+    /// What threw it, which its own blast spares.
+    #[serde(default)]
+    pub by: Option<EntityId>,
 }
 
 impl HashState for Projectile {
@@ -98,6 +107,14 @@ impl HashState for Projectile {
         h.write_i32(self.damage);
         h.write_u8(self.owner);
         h.write_u8(self.kind as u8);
+        // An arrow hashes as it always has, so replays from before siege
+        // keep their hashes.
+        if !self.blast.is_zero() {
+            h.write(&self.blast);
+            if let Some(by) = self.by {
+                h.write(&by);
+            }
+        }
     }
 }
 
@@ -200,6 +217,58 @@ pub enum Event {
         pos: Vec2Fx,
         /// Where the villager stood.
         toward: Vec2Fx,
+    },
+    /// A priest began a chant: heard by both sides (`docs/02` §5.5).
+    Chant {
+        /// The priest's side.
+        owner: PlayerId,
+        /// Where the priest stands.
+        pos: Vec2Fx,
+        /// Where the unit it chants at stands.
+        at: Vec2Fx,
+    },
+    /// A unit changed sides (`GD-PRIEST-01`).
+    Converted {
+        /// The unit.
+        target: EntityId,
+        /// What it is.
+        kind: KindId,
+        /// Whose it was.
+        from: PlayerId,
+        /// Whose it is now.
+        to: PlayerId,
+        /// Where.
+        pos: Vec2Fx,
+    },
+    /// A priest gave a wounded unit some health back (`GD-PRIEST-04`).
+    Healed {
+        /// The unit.
+        target: EntityId,
+        /// Where.
+        pos: Vec2Fx,
+    },
+    /// A Wonder's clock started: it stands finished (`GD-WIN-02`).
+    /// Announced to every side.
+    WonderRaised {
+        /// Whose.
+        owner: PlayerId,
+        /// Where.
+        pos: Vec2Fx,
+    },
+    /// A side came to hold every relic, or stopped (`GD-WIN-03`).
+    /// Announced to every side.
+    RelicsHeld {
+        /// Whose.
+        owner: PlayerId,
+        /// Whether the clock started; false, it stopped.
+        held: bool,
+    },
+    /// A siege engine's shot came down, on something or on nothing.
+    Landed {
+        /// Where.
+        pos: Vec2Fx,
+        /// How far it reached.
+        blast: Fx,
     },
     /// A working villager's swing, once every [`WORK_PERIOD`] ticks.
     Work {
@@ -348,7 +417,7 @@ impl Simulation {
     }
 
     /// Turns `i` to face `target`. Buildings have one face.
-    fn face(&mut self, i: usize, target: Slot) {
+    pub(crate) fn face(&mut self, i: usize, target: Slot) {
         if !kinds::info(self.world.kind[i]).mobile {
             return;
         }
@@ -416,7 +485,8 @@ impl Simulation {
             self.finish_fight(i, then);
             return;
         };
-        if !self.can_fight(i) {
+        // Gone over to this side, by a priest's work: no target now.
+        if !self.can_fight(i) || self.world.owner[ts.index()] == self.world.owner[i] {
             self.finish_fight(i, then);
             return;
         }
@@ -590,13 +660,22 @@ impl Simulation {
         self.world.nav[i] = None;
         self.world.move_target[i] = None;
         self.world.order[i] = Order::Idle;
-        self.world.reload[i] = 0;
+        // A priest's reload is its faith, which comes back at its own
+        // pace inside or out: a door is no shortcut.
+        if self.world.kind[i] != kinds::PRIEST {
+            self.world.reload[i] = 0;
+        }
     }
 
     /// Everything inside `bs` steps out onto the nearest open tiles around
     /// its footprint, nearest first.
     pub(crate) fn eject(&mut self, bs: Slot) {
         let id = self.world.id_at(bs);
+        // A Temple's relics go back on the ground round it, each on a tile
+        // of its own (`GD-WIN-03`).
+        if self.world.kind[bs.index()] == kinds::TEMPLE {
+            self.drop_relics_of(id, self.world.pos[bs.index()]);
+        }
         let units: Vec<usize> = self
             .world
             .slots()
@@ -754,7 +833,16 @@ impl Simulation {
                 continue;
             };
             let k = kinds::info(self.world.kind[i]);
-            self.world.reload[i] = k.combat.reload_ticks as u16;
+            // A civilization that strikes faster waits less between
+            // (`docs/02` §11).
+            let rate = self
+                .civ(self.world.owner[i])
+                .map_or(0, |c| c.rate_pct(self.world.kind[i]));
+            self.world.reload[i] = if rate == 0 {
+                k.combat.reload_ticks as u16
+            } else {
+                (k.combat.reload_ticks * 100 / (100 + rate as u32)).max(1) as u16
+            };
             self.face(i, ts);
             let from = self.world.pos[i];
             if k.combat.range > 0 {
@@ -770,6 +858,8 @@ impl Simulation {
                         damage,
                         owner,
                         kind: k.combat.damage,
+                        blast: k.blast(),
+                        by: Some(attacker),
                     });
                 }
             } else {
@@ -778,12 +868,13 @@ impl Simulation {
         }
     }
 
-    /// Projectiles fly and land.
+    /// Projectiles fly and land. An arrow follows its target; a stone
+    /// flies to where its target stood and lands there.
     pub(crate) fn fly(&mut self) {
         let step = PROJECTILE_SPEED / TICKS_PER_SECOND as i32;
         let mut landed = Vec::new();
         for (n, p) in self.projectiles.iter_mut().enumerate() {
-            if let Some(ts) = self.world.slot(p.target) {
+            if let Some(ts) = self.world.slot(p.target).filter(|_| p.blast.is_zero()) {
                 let t = ts.index();
                 if self.world.dying[t] == 0 && self.world.inside[t].is_none() {
                     p.aim = self.world.pos[t];
@@ -798,9 +889,51 @@ impl Simulation {
         }
         for n in landed.into_iter().rev() {
             let p = self.projectiles.remove(n);
-            if let Some(ts) = self.target_slot(p.target) {
+            if !p.blast.is_zero() {
+                self.blast(&p);
+            } else if let Some(ts) = self.target_slot(p.target) {
                 self.hit(ts, p.damage, p.pos, p.owner);
             }
+        }
+    }
+
+    /// A stone lands: everything within its blast of where it came down
+    /// takes the hit, friend or foe (`GD-COMBAT-04`), bar the engine that
+    /// threw it, things sheltering inside a building, and the map's own
+    /// trees, mines and animals. A building is caught when the blast
+    /// reaches its footprint. Every one takes the same damage: siege meets
+    /// no armour, and no siege engine has a bonus against a class, so the
+    /// damage settled against the target is the damage against anything.
+    fn blast(&mut self, p: &Projectile) {
+        let reach = p.blast;
+        let caught: Vec<Slot> = self
+            .world
+            .slots()
+            .filter(|s| {
+                let i = s.index();
+                if self.world.owner[i] == GAIA
+                    || self.world.dying[i] > 0
+                    || self.world.inside[i].is_some()
+                    || p.by == Some(self.world.id_at(*s))
+                {
+                    return false;
+                }
+                let at = self.world.pos[i];
+                let k = kinds::info(self.world.kind[i]);
+                if k.mobile {
+                    at.distance(p.pos) <= reach
+                } else {
+                    let half = Fx::from_ratio(k.footprint as i32, 2) + reach;
+                    (at.x - p.pos.x).abs() <= half && (at.y - p.pos.y).abs() <= half
+                }
+            })
+            .collect();
+        self.events.push(Event::Landed {
+            pos: p.pos,
+            blast: p.blast,
+        });
+        for s in caught {
+            self.hit(s, p.damage, p.pos, p.owner);
         }
     }
 
@@ -851,10 +984,14 @@ impl Simulation {
         }
         // A passive unit that is not already running runs.
         let mobile = kinds::info(self.world.kind[t]).mobile;
+        // A priest at its chant keeps chanting.
         if mobile
             && self.world.stance[t] == Stance::Passive
             && self.world.health[t] > Fx::ZERO
-            && !matches!(self.world.order[t], Order::Flee { .. })
+            && !matches!(
+                self.world.order[t],
+                Order::Flee { .. } | Order::Convert { .. }
+            )
         {
             let (safety, into) = self.safety_for(t, from);
             self.world.order[t] = Order::Flee {
@@ -950,6 +1087,10 @@ impl Simulation {
                 pos: self.world.pos[i],
             });
             if k.mobile {
+                // A priest's relic falls where it fell (`GD-WIN-03`).
+                if self.world.kind[i] == kinds::PRIEST {
+                    self.drop_relics_of(self.world.id_at(slot), self.world.pos[i]);
+                }
                 // A hunted animal lies as a carcass, its food still on it.
                 self.world.dying[i] = decay_ticks(self.world.kind[i]);
                 self.world.move_target[i] = None;

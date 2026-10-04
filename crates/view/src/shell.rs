@@ -11,7 +11,8 @@
 pub use ai::Difficulty;
 use audio::Bus;
 use sim::{
-    ConfigError, MapKind, MapSpec, SimConfig, HARDEST_GATHER_BONUS_PCT, MAX_PLAYERS, POP_CAP_RANGE,
+    Civ, ConfigError, MapKind, MapSpec, SimConfig, HARDEST_GATHER_BONUS_PCT, MAX_PLAYERS,
+    POP_CAP_RANGE,
 };
 
 use crate::font;
@@ -92,8 +93,10 @@ impl MapSize {
 /// A setting on the setup screen.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Field {
-    /// The map generator. One in the slice; the rest come with M8.
+    /// The map type.
     Map,
+    /// The player's civilization (`docs/02` §11).
+    Civ,
     /// Tiles per side.
     Size,
     /// How many computer opponents.
@@ -122,6 +125,8 @@ pub struct Setup {
     pub pop_cap: u32,
     /// The map seed.
     pub seed: u64,
+    /// The player's civilization; the opponents' come from the seed.
+    pub civ: Civ,
 }
 
 impl Setup {
@@ -134,7 +139,16 @@ impl Setup {
             opponents: vec![Difficulty::Standard],
             pop_cap: SimConfig::default().pop_cap_max,
             seed,
+            civ: Civ::Egyptians,
         }
+    }
+
+    /// Opponent `i`'s civilization: drawn from the seed, so a match set
+    /// up twice is the same match and SHUFFLE deals new ones.
+    pub fn opponent_civ(&self, i: usize) -> Civ {
+        let mut r =
+            sim::Rng::new(self.seed ^ (0xC1_u64 + i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        Civ::ALL[r.below(Civ::ALL.len() as u32) as usize]
     }
 
     /// Players in the match: the human and every opponent.
@@ -167,6 +181,9 @@ impl Setup {
             gather_bonus_pct: (0..self.players())
                 .map(|p| self.declared_bonus(p))
                 .collect(),
+            civs: std::iter::once(self.civ)
+                .chain((0..self.opponents.len()).map(|i| self.opponent_civ(i)))
+                .collect(),
             ..SimConfig::default()
         }
     }
@@ -181,7 +198,8 @@ impl Setup {
     /// their bounds.
     pub fn adjust(&mut self, field: Field, delta: i32) {
         match field {
-            Field::Map => {}
+            Field::Map => self.kind = cycle(&MapKind::PLAYABLE, self.kind, delta),
+            Field::Civ => self.civ = cycle(&Civ::ALL, self.civ, delta),
             Field::Size => self.size = cycle(&MapSize::ALL, self.size, delta),
             Field::Opponents => {
                 let n = (self.opponents.len() as i32 + delta).clamp(1, MAX_OPPONENTS as i32);
@@ -561,7 +579,8 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
     } else {
         rows_h
     };
-    let ph = 40.0 + body_h + 16.0 + 14.0 + 12.0 + 40.0 + 16.0;
+    // Two lines more under the rows: what the civilization brings.
+    let ph = 40.0 + body_h + 16.0 + 28.0 + 14.0 + 12.0 + 40.0 + 16.0;
     let x = ((s.vw - pw) / 2.0).round();
     let y = ((s.vh - ph) / 2.0).max(4.0).round();
     s.panel(x, y, pw, ph);
@@ -614,8 +633,8 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
         "MAP",
         &kind_name(setup.kind),
         Field::Map,
-        false,
-        "MORE MAPS IN M8",
+        true,
+        "",
         None,
     );
     row(
@@ -630,6 +649,15 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
         true,
         "",
         None,
+    );
+    row(
+        &mut s,
+        "CIVILIZATION",
+        &setup.civ.name().to_uppercase(),
+        Field::Civ,
+        true,
+        "",
+        Some(0),
     );
     row(
         &mut s,
@@ -652,16 +680,20 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
             "",
             Some(player),
         );
-        // The declared bonus (`GD-AI-01`): the one thing an opponent may
-        // have that the player may not, said where it is chosen.
+        // Its civilization, and the declared bonus (`GD-AI-01`): the one
+        // thing an opponent may have that the player may not, said where
+        // it is chosen.
+        let civ = setup.opponent_civ(i).name().to_uppercase();
         if bonus > 0 {
             s.p.text_in(
                 note_x,
                 ty,
-                &format!("+{bonus}% GATHER RATE"),
+                &format!("{civ}, +{bonus}% GATHER RATE"),
                 Ink::Gold,
                 1.0,
             );
+        } else {
+            s.p.text(note_x, ty, &civ, false, 1.0);
         }
     }
     row(
@@ -703,7 +735,39 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
         }
     });
 
-    let below = y + 40.0 + body_h + 16.0;
+    // The player's civilization in two lines (`docs/02` §11): what it
+    // has, and what it may not.
+    let civ = setup.civ.info();
+    let denied: Vec<String> = civ
+        .denied
+        .iter()
+        .map(|k| sim::kinds::info(*k).name.to_uppercase())
+        .chain(
+            civ.denied_techs
+                .iter()
+                .filter_map(|t| sim::tech::info(*t))
+                .map(|t| t.name.to_uppercase()),
+        )
+        .collect();
+    let civ_y = y + 40.0 + body_h + 16.0;
+    s.centred(
+        x + pw / 2.0,
+        civ_y,
+        &fit(
+            &format!("{}: {}", civ.name.to_uppercase(), civ.about),
+            pw - 32.0,
+        ),
+        Ink::Gold,
+        1.0,
+    );
+    s.centred(
+        x + pw / 2.0,
+        civ_y + 12.0,
+        &fit(&format!("NOT FOR THEM: {}", denied.join(", ")), pw - 32.0),
+        Ink::White,
+        1.0,
+    );
+    let below = civ_y + 28.0;
     s.centred(
         x + pw / 2.0,
         below,
@@ -745,10 +809,7 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
 
 /// The map generator's name for the setup screen.
 fn kind_name(kind: MapKind) -> String {
-    match kind {
-        MapKind::Flat => "FLAT".to_string(),
-        MapKind::Inland => "INLAND".to_string(),
-    }
+    kind.name().to_uppercase()
 }
 
 /// The settings screen's second page (`GD-A11Y-02`): every letter the
@@ -1364,8 +1425,8 @@ mod tests {
             assert!(find(&plain, ShellAction::Adjust(field, 1)).enabled);
         }
         assert!(
-            !find(&plain, ShellAction::Adjust(Field::Map, 1)).enabled,
-            "one map kind in the slice"
+            find(&plain, ShellAction::Adjust(Field::Map, 1)).enabled,
+            "the map types are chosen here"
         );
         assert!(find(&plain, ShellAction::Start).enabled);
         assert!(find(&plain, ShellAction::Back).enabled);

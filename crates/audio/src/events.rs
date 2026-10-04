@@ -77,6 +77,46 @@ pub fn cues(sim: &Simulation, viewer: Option<u8>) -> Vec<Placed> {
                     out.push((Cue::Work(task), Some(tile(pos))));
                 }
             }
+            Event::Landed { pos, .. } => {
+                if visible(pos) {
+                    out.push((Cue::Impact, Some(tile(pos))));
+                }
+            }
+            // Heard by both sides (`docs/02` §5.5): by the priest's, and
+            // by whoever sees the unit it chants at, though the priest
+            // stands in their fog.
+            Event::Chant { owner, pos, at } => {
+                if mine(owner) || visible(pos) || visible(at) {
+                    let heard = if mine(owner) || visible(pos) { pos } else { at };
+                    out.push((Cue::Chant, Some(tile(heard))));
+                }
+            }
+            Event::Converted { from, to, pos, .. } => {
+                if mine(to) || visible(pos) {
+                    out.push((Cue::Converted, Some(tile(pos))));
+                }
+                // Gone over: one of the side's lost.
+                if mine(from) {
+                    out.push((Cue::Loss, None));
+                }
+            }
+            // Seen, not heard: a gentle thing among the shouting.
+            Event::Healed { .. } => {}
+            // Every side's news (`docs/02` §10): good news rings, another
+            // side's rings the bell.
+            Event::WonderRaised { owner, .. } | Event::RelicsHeld { owner, held: true } => {
+                if viewer.is_some() {
+                    out.push((
+                        if mine(owner) {
+                            Cue::Research
+                        } else {
+                            Cue::Alarm
+                        },
+                        None,
+                    ));
+                }
+            }
+            Event::RelicsHeld { held: false, .. } => {}
             // A node giving out is seen, not heard: the last swing was.
             Event::Felled { .. } => {}
             Event::Researched { owner, tech: id } => {

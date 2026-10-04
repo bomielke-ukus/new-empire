@@ -13,6 +13,7 @@
 
 use crate::entity::{EntityId, KindId};
 use crate::hash::{HashState, StateHasher};
+use crate::kinds::Resource;
 use crate::orders::{Formation, Rally, Stance};
 use crate::tech::TechId;
 use crate::vec2::Vec2Fx;
@@ -192,7 +193,25 @@ pub enum CommandKind {
     /// Give up: the side is out of the match and gives no more orders
     /// (`docs/02` §10). Always available.
     Resign,
+    /// A cheat code: [`CHEAT_AMOUNT`] of a resource into the stockpile
+    /// (`GD-CHEAT-01`). The player's alone: the simulation ignores one a
+    /// computer opponent issues.
+    Cheat {
+        /// Which resource.
+        resource: Resource,
+    },
+    /// Priests to a relic, to fetch it, or with their relics to a Temple of
+    /// their side's (`GD-WIN-03`).
+    Relic {
+        /// The priests.
+        ids: Vec<EntityId>,
+        /// The relic, or the Temple.
+        target: EntityId,
+    },
 }
+
+/// What one cheat code gives (`GD-CHEAT-01`).
+pub const CHEAT_AMOUNT: i32 = 1000;
 
 /// Who issued a command: the player at the keyboard, or a computer
 /// opponent. The simulation treats both alike except where `docs/04`
@@ -223,6 +242,7 @@ impl CommandKind {
                 | CommandKind::AttackMove { .. }
                 | CommandKind::Patrol { .. }
                 | CommandKind::Garrison { .. }
+                | CommandKind::Relic { .. }
         )
     }
 
@@ -241,7 +261,8 @@ impl CommandKind {
             | CommandKind::Patrol { ids, .. }
             | CommandKind::SetStance { ids, .. }
             | CommandKind::SetFormation { ids, .. }
-            | CommandKind::Garrison { ids, .. } => ids,
+            | CommandKind::Garrison { ids, .. }
+            | CommandKind::Relic { ids, .. } => ids,
             _ => &[],
         }
     }
@@ -330,7 +351,8 @@ impl Command {
             | CommandKind::Patrol { ids, .. }
             | CommandKind::SetStance { ids, .. }
             | CommandKind::SetFormation { ids, .. }
-            | CommandKind::Garrison { ids, .. } => ids.len(),
+            | CommandKind::Garrison { ids, .. }
+            | CommandKind::Relic { ids, .. } => ids.len(),
             CommandKind::SetFarmReseed { farms, .. } => farms.len(),
             CommandKind::Ungarrison { .. }
             | CommandKind::Spawn { .. }
@@ -340,7 +362,8 @@ impl Command {
             | CommandKind::SetRally { .. }
             | CommandKind::Research { .. }
             | CommandKind::SetAutoReseed { .. }
-            | CommandKind::Resign => 0,
+            | CommandKind::Resign
+            | CommandKind::Cheat { .. } => 0,
         };
         if named > MAX_COMMAND_IDS {
             return Err(CommandError::TooManyIds { len: named });
@@ -462,6 +485,15 @@ impl HashState for CommandKind {
                 h.write_u8(*enabled as u8);
             }
             CommandKind::Resign => h.write_u8(19),
+            CommandKind::Cheat { resource } => {
+                h.write_u8(20);
+                h.write_u8(*resource as u8);
+            }
+            CommandKind::Relic { ids, target } => {
+                h.write_u8(23);
+                h.write(ids);
+                h.write(target);
+            }
         }
     }
 }

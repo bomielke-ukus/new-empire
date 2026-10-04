@@ -44,8 +44,8 @@ def spearman():
 
 def clubman():
     """Stone Age: bare-headed, a hide kilt, a club."""
-    h = kit.Humanoid("Clubman")
-    h.hold(kit.club("club"))
+    h = kit.Humanoid("Clubman", beard=True)
+    h.hold(kit.club("club"), follows=True)
     h.animate("swing")
     return h.root
 
@@ -53,7 +53,7 @@ def clubman():
 def axeman():
     """The clubman's line upgraded: a bronze cap and a bronze axe."""
     h = kit.Humanoid("Axeman", helmet="cap", helmet_mat="bronze")
-    h.hold(kit.axe("axe"))
+    h.hold(kit.axe("axe"), follows=True)
     h.animate("swing")
     return h.root
 
@@ -89,6 +89,178 @@ def light_cavalry():
     r.hold(kit.lance("lance"))
     r.animate()
     return r.root
+
+
+def swordsman():
+    """Bronze Age line infantry: a bronze cap, a leather cuirass, a round
+    shield of the owner's colour and a short broad sword."""
+    h = kit.Humanoid("Swordsman", helmet="cap", helmet_mat="bronze")
+    kit.cuirass(h, "hide")
+    h.hold(kit.sword("sword"), follows=True)
+    h.carry_shield(kit.round_shield("shield", radius=0.12))
+    h.animate("swing")
+    return h.root
+
+
+def hoplite():
+    """The Academy's heavy infantry: a crested bronze helmet, a bronze
+    breastplate and greaves, a long spear and the great round shield."""
+    h = kit.Humanoid("Hoplite", helmet="crest", helmet_mat="bronze")
+    kit.cuirass(h, "bronze")
+    kit.greaves(h, "bronze")
+    h.hold(kit.spear("spear", length=1.2))
+    h.carry_shield(kit.round_shield("aspis", radius=0.17))
+    h.animate("thrust")
+    return h.root
+
+
+def legionary():
+    """The Hoplite line's last tier: an iron helmet with a crest, iron
+    mail, a tall curved shield and an iron sword."""
+    h = kit.Humanoid("Legionary", helmet="crest", helmet_mat="iron")
+    kit.cuirass(h, "iron")
+    h.hold(kit.sword("gladius", metal="iron"), follows=True)
+    h.carry_shield(kit.tower_shield("scutum"))
+    h.animate("swing")
+    return h.root
+
+
+def chariot_archer():
+    """A bowman standing in a two-wheeled car behind a bay horse."""
+    c = kit.Chariot("ChariotArcher")
+    c.animate()
+    return c.root
+
+
+def horse_archer():
+    """A light rider on a pale horse with a bow and a quiver at the hip."""
+    r = kit.Rider("HorseArcher", coat="straw", helmet="cap", helmet_mat="hide")
+    r.hold(kit.bow("bow"), lean=0.0)
+    r.animate()
+    return r.root
+
+
+def heavy_cavalry():
+    """The shock rider: a dark horse in a bronze peytral and a caparison of
+    the owner's colour, a crested helmet, a breastplate, a heavy lance."""
+    r = kit.Rider("HeavyCavalry", coat="horse_dark", mane="hair", helmet="crest",
+                  helmet_mat="bronze", barding="bronze", cuirass="bronze")
+    r.hold(kit.spear("lance", length=1.25))
+    r.animate()
+    return r.root
+
+
+def war_elephant():
+    """A war elephant with a howdah of the owner's colour and its driver."""
+    e = kit.Elephant("WarElephant")
+    e.animate()
+    return e.root
+
+
+def stone_thrower():
+    """A torsion engine on four wheels that flings a stone from a sling."""
+    e = kit.Engine("StoneThrower", "thrower")
+    e.animate()
+    return e.root
+
+
+def catapult():
+    """The Stone Thrower made larger and ironbound, a bucket for the stone."""
+    e = kit.Engine("Catapult", "catapult")
+    e.animate()
+    return e.root
+
+
+def ballista():
+    """A great crossbow on a two-wheeled carriage, a shield of the owner's
+    colour across its front."""
+    e = kit.Engine("Ballista", "ballista")
+    e.animate()
+    return e.root
+
+
+def priest():
+    """A long robe of undyed linen with a stole of the owner's colour down
+    its front, shaven and bearded, a tall staff with a bronze head; at its
+    chant it lifts its hands (kit's "bless")."""
+    h = kit.Humanoid("Priest", tunic="linen", dress="robe", hair=False, beard=True)
+    h.wear("stole", kit.box("Priest_stole", (0.05, 0.02, 0.34), "player",
+                            (0.0, 0.082, kit.HIP_Z - 0.06)))
+    h.hold(kit.staff("staff"))
+    h.animate("bless")
+    return h.root
+
+
+def relic():
+    """A gilded casket on a low stone plinth, the poles it is carried by
+    along its sides, two small figures kneeling on its lid."""
+    root = kit.empty("Relic")
+    parts = [
+        kit.box("relic_plinth", (0.4, 0.32, 0.06), "stone_light"),
+        kit.box("relic_chest", (0.27, 0.18, 0.16), "gold", (0.0, 0.0, 0.06)),
+        kit.box("relic_band", (0.282, 0.19, 0.03), "wood_dark", (0.0, 0.0, 0.12)),
+        kit.box("relic_lid", (0.3, 0.21, 0.03), "gold", (0.0, 0.0, 0.22)),
+    ]
+    for side, y in (("l", -0.11), ("r", 0.11)):
+        parts.append(kit.cylinder("relic_pole_" + side, 0.013, 0.48, "wood",
+                                  (-0.24, y, 0.13), sides=8,
+                                  rotation=(0.0, kit._deg(90.0), 0.0)))
+    for k, x in enumerate((-0.075, 0.075)):
+        parts.append(kit.clump("relic_figure_%d" % k, 0.05, "gold", (x, 0.0, 0.28),
+                               seed=90 + k, lumps=0.25, squash=1.3))
+    for p in parts:
+        p.parent = root
+    return root
+
+
+def wonder():
+    """The Iron Age's monument: a ziggurat of dressed stone in three great
+    steps with a stair up its face, a white shrine ringed with columns on
+    its top under a gilded roof, and the owner's colour on banners at the
+    corners of its lowest step. Iron Age only, so built in the Iron Age's
+    materials whatever the set's name."""
+    kit.STYLE_AGE = 3
+    b = kit.Building("Wonder", 5)
+    kit.foundation(b, "wonder", 4.7, 4.7)
+    z = 0.0
+    tiers = [(4.4, 0.5, kit.WALLS), (3.3, 0.45, kit.FULL_WALLS), (2.25, 0.4, kit.FINISHED)]
+    for k, (w, h, frames) in enumerate(tiers):
+        b.add(kit.box("wonder_tier%d" % k, (w, w, h), "stone_light", (0.0, 0.0, z)), frames)
+        # A band of white stone just under each step's edge; not level
+        # with the step's top, where two faces would fight.
+        b.add(kit.box("wonder_cornice%d" % k, (w + 0.08, w + 0.08, 0.06), "white",
+                      (0.0, 0.0, z + h - 0.1)), frames)
+        z += h
+    # The stair up the +Y face, in flights between the steps.
+    for k in range(9):
+        y = 2.2 - k * 0.13
+        b.add(kit.box("wonder_stair%d" % k, (0.7, 0.16, 0.15 * (k + 1)), "stone",
+                      (0.0, y, 0.0)), kit.FULL_WALLS)
+    # The shrine.
+    top = z
+    b.add(kit.box("wonder_cella", (1.3, 1.3, 0.8), "white", (0.0, 0.0, top)), kit.FINISHED)
+    import math as _m
+    for i in range(16):
+        a = 2 * _m.pi * i / 16
+        b.add(kit.cylinder("wonder_col_%d" % i, 0.06, 0.8, "white",
+                           (0.92 * _m.cos(a), 0.92 * _m.sin(a), top), sides=8), kit.FINISHED)
+    b.add(kit.box("wonder_entablature", (2.05, 2.05, 0.12), "white", (0.0, 0.0, top + 0.8)),
+          kit.FINISHED)
+    b.add(kit.pyramid("wonder_roof", (2.15, 2.15, 0.7), "gold", (0.0, 0.0, top + 0.92)),
+          kit.FINISHED)
+    # The owner's colour: banners on poles at the lowest step's corners, and
+    # a band along the shrine's frieze.
+    for i, (x, y) in enumerate([(2.1, 2.1), (2.1, -2.1), (-2.1, 2.1)]):
+        b.add(kit.cylinder("wonder_pole_%d" % i, 0.02, 1.1, "wood", (x, y, 0.5), sides=6),
+              kit.FINISHED)
+        b.add(kit.box("wonder_banner_%d" % i, (0.03, 0.32, 0.42), "player",
+                      (x, y - 0.17, 1.12)), kit.FINISHED)
+    b.add(kit.box("wonder_frieze", (2.07, 2.07, 0.05), "player", (0.0, 0.0, top + 0.83)),
+          kit.FINISHED)
+    kit.scaffold(b, "wonder", 3.4, 3.4, 1.4)
+    kit.rubble(b, "wonder", 3.6, 0.7, mats=("stone_light", "white", "stone"), count=16)
+    b.finish()
+    return b.root
 
 
 # --------------------------------------------------------------------------
@@ -912,6 +1084,19 @@ SUBJECTS = {
     "gold_mine": (gold_mine, "SmallBuilding", "node"),
     "stone_mine": (stone_mine, "SmallBuilding", "node"),
     "gazelle": (gazelle, "Foot", "unit"),
+    "swordsman": (swordsman, "Foot", "unit"),
+    "hoplite": (hoplite, "Foot", "unit"),
+    "legionary": (legionary, "Foot", "unit"),
+    "chariot_archer": (chariot_archer, "Heavy", "unit"),
+    "horse_archer": (horse_archer, "Mounted", "unit"),
+    "heavy_cavalry": (heavy_cavalry, "Mounted", "unit"),
+    "war_elephant": (war_elephant, "Heavy", "unit"),
+    "stone_thrower": (stone_thrower, "Heavy", "unit"),
+    "catapult": (catapult, "Heavy", "unit"),
+    "ballista": (ballista, "Heavy", "unit"),
+    "priest": (priest, "Foot", "unit"),
+    "relic": (relic, "SmallBuilding", "node"),
+    "wonder": (wonder, "Wonder", "building"),
 }
 SUBJECTS.update({"ground_" + g: (globals()["ground_" + g], "Terrain", "ground") for g in GROUNDS})
 
@@ -930,6 +1115,7 @@ AGED = {
     "market": (1, 2, 3), "watch_tower": (1, 2, 3),
     "temple": (3,), "academy": (3,), "siege_workshop": (3,), "government_centre": (3,),
     "villager": (1, 2, 3), "clubman": (1, 2, 3), "axeman": (1, 2, 3), "spearman": (1, 2, 3),
+    "swordsman": (3,), "hoplite": (3,),
 }
 
 

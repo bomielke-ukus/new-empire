@@ -11,7 +11,7 @@
 //! simrunner matrix [--out FILE]
 //! simrunner battle [--save FILE]
 //! simrunner balance [--matches N] [--seed N] [--dump DIR]
-//! simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--stats] [--save FILE]
+//! simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--map KIND] [--stats] [--save FILE]
 //!                  [--difficulty easy,standard,hard,hardest] (one per player, repeating)
 //! simrunner versus [--matches N] [--seed N] [--ticks N] [--size N] [--difficulty hard,easy]
 //!                  [--expect FILE] [--update] [--min-wins N] (the RM-M5-01 acceptance)
@@ -51,6 +51,7 @@ struct Flags {
     timeout: Option<u64>,
     save: Option<String>,
     difficulty: Option<String>,
+    map: Option<String>,
     expect: Option<String>,
     min_wins: Option<u32>,
     out: Option<String>,
@@ -107,6 +108,7 @@ fn parse(args: &[String]) -> Result<Flags, String> {
             }
             "--save" => f.save = Some(value(&mut f)?),
             "--difficulty" => f.difficulty = Some(value(&mut f)?),
+            "--map" => f.map = Some(value(&mut f)?),
             "--expect" => f.expect = Some(value(&mut f)?),
             "--min-wins" => {
                 let v = value(&mut f)?;
@@ -530,6 +532,12 @@ fn randomised_scenario(seed: u64, ticks: u64) -> Scenario {
                 1 => vec![sim::MAX_GATHER_BONUS_PCT; 8],
                 _ => Vec::new(),
             },
+            // Half the time, civilizations for every side.
+            civs: if r.chance(1, 2) {
+                (0..8).map(|_| sim::Civ::ALL[r.below(8) as usize]).collect()
+            } else {
+                Vec::new()
+            },
         },
         style,
     }
@@ -892,7 +900,7 @@ fn usage(err: &str) -> ExitCode {
     eprintln!("  simrunner matrix [--out FILE]");
     eprintln!("  simrunner battle [--save FILE]");
     eprintln!("  simrunner balance [--matches N] [--seed N] [--dump DIR]");
-    eprintln!("  simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--stats] [--save FILE]");
+    eprintln!("  simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--map KIND] [--stats] [--save FILE]");
     eprintln!(
         "                   [--difficulty easy,standard,hard,hardest] (one per player, repeating)"
     );
@@ -938,12 +946,22 @@ fn ai(f: &Flags) -> ExitCode {
     if first.checked_add(u64::from(matches) - 1).is_none() {
         return usage("seed range overflows");
     }
+    let kind = match &f.map {
+        None => sim::MapKind::Inland,
+        Some(name) => match sim::MapKind::PLAYABLE
+            .into_iter()
+            .find(|k| k.name().eq_ignore_ascii_case(name))
+        {
+            Some(k) => k,
+            None => return usage(&format!("--map: no map called {name}")),
+        },
+    };
     let start = Instant::now();
     for n in 0..matches {
         let seed = first + u64::from(n);
         let config = SimConfig {
             map: sim::MapSpec {
-                kind: sim::MapKind::Inland,
+                kind,
                 size,
                 players,
             },
@@ -957,6 +975,10 @@ fn ai(f: &Flags) -> ExitCode {
             })
             .collect();
         let mut issued = 0usize;
+        // Every soldier each side trained over the match, by kind, for the
+        // statistics: what the opponents field, age by age.
+        let mut trained: Vec<std::collections::BTreeMap<&'static str, u32>> =
+            vec![Default::default(); players as usize];
         while sim.tick() < ticks {
             for bot in &mut opponents {
                 let commands = {
@@ -979,6 +1001,15 @@ fn ai(f: &Flags) -> ExitCode {
                     "seed {seed}: invariant at tick {}: {e}",
                     sim.tick()
                 ));
+            }
+            for e in sim.events() {
+                if let sim::Event::Trained { kind, owner, .. } = *e {
+                    if kind != kinds::VILLAGER {
+                        if let Some(t) = trained.get_mut(owner as usize) {
+                            *t.entry(kinds::info(kind).name).or_insert(0) += 1;
+                        }
+                    }
+                }
             }
         }
         let sides: Vec<String> = (0..players)
@@ -1050,9 +1081,11 @@ fn ai(f: &Flags) -> ExitCode {
                             .map_or_else(|e| e.to_string(), |_| "ok".into())
                     });
                     line.push_str(&format!(
-                        "\n     jobs {jobs:?}\n     buildings {buildings:?}\n     queue {queue:?}, train villager: {train:?}\n     food in sight: {} nodes, {} left",
+                        "\n     jobs {jobs:?}\n     buildings {buildings:?}\n     trained {:?}\n     queue {queue:?}, train villager: {train:?}\n     food in sight: {} nodes, {} left\n     relics held {}",
+                        trained[p as usize],
                         food.len(),
-                        food.iter().sum::<i32>()
+                        food.iter().sum::<i32>(),
+                        sim.relics_held(p)
                     ));
                 }
                 line

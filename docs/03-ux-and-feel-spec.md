@@ -62,6 +62,7 @@ ultrawide.
 | Shift + 1–9 | Add group to selection |
 | Tab | Cycle sub-groups within a mixed selection |
 | `.` | Select next idle villager |
+| `,` | Select next idle soldier: any unit of yours but a villager, out in the open with no order |
 | `,` | Select next idle military unit |
 | Ctrl + A | Select all military units |
 | H | Centre on Town Center |

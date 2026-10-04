@@ -42,6 +42,8 @@ pub enum Control {
     Home,
     /// The camera to the next idle villager.
     NextIdle,
+    /// The camera to the next idle soldier.
+    NextIdleSoldier,
     /// Dismiss the selection.
     Dismiss,
     /// Whose eyes a replay is seen through.
@@ -50,7 +52,7 @@ pub enum Control {
 
 impl Control {
     /// Every control, in the order the screen lists them.
-    pub const ALL: [Control; 17] = [
+    pub const ALL: [Control; 18] = [
         Control::PanUp,
         Control::PanDown,
         Control::PanLeft,
@@ -66,6 +68,7 @@ impl Control {
         Control::EdgeScroll,
         Control::Home,
         Control::NextIdle,
+        Control::NextIdleSoldier,
         Control::Dismiss,
         Control::Eyes,
     ];
@@ -88,6 +91,7 @@ impl Control {
             Control::EdgeScroll => "EDGE SCROLL ON, OFF",
             Control::Home => "HOME: THE TOWN CENTER",
             Control::NextIdle => "NEXT IDLE VILLAGER",
+            Control::NextIdleSoldier => "NEXT IDLE SOLDIER",
             Control::Dismiss => "DISMISS",
             Control::Eyes => "EYES, IN A REPLAY",
         }
@@ -111,6 +115,7 @@ impl Control {
             Control::EdgeScroll => "F3",
             Control::Home => "Home",
             Control::NextIdle => "Period",
+            Control::NextIdleSoldier => "Comma",
             Control::Dismiss => "Delete",
             Control::Eyes => "Tab",
         }

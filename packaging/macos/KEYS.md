@@ -16,10 +16,13 @@ Press `F1` in a match for this list on screen. These are the defaults; the title
 | `SHIFT` | ADD TO THE SELECTION; QUEUE AN ORDER |
 | `CTRL+0-9` | SAVE A GROUP, 0-9 RECALLS |
 | `.` | NEXT IDLE VILLAGER |
+| `,` | NEXT IDLE SOLDIER |
 | `RIGHT-CLICK` | MOVE, GATHER, BUILD, RALLY |
 | `T` | STOP |
-| `C P G B L` | TRAIN AT A BARRACKS, RANGE, STABLE |
+| `C P G B L O H M` | TRAIN AT A MILITARY BUILDING |
 | `RIGHT-CLICK` | ON AN ENEMY: ATTACK |
+| `RIGHT-CLICK` | PRIEST ON AN ENEMY UNIT: CONVERT |
+| `RIGHT-CLICK` | PRIEST ON A RELIC: TAKE IT TO A TEMPLE |
 | `RIGHT-CLICK` | ON A TOWER OR TOWN CENTER: GARRISON |
 | `T` | AT A BUILDING: ALL OUT |
 | `A, P` | ATTACK-MOVE, PATROL, THEN CLICK |
@@ -53,6 +56,7 @@ A letter works while the building or villager that has the button is selected.
 | `Y` | ACADEMY 200W (BRONZE) |
 | `G` | SIEGE 200W (BRONZE) |
 | `C` | GOVT 175W (BRONZE) |
+| `ITS BUTTON` | WONDER 1000W 1000S 1000G (IRON) |
 | `ITS BUTTON` | TOWN CENTER 200W, NEEDS A GOVERNMENT CENTRE |
 | `J` | DEFENCES PAGE, THEN ONE OF: |
 | `J J` | TOWER 120S (TOOL) |
@@ -66,3 +70,4 @@ A letter works while the building or villager that has the button is selected.
 | `R` | AUTO-RESEED ON, OFF |
 | `X` | UNQUEUE, OR CANCEL PLACING |
 | `SHIFT` | KEEP PLACING |
+| `ENTER` | TYPE A CHEAT CODE, ENTER AGAIN |

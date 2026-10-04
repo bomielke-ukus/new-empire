@@ -31,6 +31,43 @@ pub enum MapKind {
     Flat,
     /// Land only: rolling hills, forests, scattered mines. The slice's map.
     Inland,
+    /// Hills everywhere and high ground to fight over; the mines are
+    /// rich and the forests thin.
+    Highland,
+    /// Desert round a lake in the middle, its palms the best of the wood.
+    Oasis,
+    /// Land along a sea that runs down one side of the map.
+    Coastal,
+    /// Land in the middle of a sea.
+    Continental,
+    /// Two shores of a river, crossed at three fords.
+    Narrows,
+}
+
+impl MapKind {
+    /// The maps a match can be played on, in the setup screen's order.
+    /// Islands waits for ships (`docs/06` M8).
+    pub const PLAYABLE: [MapKind; 6] = [
+        MapKind::Inland,
+        MapKind::Highland,
+        MapKind::Oasis,
+        MapKind::Coastal,
+        MapKind::Continental,
+        MapKind::Narrows,
+    ];
+
+    /// Display name.
+    pub const fn name(self) -> &'static str {
+        match self {
+            MapKind::Flat => "Flat",
+            MapKind::Inland => "Inland",
+            MapKind::Highland => "Highland",
+            MapKind::Oasis => "Oasis",
+            MapKind::Coastal => "Coastal",
+            MapKind::Continental => "Continental",
+            MapKind::Narrows => "Narrows",
+        }
+    }
 }
 
 /// Map generation parameters.
@@ -89,14 +126,19 @@ pub fn generate(seed: u64, spec: &MapSpec) -> Generated {
     };
     match spec.kind {
         MapKind::Flat => flat(&spec),
-        MapKind::Inland => {
+        kind => {
             const ATTEMPTS: u32 = 12;
             for attempt in 0..ATTEMPTS {
                 let mut rng = Rng::new(
                     seed.wrapping_add(attempt as u64)
                         .wrapping_mul(0x9E37_79B9_7F4A_7C15),
                 );
-                if let Some(mut g) = inland(&mut rng, &spec) {
+                let made = if kind == MapKind::Inland {
+                    inland(&mut rng, &spec)
+                } else {
+                    varied(&mut rng, &spec)
+                };
+                if let Some(mut g) = made {
                     g.attempts = attempt + 1;
                     return g;
                 }
@@ -333,6 +375,8 @@ fn inland(rng: &mut Rng, spec: &MapSpec) -> Option<Generated> {
     if !all_starts_connected(&g) {
         return None;
     }
+    // Last, so everything else on the map is as it was before relics.
+    place_relics(&mut g);
     Some(Generated {
         tiles: g.tiles,
         spawns: g.spawns,
@@ -341,15 +385,214 @@ fn inland(rng: &mut Rng, spec: &MapSpec) -> Option<Generated> {
     })
 }
 
+/// Starts on a ring round `centre`, `ring` hundredths of the map's size
+/// out, as [`start_positions`] places them round the middle; with the
+/// bearing of the first.
+fn start_ring(
+    rng: &mut Rng,
+    size: i32,
+    players: u8,
+    centre: (i32, i32),
+    ring: i32,
+) -> (Vec<(i32, i32)>, Angle) {
+    let n = players as i32;
+    let c = Vec2Fx::from_int(centre.0, centre.1);
+    let radius = Fx::from_int(size).mul_div(Fx::from_ratio(ring, 100), Fx::ONE);
+    let base = Angle(rng.next_u32() as u16);
+    let step = Angle((65536 / n) as u16);
+    let margin = 12;
+    let starts = (0..n)
+        .map(|i| {
+            let jitter = Angle::from_degrees(rng.range_i32(-8, 9));
+            let a = base + Angle(step.0.wrapping_mul(i as u16)) + jitter;
+            let p = if n == 1 {
+                c
+            } else {
+                c + Vec2Fx::from_angle(a, radius)
+            };
+            (
+                p.x.round().clamp(margin, size - 1 - margin),
+                p.y.round().clamp(margin, size - 1 - margin),
+            )
+        })
+        .collect();
+    (starts, base)
+}
+
+/// No water this close to a start, in tiles: its kit is all on dry land.
+const DRY_AROUND_STARTS: i32 = 14;
+
+/// The map types after Inland (`docs/02` §9): Inland's making, with the
+/// ground, the water and the scenery changed. Water is in the way until
+/// there are ships: nothing crosses it and nothing stands in it.
+fn varied(rng: &mut Rng, spec: &MapSpec) -> Option<Generated> {
+    let size = spec.size as i32;
+    let kind = spec.kind;
+    // Coastal's sea runs down one side, chosen by the seed; the starts'
+    // ring moves away from it and shrinks to fit the land.
+    let side = rng.below(4) as usize;
+    let shore = size * 22 / 100;
+    let (centre, ring) = match kind {
+        MapKind::Coastal => {
+            let (dx, dy) = [(1, 0), (-1, 0), (0, 1), (0, -1)][side];
+            let push = shore * 2 / 3;
+            ((size / 2 + dx * push, size / 2 + dy * push), 25)
+        }
+        MapKind::Continental => ((size / 2, size / 2), 24),
+        _ => ((size / 2, size / 2), 34),
+    };
+    let (starts, base) = start_ring(rng, size, spec.players, centre, ring);
+    let mut g = Gen {
+        rng,
+        size,
+        tiles: TileMap::new(spec.size, spec.size),
+        occ: vec![Occ::Free; (size * size) as usize],
+        spawns: Vec::new(),
+        starts,
+    };
+
+    let hills = if kind == MapKind::Highland {
+        [36, 48, 60]
+    } else {
+        [50, 64, 78]
+    };
+    shape_elevation_at(&mut g, hills);
+    paint_terrain_as(&mut g, kind == MapKind::Oasis);
+    pour(&mut g, kind, side, shore, base);
+
+    // Keep a building zone clear around each start.
+    for &(sx, sy) in &g.starts.clone() {
+        for dy in -6..=6 {
+            for dx in -6..=6 {
+                if g.occ(sx + dx, sy + dy) == Occ::Free {
+                    g.set_occ(sx + dx, sy + dy, Occ::Reserved);
+                }
+            }
+        }
+    }
+    for p in 0..spec.players {
+        start_kit(&mut g, p);
+    }
+    if kind == MapKind::Oasis {
+        // The palms: six groves round the lake's shore.
+        let (cx, cy) = (size / 2, size / 2);
+        let r = size * 9 / 100 + 4;
+        for k in 0..6 {
+            let a = Angle::from_degrees(k * 60) + g.jitter(15);
+            let (x, y) = g.offset(cx, cy, a, r);
+            let n = g.rng.range_i32(10, 16) as usize;
+            g.blob(kinds::TREE, x, y, n);
+        }
+    }
+    let (forests, mines) = match kind {
+        MapKind::Highland => (70, 160),
+        MapKind::Oasis => (35, 100),
+        _ => (100, 100),
+    };
+    scatter_scenery_as(&mut g, spec.players, forests, mines);
+
+    g.tiles.enforce_max_step();
+    debug_assert!(g.tiles.validate().is_ok());
+
+    if !all_starts_connected(&g) {
+        return None;
+    }
+    place_relics_within(&mut g, true);
+    Some(Generated {
+        tiles: g.tiles,
+        spawns: g.spawns,
+        starts: g.starts,
+        attempts: 0,
+    })
+}
+
+/// The water of a map type: how deep each tile lies, from noise-bent
+/// lines. Three tiles in or more is deep, one or two shallow, and the two
+/// tiles along its edge a beach of sand. Never within
+/// [`DRY_AROUND_STARTS`] of a start. Water lies at the lowest level and is
+/// blocked to everything.
+fn pour(g: &mut Gen, kind: MapKind, side: usize, shore: i32, base: Angle) {
+    let size = g.size;
+    let wiggle = Fbm::new(g.rng, size, size, 10);
+    let c = size / 2;
+    // The river runs through the middle half-way between the first two
+    // starts' bearings, so the starts fall either side of it.
+    let n = g.starts.len().max(1) as i32;
+    let dir = Vec2Fx::from_angle(base + Angle((65536 / (2 * n)) as u16), Fx::ONE);
+    let fords = [-size * 30 / 100, 0, size * 30 / 100];
+    for y in 0..size {
+        for x in 0..size {
+            // -3 to 3, smoothly over the map.
+            let jig = ((i64::from(wiggle.sample(x, y).raw()) * 7) >> 16) as i32 - 3;
+            let (dx, dy) = (x - c, y - c);
+            let depth = match kind {
+                MapKind::Coastal => {
+                    let into = [x, size - 1 - x, y, size - 1 - y][side];
+                    shore + jig * 2 - into
+                }
+                // A round land, the sea at the edges and deepest in the
+                // corners.
+                MapKind::Continental => {
+                    let d = Vec2Fx::from_int(dx, dy).length().floor();
+                    d - size * 40 / 100 + jig * 2
+                }
+                MapKind::Oasis => {
+                    let d = Vec2Fx::from_int(dx, dy).length().floor();
+                    size * 9 / 100 + jig / 2 - d
+                }
+                MapKind::Narrows => {
+                    let along = (i64::from(dx) * i64::from(dir.x.raw())
+                        + i64::from(dy) * i64::from(dir.y.raw()))
+                        >> 16;
+                    let across = ((i64::from(dx) * i64::from(dir.y.raw())
+                        - i64::from(dy) * i64::from(dir.x.raw()))
+                        >> 16)
+                        .abs();
+                    if fords.iter().any(|&f| (along - i64::from(f)).abs() <= 3) {
+                        // A ford stays open: no forest grows across it.
+                        if across <= 8 && g.occ(x, y) == Occ::Free {
+                            g.set_occ(x, y, Occ::Reserved);
+                        }
+                        -2
+                    } else {
+                        4 + jig / 2 - across as i32
+                    }
+                }
+                _ => -9,
+            };
+            if depth < -1 || g.dist_to_nearest_start(x, y) < DRY_AROUND_STARTS {
+                continue;
+            }
+            if depth >= 1 {
+                let t = if depth >= 3 {
+                    Terrain::DeepWater
+                } else {
+                    Terrain::ShallowWater
+                };
+                g.tiles.set_terrain(x, y, t);
+                g.set_occ(x, y, Occ::Blocked);
+                for (cx, cy) in [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)] {
+                    g.tiles.set_corner(cx, cy, 0);
+                }
+            } else {
+                g.tiles.set_terrain(x, y, Terrain::Sand);
+            }
+        }
+    }
+    g.tiles.enforce_max_step();
+}
+
 /// Rolling hills from noise, quantised to levels, flattened around starts.
 fn shape_elevation(g: &mut Gen) {
+    shape_elevation_at(g, [50, 64, 78]);
+}
+
+/// [`shape_elevation`] with the noise levels, in hundredths, at which the
+/// ground steps up: lower makes hillier.
+fn shape_elevation_at(g: &mut Gen, levels: [i32; 3]) {
     let size = g.size;
     let noise = Fbm::new(g.rng, size + 1, size + 1, 18);
-    let thresholds = [
-        Fx::from_ratio(50, 100),
-        Fx::from_ratio(64, 100),
-        Fx::from_ratio(78, 100),
-    ];
+    let thresholds = levels.map(|l| Fx::from_ratio(l, 100));
     for cy in 0..=size {
         for cx in 0..=size {
             let v = noise.sample(cx, cy);
@@ -371,6 +614,12 @@ fn shape_elevation(g: &mut Gen) {
 
 /// Grass with patches of dirt and the odd desert scar.
 fn paint_terrain(g: &mut Gen) {
+    paint_terrain_as(g, false);
+}
+
+/// [`paint_terrain`]; `arid`, desert with patches of dirt and the odd
+/// green.
+fn paint_terrain_as(g: &mut Gen, arid: bool) {
     let size = g.size;
     let noise = Fbm::new(g.rng, size, size, 12);
     let dirt = Fx::from_ratio(66, 100);
@@ -378,12 +627,13 @@ fn paint_terrain(g: &mut Gen) {
     for y in 0..size {
         for x in 0..size {
             let v = noise.sample(x, y);
-            let t = if v >= desert {
-                Terrain::Desert
-            } else if v >= dirt {
-                Terrain::Dirt
-            } else {
-                Terrain::Grass
+            let t = match (arid, v >= desert, v >= dirt) {
+                (false, true, _) => Terrain::Desert,
+                (false, false, true) => Terrain::Dirt,
+                (false, false, false) => Terrain::Grass,
+                (true, true, _) => Terrain::Grass,
+                (true, false, true) => Terrain::Dirt,
+                (true, false, false) => Terrain::Desert,
             };
             g.tiles.set_terrain(x, y, t);
         }
@@ -433,6 +683,12 @@ fn start_kit(g: &mut Gen, player: PlayerId) {
 
 /// Forests, extra mines, bushes and herds away from the starts.
 fn scatter_scenery(g: &mut Gen, players: u8) {
+    scatter_scenery_as(g, players, 100, 100);
+}
+
+/// [`scatter_scenery`] with the forests and the mines away from the starts
+/// scaled, in percent.
+fn scatter_scenery_as(g: &mut Gen, players: u8, forests_pct: i32, mines_pct: i32) {
     let size = g.size;
     let area = size * size;
     let far = |g: &mut Gen, min_dist: i32| -> Option<(i32, i32)> {
@@ -446,20 +702,20 @@ fn scatter_scenery(g: &mut Gen, players: u8) {
         None
     };
 
-    let forests = (area / 550).max(4);
+    let forests = ((area / 550).max(4) * forests_pct / 100).max(1);
     for _ in 0..forests {
         if let Some((x, y)) = far(g, 12) {
             let n = g.rng.range_i32(18, 52) as usize;
             g.blob(kinds::TREE, x, y, n);
         }
     }
-    for _ in 0..(players as i32 * 2) {
+    for _ in 0..(players as i32 * 2 * mines_pct / 100) {
         if let Some((x, y)) = far(g, 14) {
             let n = g.rng.range_i32(4, 7) as usize;
             g.blob(kinds::GOLD_MINE, x, y, n);
         }
     }
-    for _ in 0..players {
+    for _ in 0..(players as i32 * mines_pct / 100) {
         if let Some((x, y)) = far(g, 14) {
             let n = g.rng.range_i32(3, 5) as usize;
             g.blob(kinds::STONE_MINE, x, y, n);
@@ -488,10 +744,66 @@ fn scatter_scenery(g: &mut Gen, players: u8) {
     }
 }
 
+/// The relics (`GD-WIN-03`): [`crate::relics::RELICS_PER_MAP`] of them in
+/// the open ground between the starts, apart from one another, each on a
+/// tile the first start's people can walk to and with open ground all
+/// round it, so none walls anything in. Fewer if the map has no room.
+fn place_relics(g: &mut Gen) {
+    place_relics_within(g, false);
+}
+
+/// [`place_relics`]; with `relax`, a map with too little open ground for
+/// all of them at the full distances tries again closer to the starts and
+/// to each other, down to half.
+fn place_relics_within(g: &mut Gen, relax: bool) {
+    let size = g.size;
+    let reach = flood(g);
+    let open = |g: &Gen, x: i32, y: i32| {
+        g.free(x, y) && g.tiles.walkable(x, y) && reach.get(g.idx(x, y)) == Some(&true)
+    };
+    let mut placed: Vec<(i32, i32)> = Vec::new();
+    let passes: &[i32] = if relax { &[4, 3, 2] } else { &[4] };
+    for &quarters in passes {
+        let far = ((size / 6).max(14) * quarters / 4).max(12);
+        let apart = ((size / 8).max(10) * quarters / 4).max(8);
+        let wanted = crate::relics::RELICS_PER_MAP - placed.len();
+        for _ in 0..wanted {
+            let mut put = false;
+            for _ in 0..200 {
+                let x = g.rng.range_i32(3, size - 3);
+                let y = g.rng.range_i32(3, size - 3);
+                let clear = (-1..=1).all(|dy| (-1..=1).all(|dx| open(g, x + dx, y + dy)));
+                if clear
+                    && g.dist_to_nearest_start(x, y) >= far
+                    && placed
+                        .iter()
+                        .all(|&(px, py)| (px - x).abs().max((py - y).abs()) >= apart)
+                {
+                    g.place(kinds::RELIC, GAIA, x, y);
+                    placed.push((x, y));
+                    put = true;
+                    break;
+                }
+            }
+            // No room at these distances: the next pass tries closer.
+            if !put && relax {
+                break;
+            }
+        }
+    }
+}
+
 /// Breadth-first flood over walkable, unblocked tiles from the first start;
 /// every other start must be reached. Starts are on reserved tiles next to
 /// their Town Center footprint, so they are themselves walkable.
 fn all_starts_connected(g: &Gen) -> bool {
+    let seen = flood(g);
+    !seen.is_empty() && g.starts.iter().all(|&(x, y)| seen[g.idx(x, y + 2)])
+}
+
+/// Every tile reachable on foot from the first start's villagers' row;
+/// empty if that row is itself blocked.
+fn flood(g: &Gen) -> Vec<bool> {
     let size = g.size;
     let mut seen = vec![false; (size * size) as usize];
     let mut queue = VecDeque::new();
@@ -502,7 +814,7 @@ fn all_starts_connected(g: &Gen) -> bool {
     // The TC blocks its own tile; begin from the villagers' row.
     let origin = (sx, sy + 2);
     if !walkable(origin.0, origin.1) {
-        return false;
+        return Vec::new();
     }
     seen[g.idx(origin.0, origin.1)] = true;
     queue.push_back(origin);
@@ -515,7 +827,7 @@ fn all_starts_connected(g: &Gen) -> bool {
             }
         }
     }
-    g.starts.iter().all(|&(x, y)| seen[g.idx(x, y + 2)])
+    seen
 }
 
 #[cfg(test)]
@@ -626,6 +938,105 @@ mod tests {
                         "seed {seed} p{p}: scenery inside the start zone"
                     );
                 }
+            }
+        }
+    }
+
+    /// Every map type gives every start the same kit on dry, reachable
+    /// ground: water is never by a start, every start reaches every other
+    /// on foot, and the relics are out.
+    ///
+    /// REQ: GD-MAP-01
+    #[test]
+    fn every_map_type_gives_every_start_its_kit_on_dry_land() {
+        for kind in MapKind::PLAYABLE {
+            for seed in 0..6u64 {
+                for (players, size) in [(2u8, 96u16), (4, 128), (8, 168)] {
+                    let g = generate(
+                        seed,
+                        &MapSpec {
+                            kind,
+                            size,
+                            players,
+                        },
+                    );
+                    let at = format!("{kind:?} seed {seed} players {players}");
+                    assert!(g.attempts <= 6, "{at}: {} attempts", g.attempts);
+                    assert!(g.tiles.validate().is_ok(), "{at}");
+                    assert_eq!(g.starts.len(), players as usize, "{at}");
+                    for (p, &start) in g.starts.iter().enumerate() {
+                        let owned = |k: KindId| {
+                            g.spawns
+                                .iter()
+                                .filter(|s| s.kind == k && s.owner == p as PlayerId)
+                                .count()
+                        };
+                        assert_eq!(owned(kinds::TOWN_CENTER), 1, "{at}");
+                        assert_eq!(owned(kinds::VILLAGER), 3, "{at}");
+                        assert!(count_near(&g, kinds::BERRY_BUSH, start, 12) >= 6, "{at}");
+                        assert!(count_near(&g, kinds::GOLD_MINE, start, 12) >= 5, "{at}");
+                        assert!(count_near(&g, kinds::STONE_MINE, start, 12) >= 4, "{at}");
+                        assert!(count_near(&g, kinds::TREE, start, 16) >= 20, "{at} trees");
+                        for dy in -DRY_AROUND_STARTS + 1..DRY_AROUND_STARTS {
+                            for dx in -DRY_AROUND_STARTS + 1..DRY_AROUND_STARTS {
+                                let (x, y) = (start.0 + dx, start.1 + dy);
+                                if g.tiles.in_bounds(x, y) {
+                                    assert!(
+                                        !g.tiles.terrain(x, y).is_water(),
+                                        "{at}: water at {dx},{dy} from start {p}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    let relics = g.spawns.iter().filter(|s| s.kind == kinds::RELIC).count();
+                    assert!(relics >= 3, "{at}: {relics} relics");
+                    let water = g.tiles.terrain_histogram()[Terrain::DeepWater as usize]
+                        + g.tiles.terrain_histogram()[Terrain::ShallowWater as usize];
+                    let wet = matches!(
+                        kind,
+                        MapKind::Oasis | MapKind::Coastal | MapKind::Continental | MapKind::Narrows
+                    );
+                    assert_eq!(water > 0, wet, "{at}: {water} water tiles");
+                }
+            }
+        }
+    }
+
+    /// The river of the Narrows has starts on both its shores: from some
+    /// two starts the nearest water lies in opposite directions.
+    #[test]
+    fn the_narrows_river_has_starts_on_both_shores() {
+        for seed in 0..8u64 {
+            for players in [2u8, 4, 6] {
+                let g = generate(
+                    seed,
+                    &MapSpec {
+                        kind: MapKind::Narrows,
+                        size: 128,
+                        players,
+                    },
+                );
+                let toward_water = |(sx, sy): (i32, i32)| {
+                    let mut best = (i32::MAX, (0, 0));
+                    for y in 0..128 {
+                        for x in 0..128 {
+                            if g.tiles.terrain(x, y).is_water() {
+                                let d = (x - sx) * (x - sx) + (y - sy) * (y - sy);
+                                if d < best.0 {
+                                    best = (d, (x - sx, y - sy));
+                                }
+                            }
+                        }
+                    }
+                    best.1
+                };
+                let v: Vec<(i32, i32)> = g.starts.iter().map(|&s| toward_water(s)).collect();
+                let split = v
+                    .iter()
+                    .enumerate()
+                    .any(|(i, a)| v[i + 1..].iter().any(|b| a.0 * b.0 + a.1 * b.1 < 0));
+                assert!(split, "seed {seed} players {players}: all on one shore");
             }
         }
     }

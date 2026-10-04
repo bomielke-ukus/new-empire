@@ -67,6 +67,222 @@ fn camera_keys_pan_without_building_or_spending_and_release_stops_panning() {
     }
 }
 
+/// `,` cycles through the soldiers standing idle, round and round, and
+/// brings the camera to each; a villager or a soldier with an order is
+/// never one of them. `.` still does the villagers.
+#[test]
+fn comma_cycles_the_idle_soldiers_and_never_a_villager() {
+    let mut app = app();
+    let a = spawn(&mut app, kinds::CLUBMAN, 10, 10);
+    let b = spawn(&mut app, kinds::CLUBMAN, 14, 10);
+    let busy = spawn(&mut app, kinds::CLUBMAN, 18, 10);
+    app.issue(CommandKind::Move {
+        ids: vec![busy],
+        target: Vec2Fx::from_int(30, 30),
+    });
+    step(&mut app, 3);
+    draw(&mut app);
+    let idle = app.sim.idle_soldiers(ME);
+    assert!(idle.contains(&a) && idle.contains(&b) && !idle.contains(&busy));
+    let world = app.sim.world();
+    assert!(idle
+        .iter()
+        .all(|&id| world.kind[world.slot(id).unwrap().index()] != kinds::VILLAGER));
+    let tap = |app: &mut App| {
+        app.keyboard_input(KeyCode::Comma, ElementState::Pressed, false);
+        app.keyboard_input(KeyCode::Comma, ElementState::Released, false);
+    };
+    let mut seen = Vec::new();
+    for _ in 0..idle.len() {
+        tap(&mut app);
+        assert_eq!(app.selection.ids.len(), 1);
+        let id = app.selection.ids[0];
+        let p = app.sim.world().pos[app.sim.world().slot(id).unwrap().index()];
+        let mut there = app.camera;
+        there.look_at_tile(view::fx_to_f32(p.x), view::fx_to_f32(p.y));
+        assert_eq!(app.camera.focus, there.focus, "the camera comes to it");
+        seen.push(id);
+    }
+    let (mut sorted, mut want) = (seen.clone(), idle.clone());
+    sorted.sort();
+    want.sort();
+    assert_eq!(sorted, want, "each idle soldier once");
+    tap(&mut app);
+    assert_eq!(app.selection.ids, vec![seen[0]], "and round again");
+}
+
+/// A right-click on an enemy unit with a priest selected converts it: the
+/// cursor says so, the command goes, and the priest takes the convert
+/// order. On an enemy building the priest has nothing to do.
+///
+/// REQ: GD-PRIEST-01
+#[test]
+fn a_right_click_sends_a_priest_to_convert_an_enemy_unit() {
+    let mut app = app();
+    let priest = spawn(&mut app, kinds::PRIEST, 10, 10);
+    let foe = |app: &mut App, kind: u16, x: i32, y: i32| {
+        app.sim.issue(Command {
+            player: 1,
+            kind: CommandKind::Spawn {
+                kind,
+                pos: Vec2Fx::from_int(x, y),
+            },
+        });
+        step(app, 3);
+        let world = app.sim.world();
+        let id = world
+            .slots()
+            .filter(|s| world.owner[s.index()] == 1 && world.kind[s.index()] == kind)
+            .map(|s| world.id_at(s))
+            .last()
+            .unwrap();
+        app.sim.issue(Command {
+            player: 1,
+            kind: CommandKind::SetStance {
+                ids: vec![id],
+                stance: Stance::Passive,
+            },
+        });
+        step(app, 3);
+        id
+    };
+    let enemy = foe(&mut app, kinds::CLUBMAN, 18, 10);
+    app.selection.set(vec![priest]);
+    app.camera.look_at_tile(14.0, 10.0);
+    draw(&mut app);
+    let ep = app.sim.world().pos[app.sim.world().slot(enemy).unwrap().index()];
+    let (ex, ey) = (view::fx_to_f32(ep.x), view::fx_to_f32(ep.y));
+    let g = view::iso::project(ex, ey, view::iso::ground_height(app.sim.map(), ex, ey));
+    let (px, py) = app.camera.to_window(g.0, g.1 - 8.0);
+    assert!(
+        matches!(app.hovered_target(px, py), Some(Target::Convert)),
+        "the cursor offers conversion"
+    );
+    app.right_press(px, py);
+    step(&mut app, 3);
+    let pi = app.sim.world().slot(priest).unwrap().index();
+    assert!(
+        matches!(app.sim.world().order[pi], Order::Convert { target, .. } if target == enemy),
+        "{:?}",
+        app.sim.world().order[pi]
+    );
+}
+
+/// A right-click on a relic sends the selected priests for it; with it in
+/// hand, a right-click on a Temple of ours takes it in.
+///
+/// REQ: GD-WIN-03
+#[test]
+fn a_right_click_fetches_a_relic_and_takes_it_into_the_temple() {
+    let mut app = app();
+    let relic = spawn(&mut app, kinds::RELIC, 16, 10);
+    let priest = spawn(&mut app, kinds::PRIEST, 12, 10);
+    let temple = spawn(&mut app, kinds::TEMPLE, 12, 16);
+    app.selection.set(vec![priest]);
+    app.camera.look_at_tile(14.0, 12.0);
+    draw(&mut app);
+    let r = app.sim.world().pos[app.sim.world().slot(relic).unwrap().index()];
+    let (px, py) = on_screen(&app, view::fx_to_f32(r.x), view::fx_to_f32(r.y), 8.0);
+    assert!(
+        matches!(app.hovered_target(px, py), Some(Target::Relic)),
+        "the cursor offers to fetch it"
+    );
+    app.right_press(px, py);
+    assert!(matches!(
+        app.sim.replay().commands.last().unwrap().1.kind,
+        CommandKind::Relic { target, .. } if target == relic
+    ));
+    for _ in 0..600 {
+        app.sim.step();
+        if app.sim.carried_relic(priest) == Some(relic) {
+            break;
+        }
+    }
+    assert_eq!(app.sim.carried_relic(priest), Some(relic), "in hand");
+    // Hold it: no Temple order yet, so stop the walk home and send it.
+    draw(&mut app);
+    let t = app.sim.world().pos[app.sim.world().slot(temple).unwrap().index()];
+    let (tx, ty) = (view::fx_to_f32(t.x), view::fx_to_f32(t.y));
+    let (qx, qy) = on_screen(&app, tx, ty, 20.0);
+    assert!(matches!(app.hovered_target(qx, qy), Some(Target::Relic)));
+    app.right_press(qx, qy);
+    for _ in 0..900 {
+        app.sim.step();
+        if app.sim.carried_relic(temple) == Some(relic) {
+            break;
+        }
+    }
+    assert_eq!(
+        app.sim.carried_relic(temple),
+        Some(relic),
+        "held in the Temple"
+    );
+}
+
+/// Enter opens the line, the code is typed, Enter gives 1000 of what it
+/// names; the letters typed are text, not orders, and the camera stays.
+///
+/// REQ: GD-CHEAT-01
+#[test]
+fn a_typed_cheat_code_gives_a_thousand_and_its_letters_are_not_orders() {
+    let mut app = app();
+    let unit = spawn(&mut app, kinds::VILLAGER, 8, 8);
+    app.selection.set(vec![unit]);
+    draw(&mut app);
+    let tap = |app: &mut App, code: KeyCode| {
+        app.keyboard_input(code, ElementState::Pressed, false);
+        app.keyboard_input(code, ElementState::Released, false);
+    };
+    let type_line = |app: &mut App, text: &str| {
+        for c in text.chars() {
+            let code = if c == ' ' {
+                KeyCode::Space
+            } else {
+                keys::code(&format!("Key{c}")).unwrap()
+            };
+            tap(app, code);
+        }
+    };
+    let gold = app.sim.player(ME).unwrap().stockpile[3];
+    let commands = app.sim.replay().commands.len();
+    let focus = app.camera.focus;
+    tap(&mut app, KeyCode::Enter);
+    assert_eq!(app.cheat.as_deref(), Some(""));
+    // H is the House, A attack-move, S and W pan once bound: none of them
+    // while a code is typed.
+    type_line(&mut app, "MIDAS TOUCH HAWS");
+    for _ in 0..5 {
+        tap(&mut app, KeyCode::Backspace);
+    }
+    assert_eq!(app.cheat.as_deref(), Some("MIDAS TOUCH"));
+    assert_eq!(app.build_mode, None);
+    assert_eq!(app.targeting, None);
+    app.input.update_camera(&mut app.camera, 0.1);
+    assert_eq!(app.camera.focus, focus);
+    assert_eq!(app.sim.replay().commands.len(), commands);
+    tap(&mut app, KeyCode::Enter);
+    assert!(app.cheat.is_none());
+    step(&mut app, 3);
+    assert_eq!(app.sim.player(ME).unwrap().stockpile[3], gold + 1000);
+    assert!(app
+        .notices
+        .shown()
+        .iter()
+        .any(|n| n.kind == NoticeKind::Cheat));
+    // A line that is no code orders nothing; Escape closes one unsent.
+    let commands = app.sim.replay().commands.len();
+    tap(&mut app, KeyCode::Enter);
+    type_line(&mut app, "GIVE ME GOLD");
+    tap(&mut app, KeyCode::Enter);
+    tap(&mut app, KeyCode::Enter);
+    type_line(&mut app, "MIDAS TOUCH");
+    tap(&mut app, KeyCode::Escape);
+    assert!(app.cheat.is_none());
+    step(&mut app, 3);
+    assert_eq!(app.sim.replay().commands.len(), commands);
+    assert_eq!(app.sim.player(ME).unwrap().stockpile[3], gold + 1000);
+}
+
 #[test]
 fn replacement_shortcuts_work_without_panning_or_key_repeat_orders() {
     let mut app = app();

@@ -193,6 +193,13 @@ Kept close to the original because it is the series' signature:
 - The chant is audible to both players. Hearing it near your army should make
   you react.
 
+**As built** (2026-10-04): faith is spent whole and comes back over 40
+seconds; the chant lasts four to ten seconds, and a priest without faith
+walks into reach and waits there. The healing is 3 hit points once a
+second to the most wounded unit of the priest's side within 4 tiles, not
+to a siege engine. A priest at its chant does not run when hit; idle, it
+runs home like a villager. A priest can convert a priest.
+
 ---
 
 ## 6. Buildings
@@ -238,8 +245,10 @@ the Temple), matching the original's mental model.
 Three families:
 
 1. **Economy** — gather rate bonuses, carry capacity, farm yield, villager HP.
-2. **Military** — attack, armour, range and per-line upgrades (Clubman → Axeman →
-   Swordsman → Legionary), unlocked age by age.
+2. **Military** — attack, armour, range and per-line upgrades (Clubman → Axeman,
+   Hoplite → Legionary, Stone Thrower → Catapult), unlocked age by age. The
+   Swordsman is the Barracks' own Bronze Age unit, and the Legionary the
+   Hoplite line's last tier, as §5.2 has it (`docs/07` D30).
 3. **Civic** — population efficiency, building HP, tower range, priest faith,
    conversion resistance, trade rates.
 
@@ -298,6 +307,17 @@ being killed. This one change removes most of the original's cruelty.
 - **Map sizes:** Tiny 96², Small 128², Medium 168², Large 200², Giant 240².
 - **Random map types for the full game:** Inland, Coastal, Continental,
   Highland, Islands, Narrows, Oasis. **Slice ships Inland only.**
+
+  **As built** (2026-10-04): all but Islands, chosen on the setup screen.
+  Highland is hillier, its mines richer and its forests thinner; Oasis is
+  desert round a lake in the middle with six groves of palms on its shore;
+  Coastal has a sea down one side, the starts moved away from it; Continental
+  is a round land in a sea; Narrows is a river through the middle, between
+  the starts, crossed at three fords that are kept clear of forest. No
+  water lies within 14 tiles of a start, and every start's kit is the
+  same. Until there are ships (naval, below) water is only in the way:
+  nothing crosses or stands in it, and nobody fishes. Islands needs ships
+  to be played at all, and waits for them.
 - **[GD-MAP-01]** Map generation is seeded and deterministic: the same seed always produces the
   same map, and starting positions are balanced (equal resources within a
   tolerance, verified by the generator before it returns).
@@ -316,6 +336,15 @@ being killed. This one change removes most of the original's cruelty.
 
 Wonder and Relic victories exist to force endgames. Without them, two turtling
 players produce a stalemate, which is the worst outcome an RTS can have.
+
+**As built** (2026-10-04): every match has all three. A Wonder's clock
+starts when it stands finished, and stops for good if it falls; a second
+Wonder has its own. The relic clock runs while every relic on the map is
+in the Temples of one side, and starts over when that stops (`docs/07`
+D31). Both clocks are shown to every side under the top bar, a finished
+Wonder is announced to everyone and marked on everyone's minimap in its
+owner's colour, and so is a side coming to hold every relic. The Wonder
+takes 1,500 builder-seconds and has 4,000 hit points.
 
 ---
 
@@ -340,6 +369,12 @@ Eight civilizations for the full game, sharing four architecture sets:
 
 Vertical slice ships **Egyptians and Greeks** — an economic civ and a military
 civ, enough to prove asymmetry is working.
+
+**As built** (2026-10-04): all eight, read onto the units, buildings and
+technologies the game has (`docs/07` D32, which gives the table as built);
+what names something not yet in the game waits for it. The player picks a
+civilization on the setup screen; the opponents' are dealt from the seed.
+All eight build in the one architecture set there is.
 
 ---
 
@@ -381,6 +416,13 @@ its own fog state.
 - **Cheat codes** — anachronistic joke units and resource grants, disabled in
   multiplayer and flagged in the replay. Non-negotiable; they are part of the
   memory of this game.
+  **[GD-CHEAT-01]** Resource grants: in a match, Enter opens a line, a code
+  and Enter again gives the player 1000 of a resource. Each code is an order
+  like any other, so the replay holds it and who gave it; the simulation
+  ignores one a computer opponent issues, and a replay being watched takes
+  none. The codes: `BOUNTIFUL HARVEST` (food), `MIGHTY OAK` (wood),
+  `SOLID ROCK` (stone), `MIDAS TOUCH` (gold); case and spacing do not
+  matter. The joke units are still to come.
 
 ---
 

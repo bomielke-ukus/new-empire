@@ -280,6 +280,21 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
             .join(" ")
     };
     let l = |k: &str, a: &str| (lk(k), a.to_string());
+    // Every letter a soldier is trained with, once each, in table order.
+    let mut letters: Vec<char> = Vec::new();
+    for k in kinds::all() {
+        if k.trained_at.is_some() && k.id != kinds::VILLAGER {
+            let c = train_hotkey(k.id);
+            if !letters.contains(&c) {
+                letters.push(c);
+            }
+        }
+    }
+    let train_letters = letters
+        .iter()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
     // The general keys are the player's bindings, so the overlay cannot
     // disagree with the settings screen.
     let pan: Vec<String> = [
@@ -312,10 +327,16 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
         s("SHIFT", "ADD TO THE SELECTION; QUEUE AN ORDER"),
         s("CTRL+0-9", "SAVE A GROUP, 0-9 RECALLS"),
         (key(Control::NextIdle), "NEXT IDLE VILLAGER".to_string()),
+        (
+            key(Control::NextIdleSoldier),
+            "NEXT IDLE SOLDIER".to_string(),
+        ),
         s("RIGHT", "MOVE, GATHER, BUILD, RALLY"),
         l("T", "STOP"),
-        l("C P G B L", "TRAIN AT A BARRACKS, RANGE, STABLE"),
+        l(&train_letters, "TRAIN AT A MILITARY BUILDING"),
         s("RIGHT", "ON AN ENEMY: ATTACK"),
+        s("RIGHT", "PRIEST ON AN ENEMY UNIT: CONVERT"),
+        s("RIGHT", "PRIEST ON A RELIC: TAKE IT TO A TEMPLE"),
         s("RIGHT", "ON A TOWER OR TOWN CENTER: GARRISON"),
         l("T", "AT A BUILDING: ALL OUT"),
         l("A, P", "ATTACK-MOVE, PATROL, THEN CLICK"),
@@ -354,8 +375,12 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
         .iter()
         .filter(|k| !in_defences(k.id))
         .map(|k| {
+            let key = match build_hotkey(k.id) {
+                ' ' => "CLICK".to_string(),
+                c => c.to_string(),
+            };
             (
-                build_hotkey(k.id).to_string(),
+                key,
                 format!("{} {}{}", short_name(k.id), cost_label(&k.cost), age_tag(k)),
             )
         })
@@ -380,6 +405,7 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
     orders.push(s("R", "AUTO-RESEED ON, OFF"));
     orders.push(s("X", "UNQUEUE, OR CANCEL PLACING"));
     orders.push(s("SHIFT", "KEEP PLACING"));
+    orders.push(s("ENTER", "TYPE A CHEAT CODE, ENTER AGAIN"));
     let orders = orders.into_iter().map(|(k, a)| (lk(&k), a)).collect();
     [general, orders]
 }
@@ -518,6 +544,27 @@ impl<'a> Painter<'a> {
     }
 }
 
+/// The line a cheat code is typed into (`GD-CHEAT-01`): a dark box under
+/// the resource bar, centred, with the text so far and a cursor.
+pub fn cheat_line(
+    atlas: &Atlas,
+    viewport: (f32, f32),
+    scale: f32,
+    typed: &str,
+) -> Vec<SpriteInstance> {
+    let mut p = Painter::new(atlas);
+    let text = format!("CODE: {typed}_");
+    let pad = 6.0 * scale;
+    let w = (6 + 24 + 1) as f32 * font::ADVANCE as f32 * scale + 2.0 * pad;
+    let h = font::GLYPH_H as f32 * scale + 2.0 * pad;
+    let x = ((viewport.0 - w) * 0.5).round();
+    let y = (40.0 * scale).round();
+    p.rect(x, y, w, h, BLACK, 0);
+    p.outline(x, y, w, h, GOLD);
+    p.text(x + pad, y + pad, &text, false, scale);
+    p.out
+}
+
 /// Truncates text to what fits in `width` px at 1×.
 pub(crate) fn fit(text: &str, width: f32) -> String {
     let max = (width / font::ADVANCE as f32).max(1.0) as usize;
@@ -590,6 +637,7 @@ fn short_name(kind: KindId) -> &'static str {
         kinds::SIEGE_WORKSHOP => "SIEGE",
         kinds::GOVERNMENT_CENTRE => "GOVT",
         kinds::TOWN_CENTER => "TOWN CTR",
+        kinds::WONDER => "WONDER",
         other => kinds::info(other).name,
     }
 }
@@ -598,9 +646,9 @@ fn short_name(kind: KindId) -> &'static str {
 /// so its keys need only be distinct from each other and the general keys.
 fn build_hotkey(kind: KindId) -> char {
     match kind {
-        // Every letter is spoken for (`docs/04` §23): the Town Center is
-        // placed by clicking its button.
-        kinds::TOWN_CENTER => ' ',
+        // Every letter is spoken for (`docs/04` §23): the Town Center and
+        // the Wonder are placed by clicking their buttons.
+        kinds::TOWN_CENTER | kinds::WONDER => ' ',
         kinds::PALISADE_WALL => 'P',
         kinds::STONE_WALL => 'N',
         kinds::GATE => 'G',
@@ -644,6 +692,15 @@ fn train_hotkey(kind: KindId) -> char {
         kinds::SLINGER => 'G',
         kinds::BOWMAN => 'B',
         kinds::LIGHT_CAVALRY => 'L',
+        kinds::SWORDSMAN => 'O',
+        kinds::HOPLITE | kinds::LEGIONARY => 'H',
+        kinds::CHARIOT_ARCHER => 'H',
+        kinds::HORSE_ARCHER => 'O',
+        kinds::HEAVY_CAVALRY => 'H',
+        kinds::WAR_ELEPHANT => 'M',
+        kinds::STONE_THROWER | kinds::CATAPULT => 'O',
+        kinds::BALLISTA => 'B',
+        kinds::PRIEST => 'P',
         _ => 'N',
     }
 }
@@ -652,6 +709,11 @@ fn train_hotkey(kind: KindId) -> char {
 fn unit_label(kind: KindId) -> String {
     match kind {
         kinds::LIGHT_CAVALRY => "CAVALRY".to_string(),
+        kinds::HEAVY_CAVALRY => "HEAVY CAV".to_string(),
+        kinds::CHARIOT_ARCHER => "CHARIOT".to_string(),
+        kinds::HORSE_ARCHER => "H. ARCHER".to_string(),
+        kinds::WAR_ELEPHANT => "ELEPHANT".to_string(),
+        kinds::STONE_THROWER => "THROWER".to_string(),
         other => kinds::info(other).name.to_uppercase(),
     }
 }
@@ -664,21 +726,24 @@ fn unit_plural(kind: KindId) -> String {
         kinds::SPEARMAN => "SPEARMEN".to_string(),
         kinds::BOWMAN => "BOWMEN".to_string(),
         kinds::LIGHT_CAVALRY => "LIGHT CAVALRY".to_string(),
+        kinds::HEAVY_CAVALRY => "HEAVY CAVALRY".to_string(),
+        kinds::SWORDSMAN => "SWORDSMEN".to_string(),
+        kinds::LEGIONARY => "LEGIONARIES".to_string(),
         other => format!("{}S", kinds::info(other).name.to_uppercase()),
     }
 }
 
 /// The tooltip standard (`UX-TIP-01`): cost, time, what it does per hit,
 /// what it counters and what counters it.
-fn unit_tooltip(kind: KindId) -> String {
+fn unit_tooltip(kind: KindId, cost: &Cost, hp: i32) -> String {
     let u = kinds::info(kind);
     let c = &u.combat;
     let mut t = format!(
         "{}: {}, {}S. {} HP",
         u.name.to_uppercase(),
-        cost_words(&u.cost),
+        cost_words(cost),
         u.build_seconds,
-        u.max_health
+        hp
     );
     if c.attack > 0 {
         t.push_str(&format!(
@@ -689,6 +754,20 @@ fn unit_tooltip(kind: KindId) -> String {
         if c.range > 0 {
             t.push_str(&format!(" RANGE {}", c.range));
         }
+    }
+    if u.pop_cost > 1 {
+        t.push_str(&format!(", {} POP", u.pop_cost));
+    }
+    if c.blast_tenths > 0 {
+        t.push_str(". HITS ALL IT LANDS AMONG, FRIENDS TOO");
+    }
+    if kind == kinds::PRIEST {
+        t.push_str(&format!(
+            ". CONVERTS AN ENEMY UNIT WITHIN {} TILES, THEN NEEDS {}S OF FAITH. HEALS UNITS NEAR IT {} HP/S",
+            sim::priests::CONVERT_RANGE,
+            sim::priests::FAITH_TICKS as u32 / sim::TICKS_PER_SECOND,
+            sim::priests::HEAL_HP
+        ));
     }
     for (class, bonus) in c.bonuses {
         t.push_str(&format!(
@@ -809,16 +888,13 @@ impl Def {
 
 /// A unit's tooltip (`UX-TIP-01`): name and key, cost and time, what it
 /// is, what it counters and what counters it.
-fn unit_tip(kind: KindId, key: char) -> Vec<String> {
+fn unit_tip(kind: KindId, key: char, cost: &Cost, hp: i32) -> Vec<String> {
     let u = kinds::info(kind);
     let c = &u.combat;
     let mut t = vec![
         format!("{} ({key})", u.name.to_uppercase()),
-        format!("COST {}. TIME {}S", cost_words(&u.cost), u.build_seconds),
-        format!(
-            "{} HP. ARMOUR {}/{}",
-            u.max_health, c.melee_armour, c.pierce_armour
-        ),
+        format!("COST {}. TIME {}S", cost_words(cost), u.build_seconds),
+        format!("{} HP. ARMOUR {}/{}", hp, c.melee_armour, c.pierce_armour),
     ];
     if c.attack > 0 {
         let mut a = format!("ATTACK {} {}", c.attack, c.damage.name().to_uppercase());
@@ -852,12 +928,12 @@ fn unit_tip(kind: KindId, key: char) -> Vec<String> {
 
 /// A building's tooltip (`UX-TIP-01`): name and key, cost and time, what
 /// it does, the age it comes with.
-fn building_tip(kind: KindId, key: char) -> Vec<String> {
+fn building_tip(kind: KindId, key: char, cost: &Cost, hp: i32) -> Vec<String> {
     let b = kinds::info(kind);
     let mut t = vec![
         format!("{} ({key})", b.name.to_uppercase()),
-        format!("COST {}. TIME {}S", cost_words(&b.cost), b.build_seconds),
-        format!("{} HP", b.max_health),
+        format!("COST {}. TIME {}S", cost_words(cost), b.build_seconds),
+        format!("{hp} HP"),
     ];
     let trains: Vec<String> = kinds::all()
         .iter()
@@ -1042,9 +1118,13 @@ fn commands(
         ));
         let next = pl.age.next().unwrap_or(pl.age);
         for k in DEFENCES.iter().map(|id| kinds::info(*id)) {
-            if k.age > next {
+            // Too far off, or not this civilization's (`docs/02` §11).
+            if k.age > next
+                || matches!(sim.can_build(me, k.id), Err(sim::PlaceError::Denied { .. }))
+            {
                 continue;
             }
+            let (cost, hp) = (sim.cost_of(me, k.id), sim.max_health_of(me, k.id));
             let check = sim
                 .can_build(me, k.id)
                 .map_err(|e| e.to_string().to_uppercase());
@@ -1060,11 +1140,11 @@ fn commands(
                     Action::Build(k.id),
                     short_name(k.id),
                     build_hotkey(k.id),
-                    format!("{}: {}{how}", k.name.to_uppercase(), cost_words(&k.cost)),
+                    format!("{}: {}{how}", k.name.to_uppercase(), cost_words(&cost)),
                 )
-                .costing(&k.cost)
-                .lacking(&k.cost, &pl.stockpile)
-                .tipped(building_tip(k.id, build_hotkey(k.id)))
+                .costing(&cost)
+                .lacking(&cost, &pl.stockpile)
+                .tipped(building_tip(k.id, build_hotkey(k.id), &cost, hp))
                 .gated(check),
             );
         }
@@ -1079,9 +1159,11 @@ fn commands(
         let mut kinds_: Vec<&KindInfo> = kinds::all()
             .iter()
             .filter(|k| k.buildable && !k.mobile && !in_defences(k.id) && k.age <= next)
+            .filter(|k| !matches!(sim.can_build(me, k.id), Err(sim::PlaceError::Denied { .. })))
             .collect();
         kinds_.sort_by_key(|k| (k.age, k.id));
         for k in kinds_ {
+            let (cost, hp) = (sim.cost_of(me, k.id), sim.max_health_of(me, k.id));
             let check = sim
                 .can_build(me, k.id)
                 .map_err(|e| e.to_string().to_uppercase());
@@ -1090,11 +1172,11 @@ fn commands(
                     Action::Build(k.id),
                     short_name(k.id),
                     build_hotkey(k.id),
-                    format!("{}: {}", k.name.to_uppercase(), cost_words(&k.cost)),
+                    format!("{}: {}", k.name.to_uppercase(), cost_words(&cost)),
                 )
-                .costing(&k.cost)
-                .lacking(&k.cost, &pl.stockpile)
-                .tipped(building_tip(k.id, build_hotkey(k.id)))
+                .costing(&cost)
+                .lacking(&cost, &pl.stockpile)
+                .tipped(building_tip(k.id, build_hotkey(k.id), &cost, hp))
                 .gated(check),
             );
         }
@@ -1115,7 +1197,7 @@ fn commands(
             // The roster, age-locked and unresearched lines greyed with
             // the reason, so the panel shows what is coming.
             for k in sim.roster(me, kind) {
-                let u = kinds::info(k);
+                let (cost, hp) = (sim.cost_of(me, k), sim.max_health_of(me, k));
                 let check = sim
                     .can_train(me, id, k)
                     .map_err(|e| e.to_string().to_uppercase());
@@ -1124,11 +1206,11 @@ fn commands(
                         Action::Train(k),
                         unit_label(k),
                         train_hotkey(k),
-                        unit_tooltip(k),
+                        unit_tooltip(k, &cost, hp),
                     )
-                    .costing(&u.cost)
-                    .lacking(&u.cost, &pl.stockpile)
-                    .tipped(unit_tip(k, train_hotkey(k)))
+                    .costing(&cost)
+                    .lacking(&cost, &pl.stockpile)
+                    .tipped(unit_tip(k, train_hotkey(k), &cost, hp))
                     .gated(check),
                 );
             }
@@ -1280,6 +1362,44 @@ struct Seg {
 /// The resource bar. Reflows rather than overlaps: at widths where the
 /// large text and worker counts no longer fit beside the status, the counts
 /// go, then the text shrinks, then the status goes.
+/// The Wonder and relic clocks under the top bar's right end, one line
+/// each, for every side to see (`GD-WIN-02`, `GD-WIN-03`).
+fn victory_clocks(p: &mut Painter<'_>, sim: &Simulation, me: u8, vw: f32) {
+    let whose = |owner: u8| {
+        if owner == me {
+            "YOUR".to_string()
+        } else {
+            format!("PLAYER {}'S", owner + 1)
+        }
+    };
+    let mut lines: Vec<String> = sim
+        .wonder_clocks()
+        .into_iter()
+        .map(|(_, owner, left)| format!("{} WONDER {}", whose(owner), clock(left)))
+        .collect();
+    if let Some((owner, left)) = sim.relic_clock() {
+        let who = if owner == me {
+            "YOU HOLD".to_string()
+        } else {
+            format!("PLAYER {} HOLDS", owner + 1)
+        };
+        lines.push(format!("{who} EVERY RELIC {}", clock(left)));
+    }
+    for (k, line) in lines.iter().enumerate() {
+        let w = font::width(line) as f32 + 12.0;
+        let (x, y) = ((vw - w - 6.0).round(), TOP_BAR + 6.0 + k as f32 * 16.0);
+        p.rect(x, y, w, 14.0, BLACK, 0);
+        p.rect(x + 1.0, y + 1.0, w - 2.0, 12.0, BROWN_DARK, 0);
+        p.text_in(x + 6.0, y + 3.0, line, Ink::Gold, 1.0);
+    }
+}
+
+/// Ticks as minutes and seconds, rounded up: "9:41".
+fn clock(ticks: u64) -> String {
+    let s = ticks.div_ceil(sim::TICKS_PER_SECOND as u64);
+    format!("{}:{:02}", s / 60, s % 60)
+}
+
 fn top_bar(
     p: &mut Painter<'_>,
     sim: &Simulation,
@@ -1323,8 +1443,13 @@ fn top_bar(
                 boxed: Some(if idle > 3 { RED } else { GOLD_DARK }),
             });
         }
+        // The side's civilization, if the match named one, and its age.
+        let age = pl.age.name().to_uppercase();
         segs.push(Seg {
-            text: pl.age.name().to_uppercase(),
+            text: match sim.civ(me) {
+                Some(civ) => format!("{} {age}", civ.name().to_uppercase()),
+                None => age,
+            },
             sub: None,
             boxed: None,
         });
@@ -1487,14 +1612,19 @@ impl Hud {
                 p.text(
                     10.0,
                     ty,
-                    &format!("HP {:.0}/{}", hp, info.max_health),
+                    &format!(
+                        "HP {:.0}/{}",
+                        hp,
+                        sim.max_health_of(world.owner[i], world.kind[i])
+                    ),
                     false,
                     1.0,
                 );
                 // Health bar.
                 let bw = text_w;
                 p.rect(10.0, ty + 10.0, bw, 6.0, BLACK, 0);
-                let frac = (hp / info.max_health as f32).clamp(0.0, 1.0);
+                let frac =
+                    (hp / sim.max_health_of(world.owner[i], world.kind[i]) as f32).clamp(0.0, 1.0);
                 p.rect(
                     11.0,
                     ty + 11.0,
@@ -1541,6 +1671,26 @@ impl Hud {
                         false,
                         1.0,
                     );
+                    ty += 12.0;
+                }
+                if sim.carried_relic(world.id_at(selected[0])).is_some() {
+                    let line = if world.kind[i] == kinds::TEMPLE {
+                        format!(
+                            "RELICS {}, A GOLD EACH 2S",
+                            sim.relics_held_by(world.id_at(selected[0]))
+                        )
+                    } else {
+                        "CARRYING A RELIC".to_string()
+                    };
+                    p.text_in(10.0, ty, &fit(&line, text_w), Ink::Gold, 1.0);
+                    ty += 12.0;
+                }
+                if world.kind[i] == kinds::PRIEST {
+                    // Faith: full at a spent reload (`GD-PRIEST-02`).
+                    let spent = u32::from(world.reload[i]);
+                    let full = u32::from(sim::priests::FAITH_TICKS);
+                    let pct = 100 * (full - spent.min(full)) / full;
+                    p.text(10.0, ty, &format!("FAITH {pct}%"), false, 1.0);
                     ty += 12.0;
                 }
                 if info.combat.attack > 0 {
@@ -1592,6 +1742,14 @@ impl Hud {
                     Order::Patrol { .. } => "PATROLLING",
                     Order::Flee { .. } => "FLEEING",
                     Order::Garrison { .. } => "GOING INSIDE",
+                    Order::Relic { .. }
+                        if sim.carried_relic(world.id_at(selected[0])).is_some() =>
+                    {
+                        "TAKING THE RELIC HOME"
+                    }
+                    Order::Relic { .. } => "GOING FOR A RELIC",
+                    Order::Convert { chant: 0, .. } => "GOING TO CONVERT",
+                    Order::Convert { .. } => "CONVERTING",
                 };
                 if !job.is_empty() {
                     // What is queued behind it (`UX-CMD-04`).
@@ -1827,7 +1985,8 @@ impl Hud {
         for s in &selected {
             let i = s.index();
             let info = kinds::info(world.kind[i]);
-            let hp = fx_to_f32(world.health[i]) / info.max_health as f32;
+            let hp = fx_to_f32(world.health[i])
+                / sim.max_health_of(world.owner[i], world.kind[i]) as f32;
             let under_construction = world.construction[i].is_some();
             if hp >= 0.999 && !under_construction {
                 continue;
@@ -1868,6 +2027,7 @@ impl Hud {
                 NoticeKind::Loss => GREY,
                 NoticeKind::Research => GOLD,
                 NoticeKind::Age => GOLD_LIGHT,
+                NoticeKind::Cheat => GREEN_LIGHT,
             };
             p.rect(8.0, y, NOTICE_W, NOTICE_H - 2.0, BLACK, 0);
             p.rect(9.0, y + 1.0, NOTICE_W - 2.0, NOTICE_H - 4.0, BROWN_DARK, 0);
@@ -1891,6 +2051,8 @@ impl Hud {
                 });
             }
         }
+
+        victory_clocks(&mut p, input.sim, me, vw);
 
         // Notifications share a frame; only an age-up announces unlocks ([GD-AGE-02]).
         if let Some(banner) = input.banner {
@@ -2026,7 +2188,7 @@ mod tests {
         let mut keys = std::collections::BTreeSet::from(['T', 'V', 'X', 'R', 'U']);
         for k in kinds::all()
             .iter()
-            .filter(|k| k.buildable && k.id != kinds::TOWN_CENTER && !in_defences(k.id))
+            .filter(|k| k.buildable && build_hotkey(k.id) != ' ' && !in_defences(k.id))
         {
             let key = build_hotkey(k.id);
             assert!(
@@ -2144,22 +2306,38 @@ mod tests {
     /// REQ: UX-TIP-01
     #[test]
     fn unit_tooltips_follow_the_standard_and_roster_keys_are_distinct() {
-        let spear = unit_tooltip(kinds::SPEARMAN);
+        let spear = unit_tooltip(
+            kinds::SPEARMAN,
+            &kinds::info(kinds::SPEARMAN).cost,
+            kinds::info(kinds::SPEARMAN).max_health,
+        );
         assert!(
             spear.starts_with("SPEARMAN: 40 FOOD 20 WOOD, 26S. 45 HP, 4 MELEE"),
             "{spear}"
         );
         assert!(spear.contains("BONUS 6 VS CAVALRY"), "{spear}");
         assert!(spear.contains("WEAK TO SLINGERS"), "{spear}");
-        let bow = unit_tooltip(kinds::BOWMAN);
+        let bow = unit_tooltip(
+            kinds::BOWMAN,
+            &kinds::info(kinds::BOWMAN).cost,
+            kinds::info(kinds::BOWMAN).max_health,
+        );
         assert!(bow.contains("5 PIERCE RANGE 5"), "{bow}");
         assert!(
             !bow.contains("WEAK TO"),
             "nothing counters archers yet: {bow}"
         );
-        let cav = unit_tooltip(kinds::LIGHT_CAVALRY);
+        let cav = unit_tooltip(
+            kinds::LIGHT_CAVALRY,
+            &kinds::info(kinds::LIGHT_CAVALRY).cost,
+            kinds::info(kinds::LIGHT_CAVALRY).max_health,
+        );
         assert!(cav.contains("WEAK TO SPEARMEN"), "{cav}");
-        let vill = unit_tooltip(kinds::VILLAGER);
+        let vill = unit_tooltip(
+            kinds::VILLAGER,
+            &kinds::info(kinds::VILLAGER).cost,
+            kinds::info(kinds::VILLAGER).max_health,
+        );
         assert!(vill.contains("25 HP, 3 MELEE"), "{vill}");
         for b in kinds::all().iter().filter(|k| k.trains) {
             let keys: Vec<char> = kinds::trained_at(b.id)
@@ -2617,6 +2795,8 @@ mod tests {
         {
             let want = if in_defences(k.id) {
                 format!("{DEFENCES_KEY} {}", build_hotkey(k.id))
+            } else if build_hotkey(k.id) == ' ' {
+                "CLICK".to_string()
             } else {
                 build_hotkey(k.id).to_string()
             };

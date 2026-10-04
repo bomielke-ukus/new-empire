@@ -14,6 +14,7 @@
 
 pub mod economy;
 pub mod military;
+pub mod temple;
 
 use economy::{BuildOrder, Economy};
 use fogged::{Command, FoggedView, PlayerId, Rng};
@@ -142,6 +143,12 @@ impl Opponent {
             self.military
                 .think(view, &self.order, &mut self.rng, &mut stock),
         );
+        kinds.extend(temple::think(
+            view,
+            &self.order,
+            &mut stock,
+            self.military.army_at(),
+        ));
         kinds.into_iter().map(|kind| view.command(kind)).collect()
     }
 

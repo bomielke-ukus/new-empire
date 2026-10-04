@@ -171,6 +171,10 @@ pub const TOOLWORKING: TechId = 31;
 pub const LEATHER_ARMOUR: TechId = 32;
 /// +1 range and +1 attack for archers.
 pub const FLETCHING: TechId = 33;
+/// The Hoplite line becomes the Legionary.
+pub const LEGION: TechId = 34;
+/// The Stone Thrower line becomes the Catapult.
+pub const TORSION: TechId = 35;
 
 /// Buildings of the current age needed to advance, excluding houses and the
 /// Town Center.
@@ -322,6 +326,26 @@ const TABLE: &[TechInfo] = &[
             Effect::Range(Class::Ranged, 1),
             Effect::Attack(Class::Ranged, 1),
         ],
+    },
+    TechInfo {
+        id: LEGION,
+        name: "Legion",
+        cost: [200, 0, 0, 150],
+        seconds: 60,
+        building: kinds::ACADEMY,
+        age: Age::Iron,
+        requires: &[],
+        effects: &[Effect::UpgradeLine(kinds::HOPLITE, kinds::LEGIONARY)],
+    },
+    TechInfo {
+        id: TORSION,
+        name: "Torsion",
+        cost: [0, 200, 0, 150],
+        seconds: 60,
+        building: kinds::SIEGE_WORKSHOP,
+        age: Age::Iron,
+        requires: &[],
+        effects: &[Effect::UpgradeLine(kinds::STONE_THROWER, kinds::CATAPULT)],
     },
 ];
 

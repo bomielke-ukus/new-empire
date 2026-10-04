@@ -122,9 +122,17 @@ pub fn validate(manifest_path: &Path, palette: &Palette) -> Result<Report, Strin
 }
 
 /// The sets of what the map is made of rather than what a player owns: the
-/// nodes and the herd animals. They wear no player colour, and a node, being
-/// neither built nor knocked down, needs only its standing frame.
-pub const NEUTRAL_SETS: [&str; 5] = ["tree", "berry_bush", "gold_mine", "stone_mine", "gazelle"];
+/// nodes, the herd animals and the relic (nature's until a priest takes it
+/// up). They wear no player colour, and a node, being neither built nor
+/// knocked down, needs only its standing frame.
+pub const NEUTRAL_SETS: [&str; 6] = [
+    "tree",
+    "berry_bush",
+    "gold_mine",
+    "stone_mine",
+    "gazelle",
+    "relic",
+];
 
 /// A neutral node's one animation.
 const REQUIRED_STILL: [(&str, u32); 1] = [("idle", 1)];

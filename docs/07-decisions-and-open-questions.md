@@ -351,13 +351,72 @@ still replace any age's set by name (`house_bronze`). The roof colour is
 what reads at the camera's height, so it is the one change every
 building makes.
 
+### D30 — The Legionary ends the Hoplite line; a siege stone lands where it was aimed
+**Date:** 2026-10-04 · **Decided by:** Claude, on the owner's instruction to build the rest of M8
+
+Two things `docs/02` left open or said two ways. §7 gives the line
+upgrades as Clubman → Axeman → Swordsman → Legionary, while §5.2's table,
+which carries the numbers, makes the Legionary the Hoplite line's last
+tier and gives the Swordsman a cost of its own. The table wins: the Axe
+upgrades the Clubman, the Legion upgrade the Hoplite (at the Academy, in
+the Iron Age), and Torsion the Stone Thrower into the Catapult (at the
+Siege Workshop); the Swordsman is the Barracks' Bronze Age unit, trained
+beside the Axeman. Second, `GD-COMBAT-04` turns friendly fire on but does
+not say how a stone flies. It flies to where its target stood when it was
+thrown and comes down there, so a moving target can step out of the way,
+and hurts everything within its blast, friend or foe: half a tile for the
+Stone Thrower, a tile for the Catapult. The engine that threw it is never
+hit by its own stone; there is no minimum range. The Ballista's bolt is an
+arrow: it follows its target and has no blast.
+
+### D31 — Relics are carried by priests, held in Temples, and earn gold
+**Date:** 2026-10-04 · **Decided by:** Claude, on the owner's instruction to build the rest of M8; Q2's recommendation
+
+Q2 asked whether relics stand still where they lie, as the original's
+ruins did, or are carried. They are carried: five on a generated map, in
+the open ground between the starts and apart from one another. Only a
+priest can take one up; carried to a Temple of its side's, it earns that
+side a gold every two seconds for as long as the Temple stands. A priest
+that falls drops its relic where it fell, a Temple that falls drops all it
+held round its rubble, and a priest converted with a relic in hand brings
+it over. Holding every relic on the map in one side's Temples for ten
+minutes wins (`GD-WIN-03`). It gives priests a second job and puts five
+places on the map worth fighting over. A relic on the ground is nature's
+and blocks its tile like a bush; it cannot be attacked.
+
+### D32 — The civilizations' bonuses and denials, on the game as it is
+**Date:** 2026-10-04 · **Decided by:** Claude, on the owner's instruction to build the rest of M8
+
+`docs/02` §11's table names things the game does not have: ships, guard
+towers, a priest's second tier, cavalry upgrades. A bonus or denial that
+names one of them waits for it; the rest are read onto what exists:
+
+| Civ | Bonuses as built | Denied as built |
+|---|---|---|
+| Egyptians | Gold +20%; Chariot Archers +33% HP; priests convert from 2 tiles further | the Academy, Hoplite and Legionary (the Legion), Heavy Cavalry |
+| Greeks | Hoplites and Legionaries +25% speed; the Legion upgrade from the Bronze Age (the spec's "hoplites in Bronze" is every side's already); ships +30% waits for ships | Chariot Archer, Horse Archer |
+| Assyrians | Villagers +10% speed; Slingers, Bowmen, Chariot and Horse Archers strike 20% more often | the Legion upgrade ("heavy infantry upgrades") |
+| Babylonians | Walls, the gate and towers +60% HP; stone +20% | Heavy Cavalry ("cavalry upgrades"); Torsion and the Catapult ("siege workshop tier 2") |
+| Persians | Hunting +30%; War Elephants +50% speed | Ballista; guard towers wait for them |
+| Phoenicians | Wood +30%; War Elephants cost 25% less | Stone Wall; priests' tier 2 waits for it |
+| Shang | Villagers cost 30% less; walls and the gate +100% HP | War Elephant; Torsion and the Catapult ("siege upgrades") |
+| Sumerians | Farms hold twice the food; siege engines strike 50% more often | War Elephant and Horse Archer ("cavalry beyond Bronze") |
+
+Every bonus is a number on what a side already has; nothing about how a
+unit plays changes. A match names a civilization per side in its
+configuration; one that names none (every test and corpus match before
+this) plays as before and hashes as before. On the setup screen the
+player picks theirs and the opponents' are dealt from the seed. The four
+architecture sets are named per civilization but not drawn: every side's
+buildings look the same until the other three sets are made.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?
 Water doubles the pathfinding surface (separate navigation domain, transports,
 shore-landing edge cases) for one map type. **Recommendation:** hold until M8.
 
-### Q2 — Relics: static (AoE1 ruins) or carryable (AoE2)?
+### Q2 — Relics: static (AoE1 ruins) or carryable (AoE2)? — **answered, see D31**
 Carryable relics create better fights over specific objects; static ruins are
 simpler and match the original. **Recommendation:** carryable, held in the
 Temple, generating gold — it gives priests a second job and creates map tension.

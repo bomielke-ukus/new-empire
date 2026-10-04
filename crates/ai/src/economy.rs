@@ -53,6 +53,15 @@ pub struct BuildOrder {
     /// before there was hunting reads the Standard number.
     #[serde(default = "standard_hunters")]
     pub hunters: u32,
+    /// Priests kept from the Bronze Age, at a Temple by the Town Center,
+    /// for the relics and to turn the enemy's (`docs/02` §5.5). A save
+    /// from before priests reads none.
+    #[serde(default)]
+    pub priests: u32,
+    /// Whether it raises a Wonder in the Iron Age once it can pay for one
+    /// with plenty over (`GD-WIN-02`). A save from before reads no.
+    #[serde(default)]
+    pub wonder: bool,
 }
 
 fn standard_hunters() -> u32 {
@@ -72,18 +81,25 @@ const REPAIR_BELOW_QUARTERS: i32 = 3;
 /// repair waits: villagers sent into a fight are villagers lost.
 const REPAIR_SAFE_RADIUS: i32 = 8;
 
-/// The buildings that count toward the next age, in the order they are
-/// wanted, by age index. The Storehouse also drops off wood and stone and
-/// gold; the Barracks is the first soldier's home.
+/// The buildings each age wants, in the order they are wanted, by age
+/// index: first the two that count toward the next age. The Storehouse
+/// also drops off wood and stone and gold; the Barracks is the first
+/// soldier's home; the Academy and the Siege Workshop are the Bronze Age's
+/// pair, and the Stable comes with them for the heavy cavalry.
 const AGE_BUILDINGS: [&[KindId]; 4] = [
     &[kinds::STOREHOUSE, kinds::BARRACKS],
     &[kinds::ARCHERY_RANGE, kinds::MARKET],
-    &[],
+    &[kinds::ACADEMY, kinds::SIEGE_WORKSHOP, kinds::STABLE],
     &[],
 ];
 
 /// Wood kept back for the next house.
 const HOUSE_RESERVE: i32 = 30;
+
+/// Ticks in the Tool Age after which the Bronze Age is saved for whatever
+/// the army: ten minutes, by which time the army has had its chance to
+/// attack.
+const AGE_PATIENCE: u64 = 12_000;
 
 impl BuildOrder {
     /// The order a difficulty plays (`docs/02` §12's table).
@@ -108,14 +124,17 @@ impl BuildOrder {
                 towers: 0,
                 barracks: 1,
                 hunters: 1,
+                priests: 0,
+                wonder: false,
             },
             Difficulty::Standard => BuildOrder {
                 villagers: [8, 16, 22, 26],
+                // The Bronze and Iron Ages' soldiers are paid in gold.
                 shares: [
                     [60, 40, 0, 0],
                     [45, 40, 5, 10],
-                    [40, 40, 5, 15],
-                    [40, 40, 5, 15],
+                    [35, 30, 5, 30],
+                    [35, 25, 10, 30],
                 ],
                 cadence: 20,
                 headroom: 3,
@@ -128,14 +147,16 @@ impl BuildOrder {
                 towers: 0,
                 barracks: 1,
                 hunters: 2,
+                priests: 2,
+                wonder: false,
             },
             Difficulty::Hard | Difficulty::Hardest => BuildOrder {
                 villagers: [10, 20, 28, 32],
                 shares: [
                     [60, 40, 0, 0],
                     [45, 40, 5, 10],
-                    [40, 40, 5, 15],
-                    [40, 40, 5, 15],
+                    [35, 30, 5, 30],
+                    [35, 25, 10, 30],
                 ],
                 cadence: 10,
                 headroom: 4,
@@ -148,6 +169,8 @@ impl BuildOrder {
                 towers: 1,
                 barracks: 2,
                 hunters: 3,
+                priests: 3,
+                wonder: true,
             },
         }
     }
@@ -163,9 +186,13 @@ pub struct Economy {
     /// Buildings ordered and not yet seen as sites, with the tick ordered,
     /// so one is not ordered twice while the first is walking to its site.
     ordered: Vec<(KindId, u64)>,
-    /// What is being saved for: the Tool Age's cost while only the cost
+    /// What is being saved for: the next age's cost while only the cost
     /// stands in its way. The military keeps its hands off it.
     saving: Cost,
+    /// The age last seen, and the tick it was first seen in: how long the
+    /// side has stood in its age.
+    #[serde(default)]
+    age_seen: (u8, u64),
     /// Villagers sent to a node last thought, so a villager still idle now
     /// tells us the node cannot be gathered from.
     sent: Vec<(EntityId, EntityId)>,
@@ -357,11 +384,14 @@ impl Economy {
         // ----- The count: who gathers what, and what each share wants.
         // Until food and wood are stocked, the age's stone and gold shares
         // go to them: nothing is bought with gold that is not first paid
-        // for in houses and farms.
+        // for in houses and farms. Not from the Bronze Age on, where the
+        // army spends food and wood as fast as they come in and is itself
+        // paid in gold: there a short stock is the army's doing, and gold
+        // left unmined would keep it Clubmen for ever.
         let n = villagers.len() as u32;
         let mut shares = order.shares[age];
-        let basics_short =
-            stock[Resource::Food.index()] < 200 || stock[Resource::Wood.index()] < 150;
+        let basics_short = me.age < Age::Bronze
+            && (stock[Resource::Food.index()] < 200 || stock[Resource::Wood.index()] < 150);
         if basics_short {
             let extra = shares[Resource::Stone.index()] + shares[Resource::Gold.index()];
             shares[Resource::Stone.index()] = 0;
@@ -549,6 +579,20 @@ impl Economy {
         // ----- The age gate: the buildings the next age needs, then the
         // advance itself.
         self.saving = [0; 4];
+        if self.age_seen.0 != age as u8 {
+            self.age_seen = (age as u8, tick);
+        }
+        let patience_spent = tick.saturating_sub(self.age_seen.1) >= AGE_PATIENCE;
+        let soldiers = mine
+            .iter()
+            .filter(|s| {
+                let k = kinds::info(s.kind);
+                k.mobile
+                    && k.combat.attack > 0
+                    && s.kind != kinds::VILLAGER
+                    && s.kind != kinds::SCOUT
+            })
+            .count() as u32;
         if let (Some(tc), true) = (tc, me.age.index() < order.last_age.index()) {
             if let Some(next) = tech::age_advance(me.age) {
                 if !queued.contains(&Item::Tech(next.id)) {
@@ -560,28 +604,58 @@ impl Economy {
                             });
                             spend(stock, &next.cost);
                         }
-                        // Saved for only while the food engine is not
-                        // built: the Tool Age brings the farms. Later
-                        // ages compete with the army for what comes in.
-                        Err(fogged::ResearchError::Unaffordable) if me.age == Age::Stone => {
+                        // Saved for at once in the Stone Age: the Tool Age
+                        // brings the farms. Later ages compete with the
+                        // army for what comes in, so they are saved for
+                        // once the army is big enough to attack with; the
+                        // Bronze Age also after five minutes in the Tool
+                        // Age whatever the army, since a side that never
+                        // saves never advances and its later soldiers are
+                        // never seen. Not the Iron Age: its gold is the
+                        // Bronze Age army's gold.
+                        Err(fogged::ResearchError::Unaffordable)
+                            if me.age == Age::Stone
+                                || soldiers >= order.attack_size
+                                || (me.age == Age::Tool && patience_spent) =>
+                        {
                             self.saving = next.cost;
                         }
                         Err(_) => {}
                     }
                 }
             }
-            for &kind in AGE_BUILDINGS[age] {
+            // An order that keeps priests wants a Temple from the Bronze
+            // Age, after the age's own buildings (`crate::temple`).
+            let temple: &[KindId] = if age >= 2 && order.priests > 0 {
+                &[kinds::TEMPLE]
+            } else {
+                &[]
+            };
+            for &kind in AGE_BUILDINGS[age].iter().chain(temple) {
                 if farms_short {
                     // Farms first.
                     break;
                 }
-                if owned(kind) || pending(&self.ordered, kind) || view.can_build(kind).is_err() {
+                if owned(kind) || pending(&self.ordered, kind) {
+                    continue;
+                }
+                let unaffordable =
+                    matches!(view.can_build(kind), Err(fogged::PlaceError::Unaffordable));
+                if view.can_build(kind).is_err() && !unaffordable {
                     continue;
                 }
                 let cost = kinds::info(kind).cost;
                 let mut with_reserve = cost;
                 with_reserve[Resource::Wood.index()] += HOUSE_RESERVE;
-                if !afford(stock, &with_reserve) {
+                if unaffordable || !afford(stock, &with_reserve) {
+                    // From the Bronze Age on the army spends whatever comes
+                    // in, so the building the next age needs is saved for
+                    // as the advance is, or it never stands.
+                    if age >= 2 {
+                        for (s, c) in self.saving.iter_mut().zip(with_reserve) {
+                            *s = (*s).max(c);
+                        }
+                    }
                     break;
                 }
                 // The Storehouse goes by the wood it will take in; the rest
@@ -605,6 +679,47 @@ impl Economy {
                     }
                 }
                 break;
+            }
+        }
+
+        // ----- A Wonder (`GD-WIN-02`), for the orders that raise one: in
+        // the Iron Age, with its cost in hand and as much again of food and
+        // wood besides, by the Town Center, and the most builders a site
+        // takes.
+        if order.wonder
+            && age == Age::Iron.index()
+            && !owned(kinds::WONDER)
+            && !pending(&self.ordered, kinds::WONDER)
+            && view.can_build(kinds::WONDER).is_ok()
+        {
+            let cost = view.cost_of(kinds::WONDER);
+            let mut with_reserve = cost;
+            with_reserve[Resource::Food.index()] += 600;
+            with_reserve[Resource::Wood.index()] += 300;
+            if afford(stock, &with_reserve) {
+                if let Some((x, y)) = place(view, kinds::WONDER, tc_tile, 6, 18, rng) {
+                    let to = fogged::nav::centre((x, y));
+                    let mut ids = Vec::new();
+                    while ids.len() < kinds::MAX_BUILDERS {
+                        let mut busy = taken.clone();
+                        busy.extend(&ids);
+                        match builder(&villagers, to, None, &busy) {
+                            Some(b) => ids.push(b),
+                            None => break,
+                        }
+                    }
+                    if !ids.is_empty() {
+                        taken.extend(&ids);
+                        out.push(CommandKind::Build {
+                            kind: kinds::WONDER,
+                            x,
+                            y,
+                            ids,
+                        });
+                        spend(stock, &cost);
+                        self.ordered.push((kinds::WONDER, tick));
+                    }
+                }
             }
         }
 
@@ -808,7 +923,7 @@ pub(crate) fn builder(
         Job::Gathering(r) if Some(r) == prefer => 1,
         Job::Gathering(Resource::Wood) => 2,
         Job::Gathering(_) | Job::Hunting(_) => 3,
-        Job::Busy => 4,
+        Job::Busy | Job::Fetching(_) | Job::Converting(_) => 4,
         Job::Building(_) | Job::Repairing(_) | Job::Unknown => 9,
     };
     villagers

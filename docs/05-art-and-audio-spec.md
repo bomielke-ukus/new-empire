@@ -116,6 +116,10 @@ pilasters, slate roofs. The infantry go from tunics to hide caps and
 wraps, then bronze and then iron caps, pads and greaves, with a cape in the
 Iron Age; villagers from bare heads to a linen cap, a straw hat and a hood.
 The ranged soldiers, the riders, the farm and the walls have one look.
+The figures are jointed, with faces, hair or helmets, belts and shaped
+weapons, and the riders sit horses of the same build (2026-10-04, after
+the owner found the first figures too plain). The Wonder is Iron Age only
+and has the one look.
 
 ---
 
@@ -186,6 +190,16 @@ Ancient-world instrumentation — frame drums, lyre, oud, bone flute, low male
 chorus — with each age's stem adding instrumentation over the last, so the score
 "ages up" with the player. Sparse rather than constant: silence between cues is
 what makes the world feel large.
+
+Each age's stem is its own piece, not the last one with a layer added: the
+owner, playing, found four stems that shared a tune and a tempo sounded like
+one (2026-10-04). Each has its own tempo, mode and tune, so an age reached is
+heard as well as seen. As placeholders (`audio::placeholder`): the Stone Age
+at 60 beats a minute in A minor pentatonic, frame drum and bone flute; the
+Tool Age at 80 in D dorian, the lyre's running figure, a shaker and the
+flute; the Bronze Age at 96 in G mixolydian, a processional horn over a
+walking bass and the chorus; the Iron Age at 112 in C harmonic minor, doubled
+war drums, a snare, a hammering bass and the horn high.
 
 ---
 

@@ -8,6 +8,7 @@
 //! villagers and the selection; Escape opens the pause menu, and the
 //! results come up when the match is decided.
 
+mod cheats;
 mod clock;
 mod input;
 mod keys;
@@ -233,6 +234,8 @@ struct App {
     replays: Vec<save::Entry>,
     /// The recording being watched, if the match is a replay.
     playback: Option<Playback>,
+    /// A cheat code being typed (`GD-CHEAT-01`), while the line is open.
+    cheat: Option<String>,
     /// Whose eyes the world is seen through: a player's, or nobody's for
     /// the whole map, which only a replay allows.
     viewer: Option<u8>,
@@ -469,6 +472,7 @@ impl App {
             replays_dir: data_dir("NEW_EMPIRE_REPLAYS", "replays"),
             replays: Vec::new(),
             playback: None,
+            cheat: None,
             viewer: Some(ME),
             match_started: 0,
             recording: None,
@@ -621,6 +625,28 @@ impl App {
 
     fn map_size(&self) -> (i32, i32) {
         (self.sim.map().width(), self.sim.map().height())
+    }
+
+    /// A typed line: the resource if it is a code, else the refusal.
+    fn enter_cheat(&mut self, line: &str) {
+        let Some(resource) = cheats::lookup(line) else {
+            if !line.trim().is_empty() {
+                self.cue(Cue::Invalid, None);
+            }
+            return;
+        };
+        self.issue(CommandKind::Cheat { resource });
+        self.cue(Cue::Deposited, None);
+        self.notices.push(Notice {
+            kind: NoticeKind::Cheat,
+            text: format!(
+                "CHEAT: {} {}",
+                sim::CHEAT_AMOUNT,
+                resource.name().to_uppercase()
+            ),
+            tile: None,
+            tick: self.sim.tick(),
+        });
     }
 
     fn issue(&mut self, kind: CommandKind) {
@@ -1000,6 +1026,63 @@ impl App {
                         tick,
                     });
                 }
+                // Every side is told of a Wonder and of the relics all held
+                // (`GD-WIN-02`, `GD-WIN-03`).
+                sim::Event::WonderRaised { owner, pos } => {
+                    let text = if owner == me {
+                        "OUR WONDER STANDS: HOLD IT TEN MINUTES".to_string()
+                    } else {
+                        format!(
+                            "PLAYER {}'S WONDER STANDS: TEN MINUTES TO BRING IT DOWN",
+                            owner + 1
+                        )
+                    };
+                    self.notices.push(Notice {
+                        kind: NoticeKind::Age,
+                        text,
+                        tile: Some(tile_of(pos)),
+                        tick,
+                    });
+                }
+                sim::Event::RelicsHeld { owner, held } => {
+                    let text = match (owner == me, held) {
+                        (true, true) => "WE HOLD EVERY RELIC: KEEP THEM TEN MINUTES".to_string(),
+                        (false, true) => {
+                            format!("PLAYER {} HOLDS EVERY RELIC: TEN MINUTES", owner + 1)
+                        }
+                        (_, false) => "THE RELIC CLOCK HAS STOPPED".to_string(),
+                    };
+                    self.notices.push(Notice {
+                        kind: NoticeKind::Age,
+                        text,
+                        tile: None,
+                        tick,
+                    });
+                }
+                // A priest's work, either way round (`GD-PRIEST-01`).
+                sim::Event::Converted {
+                    kind,
+                    from,
+                    to,
+                    pos,
+                    ..
+                } if from == me || to == me => {
+                    let name = kinds::info(kind).name.to_uppercase();
+                    let (kind, text) = if from == me {
+                        (NoticeKind::Loss, format!("{name} CONVERTED BY THE ENEMY"))
+                    } else {
+                        (
+                            NoticeKind::Research,
+                            format!("{name} CONVERTED TO OUR SIDE"),
+                        )
+                    };
+                    self.notices.push(Notice {
+                        kind,
+                        text,
+                        tile: Some(tile_of(pos)),
+                        tick,
+                    });
+                }
                 _ => {}
             }
         }
@@ -1141,6 +1224,14 @@ impl App {
             self.viewer,
             self.ui_scale(),
         ));
+        if let Some(line) = &self.cheat {
+            scene.ui.extend(view::hud::cheat_line(
+                &self.atlas,
+                self.camera.viewport,
+                self.ui_scale(),
+                line,
+            ));
+        }
         // Band-box outline.
         if let (Some(from), Some(to)) = (self.selection.drag_from, self.input.cursor) {
             let thr = DRAG_THRESHOLD * self.camera.dpi;
@@ -1490,8 +1581,24 @@ impl App {
                 "REPLAY OVER",
                 format!("THE RECORDING ENDS AT {}", save::clock(p.replay.ticks)),
             ),
-            None if won => ("VICTORY", "EVERY OTHER SIDE IS OUT".to_string()),
+            None if won => (
+                "VICTORY",
+                match self.sim.victory() {
+                    Some((_, sim::Victory::Wonder)) => "YOUR WONDER STOOD TEN MINUTES",
+                    Some((_, sim::Victory::Relics)) => "YOU HELD EVERY RELIC TEN MINUTES",
+                    _ => "EVERY OTHER SIDE IS OUT",
+                }
+                .to_string(),
+            ),
             None if resigned => ("DEFEAT", "YOU RESIGNED".to_string()),
+            None if matches!(self.sim.victory(), Some((_, sim::Victory::Wonder))) => (
+                "DEFEAT",
+                "ANOTHER SIDE'S WONDER STOOD TEN MINUTES".to_string(),
+            ),
+            None if matches!(self.sim.victory(), Some((_, sim::Victory::Relics))) => (
+                "DEFEAT",
+                "ANOTHER SIDE HELD EVERY RELIC TEN MINUTES".to_string(),
+            ),
             None if !self.sim.standing(ME) => ("DEFEAT", "NOTHING LEFT TO FIGHT WITH".to_string()),
             None => ("DEFEAT", "ANOTHER SIDE WON".to_string()),
         };
@@ -1684,6 +1791,7 @@ impl App {
         self.wall_from = None;
         self.alarm_at = None;
         self.show_help = false;
+        self.cheat = None;
         // A loaded match is in the age it was left in: no celebration.
         self.last_age = self.sim.player(ME).map_or(Age::Stone, |p| p.age);
         self.age_up = None;
@@ -1759,12 +1867,32 @@ impl App {
                 Some(Target::Repair) => CursorIcon::Cell,
                 Some(Target::Hunt) => CursorIcon::Crosshair,
                 Some(Target::Attack) => CursorIcon::Crosshair,
+                // The spec's convert cursor; the system's nearest is help.
+                Some(Target::Convert) => CursorIcon::Help,
+                Some(Target::Relic) => CursorIcon::Grab,
                 Some(Target::Garrison) => CursorIcon::Copy,
                 _ => CursorIcon::Default,
             },
             _ => CursorIcon::Default,
         };
         w.set_cursor(icon);
+    }
+
+    /// The selected priests a right-click on `id` sends with a relic order:
+    /// all of them at a relic on the ground, those holding one at a Temple
+    /// of ours.
+    fn relic_carriers(&self, id: EntityId) -> Vec<EntityId> {
+        let priests = self.selection.own_priests(&self.sim, ME);
+        if self.sim.ground_relic(id).is_some() {
+            priests
+        } else if self.sim.relic_temple(id, ME).is_some() {
+            priests
+                .into_iter()
+                .filter(|&p| self.sim.carried_relic(p).is_some())
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     /// What a right-click at a point would do with the current selection.
@@ -1788,6 +1916,14 @@ impl App {
         }
         if enemy_of_me(&self.sim, i) && !self.selection.own_fighters(&self.sim, ME).is_empty() {
             return Some(Target::Attack);
+        }
+        if self.sim.convertible(id, ME).is_some()
+            && !self.selection.own_priests(&self.sim, ME).is_empty()
+        {
+            return Some(Target::Convert);
+        }
+        if !self.relic_carriers(id).is_empty() {
+            return Some(Target::Relic);
         }
         if shelter_of_me(&self.sim, i) && !self.selection.own_mobile(&self.sim, ME).is_empty() {
             return Some(Target::Garrison);
@@ -2028,10 +2164,25 @@ impl App {
             let world = self.sim.world();
             let gatherable = gatherable_by_me(&self.sim, i);
             let site = world.owner[i] == ME && world.construction[i].is_some();
-            let fighters = self.selection.own_fighters(&self.sim, ME);
+            // Soldiers fight it; priests convert it, if it is a unit
+            // (`GD-PRIEST-01`). One command: the simulation sorts them.
+            let mut fighters = self.selection.own_fighters(&self.sim, ME);
+            if self.sim.convertible(id, ME).is_some() {
+                fighters.extend(self.selection.own_priests(&self.sim, ME));
+            }
             if !fighters.is_empty() && enemy_of_me(&self.sim, i) {
                 self.issue(CommandKind::Attack {
                     ids: fighters,
+                    target: id,
+                });
+                return;
+            }
+            // A relic: the selected priests fetch it; a Temple of ours:
+            // those with a relic take it in (`GD-WIN-03`).
+            let carriers = self.relic_carriers(id);
+            if !carriers.is_empty() {
+                self.issue(CommandKind::Relic {
+                    ids: carriers,
                     target: id,
                 });
                 return;
@@ -2221,6 +2372,13 @@ impl App {
     /// Returns true only when the caller should close the window.
     fn keyboard_input(&mut self, code: KeyCode, state: ElementState, repeat: bool) -> bool {
         match state {
+            // While a code is typed its letters are text, not keys held
+            // to pan the camera.
+            ElementState::Pressed if self.cheat.is_some() => {
+                if !repeat || code == KeyCode::Backspace {
+                    return self.key(code);
+                }
+            }
             ElementState::Pressed => {
                 self.input.held.insert(code);
                 if !repeat {
@@ -2298,6 +2456,34 @@ impl App {
             }
             return false;
         }
+        // A cheat code (`GD-CHEAT-01`): Enter opens the line, Enter again
+        // gives what the code names, Escape closes it. Not in a replay:
+        // a replay takes no orders.
+        if let Some(line) = &mut self.cheat {
+            match code {
+                KeyCode::Enter | KeyCode::NumpadEnter => {
+                    let line = self.cheat.take().unwrap_or_default();
+                    self.enter_cheat(&line);
+                }
+                KeyCode::Escape => self.cheat = None,
+                KeyCode::Backspace => {
+                    line.pop();
+                }
+                code => {
+                    if let Some(c) = cheats::typed(code) {
+                        if line.len() < cheats::MAX_LEN {
+                            line.push(c);
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+        if matches!(code, KeyCode::Enter | KeyCode::NumpadEnter) && self.playback.is_none() {
+            self.cheat = Some(String::new());
+            self.input.held.clear();
+            return false;
+        }
         // Camera movement is handled through held keys, regardless of the
         // selection. Never let a pan key also dispatch a command.
         if self.input.is_pan_key(code) {
@@ -2370,8 +2556,13 @@ impl App {
                     self.camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
                 }
             }
-            Some(Control::NextIdle) => {
-                if let Some(id) = self.selection.next_idle(&self.sim, ME) {
+            Some(control @ (Control::NextIdle | Control::NextIdleSoldier)) => {
+                let next = if control == Control::NextIdle {
+                    self.selection.next_idle(&self.sim, ME)
+                } else {
+                    self.selection.next_idle_soldier(&self.sim, ME)
+                };
+                if let Some(id) = next {
                     let i = self.sim.world().slot(id).unwrap().index();
                     let p = self.sim.world().pos[i];
                     self.camera
@@ -2461,6 +2652,8 @@ enum Target {
     Repair,
     Hunt,
     Attack,
+    Convert,
+    Relic,
     Garrison,
     #[allow(dead_code)]
     Other(EntityId),

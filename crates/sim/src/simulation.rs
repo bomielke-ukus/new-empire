@@ -90,6 +90,11 @@ pub struct SimConfig {
     /// past the end of the list get none.
     #[serde(default)]
     pub gather_bonus_pct: Vec<i32>,
+    /// Each player's civilization (`docs/02` §11), by player. A player
+    /// past the end of the list has none: no bonuses, nothing denied, as
+    /// every side played before there were civilizations.
+    #[serde(default)]
+    pub civs: Vec<crate::civs::Civ>,
 }
 
 /// The serialised shape of [`Simulation`], for a save file (`docs/04`
@@ -122,6 +127,7 @@ impl Default for SimConfig {
             pop_cap_max: 75,
             starting_stockpile: DEFAULT_STOCKPILE,
             gather_bonus_pct: Vec::new(),
+            civs: Vec::new(),
         }
     }
 }
@@ -213,6 +219,14 @@ impl HashState for SimConfig {
         h.write_u32(self.pop_cap_max);
         for v in self.starting_stockpile {
             h.write_i32(v);
+        }
+        // Only when named: a match without civilizations hashes as it did.
+        if !self.civs.is_empty() {
+            h.write_u8(0xC1);
+            h.write_u32(self.civs.len() as u32);
+            for &c in &self.civs {
+                h.write_u8(c as u8);
+            }
         }
     }
 }
@@ -352,6 +366,25 @@ impl Job {
     }
 }
 
+/// Folds an effect that changes numbers into a side's modifiers. An age
+/// and a line upgrade are not numbers; the caller does those.
+fn fold_modifier(m: &mut Modifiers, effect: Effect) {
+    match effect {
+        Effect::GatherRate(r, pct) => m.gather_rate_pct[r.index()] += pct,
+        Effect::CarryCapacity(n) => m.carry_bonus += n,
+        Effect::FarmYield(n) => m.farm_yield_bonus += n,
+        Effect::VillagerSpeed(pct) => m.villager_speed_pct += pct,
+        Effect::BuildSpeed(pct) => m.build_speed_pct += pct,
+        Effect::Attack(c, n) => m.attack_bonus[c.index()] += n,
+        Effect::Armour(c, me, pi) => {
+            m.melee_armour_bonus[c.index()] += me;
+            m.pierce_armour_bonus[c.index()] += pi;
+        }
+        Effect::Range(c, n) => m.range_bonus[c.index()] += n,
+        Effect::AdvanceAge(_) | Effect::UpgradeLine(..) => {}
+    }
+}
+
 /// What a repair costs (`GD-BUILD-02`): half the building's cost in
 /// proportion to the health missing, each resource rounded up so a scratch
 /// costs one.
@@ -418,7 +451,7 @@ pub(crate) struct Scratch {
 
 impl Scratch {
     /// Notes an immobile thing standing on its footprint, for the fog.
-    fn place(&mut self, ax: i32, ay: i32, fp: i32, slot: usize, w: i32, h: i32) {
+    pub(crate) fn place(&mut self, ax: i32, ay: i32, fp: i32, slot: usize, w: i32, h: i32) {
         self.touched.push((ax, ay));
         if self.cover.len() != (w * h) as usize {
             return;
@@ -431,7 +464,7 @@ impl Scratch {
     }
 
     /// Notes an immobile thing leaving its footprint, for the fog.
-    fn vacate(&mut self, ax: i32, ay: i32, fp: i32, slot: usize, w: i32, h: i32) {
+    pub(crate) fn vacate(&mut self, ax: i32, ay: i32, fp: i32, slot: usize, w: i32, h: i32) {
         self.touched.push((ax, ay));
         if self.cover.len() != (w * h) as usize {
             return;
@@ -494,6 +527,11 @@ pub enum PlaceError {
     /// A second Town Center needs a finished Government Centre standing
     /// (`docs/07` D22).
     NeedsGovernmentCentre,
+    /// The player's civilization does not have it (`docs/02` §11).
+    Denied {
+        /// Which civilization.
+        civ: crate::civs::Civ,
+    },
 }
 
 impl core::fmt::Display for PlaceError {
@@ -505,6 +543,7 @@ impl core::fmt::Display for PlaceError {
             PlaceError::Unaffordable => write!(f, "not enough resources"),
             PlaceError::NeedsWall => write!(f, "goes onto a wall of yours"),
             PlaceError::NeedsGovernmentCentre => write!(f, "needs a Government Centre"),
+            PlaceError::Denied { civ } => write!(f, "not for the {}", civ.name()),
         }
     }
 }
@@ -547,6 +586,11 @@ pub enum ResearchError {
     },
     /// Not enough resources.
     Unaffordable,
+    /// The player's civilization does not have it (`docs/02` §11).
+    Denied {
+        /// Which civilization.
+        civ: crate::civs::Civ,
+    },
 }
 
 impl core::fmt::Display for ResearchError {
@@ -569,6 +613,7 @@ impl core::fmt::Display for ResearchError {
                 write!(f, "needs {need} buildings of this age, have {have}")
             }
             ResearchError::Unaffordable => write!(f, "not enough resources"),
+            ResearchError::Denied { civ } => write!(f, "not for the {}", civ.name()),
         }
     }
 }
@@ -605,6 +650,11 @@ pub enum TrainError {
     QueueFull,
     /// The stockpile does not cover the cost.
     Unaffordable,
+    /// The player's civilization does not have it (`docs/02` §11).
+    Denied {
+        /// Which civilization.
+        civ: crate::civs::Civ,
+    },
 }
 
 impl core::fmt::Display for TrainError {
@@ -624,6 +674,7 @@ impl core::fmt::Display for TrainError {
                 write!(f, "replaced by the {}", kinds::info(*by).name)
             }
             TrainError::QueueFull => write!(f, "queue is full"),
+            TrainError::Denied { civ } => write!(f, "not for the {}", civ.name()),
             TrainError::Unaffordable => write!(f, "not enough resources"),
         }
     }
@@ -665,6 +716,10 @@ pub struct Simulation {
     /// since it steers only the alarm event and nothing a replay decides.
     #[serde(default)]
     pub(crate) last_alarm: Vec<u64>,
+    /// The Wonder and relic clocks, and what they decided
+    /// (`GD-WIN-02`, `GD-WIN-03`).
+    #[serde(default)]
+    pub(crate) clocks: crate::victory::Clocks,
     /// What happened this tick that the presentation may care about.
     #[serde(skip)]
     pub(crate) events: Vec<Event>,
@@ -699,10 +754,21 @@ impl Simulation {
             nav_seen: 0,
             projectiles: Vec::new(),
             last_alarm: Vec::new(),
+            clocks: crate::victory::Clocks::default(),
             events: Vec::new(),
             scratch: Scratch::default(),
             config,
         };
+        // A civilization's standing effects, from the first tick.
+        for (p, civ) in sim.config.civs.clone().into_iter().enumerate() {
+            if let Some(pl) = sim.players.get_mut(p) {
+                for bonus in civ.info().bonuses {
+                    if let crate::civs::Bonus::Effect(e) = *bonus {
+                        fold_modifier(&mut pl.modifiers, e);
+                    }
+                }
+            }
+        }
         for s in &generated.spawns {
             sim.spawn(s.kind, s.owner, s.pos);
         }
@@ -807,6 +873,67 @@ impl Simulation {
             .collect()
     }
 
+    /// `p`'s soldiers standing idle, in slot order: every unit of theirs
+    /// that is not a villager, out in the open with no order. A unit
+    /// sheltering in a building is not idle; it was put there.
+    pub fn idle_soldiers(&self, p: PlayerId) -> Vec<EntityId> {
+        self.world
+            .slots()
+            .filter(|s| {
+                let i = s.index();
+                let k = kinds::info(self.world.kind[i]);
+                self.world.owner[i] == p
+                    && self.world.dying[i] == 0
+                    && self.world.inside[i].is_none()
+                    && k.mobile
+                    && (k.combat.attack > 0 || self.world.kind[i] == kinds::PRIEST)
+                    && self.world.kind[i] != kinds::VILLAGER
+                    && self.world.order[i] == Order::Idle
+            })
+            .map(|s| self.world.id_at(s))
+            .collect()
+    }
+
+    /// The civilization `p` plays, if the match named one (`docs/02` §11).
+    pub fn civ(&self, p: PlayerId) -> Option<crate::civs::Civ> {
+        self.config.civs.get(p as usize).copied()
+    }
+
+    /// What a `kind` costs `p`: its cost, less or more by `p`'s
+    /// civilization.
+    pub fn cost_of(&self, p: PlayerId, kind: KindId) -> Cost {
+        let cost = kinds::info(kind).cost;
+        match self.civ(p).map(|c| c.cost_pct(kind)) {
+            Some(pct) if pct != 0 => cost.map(|c| crate::civs::scaled(c, pct)),
+            _ => cost,
+        }
+    }
+
+    /// A `kind`'s full health when `owner`'s: its hit points, more by the
+    /// owner's civilization.
+    pub fn max_health_of(&self, owner: PlayerId, kind: KindId) -> i32 {
+        let hp = kinds::info(kind).max_health;
+        self.civ(owner)
+            .map_or(hp, |c| crate::civs::scaled(hp, c.health_pct(kind)))
+    }
+
+    /// How fast a `kind` of `owner`'s walks, tiles a second, before its
+    /// side's technology: its own speed, more by the civilization.
+    pub fn civ_speed(&self, owner: PlayerId, kind: KindId) -> Fx {
+        let speed = kinds::info(kind).speed_per_second;
+        match self.civ(owner).map(|c| c.speed_pct(kind)) {
+            Some(pct) if pct != 0 => speed.mul_div(Fx::from_int(100 + pct), Fx::from_int(100)),
+            _ => speed,
+        }
+    }
+
+    /// The age `tech` is open to `p` from: its own, or earlier for a
+    /// civilization that has it early.
+    pub fn tech_age(&self, p: PlayerId, tech: TechId) -> Age {
+        let normally = tech::info(tech).map_or(Age::Stone, |t| t.age);
+        self.civ(p).map_or(normally, |c| c.tech_age(tech, normally))
+    }
+
     /// Whether `p` could build a `kind` at all right now, wherever it went:
     /// the age, what it needs standing, and the cost. The panel greys a
     /// button with these words; [`Simulation::can_place`] adds the ground.
@@ -814,6 +941,9 @@ impl Simulation {
         let info = kinds::info(kind);
         if !info.buildable {
             return Err(PlaceError::NotBuildable);
+        }
+        if let Some(civ) = self.civ(p).filter(|c| !c.allows(kind)) {
+            return Err(PlaceError::Denied { civ });
         }
         let Some(pl) = self.players.get(p as usize) else {
             return Err(PlaceError::Unaffordable);
@@ -826,7 +956,7 @@ impl Simulation {
         if kind == kinds::TOWN_CENTER && !self.has_standing(p, kinds::GOVERNMENT_CENTRE) {
             return Err(PlaceError::NeedsGovernmentCentre);
         }
-        if !pl.can_afford(&info.cost) {
+        if !pl.can_afford(&self.cost_of(p, kind)) {
             return Err(PlaceError::Unaffordable);
         }
         Ok(())
@@ -906,6 +1036,9 @@ impl Simulation {
             .players
             .get(p as usize)
             .ok_or(TrainError::NotYourBuilding)?;
+        if let Some(civ) = self.civ(p).filter(|c| !c.allows(kind)) {
+            return Err(TrainError::Denied { civ });
+        }
         if player.age < u.age {
             return Err(TrainError::AgeLocked { needs: u.age });
         }
@@ -926,7 +1059,7 @@ impl Simulation {
         {
             return Err(TrainError::QueueFull);
         }
-        if !player.can_afford(&u.cost) {
+        if !player.can_afford(&self.cost_of(p, kind)) {
             return Err(TrainError::Unaffordable);
         }
         Ok(())
@@ -942,8 +1075,10 @@ impl Simulation {
                 .get(p as usize)
                 .is_some_and(|pl| pl.has_researched(t))
         };
+        let civ = self.civ(p);
         kinds::trained_at(kind)
             .filter(|u| !tech::upgrade_of(u.id).is_some_and(|t| researched(t.id)))
+            .filter(|u| civ.is_none_or(|c| c.allows(u.id)))
             .map(|u| u.id)
             .collect()
     }
@@ -1003,13 +1138,18 @@ impl Simulation {
         if player.has_researched(id) {
             return Err(ResearchError::AlreadyResearched);
         }
+        if let Some(civ) = self.civ(p).filter(|c| !c.allows_tech(id)) {
+            return Err(ResearchError::Denied { civ });
+        }
         // An age advance is researched from exactly the age before it; any
-        // other technology from its age onward.
+        // other technology from its age onward, or earlier for a
+        // civilization that has it early.
         if t.advances_age().is_some() && player.age > t.age {
             return Err(ResearchError::AlreadyResearched);
         }
-        if player.age < t.age {
-            return Err(ResearchError::AgeLocked { needs: t.age });
+        let age = self.tech_age(p, id);
+        if player.age < age {
+            return Err(ResearchError::AgeLocked { needs: age });
         }
         for &r in t.requires {
             if !player.has_researched(r) {
@@ -1108,9 +1248,15 @@ impl Simulation {
         })
     }
 
-    /// The last side standing, once every other side is out. `None` while
-    /// two or more stand, and in a match with one side.
+    /// The side that won: the last standing, or one whose Wonder or relics
+    /// were held their ten minutes ([`Simulation::victory`]). `None` while
+    /// it is undecided, and in a match with one side.
     pub fn winner(&self) -> Option<PlayerId> {
+        self.victory().map(|(p, _)| p)
+    }
+
+    /// The last side standing, once every other side is out (`GD-WIN-01`).
+    pub(crate) fn conquered(&self) -> Option<PlayerId> {
         if self.players.len() < 2 {
             return None;
         }
@@ -1121,11 +1267,12 @@ impl Simulation {
 
     /// True once the match is decided: a winner, or nobody left.
     pub fn over(&self) -> bool {
-        self.players.len() >= 2
-            && (0..self.players.len() as PlayerId)
-                .filter(|&p| self.standing(p))
-                .count()
-                <= 1
+        self.clocks.won.is_some()
+            || self.players.len() >= 2
+                && (0..self.players.len() as PlayerId)
+                    .filter(|&p| self.standing(p))
+                    .count()
+                    <= 1
     }
 
     /// A side's score (`docs/02` §10): everything it has gathered plus
@@ -1214,12 +1361,15 @@ impl Simulation {
         lap.mark(&mut t.movement);
         self.acquire();
         self.strike();
+        self.heal();
         self.fly();
         self.deaths();
         lap.mark(&mut t.combat);
         self.construction();
         self.repairs();
         self.production();
+        self.relic_gold();
+        self.victory_clocks();
         self.recount_population();
         lap.mark(&mut t.economy);
         self.fog_of_war_update();
@@ -1252,6 +1402,11 @@ impl Simulation {
         h.write(&self.projectiles);
         for f in &self.fog {
             h.write(f);
+        }
+        // Only once a clock has run: a match without one hashes as it
+        // always did.
+        if !self.clocks.is_quiet() {
+            h.write(&self.clocks);
         }
         h.finish()
     }
@@ -1326,13 +1481,21 @@ impl Simulation {
                 });
             }
             if let Some(b) = self.world.inside[i] {
+                // A relic is carried by a priest or held in a Temple of
+                // its side's; a unit shelters in a building.
+                let relic = self.world.kind[i] == kinds::RELIC;
                 let ok = self.world.slot(b).is_some_and(|bs| {
                     let j = bs.index();
-                    self.world.owner[j] == self.world.owner[i]
-                        && self.world.dying[j] == 0
-                        && kinds::info(self.world.kind[j]).garrison > 0
-                        && kinds::info(self.world.kind[i]).mobile
-                        && self.world.dying[i] == 0
+                    let theirs =
+                        self.world.owner[j] == self.world.owner[i] && self.world.dying[j] == 0;
+                    if relic {
+                        theirs && matches!(self.world.kind[j], kinds::PRIEST | kinds::TEMPLE)
+                    } else {
+                        theirs
+                            && kinds::info(self.world.kind[j]).garrison > 0
+                            && kinds::info(self.world.kind[i]).mobile
+                            && self.world.dying[i] == 0
+                    }
                 });
                 if !ok {
                     return Err(Violation::BadGarrison { slot: s });
@@ -1452,7 +1615,7 @@ impl Simulation {
             kind,
             owner,
             pos,
-            Fx::from_int(info.max_health),
+            Fx::from_int(self.max_health_of(owner, kind)),
             resource,
         );
         if info.footprint > 0 {
@@ -1477,7 +1640,11 @@ impl Simulation {
         };
         let i = slot.index();
         let info = kinds::info(self.world.kind[i]);
-        if info.footprint > 0 && self.world.dying[i] == 0 {
+        if self.world.kind[i] == kinds::PRIEST {
+            // A relic in hand stays on the map.
+            self.drop_relics_of(id, self.world.pos[i]);
+        }
+        if info.footprint > 0 && self.world.dying[i] == 0 && self.world.inside[i].is_none() {
             // A standing building goes: anyone inside steps out first, and
             // its footprint opens. Rubble opened its footprint when it fell.
             self.eject(slot);
@@ -1501,7 +1668,7 @@ impl Simulation {
             self.nav.refresh();
         }
         if self.world.construction[i].is_some() {
-            let cost = info.cost;
+            let cost = self.cost_of(self.world.owner[i], self.world.kind[i]);
             if let Some(p) = self.players.get_mut(self.world.owner[i] as usize) {
                 // Unfinished sites refund what has not been built yet.
                 let done = self.world.construction[i]
@@ -1512,7 +1679,7 @@ impl Simulation {
                 p.refund(&back);
             }
         }
-        if !info.mobile {
+        if !info.mobile && self.world.inside[i].is_none() {
             let fp = info.footprint as i32;
             let (ax, ay) = nav::anchor_tile(self.world.pos[i], fp);
             let (w, h) = (self.map.width(), self.map.height());
@@ -1533,6 +1700,11 @@ impl Simulation {
 
     fn apply_commands(&mut self) {
         for (cmd, via) in self.queue.drain_due_from(self.tick) {
+            // A cheat code is the player's: a computer opponent's does
+            // nothing (`GD-CHEAT-01`).
+            if via == Source::Ai && matches!(cmd.kind, CommandKind::Cheat { .. }) {
+                continue;
+            }
             // A command that places or clears a building leaves the grid
             // dirty; the next one may ask it what is connected. Relabel
             // between them (free when nothing changed), so a move ordered
@@ -1570,7 +1742,14 @@ impl Simulation {
                     pl.resigned = true;
                 }
             }
+            CommandKind::Cheat { resource } => {
+                if let Some(pl) = self.players.get_mut(p as usize) {
+                    pl.stockpile[resource.index()] += crate::command::CHEAT_AMOUNT;
+                }
+            }
             CommandKind::Spawn { kind, pos } => {
+                // A relic is nature's until a priest takes it up.
+                let p = if kind == kinds::RELIC { GAIA } else { p };
                 if let Some(id) = self.spawn(kind, p, pos) {
                     if kind == kinds::GATE {
                         // A spawned gate is a finished gate, and stands open.
@@ -1614,6 +1793,14 @@ impl Simulation {
                 for id in ids {
                     if let Some(slot) = self.owned_mobile(id, p) {
                         let i = slot.index();
+                        // A priest sent at an enemy unit converts it
+                        // (`GD-PRIEST-01`); at anything else it stays put.
+                        if self.world.kind[i] == kinds::PRIEST {
+                            if self.convertible(target, p).is_some() {
+                                self.begin_conversion(i, target);
+                            }
+                            continue;
+                        }
                         if kinds::info(self.world.kind[i]).combat.attack == 0 {
                             continue;
                         }
@@ -1623,6 +1810,15 @@ impl Simulation {
                             Then::Idle
                         };
                         self.engage(i, target, then, None);
+                    }
+                }
+            }
+            CommandKind::Relic { ids, target } => {
+                for id in ids {
+                    if let Some(slot) = self.owned_mobile(id, p) {
+                        if self.world.kind[slot.index()] == kinds::PRIEST {
+                            self.send_for_relic(slot.index(), target);
+                        }
                     }
                 }
             }
@@ -1752,7 +1948,7 @@ impl Simulation {
                     // The wall segment the gate replaces is taken down and
                     // its cost handed back.
                     if let Some(wall) = self.wall_at(p, x, y) {
-                        let cost = kinds::info(self.world.kind[wall.index()]).cost;
+                        let cost = self.cost_of(p, self.world.kind[wall.index()]);
                         self.remove(wall);
                         self.players[p as usize].refund(&cost);
                     }
@@ -1773,10 +1969,11 @@ impl Simulation {
                 for r in rubble {
                     self.remove(r);
                 }
-                self.players[p as usize].pay(&info.cost);
+                let cost = self.cost_of(p, kind);
+                self.players[p as usize].pay(&cost);
                 let pos = nav::building_centre(x, y, info.footprint as i32);
                 let Some(site) = self.spawn(kind, p, pos) else {
-                    self.players[p as usize].refund(&info.cost);
+                    self.players[p as usize].refund(&cost);
                     return;
                 };
                 let i = site.index();
@@ -1818,7 +2015,8 @@ impl Simulation {
                     return;
                 };
                 let i = bs.index();
-                if !self.players[p as usize].pay(&kinds::info(kind).cost) {
+                let cost = self.cost_of(p, kind);
+                if !self.players[p as usize].pay(&cost) {
                     return;
                 }
                 self.world.production[i]
@@ -1834,7 +2032,7 @@ impl Simulation {
                 if let Some(q) = self.world.production[i].as_mut() {
                     if let Some(item) = q.queue.pop() {
                         let cost = match item.item {
-                            Item::Unit(k) => kinds::info(k).cost,
+                            Item::Unit(k) => self.cost_of(p, k),
                             Item::Tech(t) => tech::info(t).map_or([0; 4], |t| t.cost),
                         };
                         self.players[p as usize].refund(&cost);
@@ -1945,7 +2143,10 @@ impl Simulation {
             .collect();
         let pace = units
             .iter()
-            .map(|s| kinds::info(self.world.kind[s.index()]).speed_per_second)
+            .map(|s| {
+                let i = s.index();
+                self.civ_speed(self.world.owner[i], self.world.kind[i])
+            })
             .fold(Fx::MAX, Fx::min);
         (goals, pace, field)
     }
@@ -2086,6 +2287,8 @@ impl Simulation {
                 Order::Repair { building, working } => {
                     self.tick_work(slot, building, working, Job::Repair)
                 }
+                Order::Convert { target, chant } => self.tick_convert(slot, target, chant),
+                Order::Relic { relic, temple } => self.tick_relic(slot, relic, temple),
             }
         }
         self.advance_queues();
@@ -2180,7 +2383,12 @@ impl Simulation {
                 let modifiers = self.modifiers(me);
                 // Meat off a carcass has its own, faster base.
                 let base = if kinds::huntable(self.world.kind[n]) {
-                    kinds::MEAT_GATHER_RATE
+                    // A hunting civilization's hunters cut faster.
+                    match self.civ(me).map_or(0, |c| c.hunting_pct()) {
+                        0 => kinds::MEAT_GATHER_RATE,
+                        pct => kinds::MEAT_GATHER_RATE
+                            .mul_div(Fx::from_int(100 + pct), Fx::from_int(100)),
+                    }
                 } else {
                     resource.gather_rate()
                 };
@@ -2315,7 +2523,8 @@ impl Simulation {
         !k.mobile
             && self.world.construction[i].is_none()
             && self.world.dying[i] == 0
-            && self.world.health[i] < Fx::from_int(k.max_health)
+            && self.world.health[i]
+                < Fx::from_int(self.max_health_of(self.world.owner[i], self.world.kind[i]))
     }
 
     /// A villager walking up to a building of its side's and working at
@@ -2737,17 +2946,18 @@ impl Simulation {
             if !info.mobile || self.world.dying[i] > 0 || self.world.inside[i].is_some() {
                 continue;
             }
+            let owner = self.world.owner[i];
+            let base = self.civ_speed(owner, self.world.kind[i]);
             let per_second = match self.world.kind[i] {
                 kinds::VILLAGER => {
-                    let pct = self.modifiers(self.world.owner[i]).villager_speed_pct;
+                    let pct = self.modifiers(owner).villager_speed_pct;
                     if pct == 0 {
-                        info.speed_per_second
+                        base
                     } else {
-                        info.speed_per_second
-                            .mul_div(Fx::from_int(100 + pct), Fx::from_int(100))
+                        base.mul_div(Fx::from_int(100 + pct), Fx::from_int(100))
                     }
                 }
-                _ => info.speed_per_second,
+                _ => base,
             };
             // A group in formation walks at its slowest member's pace.
             let per_second = match &self.world.nav[i] {
@@ -3076,11 +3286,12 @@ impl Simulation {
             let pace = (100 + modifiers.build_speed_pct).max(1) as u32;
             let done = (self.world.construction[i].unwrap_or(0) + n * pace).min(total);
             self.world.construction[i] = Some(done);
+            let full = self.max_health_of(owner, self.world.kind[i]);
             self.world.health[i] =
-                Fx::from_int((info.max_health as i64 * done as i64 / total as i64).max(1) as i32);
+                Fx::from_int((full as i64 * done as i64 / total as i64).max(1) as i32);
             if done >= total {
                 self.world.construction[i] = None;
-                self.world.health[i] = Fx::from_int(info.max_health);
+                self.world.health[i] = Fx::from_int(full);
                 // Finished: whoever sees it remembers it built, not a site.
                 self.scratch
                     .touched
@@ -3230,22 +3441,12 @@ impl Simulation {
         let mut advanced = false;
         for effect in t.effects {
             match *effect {
-                Effect::GatherRate(r, pct) => p.modifiers.gather_rate_pct[r.index()] += pct,
-                Effect::CarryCapacity(n) => p.modifiers.carry_bonus += n,
-                Effect::FarmYield(n) => p.modifiers.farm_yield_bonus += n,
-                Effect::VillagerSpeed(pct) => p.modifiers.villager_speed_pct += pct,
-                Effect::BuildSpeed(pct) => p.modifiers.build_speed_pct += pct,
                 Effect::AdvanceAge(age) => {
                     p.age = age;
                     advanced = true;
                 }
-                Effect::Attack(c, n) => p.modifiers.attack_bonus[c.index()] += n,
-                Effect::Armour(c, m, pi) => {
-                    p.modifiers.melee_armour_bonus[c.index()] += m;
-                    p.modifiers.pierce_armour_bonus[c.index()] += pi;
-                }
-                Effect::Range(c, n) => p.modifiers.range_bonus[c.index()] += n,
                 Effect::UpgradeLine(from, to) => upgrades.push((from, to)),
+                other => fold_modifier(&mut p.modifiers, other),
             }
         }
         if advanced && (owner as usize) < MAX_PLAYERS {
@@ -3261,7 +3462,7 @@ impl Simulation {
     /// `to`, keeping its damage taken in hit points, and every `from`
     /// waiting in a queue becomes a `to` at the same progress.
     fn upgrade_line(&mut self, owner: PlayerId, from: KindId, to: KindId) {
-        let delta = Fx::from_int(kinds::info(to).max_health - kinds::info(from).max_health);
+        let delta = Fx::from_int(self.max_health_of(owner, to) - self.max_health_of(owner, from));
         let slots: Vec<Slot> = self.world.slots().collect();
         for slot in slots {
             let i = slot.index();
@@ -3380,7 +3581,8 @@ impl Simulation {
             for s in world.slots() {
                 let i = s.index();
                 let k = kinds::info(world.kind[i]);
-                if k.mobile {
+                // A relic in hand or in a Temple stands nowhere.
+                if k.mobile || world.inside[i].is_some() {
                     continue;
                 }
                 let fp = k.footprint as i32;
@@ -3456,7 +3658,10 @@ impl Simulation {
         // by every side that sees any tile of it, as it is now; a side
         // that sees the anchor of nothing remembers nothing there.
         let standing = |i: usize| {
-            world.is_live(i) && !kinds::info(world.kind[i]).mobile && world.dying[i] == 0
+            world.is_live(i)
+                && !kinds::info(world.kind[i]).mobile
+                && world.dying[i] == 0
+                && world.inside[i].is_none()
         };
         let memory_of = |i: usize| Memory {
             id: world.id_at(Slot::new(i)),
@@ -3593,9 +3798,11 @@ impl Simulation {
             let i = bs.index();
             let info = kinds::info(self.world.kind[i]);
             let owner = self.world.owner[i];
-            let max = Fx::from_int(info.max_health);
+            let full = self.max_health_of(owner, self.world.kind[i]);
+            let max = Fx::from_int(full);
             if self.world.work[i] == Fx::ZERO {
-                let due = repair_due(&info.cost, max - self.world.health[i], info.max_health);
+                let cost = self.cost_of(owner, self.world.kind[i]);
+                let due = repair_due(&cost, max - self.world.health[i], full);
                 let paid = self
                     .players
                     .get_mut(owner as usize)

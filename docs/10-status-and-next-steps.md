@@ -1690,7 +1690,297 @@ rendered sets had one look; only the placeholders changed with the age.
 - **Goldens:** the five scenes in a later age (`ages-*`, `army-hud`,
   `tooltip-hud`) rebaked; the Stone Age scenes are unchanged.
 
+### Work record: each age its own music (2026-10-04)
+
+The owner, playing, asked for the music to change with each age as the
+buildings do. The four stems had shared one tune, tempo and key and only
+added layers. Each is its own piece now (`docs/05` §5.3): Stone at 60
+beats a minute, frame drum and bone flute in A minor pentatonic; Tool at
+80, the lyre's figure, a shaker and the flute in D dorian; Bronze at 96, a
+processional horn over a walking bass and the chorus in G mixolydian; Iron
+at 112, doubled war drums, a snare, a hammering bass and the horn high in
+C harmonic minor. The synthesiser has a held horn, a bass, a shaker and a
+snare for them. Still placeholders, replaced by name.
+
+### Work record: M8 chunk 1 — the later ages' soldiers (2026-10-04)
+
+The owner asked for the rest of the roadmap after M7. M8 starts with the
+Bronze and Iron Ages' military, which the Academy and the Siege Workshop
+had stood empty for (`docs/02` §5.2-§5.4).
+
+- **Ten soldiers.** Bronze: the Swordsman (Barracks), Hoplite (Academy),
+  Chariot Archer (Archery Range), Heavy Cavalry (Stable), Stone Thrower
+  (Siege Workshop). Iron: the Legionary (the Hoplite line, after Legion),
+  Horse Archer, War Elephant, Catapult (the Stone Thrower line, after
+  Torsion) and Ballista. Siege and the elephant take two population.
+  Stats are `docs/02`'s opening values; the missing armour values are
+  ours (`docs/damage-matrix.md` lists every number).
+- **Siege throws at the ground** (`docs/07` D30): a stone lands where its
+  target stood and hurts everything within its blast, the thrower's own
+  side included (`GD-COMBAT-04`), with dust where it lands and a sound of
+  its own. The spec's §7 and §5.2 disagreed on the Legionary's line; the
+  table won.
+- **In the game:** a training letter for each (O, H, M, B; never W, A, S
+  or D), short labels where the name is long, tooltips that say two
+  population and that a stone hits friends too, and placeholder drawings
+  until the models are rendered.
+- **Goldens:** `army-hud` and `tooltip-hud` rebaked: the Barracks panel
+  shows the Swordsman, greyed until the Bronze Age.
+
+### Work record: cheat codes for resources (2026-10-04)
+
+The owner, playing, asked for resource cheats for the player and never
+for a computer opponent (`docs/02` `GD-CHEAT-01`). Enter in a match opens a
+line under the resource bar; `BOUNTIFUL HARVEST`, `MIGHTY OAK`, `SOLID
+ROCK` or `MIDAS TOUCH` and Enter again gives 1000 food, wood, stone or gold,
+with a green notice. While the line is open its letters are text: no
+hotkey fires and no held key pans. A code is `CommandKind::Cheat`, so the
+replay holds it with who gave it; the simulation skips one whose source is
+a computer opponent, and a replay being watched takes no orders at all.
+The view's own replay of the feedback now issues each recorded command as
+whoever gave it. The joke units the spec also asks for are not built.
+
+### Work record: the next idle soldier on `,` (2026-10-04)
+
+The owner asked for a key to cycle through idle units. `.` already did the
+villagers (`docs/03` §2); `,` now does the soldiers the same way: every
+unit of the player's that is not a villager, out in the open with no
+order (`Simulation::idle_soldiers`), one at a time with the camera brought
+to each, round and round. It is rebindable on the settings screen as
+NEXT IDLE SOLDIER and listed in the controls overlay and the release
+notes' keys.
+
+### Work record: M8 chunk 2 — the opponent fields the later ages (2026-10-04)
+
+The computer opponent had built nothing past the Tool Age's two
+buildings, researched nothing but ages and so never had an Axeman, and in
+Hard-against-Hard matches neither side left the Tool Age in forty
+minutes: its gold share was given to food and wood whenever their stock
+ran low, which in a later age's economy is always.
+
+- **What it builds and trains.** The Academy, the Siege Workshop and the
+  Stable in the Bronze Age (the first two are the Iron Age's pair); a
+  Bronze Age army of Swordsmen, Hoplites, Bowmen, Chariot Archers, Heavy
+  Cavalry, Axemen and a few Stone Throwers, and an Iron Age one adding
+  Legionaries, Horse Archers, War Elephants, Catapults and Ballistas.
+  Siege stays a small share: its stones land on the opponent's own men.
+- **Line upgrades.** It researches the upgrade of whatever its mix
+  holds: the Axe, Legion, Torsion.
+- **Saving for the ages.** The next age is saved for once the army is
+  big enough to attack with, and the Bronze Age after ten minutes in the
+  Tool Age regardless; from the Bronze Age on, the building the next age
+  needs is saved for too. The gold share is kept from the Bronze Age on,
+  and an army reserve applies only to what a soldier costs; the
+  food-only Clubman fallback stops at the Tool Age.
+- **Result.** In Hard against Hard both sides reach the Bronze Age and
+  most the Iron, fielding Swordsmen, Hoplites, Heavy Cavalry, War
+  Elephants and Stone Throwers. Hard still beats Easy in 20 of 20
+  (`RM-M5-01`); the record is rewritten. `simrunner ai --stats` now
+  lists what each side trained, by kind.
+
+### Work record: M8 chunk 3 — detailed figures and the new roster's art (2026-10-04)
+
+The owner, playing on the Mac, found the soldiers too plain: blocks for
+bodies and horses like tables. The figures are rebuilt and every unit is
+rendered again, with the later ages' soldiers rendered for the first time.
+
+- **The figure** (`kit.Humanoid`). Jointed: thighs carry shins and upper
+  arms carry forearms, so knees and elbows bend in the walk and the
+  blows. A lofted torso narrow at the waist with a yoke of shoulders, a
+  kilt or a robe, a belt, sleeves, a neck, a face with a nose and eyes,
+  hair or a beard; helmets as a cap, a crested helm (the crest a
+  crescent, not a block), a cone or a band. Weapons have shape: a leaf
+  blade, a recurved bow, a crescent axe, a knobbed club, a broad sword,
+  a tower shield and a rimmed round one.
+- **The horse** is one model for every rider, built of the same lofted
+  pieces with a neck, a head, a mane and jointed legs; the rider sits it
+  with bent legs. The chariot, the war elephant (with a howdah of the
+  owner's colour) and the three engines are new models.
+- **The ages' dress** is redone on the new body: domes on the helmets,
+  pads on the upper arms, greaves on the shins, a lofted cape.
+- **The sets.** The eight first sets, the ten Bronze and Iron Age
+  soldiers (`slice.py`), and the fourteen aged sets of the villager and
+  the infantry, the swordsman and the hoplite now in the Iron Age too:
+  32 sets, rendered in about three hours on the CPU.
+- **The priest, the relic and the Wonder** are modelled too: the priest
+  in a linen robe with a stole of the owner's colour and a staff, lifting
+  its hands to chant; the relic a gilded casket on a plinth; the Wonder a
+  ziggurat of three steps with a stair, a shrine of columns under a gilded
+  roof and the owner's banners, in the Wonder size class (five tiles).
+  The relic is neutral (`atlas validate`'s `NEUTRAL_SETS`): no owner's
+  colour, no construction, no rubble. With these three the placeholders
+  are all replaced (`view::sprites::AWAITING_ART` is empty).
+- **The atlas** would need 10011 rows at 4096 wide, more than the GPU's
+  8192, so it is 8192 wide now (`ATLAS_WIDTH`): 5109 rows, a 64 MB
+  texture where it was 32 MB.
+- **Goldens:** 24 of the 28 scenes rebaked for the new figures.
+
+### Work record: M8 chunk 4, first part — priests (2026-10-04)
+
+The Priest (`docs/02` §5.5) is trained at the Temple from the Bronze Age
+for 125 gold: 25 hit points, no attack, passive like a villager.
+
+- **Conversion** (`GD-PRIEST-01`). A right-click on an enemy unit sends a
+  selected priest to it (the cursor turns to help's question mark, the
+  system's nearest to the spec's convert cursor); soldiers selected with
+  it attack, in the same command. The priest walks to within 7 tiles and
+  chants for between four and ten seconds, drawn from the simulation's
+  generator; a target that steps out of reach holds the chant while the
+  priest follows. At the end the unit is the priest's side's for good,
+  standing idle, its queue gone; the soldiers who were fighting it stop.
+  A priest at its chant does not run when hit.
+- **Faith** (`GD-PRIEST-02`). A conversion spends it; it comes back over
+  40 seconds, in the priest's reload counter, inside a building as out.
+  A spent priest sent at a unit walks there and waits for it. The panel
+  shows it as FAITH n%.
+- **What turns** (`GD-PRIEST-03`). Units of another side, siege
+  included; not buildings, not nature's animals, not the priest's own.
+- **Healing** (`GD-PRIEST-04`). A priest not converting gives 3 hit
+  points once a second to the most wounded unit of its side within 4
+  tiles, not itself and not a siege engine.
+- **Heard and told.** The chant is heard by the priest's side and by
+  whoever sees the unit it is chanting at, though the priest is in their
+  fog; a conversion rings for the side that gained it, sounds the loss
+  for the side that lost it, and puts a notice on both sides' stacks.
+- **Not yet.** The priest is drawn as a placeholder (a robe, a stole in
+  the player colour and a staff) until its model is rendered; the
+  computer opponent trains none. (Both done since: chunks 3 and 5.)
+
+### Work record: M8 chunk 4, second part — relics and the Wonder (2026-10-04)
+
+The two victories that end a match on a clock (`docs/02` §10), and the
+relics the second needs (`docs/07` D31, answering Q2).
+
+- **Relics** (`GD-WIN-03`). Five on every generated map, placed last so
+  the rest of the map is as it was: in the open ground at least a sixth of
+  the map from any start, apart, each with walkable ground all round it
+  that the first start can reach. A relic on the ground is nature's and
+  blocks its tile; it cannot be attacked. A right-click on one sends the
+  selected priests for it (the grab cursor); the first there takes it up
+  and carries it to the nearest Temple of its side's, or to the one
+  right-clicked; with no Temple it stands holding it. Held in a Temple a
+  relic earns a gold every two seconds. A fallen priest drops its relic
+  where it fell, a fallen Temple drops all it held round its rubble, a
+  converted priest brings its relic over. A carried relic is drawn over
+  its priest's head; the panel says CARRYING A RELIC, and a Temple's says
+  how many it holds.
+- **The Wonder** (`GD-WIN-02`). An Iron Age building, 1000 wood, stone
+  and gold, 5×5, 4,000 hit points and 1,500 builder-seconds, placed from
+  its button (every letter was taken). Its clock starts when it stands
+  finished and stops if it falls.
+- **The clocks.** Ten minutes each, read once a second, in the state hash
+  only once one has run (a match without them hashes as before). Shown to
+  every side under the top bar's right end; a finished Wonder and a side
+  coming to hold every relic are announced to every side with a notice
+  and a sound, and a Wonder is marked on every minimap, gold-rimmed in its
+  owner's colour. The results screen says which victory it was.
+- **The opponent's view.** Another side's units inside a building, and
+  its relics, are no longer in the computer opponent's sightings: the
+  garrisoned ones were showing through the building's tile.
+- **Recorded again.** Relics on generated maps change every generated
+  match: the eight corpus entries on them have new digests (the four on
+  flat maps do not), and the Hard-against-Easy record is rewritten.
+- **Not yet.** The Wonder and the relic are drawn as placeholders until
+  rendered. The opponent's use of them is the next record. (Both done
+  since: chunks 3 and 5.)
+
+### Work record: M8 chunk 5 — the opponent's priests and its answer to the clocks (2026-10-04)
+
+- **The clocks.** An enemy Wonder standing, or an enemy holding every
+  relic, and the opponent sends every idle soldier at it at once, as an
+  aggressive attack-move, whatever the size of its army: at the Wonder,
+  which every side is told of, or at the nearest Temple of the holder's
+  it knows of, or its Town Center. A Wonder of the player's draws the
+  army within seconds of standing (`tools/simrunner/tests/ai_temple.rs`).
+- **Priests.** Standard keeps two and Hard three; Easy never leaves the
+  Tool Age. From the Bronze Age the economy builds a Temple after the
+  age's own buildings, and the priests are trained there with gold kept
+  in reserve. An idle priest takes a relic in hand into the Temple, goes
+  for the nearest relic it knows of that no other priest is fetching (in
+  sight, or remembered where it was seen), and otherwise, with its faith
+  back, converts the dearest enemy unit within 8 tiles; while the army is
+  out, an idle priest at home goes to where the army is. The view gives
+  the opponent a priest's relic, its faith, what it is fetching or
+  converting, and the public clocks; no more than its panel shows a
+  player.
+- **What it does in a match.** In Hard against Hard the Bronze Age comes
+  late (around half an hour in), so its priests do too; a rich Hard
+  opponent alone has relics in its Temple inside 25 minutes. Hard still
+  beats Easy 20 of 20; the six records long enough for a Temple are
+  rewritten.
+- **Its own Wonder.** Hard, in the Iron Age, with the Wonder's cost in
+  hand and 600 food and 300 wood over, raises one by the Town Center with
+  five builders. A rich Hard opponent alone (20,000 of each to start) has
+  one standing within 40,000 ticks; no recorded Hard-against-Easy match gets that rich, and the
+  record is unchanged.
+
+### Work record: M8 chunk 6 — the map types (2026-10-04)
+
+`docs/02` §9's map types, all but Islands, which needs ships. The setup
+screen's MAP row now turns through Inland, Highland, Oasis, Coastal,
+Continental and Narrows; `mapview --map` and `simrunner ai --map` take
+them too.
+
+- **How they are made.** Inland's own generator is untouched, so every
+  Inland map and the corpus are as they were. The others share its
+  pieces: Highland steps the ground up at lower noise (36/48/60 against
+  50/64/78), with 160% of the mines and 70% of the forests away from the
+  starts; Oasis paints desert first, pours a lake in the middle, and
+  grows six groves round it, with 35% of the other forests. The water of
+  Coastal (a sea 22% deep down a side the seed picks, the starts' ring
+  moved off it and smaller), Continental (a round land, 40% of the map
+  across, in a sea) and Narrows (a river seven tiles wide through the
+  middle, half-way between the first two starts' bearings so they fall on
+  either shore, crossed at three fords that no forest may grow across)
+  is a noise-bent depth: three tiles in is deep, one or two shallow, and
+  two of sand along its edge. Water lies at the lowest level and blocks
+  everything. None lies within 14 tiles of a start.
+- **Relics** go in last as on Inland, but on a map with too little open
+  ground for five at the full distances (Continental with eight sides)
+  they are placed closer to the starts and each other, down to half.
+- **Checked.** Every type, six seeds each, at two players on 96 tiles,
+  four on 128 and eight on 168: every start has its kit on dry land, the
+  map validates in at most six attempts, and has its relics; the water
+  maps have water and the others none; the Narrows has starts on both
+  shores. Hard against Standard plays every type for 25 minutes.
+- **Not yet.** Islands, and anything on water: docks, fishing, ships.
+  The palms are the ordinary trees.
+
+### Work record: M8 chunk 7 — the civilizations (2026-10-04)
+
+`docs/02` §11's eight, with the spec's table read onto the game as it is
+(`docs/07` D32: what names a ship, a guard tower or a priest's second
+tier waits for it).
+
+- **In the simulation.** `sim::civs` holds the table. A match names one
+  per side in `SimConfig::civs`; a match that names none plays and hashes
+  as before, so the corpus and the opponent's record are untouched. A
+  civilization's effects fold into the side's modifiers from the first
+  tick; hit points, speed, strike rate, cost, hunting and a priest's reach
+  are read where they apply (`Simulation::max_health_of`, `civ_speed`,
+  `cost_of`, `tech_age`), and costs are charged and refunded at the same
+  price. What it is denied is refused with its name ("NOT FOR THE
+  EGYPTIANS") and its buildings' rosters leave it out.
+- **On screen.** The setup screen's CIVILIZATION row picks the player's,
+  its bonuses written beside it; each opponent's is dealt from the seed
+  and shown on its row. The top bar names the side's civilization with
+  its age; the build grid leaves out what it is denied; buttons,
+  tooltips and health bars show its costs and hit points.
+- **The opponent.** Its army mix hands a denied kind's share to the rest.
+  Two Hard opponents, Egyptians and Greeks, play twenty minutes and field
+  nothing either is denied.
+- **Not yet.** The other three architecture sets: every civilization's
+  buildings look the same.
+
 ### Resume here next session
+
+**M8 is under way** (`docs/06`): the later ages' soldiers are in the
+simulation (chunk 1) and the opponent fields them (chunk 2); the
+detailed soldiers and the new roster are rendered (chunk 3);
+priests, relics and the Wonder are in (chunk 4) and the opponent uses
+them (chunk 5); five map types are in (chunk 6) and the eight
+civilizations (chunk 7, above). Next: naval and Islands, and the other
+three architecture sets.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded
@@ -1904,10 +2194,14 @@ Stated so they are not rediscovered.
   nobody fishes (the
   simulation has no boats), and no rendered set has a second
   civilisation's look. A modeller's work can replace any set by name.
-- **The sprite atlas is 83% full** (6802 of 8192 rows at 4096 wide). A
-  second civilisation's sets, or another batch the size of the ages, will
-  need a second atlas page or a texture array, not a wider texture.
-- **One notification row stays open**: no Wonder to announce.
+- **The sprite atlas is 62% full** (5109 of 8192 rows at 8192 wide, a
+  64 MB texture; 84 sets). 8192 is the widest texture the GPU limits
+  allow, so a second civilisation's sets will need a second atlas page or
+  a texture array.
+- **The opponent researches no technology but ages and line upgrades**:
+  no Toolworking, Leather Armour, Fletching, gathering or farming
+  technology. It reaches the Iron Age in some long matches, not all, so
+  its Temple, priests and Wonder come late or not at all.
 - **The Mac build is not notarised and is Apple Silicon only.**
   Notarising needs an Apple Developer account and a signing identity in
   the workflow's secrets; an Intel slice needs a second target and `lipo`

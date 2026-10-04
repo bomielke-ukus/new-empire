@@ -29,6 +29,8 @@ pub const UI_FOOT_GLOW: KindId = 58_400;
 pub const UI_ARROW: KindId = 58_500;
 /// Rubble where a building stood, by footprint (1..=3).
 pub const UI_RUBBLE: KindId = 58_600;
+/// A siege engine's stone in flight.
+pub const UI_STONE: KindId = 58_700;
 /// Light glyphs: `UI_GLYPH + index into font::CHARS`.
 pub const UI_GLYPH: KindId = 60_000;
 /// Dark glyphs: `UI_GLYPH_DARK + index into font::CHARS`.
@@ -525,6 +527,11 @@ impl Atlas {
             c.circle(hand.0, hand.1, 3.0, P_BASE);
             canvases.push(still(UI_ARROW, facing, c));
         }
+        let mut stone = Canvas::new(12, 12, (6, 6));
+        stone.circle(6.0, 6.0, 5.0, BLACK);
+        stone.circle(6.0, 6.0, 4.0, GREY_DARK);
+        stone.circle(5.0, 5.0, 2.0, GREY_LIGHT);
+        canvases.push(still(UI_STONE, 0, stone));
         for fp in 0..=3u32 {
             canvases.push(still(UI_RING + fp as KindId, 0, ring(fp)));
             if fp > 0 {
@@ -558,6 +565,11 @@ impl Atlas {
     /// The arrow drawn for a projectile in flight.
     pub fn arrow(&self, facing: u8) -> Option<(&Frame, bool)> {
         self.frame(UI_ARROW, facing)
+    }
+
+    /// The stone drawn for a siege engine's shot in flight.
+    pub fn stone(&self) -> Option<&Frame> {
+        self.frame(UI_STONE, 0).map(|(f, _)| f)
     }
 
     /// A 4×4 fill of a palette index, for stretching into rectangles.
@@ -712,9 +724,10 @@ fn glyph(ch: char, idx: u8) -> Canvas {
 }
 
 /// Atlas texture width. Height grows to fit, up to the GPU's limit (8192 a
-/// side by default): with every rendered set and its age looks loaded, a
-/// narrower atlas would run past it.
-pub const ATLAS_WIDTH: u32 = 4096;
+/// side by default): with every rendered set, its age looks and the later
+/// ages' soldiers loaded, a narrower atlas runs past it. One byte a pixel
+/// (`R8Uint`), so the whole square is 64 MB.
+pub const ATLAS_WIDTH: u32 = 8192;
 
 /// A frame waiting to be packed.
 struct Entry {
@@ -861,6 +874,19 @@ pub fn kind_for_set(name: &str) -> Option<KindId> {
         "gold_mine" => kinds::GOLD_MINE,
         "stone_mine" => kinds::STONE_MINE,
         "gazelle" => kinds::GAZELLE,
+        "swordsman" => kinds::SWORDSMAN,
+        "hoplite" => kinds::HOPLITE,
+        "legionary" => kinds::LEGIONARY,
+        "chariot_archer" => kinds::CHARIOT_ARCHER,
+        "horse_archer" => kinds::HORSE_ARCHER,
+        "heavy_cavalry" => kinds::HEAVY_CAVALRY,
+        "war_elephant" => kinds::WAR_ELEPHANT,
+        "stone_thrower" => kinds::STONE_THROWER,
+        "catapult" => kinds::CATAPULT,
+        "ballista" => kinds::BALLISTA,
+        "priest" => kinds::PRIEST,
+        "relic" => kinds::RELIC,
+        "wonder" => kinds::WONDER,
         _ => return None,
     })
 }
@@ -987,6 +1013,8 @@ fn has_age_variants(kind: KindId) -> bool {
         || k.class == kinds::Class::Infantry
         || (k.buildable
             && !k.mobile
+            // Iron Age only: its own look is the only one.
+            && kind != kinds::WONDER
             && kind != kinds::FARM
             && !kinds::is_wall(kind)
             && kind != kinds::GATE)
@@ -1135,7 +1163,14 @@ fn draw_fallen(kind: KindId, age: u8) -> Canvas {
 fn is_military_foot(kind: KindId) -> bool {
     matches!(
         kind,
-        kinds::CLUBMAN | kinds::AXEMAN | kinds::SPEARMAN | kinds::SLINGER | kinds::BOWMAN
+        kinds::CLUBMAN
+            | kinds::AXEMAN
+            | kinds::SPEARMAN
+            | kinds::SLINGER
+            | kinds::BOWMAN
+            | kinds::SWORDSMAN
+            | kinds::HOPLITE
+            | kinds::LEGIONARY
     )
 }
 
@@ -1226,7 +1261,92 @@ fn military_foot(kind: KindId, facing: u8, age: u8, striking: bool) -> Canvas {
             c.line(top, string, 1.0, LINEN);
             c.line(string, bottom, 1.0, LINEN);
         }
+        kinds::SWORDSMAN | kinds::LEGIONARY => {
+            // A short broad blade, and the legionary's tall square shield.
+            shaft(&mut c, (hx, hy), dir, weapon(13.0, 4.0, BLACK, BLACK));
+            shaft(&mut c, (hx, hy), dir, weapon(12.0, 2.0, GREY_LIGHT, WHITE));
+            if kind == kinds::LEGIONARY {
+                c.rect(32 - (side * 13.0) as i32 - 5, 34, 10, 18, BLACK);
+                c.rect(32 - (side * 13.0) as i32 - 4, 35, 8, 16, P_DARK);
+                c.rect(32 - (side * 13.0) as i32 - 1, 35, 2, 16, GOLD);
+            }
+        }
+        kinds::HOPLITE => {
+            // A long spear over a great round shield.
+            shaft(&mut c, (hx, hy + 2.0), dir, weapon(30.0, 4.0, BLACK, BLACK));
+            shaft(
+                &mut c,
+                (hx, hy + 2.0),
+                dir,
+                weapon(29.0, 2.0, BROWN, BRONZE),
+            );
+            c.circle(32.0 - side * 9.0, 42.0, 10.0, BLACK);
+            c.circle(32.0 - side * 9.0, 42.0, 9.0, BRONZE);
+            c.circle(32.0 - side * 9.0, 42.0, 6.0, P_DARK);
+        }
         _ => unreachable!(),
+    }
+    c
+}
+
+/// A horse seen from the camera, its head toward the facing, with a rider
+/// in the player colour: the shape every mounted placeholder shares.
+fn horse_and_rider(dx: f32, dy: f32, coat: u8, rider: u8) -> Canvas {
+    let mut c = Canvas::new(56, 56, (28, 50));
+    c.ellipse(28.0, 50.0, 19.0, 7.0, SHADOW);
+    c.ellipse(28.0, 37.0, 18.0, 10.0, BLACK);
+    c.ellipse(28.0, 37.0, 17.0, 9.0, coat);
+    c.circle(28.0 + dx * 15.0, 37.0 + dy * 11.0, 5.0, BLACK);
+    c.circle(28.0 + dx * 15.0, 37.0 + dy * 11.0, 4.0, BROWN_DARK);
+    c.ellipse(28.0, 32.0, 8.0, 5.0, P_BASE);
+    c.ellipse(28.0, 24.0, 5.0, 7.0, BLACK);
+    c.ellipse(28.0, 24.0, 4.0, 6.0, rider);
+    c.ellipse(29.0, 22.0, 2.0, 4.0, P_LIGHT);
+    c.circle(28.0, 16.0, 5.0, BLACK);
+    c.circle(28.0, 16.0, 4.0, SKIN);
+    c
+}
+
+/// A bow held up beside a rider or a driver.
+fn held_bow(c: &mut Canvas, x: f32, y: f32) {
+    c.line((x, y - 10.0), (x + 5.0, y), 3.0, BLACK);
+    c.line((x + 5.0, y), (x, y + 10.0), 3.0, BLACK);
+    c.line((x, y - 10.0), (x + 5.0, y), 1.0, BROWN);
+    c.line((x + 5.0, y), (x, y + 10.0), 1.0, BROWN);
+    c.line((x, y - 10.0), (x, y + 10.0), 1.0, LINEN);
+}
+
+/// A siege engine on a timber frame: a throwing arm, or a bow laid flat.
+fn engine(dx: f32, dy: f32, bolt: bool) -> Canvas {
+    let mut c = Canvas::new(56, 48, (28, 42));
+    c.ellipse(28.0, 42.0, 20.0, 6.0, SHADOW);
+    c.rect(10, 26, 36, 12, BLACK);
+    c.rect(11, 27, 34, 10, BROWN);
+    c.rect(11, 27, 34, 3, P_BASE);
+    for wx in [14.0, 42.0] {
+        c.circle(wx, 38.0, 5.0, BLACK);
+        c.circle(wx, 38.0, 4.0, BROWN_DARK);
+    }
+    if bolt {
+        c.line(
+            (28.0 - dx * 14.0, 24.0),
+            (28.0 + dx * 14.0, 24.0 + dy * 6.0),
+            3.0,
+            BLACK,
+        );
+        c.line((16.0, 18.0), (40.0, 18.0), 3.0, BLACK);
+        c.line((16.0, 18.0), (40.0, 18.0), 1.0, BROWN);
+        c.line(
+            (28.0, 18.0),
+            (28.0 + dx * 16.0, 22.0 + dy * 6.0),
+            1.0,
+            GREY_LIGHT,
+        );
+    } else {
+        c.line((28.0, 30.0), (28.0 - dx * 8.0, 6.0), 4.0, BLACK);
+        c.line((28.0, 30.0), (28.0 - dx * 8.0, 6.0), 2.0, BROWN);
+        c.circle(28.0 - dx * 8.0, 6.0, 4.0, BLACK);
+        c.circle(28.0 - dx * 8.0, 6.0, 3.0, GREY);
     }
     c
 }
@@ -1243,6 +1363,25 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
             c
         }
         k if is_military_foot(k) => military_foot(k, facing, age, false),
+        kinds::PRIEST => {
+            // A long white robe with a stole of the player colour, and a
+            // staff held up beside it.
+            let mut c = Canvas::new(40, 48, (20, 42));
+            c.ellipse(20.0, 42.0, 11.0, 5.0, SHADOW);
+            c.ellipse(20.0, 31.0, 9.0, 13.0, BLACK);
+            c.ellipse(20.0, 31.0, 8.0, 12.0, LINEN);
+            c.ellipse(16.0, 33.0, 3.0, 9.0, LIMESTONE_DARK);
+            c.rect(19, 20, 3, 20, P_BASE);
+            c.circle(20.0, 14.0, 7.0, BLACK);
+            c.circle(20.0, 14.0, 6.0, SKIN);
+            c.circle(20.0 + dx * 5.0, 14.0 + dy * 5.0, 2.0, BLACK);
+            let sx = 20.0 + if dx < 0.0 { -10.0 } else { 10.0 };
+            c.line((sx, 40.0), (sx, 8.0), 3.0, BLACK);
+            c.line((sx, 40.0), (sx, 8.0), 1.5, BROWN);
+            c.circle(sx, 7.0, 3.0, BLACK);
+            c.circle(sx, 7.0, 2.0, GOLD);
+            c
+        }
         kinds::LIGHT_CAVALRY => {
             // The scout's horse with a rider in the player colour and a
             // lance: the same silhouette as the scout, armed.
@@ -1266,6 +1405,64 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
             );
             c
         }
+        kinds::HEAVY_CAVALRY => {
+            // A dark horse, a bronze-capped rider, a heavier lance.
+            let mut c = horse_and_rider(dx, dy, BROWN_DARK, P_BASE);
+            c.circle(28.0, 14.0, 4.0, BRONZE);
+            shaft(
+                &mut c,
+                (28.0 + dx * 4.0, 24.0 + dy * 3.0),
+                (dx, dy),
+                weapon(16.0, 2.5, BROWN, GREY_LIGHT),
+            );
+            c
+        }
+        kinds::HORSE_ARCHER => {
+            let mut c = horse_and_rider(dx, dy, HIDE, P_BASE);
+            held_bow(&mut c, 36.0, 24.0);
+            c
+        }
+        kinds::CHARIOT_ARCHER => {
+            // A car on two wheels behind a horse, a bowman standing in it.
+            let mut c = Canvas::new(64, 56, (32, 50));
+            c.ellipse(32.0, 50.0, 24.0, 7.0, SHADOW);
+            c.ellipse(32.0 + dx * 14.0, 38.0 + dy * 9.0, 12.0, 7.0, BLACK);
+            c.ellipse(32.0 + dx * 14.0, 38.0 + dy * 9.0, 11.0, 6.0, HIDE);
+            c.rect(22, 30, 18, 12, BLACK);
+            c.rect(23, 31, 16, 10, P_DARK);
+            c.circle(31.0, 44.0, 6.0, BLACK);
+            c.circle(31.0, 44.0, 5.0, BROWN_DARK);
+            c.ellipse(31.0, 24.0, 4.0, 6.0, BLACK);
+            c.ellipse(31.0, 24.0, 3.0, 5.0, P_BASE);
+            c.circle(31.0, 16.0, 4.0, BLACK);
+            c.circle(31.0, 16.0, 3.0, SKIN);
+            held_bow(&mut c, 37.0, 22.0);
+            c
+        }
+        kinds::WAR_ELEPHANT => {
+            // Grey and huge, a trunk toward the facing, a howdah of the
+            // player colour.
+            let mut c = Canvas::new(72, 72, (36, 64));
+            c.ellipse(36.0, 64.0, 26.0, 9.0, SHADOW);
+            for lx in [24.0, 32.0, 40.0, 48.0] {
+                c.rect(lx as i32 - 3, 48, 6, 14, BLACK);
+                c.rect(lx as i32 - 2, 49, 4, 12, GREY);
+            }
+            c.ellipse(36.0, 42.0, 24.0, 15.0, BLACK);
+            c.ellipse(36.0, 42.0, 23.0, 14.0, GREY);
+            let (hx, hy) = (36.0 + dx * 20.0, 38.0 + dy * 12.0);
+            c.circle(hx, hy, 9.0, BLACK);
+            c.circle(hx, hy, 8.0, GREY_LIGHT);
+            c.line((hx, hy + 4.0), (hx + dx * 8.0, hy + 16.0), 4.0, BLACK);
+            c.line((hx, hy + 4.0), (hx + dx * 8.0, hy + 16.0), 2.0, GREY_LIGHT);
+            c.rect(28, 20, 16, 10, BLACK);
+            c.rect(29, 21, 14, 8, P_BASE);
+            c.circle(36.0, 14.0, 4.0, BLACK);
+            c.circle(36.0, 14.0, 3.0, SKIN);
+            c
+        }
+        kinds::STONE_THROWER | kinds::CATAPULT => engine(dx, dy, false),
+        kinds::BALLISTA => engine(dx, dy, true),
         kinds::SCOUT => {
             let mut c = Canvas::new(56, 56, (28, 50));
             c.ellipse(28.0, 50.0, 19.0, 7.0, SHADOW);
@@ -1447,6 +1644,67 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
             let mut c = block(fp, 44.0, true, st);
             let (x, y) = wall_point(&c, fp, 0.5);
             c.rect(x as i32 - 12, y as i32 - 40, 24, 3, GOLD);
+            c
+        }
+        kinds::WONDER => {
+            // Three tiers stepping up from a wide base, a gold capstone.
+            let mut c = block(fp, 48.0, true, st);
+            let cx = c.w as f32 / 2.0;
+            let top = c.h as f32 - fp as f32 * iso::TILE_H / 2.0 - 48.0;
+            for (k, (hw, rise)) in [(110.0f32, 30.0f32), (70.0, 26.0), (34.0, 22.0)]
+                .into_iter()
+                .enumerate()
+            {
+                let base = top - k as f32 * 26.0;
+                let hh = hw / 2.0;
+                c.convex(
+                    &[
+                        (cx - hw, base),
+                        (cx, base + hh),
+                        (cx, base + hh - rise),
+                        (cx - hw, base - rise),
+                    ],
+                    LIMESTONE,
+                );
+                c.convex(
+                    &[
+                        (cx, base + hh),
+                        (cx + hw, base),
+                        (cx + hw, base - rise),
+                        (cx, base + hh - rise),
+                    ],
+                    LIMESTONE_DARK,
+                );
+                c.diamond(cx, base - rise, hw, hh, SAND);
+            }
+            c.diamond(cx, top - 3.0 * 26.0 + 4.0, 12.0, 6.0, GOLD);
+            c.rect(
+                cx as i32 - 1,
+                (top - 3.0 * 26.0 - 22.0) as i32,
+                2,
+                22,
+                BLACK,
+            );
+            c.rect(
+                cx as i32 + 1,
+                (top - 3.0 * 26.0 - 22.0) as i32,
+                12,
+                7,
+                P_BASE,
+            );
+            c
+        }
+        kinds::RELIC => {
+            // A small gilded casket on its stand.
+            let mut c = Canvas::new(32, 32, (16, 26));
+            c.diamond(16.0, 26.0, 12.0, 6.0, SHADOW);
+            c.rect(8, 14, 16, 11, BLACK);
+            c.rect(9, 15, 14, 9, GOLD_DARK);
+            c.rect(9, 15, 14, 3, GOLD);
+            c.rect(7, 11, 18, 4, BLACK);
+            c.rect(8, 12, 16, 2, GOLD_LIGHT);
+            c.rect(15, 5, 2, 8, BLACK);
+            c.rect(12, 7, 8, 2, BLACK);
             c
         }
         kinds::PALISADE_WALL => palisade(),
@@ -2036,11 +2294,37 @@ mod tests {
         assert_eq!(d.index, 7, "death holds its last frame");
         let (e, flip) = a.frame_at(kinds::VILLAGER, 7, Anim::Idle, 0).unwrap();
         assert!(flip && e.facing == 3, "east mirrors west");
-        // Every kind the simulation has is drawn from its rendered set, and
-        // the UI frames still exist.
+        // Every kind the simulation has is drawn from its rendered set but
+        // the ones still waiting for theirs, and the UI frames still exist.
         for k in kinds::all() {
-            assert_eq!(a.frame(k.id, 1).unwrap().0.scale, 2, "{}", k.name);
+            let rendered = a.frame(k.id, 1).unwrap().0.scale == 2;
+            assert_eq!(rendered, !AWAITING_ART.contains(&k.id), "{}", k.name);
         }
+        // The later ages' soldiers and the priest walk, strike and fall.
+        for k in [
+            kinds::SWORDSMAN,
+            kinds::HOPLITE,
+            kinds::LEGIONARY,
+            kinds::CHARIOT_ARCHER,
+            kinds::HORSE_ARCHER,
+            kinds::HEAVY_CAVALRY,
+            kinds::WAR_ELEPHANT,
+            kinds::STONE_THROWER,
+            kinds::CATAPULT,
+            kinds::BALLISTA,
+            kinds::PRIEST,
+        ] {
+            for anim in [Anim::Walk, Anim::Work, Anim::Death] {
+                assert!(
+                    a.anim_info(k, anim).is_some(),
+                    "{} has no {anim:?}",
+                    kinds::info(k).name
+                );
+            }
+        }
+        // The Wonder rises through its stages to its own rubble.
+        assert!(a.stage_frame(kinds::WONDER, 2).is_some());
+        assert!(a.own_rubble(kinds::WONDER).is_some());
         assert!(a.glyph('A', false).is_some());
         // A wall has an arm toward each of its eight neighbours; the gate
         // stands shut and open in four orientations.
@@ -2094,6 +2378,12 @@ mod tests {
         );
         assert!(a.stage_frame(variant_id(kinds::HOUSE, 1), 0).is_some());
     }
+
+    /// The Bronze and Iron Ages' soldiers, drawn as placeholders until
+    /// their models are rendered (`docs/10` §5). The list only shrinks.
+    /// Kinds still drawn as placeholders: none. A new kind goes here until
+    /// its set is rendered.
+    const AWAITING_ART: [KindId; 0] = [];
 
     #[test]
     fn a_set_named_for_an_age_draws_its_kind_in_that_age() {

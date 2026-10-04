@@ -20,6 +20,7 @@
 
 pub mod angle;
 pub mod battle;
+pub mod civs;
 pub mod combat;
 pub mod command;
 pub mod entity;
@@ -34,22 +35,26 @@ pub mod mapgen;
 pub mod nav;
 pub mod noise;
 pub mod orders;
+pub mod priests;
+pub mod relics;
 pub mod replay;
 pub mod rng;
 pub mod simulation;
 pub mod tech;
 mod trig_table;
 pub mod vec2;
+pub mod victory;
 
 pub use angle::Angle;
 pub use battle::{
     decay_ticks, Event, Projectile, Task, BOLT_TILES, CARCASS_TICKS, DECAY_TICKS, RUBBLE_TICKS,
     WORK_PERIOD,
 };
+pub use civs::Civ;
 pub use combat::{Armour, Elevation};
 pub use command::{
-    Command, CommandError, CommandKind, CommandQueue, PlayerId, Source, COMMAND_DELAY,
-    MAX_COMMAND_IDS, MAX_PLAYERS,
+    Command, CommandError, CommandKind, CommandQueue, PlayerId, Source, CHEAT_AMOUNT,
+    COMMAND_DELAY, MAX_COMMAND_IDS, MAX_PLAYERS,
 };
 pub use entity::{EntityId, KindId, Slot, World, WorldViolation};
 pub use fog::{Fog, Memory, Visibility, MAX_SIGHT};
@@ -73,3 +78,4 @@ pub use simulation::{
 };
 pub use tech::{Age, Effect, TechId, TechInfo};
 pub use vec2::Vec2Fx;
+pub use victory::Victory;

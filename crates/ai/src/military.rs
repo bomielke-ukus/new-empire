@@ -9,6 +9,7 @@
 //! which is what the scout is for.
 
 use fogged::kinds::{self, Cost, Resource};
+use fogged::tech;
 use fogged::{
     Age, CommandKind, EntityId, Event, FoggedView, Item, Job, KindId, Rng, Sighting, Stance, Vec2Fx,
 };
@@ -38,6 +39,10 @@ pub struct Military {
     attack: Option<(Vec2Fx, u64)>,
     /// The tick of the last alarm answered.
     answered: Option<u64>,
+    /// Where the army is while it is out: the middle of the soldiers away
+    /// from home, for the priests to follow.
+    #[serde(default)]
+    army_at: Option<Vec2Fx>,
 }
 
 /// A soldier: mobile, armed, and not a villager or the scout.
@@ -51,6 +56,11 @@ fn is_soldier_kind(kind: KindId) -> bool {
 }
 
 impl Military {
+    /// Where the army is while it is out, for the priests to follow.
+    pub fn army_at(&self) -> Option<Vec2Fx> {
+        self.army_at
+    }
+
     /// Every tick, before thinking: what the bell says.
     pub fn observe(&mut self, view: &FoggedView<'_>) {
         let tick = view.tick();
@@ -222,10 +232,52 @@ impl Military {
             let target = enemy_tc.map(|(_, pos)| pos).or_else(|| target_from(from))?;
             Some((CommandKind::AttackMove { ids, target }, target))
         };
+        // An enemy clock running (`GD-WIN-02`, `GD-WIN-03`): every idle
+        // soldier goes at it now, whatever the army's size. Every side is
+        // told where a Wonder stands; the relics are in the enemy's
+        // Temples, the nearest one known, or failing that its Town Center.
+        let wonder = view
+            .wonders()
+            .into_iter()
+            .filter(|(o, _, _)| enemy(*o))
+            .min_by_key(|(_, _, left)| *left)
+            .map(|(_, pos, _)| pos);
+        let relic_temple = view
+            .relic_clock()
+            .filter(|(o, _)| enemy(*o))
+            .and_then(|(o, _)| {
+                seen.iter()
+                    .filter(|s| s.owner == o && s.kind == kinds::TEMPLE)
+                    .map(|s| s.pos)
+                    .chain(
+                        view.remembered()
+                            .into_iter()
+                            .filter(|r| r.owner == o && r.kind == kinds::TEMPLE)
+                            .map(|r| fogged::nav::centre(r.tile)),
+                    )
+                    .min_by_key(|p| (p.distance_sq_raw(tc.pos), p.x.raw(), p.y.raw()))
+                    .or(enemy_tc.map(|(_, p)| p))
+            });
+        let clock_target = wonder.or(relic_temple);
+        if let Some(target) = clock_target {
+            let idle: Vec<EntityId> = soldiers
+                .iter()
+                .filter(|s| s.job == Job::Idle && !s.inside)
+                .map(|s| s.id)
+                .collect();
+            if !idle.is_empty() {
+                out.push(CommandKind::SetStance {
+                    ids: idle.clone(),
+                    stance: Stance::Aggressive,
+                });
+                out.push(CommandKind::AttackMove { ids: idle, target });
+                self.attack = Some((target, tick));
+            }
+        }
         let n_home = idle_home.len() as u32;
         let assault = n_home >= order.attack_size
             || (tick >= order.attack_by && n_home >= (order.attack_size * 3).div_ceil(4));
-        if assault && !out_already && self.threats.is_empty() {
+        if clock_target.is_none() && assault && !out_already && self.threats.is_empty() {
             if let Some((order, target)) = orders_for(idle_home.clone(), tc.pos) {
                 out.push(CommandKind::SetStance {
                     ids: idle_home,
@@ -240,7 +292,7 @@ impl Military {
             .filter(|s| s.job == Job::Idle && !home(s.pos))
             .map(|s| s.id)
             .collect();
-        if let Some(&lead) = idle_away.first() {
+        if let (Some(&lead), None) = (idle_away.first(), clock_target) {
             let from = soldiers
                 .iter()
                 .find(|s| s.id == lead)
@@ -253,6 +305,23 @@ impl Military {
                 }),
             }
         }
+
+        // Where the army is, while it is out.
+        let away: Vec<Vec2Fx> = soldiers
+            .iter()
+            .filter(|s| !home(s.pos) && !s.inside)
+            .map(|s| s.pos)
+            .collect();
+        self.army_at = (self.attack.is_some() && !away.is_empty()).then(|| {
+            let n = away.len() as i32;
+            let (sx, sy) = away.iter().fold((0i64, 0i64), |(x, y), p| {
+                (x + i64::from(p.x.raw()), y + i64::from(p.y.raw()))
+            });
+            Vec2Fx::new(
+                fogged::Fx::from_raw((sx / i64::from(n)) as i32),
+                fogged::Fx::from_raw((sy / i64::from(n)) as i32),
+            )
+        });
 
         // ----- Training, to the composition, with what is left after the
         // reserve.
@@ -275,6 +344,15 @@ impl Military {
                 *have.entry(s.kind).or_insert(0u32) += 1;
             }
             let composition = COMPOSITION[age];
+            // A kind the civilization is denied gives its share to the
+            // rest (`docs/02` §11).
+            let civ = view.civ();
+            let whole: u32 = composition
+                .iter()
+                .filter(|(k, _)| civ.is_none_or(|c| c.allows(*k)))
+                .map(|(_, s)| *s)
+                .sum::<u32>()
+                .max(1);
             let mut best: Option<(i32, KindId, EntityId)> = None;
             for b in mine
                 .iter()
@@ -287,13 +365,10 @@ impl Military {
                     let Some(&(_, share)) = composition.iter().find(|(k, _)| *k == kind) else {
                         continue;
                     };
-                    let target = (want * share).div_ceil(100) as i32;
+                    let target = (want * share).div_ceil(whole) as i32;
                     let deficit = target - *have.get(&kind).unwrap_or(&0) as i32;
                     let cost = kinds::info(kind).cost;
-                    let mut with_reserve = cost;
-                    for (c, r) in with_reserve.iter_mut().zip(RESERVE) {
-                        *c += r;
-                    }
+                    let with_reserve = reserved(cost);
                     if deficit <= 0
                         || !afford(stock, &with_reserve)
                         || view.can_train(b.id, kind).is_err()
@@ -308,8 +383,9 @@ impl Military {
             // Nothing in the composition can be paid for, usually for want
             // of wood while the food piles up: the cheapest soldier a
             // building of ours trains, paid in food alone, is better than
-            // none.
-            if best.is_none() {
+            // none. Not from the Bronze Age on, where that is a Clubman
+            // against swords: there the army waits for what it wants.
+            if best.is_none() && age < 2 {
                 let mut cheapest: Option<(i32, KindId, EntityId)> = None;
                 for b in mine
                     .iter()
@@ -338,6 +414,33 @@ impl Military {
             if let Some((_, kind, building)) = best {
                 out.push(CommandKind::Train { building, kind });
                 spend(stock, &kinds::info(kind).cost);
+            }
+        }
+
+        // ----- Line upgrades for what the army is made of: the Axe for
+        // the Axeman, Legion for the Legionary, Torsion for the Catapult.
+        // Each once, at a finished building of ours, with the reserve kept.
+        for t in tech::all() {
+            let Some((_, to)) = t.upgrades_line() else {
+                continue;
+            };
+            if !COMPOSITION[age].iter().any(|(k, _)| *k == to) {
+                continue;
+            }
+            let Some(b) = mine.iter().find(|s| s.kind == t.building && !s.site) else {
+                continue;
+            };
+            let queue = view.queue(b.id);
+            if queue.len() >= 2 || queue.contains(&Item::Tech(t.id)) {
+                continue;
+            }
+            let with_reserve = reserved(t.cost);
+            if afford(stock, &with_reserve) && view.can_research(b.id, t.id).is_ok() {
+                out.push(CommandKind::Research {
+                    building: b.id,
+                    tech: t.id,
+                });
+                spend(stock, &t.cost);
             }
         }
 
@@ -415,6 +518,18 @@ impl Military {
     }
 }
 
+/// `cost` with the reserve kept on what it is paid in: a soldier paid in
+/// food and gold leaves the wood alone, whatever wood is short.
+fn reserved(cost: Cost) -> Cost {
+    let mut out = cost;
+    for (c, r) in out.iter_mut().zip(RESERVE) {
+        if *c > 0 {
+            *c += r;
+        }
+    }
+    out
+}
+
 /// The eight compass points, in the order the scout rides them.
 const COMPASS: [(i32, i32); 8] = [
     (1, 0),
@@ -430,7 +545,10 @@ const COMPASS: [(i32, i32); 8] = [
 /// The army's shape by age index, in percent of the army target: what to
 /// train, and how much of it. A kind a building of ours cannot train yet
 /// is skipped, so the Stone Age is all clubmen and the Tool Age is axemen
-/// with bowmen and slingers once their buildings stand.
+/// (once the Axe is researched) with bowmen and slingers once their
+/// buildings stand. A line's two ends share out its part: Hoplites until
+/// Legion, Stone Throwers until Torsion. Siege is a small part of it: its
+/// stones land on the opponent's own men as readily as on anyone's.
 const COMPOSITION: [&[(KindId, u32)]; 4] = [
     &[(kinds::CLUBMAN, 100)],
     &[
@@ -440,16 +558,25 @@ const COMPOSITION: [&[(KindId, u32)]; 4] = [
         (kinds::CLUBMAN, 15),
     ],
     &[
-        (kinds::AXEMAN, 35),
-        (kinds::BOWMAN, 30),
-        (kinds::LIGHT_CAVALRY, 20),
-        (kinds::SLINGER, 15),
+        (kinds::SWORDSMAN, 25),
+        (kinds::HOPLITE, 20),
+        (kinds::BOWMAN, 20),
+        (kinds::CHARIOT_ARCHER, 10),
+        (kinds::HEAVY_CAVALRY, 10),
+        (kinds::AXEMAN, 10),
+        (kinds::STONE_THROWER, 5),
     ],
     &[
-        (kinds::AXEMAN, 35),
-        (kinds::BOWMAN, 30),
-        (kinds::LIGHT_CAVALRY, 20),
-        (kinds::SLINGER, 15),
+        (kinds::LEGIONARY, 20),
+        (kinds::HOPLITE, 5),
+        (kinds::SWORDSMAN, 15),
+        (kinds::HORSE_ARCHER, 15),
+        (kinds::BOWMAN, 10),
+        (kinds::WAR_ELEPHANT, 10),
+        (kinds::HEAVY_CAVALRY, 10),
+        (kinds::CATAPULT, 5),
+        (kinds::STONE_THROWER, 5),
+        (kinds::BALLISTA, 5),
     ],
 ];
 

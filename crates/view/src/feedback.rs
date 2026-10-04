@@ -202,6 +202,14 @@ impl CombatFeedback {
                     kind: PuffKind::Hammer,
                     tick,
                 }),
+                // A stone comes down in a ring of dust a tile across, on
+                // something or on nothing.
+                Event::Landed { pos, .. } => self.puffs.push(Puff {
+                    pos: tile(pos),
+                    dir: (0.0, 0.0),
+                    kind: PuffKind::Collapse(1),
+                    tick,
+                }),
                 Event::Felled { kind, pos, toward } if kind == kinds::TREE => {
                     self.falls.push(Fall {
                         kind,
@@ -220,10 +228,17 @@ impl CombatFeedback {
         replay.validate()?;
         *self = Self::default();
         let mut sim = Simulation::new(replay.seed, replay.config.clone());
-        let mut commands = replay.commands.iter().peekable();
+        let mut commands = replay.commands.iter().enumerate().peekable();
         while sim.tick() < replay.ticks {
-            while commands.peek().is_some_and(|(tick, _)| *tick == sim.tick()) {
-                sim.issue(commands.next().unwrap().1.clone());
+            while commands
+                .peek()
+                .is_some_and(|(_, (tick, _))| *tick == sim.tick())
+            {
+                // Each as the one who gave it: a computer opponent's is
+                // treated as one (`TA-PATH-06`, `GD-CHEAT-01`).
+                let (n, (_, command)) = commands.next().unwrap();
+                let via = replay.sources.get(n).copied().unwrap_or_default();
+                sim.issue_from(command.clone(), via);
             }
             sim.step();
             self.observe(&sim);
@@ -388,11 +403,35 @@ impl CombatFeedback {
     /// their own flashes red for three seconds, a loss of theirs pings
     /// white, large then small.
     pub fn minimap_marks(&self, sim: &Simulation, viewer: Option<u8>) -> Vec<Mark> {
+        let mut out = Vec::new();
+        // Every finished Wonder, in its owner's colour, gold-rimmed, for
+        // everyone and for as long as it stands (`GD-WIN-02`).
+        for (id, owner, _) in sim.wonder_clocks() {
+            let Some(s) = sim.world().slot(id) else {
+                continue;
+            };
+            let pos = sim.world().pos[s.index()];
+            let (x, y) = (pos.x.floor(), pos.y.floor());
+            let c = crate::palette::PLAYER_COLOURS
+                .get(owner as usize)
+                .map_or([255, 255, 255, 255], |c| [c[0], c[1], c[2], 255]);
+            out.push(Mark {
+                x,
+                y,
+                colour: [255, 214, 90, 255],
+                size: 7,
+            });
+            out.push(Mark {
+                x,
+                y,
+                colour: c,
+                size: 5,
+            });
+        }
         let Some(me) = viewer else {
-            return Vec::new();
+            return out;
         };
         let tick = sim.tick();
-        let mut out = Vec::new();
         for a in self.attacks.iter().filter(|a| a.owner == me) {
             let age = tick.saturating_sub(a.tick);
             if age < INDICATOR_TICKS && (age / 4).is_multiple_of(2) {
