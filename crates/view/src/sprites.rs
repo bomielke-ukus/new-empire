@@ -2398,11 +2398,11 @@ mod tests {
         assert_eq!(d.index, 7, "death holds its last frame");
         let (e, flip) = a.frame_at(kinds::VILLAGER, 7, Anim::Idle, 0).unwrap();
         assert!(flip && e.facing == 3, "east mirrors west");
-        // Every kind the simulation has is drawn from its rendered set but
-        // the ones still waiting for theirs, and the UI frames still exist.
+        // Every kind the simulation has is drawn from its rendered set, and
+        // the UI frames still exist.
         for k in kinds::all() {
             let rendered = a.frame(k.id, 1).unwrap().0.scale == 2;
-            assert_eq!(rendered, !AWAITING_ART.contains(&k.id), "{}", k.name);
+            assert!(rendered, "{} has no rendered set", k.name);
         }
         // The later ages' soldiers and the priest walk, strike and fall.
         for k in [
@@ -2487,8 +2487,6 @@ mod tests {
     /// their models are rendered (`docs/10` §5). The list only shrinks.
     /// Kinds still drawn as placeholders. A new kind goes here until its
     /// set is rendered.
-    const AWAITING_ART: [KindId; 1] = [kinds::CATAPULT_SHIP];
-
     #[test]
     fn a_set_named_for_an_age_draws_its_kind_in_that_age() {
         assert_eq!(set_target("house"), Some((kinds::HOUSE, 0)));

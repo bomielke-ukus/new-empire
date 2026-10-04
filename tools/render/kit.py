@@ -2617,7 +2617,8 @@ def boat_pose(kind, anim, i, count):
     elif anim == "attack":
         body["roll"] = _deg(1.5) * math.sin(t)
         if kind == "catapult":
-            arm = [-8.0, -14.0, -16.0, 95.0, 80.0, 30.0]
+            # The arm lies aft; it throws up over the top and past it.
+            arm = [-8.0, -14.0, -16.0, -95.0, -80.0, -30.0]
             s["throw_arm"] = _deg(arm[i])
             loaded = i < 3
         else:

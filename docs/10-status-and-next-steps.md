@@ -2147,6 +2147,45 @@ the trade boat, Islands and the opponent's use of all of it follow.
   transports, and lands only near the enemy's Town Center. On Coastal
   maps whose sea is far from its start it builds no Dock.
 
+### Work record: naval, fifth part — the boats' art (2026-10-04)
+
+- **A size class for boats** (`docs/05` §2.3, `docs/08` §7). A unit's
+  sprite is anchored at its feet, 3 px above the frame's bottom; a
+  boat's position is the middle of its hull, which reaches as far toward
+  the camera as away from it, so under the Heavy class the near half of
+  every hull was cut off. `Ship` is 80 × 80 at 1×, anchored 24 px above
+  the bottom, and counts a two-tile footprint for the validator's
+  allowance below the anchor. `rig.json`, `atlas` (manifest, compose,
+  rig, validate) and `view::sheets` know it.
+- **The models** (`tools/render/kit.py`, `Boat`): a hull tarred at the
+  water line and planked above, a deck below an open rail, foam where it
+  meets the water, a mast and yard with a sail of the owner's colour
+  (linen banded in it for the fishing and trade boats) and reef bands,
+  oars that trail aft at rest and sweep at the walk, and crew in linen
+  belted in the owner's colour. Each kind's fittings: the fisher's net,
+  the transport's benches, the trader's bales and jars, archers at the
+  rail, the galley's second bank of oars, shields and bronze ram, and the
+  catapult ship's engine, which throws up over its top.
+- **Sinking.** A holdout plane at the water line (`kit.water_line`)
+  hides what a boat has taken under: it heels, its bow lifts, it goes
+  down until the masthead is all that shows, and planks, a cask and a
+  ring of foam are left on the water. The fish use the same plane, so
+  their backs and fins break the surface; one leaps over its splash.
+- **The Dock**: piles in the water, a deck of planks, mooring posts, a
+  shed under slate with a band of the owner's colour, a crane with a
+  bale, crates, casks, nets drying on a rack and the owner's flag; built
+  pile by pile, half-decked, decked under a scaffold; its rubble is
+  stumps and planks adrift.
+- **Two kit fixes on the way.** `rod` draws only in the y-z plane, so
+  the yard (along x) had no length and the oars hung straight down;
+  `beam` points any way. A solid rail flush with the hull's top made
+  coincident faces that shaded black; the rail is now `oval_ring`, open
+  over a deck set below it.
+- **Atlas**: the eight sets took about 900 of the atlas's rows (§5).
+  Every kind the simulation has is now drawn from a rendered set; the
+  view test that checked the list of kinds awaiting art checks that none
+  is.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the
@@ -2157,8 +2196,9 @@ them (chunk 5); five map types are in (chunk 6) and the eight
 civilizations (chunk 7); the opponent researches its technologies and
 builds Storehouses by its work; naval is in the simulation — the water,
 the Dock, fishing, warships, transports, trade and Islands (above).
-The opponent goes to sea (above). Next: the boats' art, then the other
-three architecture sets.
+The opponent goes to sea, and the boats, the Dock and the fish are
+rendered (above). Next: the other three architecture sets, which need a
+second atlas page first (§5).
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded
@@ -2372,8 +2412,8 @@ Stated so they are not rediscovered.
   nobody fishes (the
   simulation has no boats), and no rendered set has a second
   civilisation's look. A modeller's work can replace any set by name.
-- **The sprite atlas is 62% full** (5109 of 8192 rows at 8192 wide, a
-  64 MB texture; 84 sets). 8192 is the widest texture the GPU limits
+- **The sprite atlas is 74% full** (6025 of 8192 rows at 8192 wide, a
+  64 MB texture; 92 sets). 8192 is the widest texture the GPU limits
   allow, so a second civilisation's sets will need a second atlas page or
   a texture array.
 - **The opponent's Wonder comes late**: after ten minutes in the Iron
