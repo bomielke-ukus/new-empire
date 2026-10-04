@@ -2487,11 +2487,10 @@ mod tests {
     /// their models are rendered (`docs/10` §5). The list only shrinks.
     /// Kinds still drawn as placeholders. A new kind goes here until its
     /// set is rendered.
-    const AWAITING_ART: [KindId; 4] = [
+    const AWAITING_ART: [KindId; 3] = [
         kinds::ARCHER_SHIP,
         kinds::WAR_GALLEY,
         kinds::CATAPULT_SHIP,
-        kinds::TRADE_BOAT,
     ];
 
     #[test]
