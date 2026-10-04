@@ -42,18 +42,21 @@ pub enum MapKind {
     Continental,
     /// Two shores of a river, crossed at three fords.
     Narrows,
+    /// Each start on an island of its own in a sea: nobody walks to
+    /// anybody (`GD-NAVAL-03`).
+    Islands,
 }
 
 impl MapKind {
     /// The maps a match can be played on, in the setup screen's order.
-    /// Islands waits for ships (`docs/06` M8).
-    pub const PLAYABLE: [MapKind; 6] = [
+    pub const PLAYABLE: [MapKind; 7] = [
         MapKind::Inland,
         MapKind::Highland,
         MapKind::Oasis,
         MapKind::Coastal,
         MapKind::Continental,
         MapKind::Narrows,
+        MapKind::Islands,
     ];
 
     /// Display name.
@@ -66,6 +69,7 @@ impl MapKind {
             MapKind::Coastal => "Coastal",
             MapKind::Continental => "Continental",
             MapKind::Narrows => "Narrows",
+            MapKind::Islands => "Islands",
         }
     }
 }
@@ -386,14 +390,16 @@ fn inland(rng: &mut Rng, spec: &MapSpec) -> Option<Generated> {
 }
 
 /// Starts on a ring round `centre`, `ring` hundredths of the map's size
-/// out, as [`start_positions`] places them round the middle; with the
-/// bearing of the first.
+/// out, as [`start_positions`] places them round the middle, each bearing
+/// jittered by up to `jitter_degrees` either way; with the bearing of the
+/// first.
 fn start_ring(
     rng: &mut Rng,
     size: i32,
     players: u8,
     centre: (i32, i32),
     ring: i32,
+    jitter_degrees: i32,
 ) -> (Vec<(i32, i32)>, Angle) {
     let n = players as i32;
     let c = Vec2Fx::from_int(centre.0, centre.1);
@@ -403,7 +409,7 @@ fn start_ring(
     let margin = 12;
     let starts = (0..n)
         .map(|i| {
-            let jitter = Angle::from_degrees(rng.range_i32(-8, 9));
+            let jitter = Angle::from_degrees(rng.range_i32(-jitter_degrees, jitter_degrees + 1));
             let a = base + Angle(step.0.wrapping_mul(i as u16)) + jitter;
             let p = if n == 1 {
                 c
@@ -422,6 +428,10 @@ fn start_ring(
 /// No water this close to a start, in tiles: its kit is all on dry land.
 const DRY_AROUND_STARTS: i32 = 14;
 
+/// On Islands, the channel between two starts' islands runs no nearer
+/// either start than this: the start's own kit lies within it.
+const CHANNEL_CLEAR: i32 = 12;
+
 /// The map types after Inland (`docs/02` §9): Inland's making, with the
 /// ground, the water and the scenery changed. Water is in the way until
 /// there are ships: nothing crosses it and nothing stands in it.
@@ -439,9 +449,13 @@ fn varied(rng: &mut Rng, spec: &MapSpec) -> Option<Generated> {
             ((size / 2 + dx * push, size / 2 + dy * push), 25)
         }
         MapKind::Continental => ((size / 2, size / 2), 24),
+        // Islands spreads the starts wide and evenly, so a channel of sea
+        // runs between every two.
+        MapKind::Islands => ((size / 2, size / 2), 40),
         _ => ((size / 2, size / 2), 34),
     };
-    let (starts, base) = start_ring(rng, size, spec.players, centre, ring);
+    let jitter = if kind == MapKind::Islands { 2 } else { 8 };
+    let (starts, base) = start_ring(rng, size, spec.players, centre, ring, jitter);
     let mut g = Gen {
         rng,
         size,
@@ -494,10 +508,16 @@ fn varied(rng: &mut Rng, spec: &MapSpec) -> Option<Generated> {
     g.tiles.enforce_max_step();
     debug_assert!(g.tiles.validate().is_ok());
 
-    if !all_starts_connected(&g) {
+    // Islands keeps every start apart by design; everywhere else the
+    // starts must be walkable to one another.
+    let islands = kind == MapKind::Islands;
+    if !islands && !all_starts_connected(&g) {
         return None;
     }
-    place_relics_within(&mut g, true);
+    if islands && (!every_start_stands(&g) || any_start_walks_to_another(&g)) {
+        return None;
+    }
+    place_relics_on(&mut g, true, islands);
     place_fish(&mut g);
     Some(Generated {
         tiles: g.tiles,
@@ -521,10 +541,22 @@ fn pour(g: &mut Gen, kind: MapKind, side: usize, shore: i32, base: Angle) {
     let n = g.starts.len().max(1) as i32;
     let dir = Vec2Fx::from_angle(base + Angle((65536 / (2 * n)) as u16), Fx::ONE);
     let fords = [-size * 30 / 100, 0, size * 30 / 100];
+    // An island to each start, as wide as half the gap to the nearest
+    // other start allows, and never narrower than its dry ground.
+    let gap = g
+        .starts
+        .iter()
+        .enumerate()
+        .flat_map(|(a, &p)| g.starts.iter().skip(a + 1).map(move |&q| (p, q)))
+        .map(|((ax, ay), (bx, by))| Vec2Fx::from_int(ax - bx, ay - by).length().floor())
+        .min()
+        .unwrap_or(size);
+    let island = (gap / 2 - 3).clamp(DRY_AROUND_STARTS + 2, size * 22 / 100);
     for y in 0..size {
         for x in 0..size {
             // -3 to 3, smoothly over the map.
             let jig = ((i64::from(wiggle.sample(x, y).raw()) * 7) >> 16) as i32 - 3;
+            let mut channel = false;
             let (dx, dy) = (x - c, y - c);
             let depth = match kind {
                 MapKind::Coastal => {
@@ -559,9 +591,31 @@ fn pour(g: &mut Gen, kind: MapKind, side: usize, shore: i32, base: Angle) {
                         4 + jig / 2 - across as i32
                     }
                 }
+                MapKind::Islands => {
+                    let mut near: Vec<i32> = g
+                        .starts
+                        .iter()
+                        .map(|&(sx, sy)| Vec2Fx::from_int(x - sx, y - sy).length().floor())
+                        .collect();
+                    near.sort_unstable();
+                    let (d1, d2) = (near[0], near.get(1).copied().unwrap_or(size));
+                    // A channel of sea halfway between neighbours, so no
+                    // two islands touch however close their starts.
+                    if d2 - d1 < 3 && d1 >= CHANNEL_CLEAR {
+                        channel = true;
+                        3
+                    } else {
+                        d1 - island + jig * 2
+                    }
+                }
                 _ => -9,
             };
-            if depth < -1 || g.dist_to_nearest_start(x, y) < DRY_AROUND_STARTS {
+            let dry = if channel {
+                CHANNEL_CLEAR
+            } else {
+                DRY_AROUND_STARTS
+            };
+            if depth < -1 || g.dist_to_nearest_start(x, y) < dry {
                 continue;
             }
             if depth >= 1 {
@@ -757,8 +811,18 @@ fn place_relics(g: &mut Gen) {
 /// all of them at the full distances tries again closer to the starts and
 /// to each other, down to half.
 fn place_relics_within(g: &mut Gen, relax: bool) {
+    place_relics_on(g, relax, false);
+}
+
+/// Relics where the first start can walk, or with `any_start` where any
+/// start can: on Islands every island has its share of the open ground.
+fn place_relics_on(g: &mut Gen, relax: bool, any_start: bool) {
     let size = g.size;
-    let reach = flood(g);
+    let reach = if any_start {
+        flood_from(g, &g.starts.clone())
+    } else {
+        flood(g)
+    };
     let open = |g: &Gen, x: i32, y: i32| {
         g.free(x, y) && g.tiles.walkable(x, y) && reach.get(g.idx(x, y)) == Some(&true)
     };
@@ -839,20 +903,50 @@ fn all_starts_connected(g: &Gen) -> bool {
 /// Every tile reachable on foot from the first start's villagers' row;
 /// empty if that row is itself blocked.
 fn flood(g: &Gen) -> Vec<bool> {
+    flood_from(g, &g.starts[..1])
+}
+
+/// Whether any start can walk to another: on Islands, a failed map.
+fn any_start_walks_to_another(g: &Gen) -> bool {
+    g.starts.iter().enumerate().any(|(a, &start)| {
+        let reach = flood_from(g, &[start]);
+        g.starts
+            .iter()
+            .enumerate()
+            .any(|(b, &(x, y))| a != b && reach.get(g.idx(x, y + 2)) == Some(&true))
+    })
+}
+
+/// Every start's villagers' row stands on open land.
+fn every_start_stands(g: &Gen) -> bool {
+    g.starts.iter().all(|&(sx, sy)| {
+        g.in_bounds(sx, sy + 2) && g.placeable(sx, sy + 2) && g.tiles.walkable(sx, sy + 2)
+    })
+}
+
+/// Every tile reachable on foot from any of `starts`' villagers' rows;
+/// empty if the first row is itself blocked.
+fn flood_from(g: &Gen, starts: &[(i32, i32)]) -> Vec<bool> {
     let size = g.size;
     let mut seen = vec![false; (size * size) as usize];
     let mut queue = VecDeque::new();
     let walkable =
         |x: i32, y: i32| g.in_bounds(x, y) && g.placeable(x, y) && g.tiles.walkable(x, y);
 
-    let (sx, sy) = g.starts[0];
-    // The TC blocks its own tile; begin from the villagers' row.
-    let origin = (sx, sy + 2);
-    if !walkable(origin.0, origin.1) {
-        return Vec::new();
+    for (k, &(sx, sy)) in starts.iter().enumerate() {
+        // The TC blocks its own tile; begin from the villagers' row.
+        let origin = (sx, sy + 2);
+        if !walkable(origin.0, origin.1) {
+            if k == 0 {
+                return Vec::new();
+            }
+            continue;
+        }
+        if !seen[g.idx(origin.0, origin.1)] {
+            seen[g.idx(origin.0, origin.1)] = true;
+            queue.push_back(origin);
+        }
     }
-    seen[g.idx(origin.0, origin.1)] = true;
-    queue.push_back(origin);
     while let Some((x, y)) = queue.pop_front() {
         for (dx, dy) in DIRS4 {
             let (nx, ny) = (x + dx, y + dy);
@@ -1012,8 +1106,14 @@ mod tests {
                         assert!(count_near(&g, kinds::GOLD_MINE, start, 12) >= 5, "{at}");
                         assert!(count_near(&g, kinds::STONE_MINE, start, 12) >= 4, "{at}");
                         assert!(count_near(&g, kinds::TREE, start, 16) >= 20, "{at} trees");
-                        for dy in -DRY_AROUND_STARTS + 1..DRY_AROUND_STARTS {
-                            for dx in -DRY_AROUND_STARTS + 1..DRY_AROUND_STARTS {
+                        // Islands' channels come nearer, past the kit.
+                        let dry = if kind == MapKind::Islands {
+                            CHANNEL_CLEAR
+                        } else {
+                            DRY_AROUND_STARTS
+                        };
+                        for dy in -dry + 1..dry {
+                            for dx in -dry + 1..dry {
                                 let (x, y) = (start.0 + dx, start.1 + dy);
                                 if g.tiles.in_bounds(x, y) {
                                     assert!(
@@ -1030,9 +1130,78 @@ mod tests {
                         + g.tiles.terrain_histogram()[Terrain::ShallowWater as usize];
                     let wet = matches!(
                         kind,
-                        MapKind::Oasis | MapKind::Coastal | MapKind::Continental | MapKind::Narrows
+                        MapKind::Oasis
+                            | MapKind::Coastal
+                            | MapKind::Continental
+                            | MapKind::Narrows
+                            | MapKind::Islands
                     );
                     assert_eq!(water > 0, wet, "{at}: {water} water tiles");
+                }
+            }
+        }
+    }
+
+    /// On Islands nobody walks to anybody: every start is on land of its
+    /// own, whatever the number of players, and the sea between is one.
+    ///
+    /// REQ: GD-NAVAL-03
+    #[test]
+    fn every_island_is_its_own() {
+        for seed in 0..8u64 {
+            for (players, size) in [(2u8, 96u16), (3, 96), (4, 128), (6, 128), (8, 96), (8, 168)] {
+                let spec = MapSpec {
+                    kind: MapKind::Islands,
+                    size,
+                    players,
+                };
+                let g = generate(seed, &spec);
+                let at = format!("seed {seed} players {players} size {size}");
+                assert!(g.attempts <= 6, "{at}: {} attempts", g.attempts);
+                let mut rng = Rng::new(0);
+                let gen = Gen {
+                    rng: &mut rng,
+                    size: size as i32,
+                    tiles: g.tiles.clone(),
+                    occ: vec![Occ::Free; size as usize * size as usize],
+                    spawns: Vec::new(),
+                    starts: g.starts.clone(),
+                };
+                for (a, &start) in g.starts.iter().enumerate() {
+                    let reach = flood_from(&gen, &[start]);
+                    assert!(!reach.is_empty(), "{at}: start {a} on land");
+                    for (b, &(x, y)) in g.starts.iter().enumerate() {
+                        if a != b {
+                            assert!(!reach[gen.idx(x, y + 2)], "{at}: {a} walks to {b}");
+                        }
+                    }
+                }
+                // Every island's shore is on the one sea round the map's
+                // edge (a pond inland is no way off it).
+                let water = crate::nav::NavGrid::water_from_map(&g.tiles);
+                // The sea is the largest body of water.
+                let mut bodies: std::collections::BTreeMap<u16, (usize, (i32, i32))> =
+                    std::collections::BTreeMap::new();
+                for y in 0..size as i32 {
+                    for x in 0..size as i32 {
+                        let c = water.component(x, y);
+                        if c != 0 {
+                            bodies.entry(c).or_insert((0, (x, y))).0 += 1;
+                        }
+                    }
+                }
+                let sea = bodies.values().max().expect("water").1;
+                for (a, &start) in g.starts.iter().enumerate() {
+                    let reach = flood_from(&gen, &[start]);
+                    let shore = (0..size as i32)
+                        .flat_map(|y| (0..size as i32).map(move |x| (x, y)))
+                        .filter(|&(x, y)| reach[gen.idx(x, y)])
+                        .any(|(x, y)| {
+                            crate::nav::ORTHO_STEPS
+                                .iter()
+                                .any(|&(dx, dy)| water.connected(sea, (x + dx, y + dy)))
+                        });
+                    assert!(shore, "{at}: island {a} on the sea");
                 }
             }
         }

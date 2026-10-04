@@ -626,11 +626,14 @@ pub fn order_point(sim: &Simulation, order: &Order) -> Option<Vec2Fx> {
     let of = |id: sim::EntityId| world.slot(id).map(|s| world.pos[s.index()]);
     match *order {
         Order::Idle => None,
-        Order::Move { target } | Order::AttackMove { target } | Order::Flee { target, .. } => {
-            Some(target)
-        }
+        Order::Move { target }
+        | Order::AttackMove { target }
+        | Order::Flee { target, .. }
+        | Order::Unload { at: target } => Some(target),
         Order::Patrol { to, .. } => Some(to),
-        Order::Attack { target, .. } | Order::Convert { target, .. } => of(target),
+        Order::Attack { target, .. }
+        | Order::Convert { target, .. }
+        | Order::Trade { market: target, .. } => of(target),
         Order::Relic { relic, temple } => temple.and_then(of).or_else(|| of(relic)),
         Order::Garrison { building } | Order::Repair { building, .. } => of(building),
         Order::Gather { node, .. } => of(node),

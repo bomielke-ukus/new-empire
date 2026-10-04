@@ -705,6 +705,8 @@ fn train_hotkey(kind: KindId) -> char {
         kinds::ARCHER_SHIP => 'B',
         kinds::WAR_GALLEY => 'G',
         kinds::CATAPULT_SHIP => 'O',
+        kinds::TRANSPORT => 'H',
+        kinds::TRADE_BOAT => 'M',
         _ => 'N',
     }
 }
@@ -1060,6 +1062,30 @@ fn commands(
             'T',
             "STOP WHAT THEY ARE DOING",
         ));
+    }
+    // A transport puts everyone ashore where it lies, if land is near; a
+    // right-click on land with it sails there and lands them.
+    if let Some(boat) = selected.iter().copied().find(|s| {
+        own(s)
+            && kinds::info(world.kind[s.index()]).mobile
+            && kinds::garrisons(world.kind[s.index()])
+    }) {
+        let aboard = sim.garrison_of(world.id_at(boat)).len();
+        defs.push(
+            Def::on(
+                Action::Ungarrison(boat.index() as u32),
+                "ALL ASHORE",
+                'U',
+                format!(
+                    "PUT THE {aboard} ABOARD ASHORE HERE. RIGHT-CLICK LAND TO SAIL THEM THERE; RIGHT-CLICK THE BOAT WITH UNITS TO BOARD"
+                ),
+            )
+            .gated(if aboard == 0 {
+                Err("NOBODY ABOARD".to_string())
+            } else {
+                Ok(())
+            }),
+        );
     }
     let fighters: Vec<Slot> = selected
         .iter()
@@ -1756,6 +1782,9 @@ impl Hud {
                     Order::Relic { .. } => "GOING FOR A RELIC",
                     Order::Convert { chant: 0, .. } => "GOING TO CONVERT",
                     Order::Convert { .. } => "CONVERTING",
+                    Order::Unload { .. } => "SAILING TO LAND THEM",
+                    Order::Trade { out: true, .. } => "SAILING OUT TO TRADE",
+                    Order::Trade { .. } => "BRINGING GOLD HOME",
                 };
                 if !job.is_empty() {
                     // What is queued behind it (`UX-CMD-04`).

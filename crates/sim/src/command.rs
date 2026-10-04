@@ -208,6 +208,21 @@ pub enum CommandKind {
         /// The relic, or the Temple.
         target: EntityId,
     },
+    /// Trade boats to trade at another side's Dock (`GD-NAVAL-04`).
+    Trade {
+        /// The trade boats.
+        ids: Vec<EntityId>,
+        /// The other side's Dock.
+        dock: EntityId,
+    },
+    /// Transports to the shore nearest a point, to put everyone aboard
+    /// ashore there (`GD-NAVAL-03`).
+    Unload {
+        /// The transports.
+        ids: Vec<EntityId>,
+        /// Where on land.
+        target: Vec2Fx,
+    },
 }
 
 /// What one cheat code gives (`GD-CHEAT-01`).
@@ -243,6 +258,8 @@ impl CommandKind {
                 | CommandKind::Patrol { .. }
                 | CommandKind::Garrison { .. }
                 | CommandKind::Relic { .. }
+                | CommandKind::Unload { .. }
+                | CommandKind::Trade { .. }
         )
     }
 
@@ -262,7 +279,9 @@ impl CommandKind {
             | CommandKind::SetStance { ids, .. }
             | CommandKind::SetFormation { ids, .. }
             | CommandKind::Garrison { ids, .. }
-            | CommandKind::Relic { ids, .. } => ids,
+            | CommandKind::Relic { ids, .. }
+            | CommandKind::Unload { ids, .. }
+            | CommandKind::Trade { ids, .. } => ids,
             _ => &[],
         }
     }
@@ -352,7 +371,9 @@ impl Command {
             | CommandKind::SetStance { ids, .. }
             | CommandKind::SetFormation { ids, .. }
             | CommandKind::Garrison { ids, .. }
-            | CommandKind::Relic { ids, .. } => ids.len(),
+            | CommandKind::Relic { ids, .. }
+            | CommandKind::Unload { ids, .. }
+            | CommandKind::Trade { ids, .. } => ids.len(),
             CommandKind::SetFarmReseed { farms, .. } => farms.len(),
             CommandKind::Ungarrison { .. }
             | CommandKind::Spawn { .. }
@@ -493,6 +514,16 @@ impl HashState for CommandKind {
                 h.write_u8(23);
                 h.write(ids);
                 h.write(target);
+            }
+            CommandKind::Unload { ids, target } => {
+                h.write_u8(24);
+                h.write(ids);
+                h.write(target);
+            }
+            CommandKind::Trade { ids, dock } => {
+                h.write_u8(25);
+                h.write(ids);
+                h.write(dock);
             }
         }
     }

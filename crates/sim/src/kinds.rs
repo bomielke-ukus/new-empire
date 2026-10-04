@@ -89,6 +89,11 @@ pub const BALLISTA: KindId = 39;
 pub const PRIEST: KindId = 40;
 /// A fishing boat: gathers fish from the water (`docs/02` §5.1).
 pub const FISHING_BOAT: KindId = 50;
+/// A transport: carries ten units over the water (`docs/02` §5.1).
+pub const TRANSPORT: KindId = 51;
+/// A trade boat: takes wood to another side's Dock and brings gold home
+/// (`docs/02` §5.1).
+pub const TRADE_BOAT: KindId = 52;
 /// The Tool Age's warship: archers on a light hull (`docs/07` D33).
 pub const ARCHER_SHIP: KindId = 53;
 /// The Bronze Age's warship: a war galley, more archers, more hull.
@@ -710,6 +715,25 @@ const TABLE: &[KindInfo] = &[
         naval: true,
         ..unit(FISHING_BOAT, "Fishing Boat", 45, 13, [0, 50, 0, 0], 30)
     },
+    // Ten aboard, landed where its owner says; cannot fight.
+    KindInfo {
+        age: Age::Tool,
+        class: Class::Ship,
+        combat: fortified(0, 4),
+        garrison: 10,
+        trained_at: Some(DOCK),
+        naval: true,
+        ..unit(TRANSPORT, "Transport", 150, 14, [0, 75, 0, 0], 30)
+    },
+    // Sails wood out and gold home; cannot fight.
+    KindInfo {
+        age: Age::Bronze,
+        class: Class::Ship,
+        combat: fortified(0, 3),
+        trained_at: Some(DOCK),
+        naval: true,
+        ..unit(TRADE_BOAT, "Trade Boat", 100, 16, [0, 100, 0, 0], 40)
+    },
     // The warships (`docs/07` D33): archers that shoot over the water at
     // anything in reach, ashore or afloat, and a catapult for the shore.
     KindInfo {
@@ -941,7 +965,8 @@ pub fn is_wall(kind: KindId) -> bool {
     matches!(kind, PALISADE_WALL | STONE_WALL)
 }
 
-/// A building that shelters units (`UX-CMD-09`).
+/// A building that shelters units (`UX-CMD-09`), or a transport that
+/// carries them.
 pub fn garrisons(kind: KindId) -> bool {
     info(kind).garrison > 0
 }
@@ -1035,7 +1060,7 @@ mod tests {
         assert_eq!(trained_at(SIEGE_WORKSHOP).count(), 3);
         assert_eq!(trained_at(TEMPLE).count(), 1);
         assert_eq!(trained_at(TOWN_CENTER).count(), 1);
-        assert_eq!(trained_at(DOCK).count(), 4);
+        assert_eq!(trained_at(DOCK).count(), 6);
         // A boat is of the water and so is where it is trained; nothing
         // of the water lives on land.
         for k in all() {

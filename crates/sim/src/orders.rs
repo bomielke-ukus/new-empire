@@ -220,6 +220,20 @@ pub enum Order {
         /// Ticks of the chant still to go; 0 before it has begun.
         chant: u16,
     },
+    /// A transport's: sail to the water by the land nearest `at` and put
+    /// everyone aboard ashore there (`GD-NAVAL-03`).
+    Unload {
+        /// Where on land.
+        at: Vec2Fx,
+    },
+    /// A trade boat's: wood out from a Dock of its side's to `market`,
+    /// another side's, and gold home, over and over (`GD-NAVAL-04`).
+    Trade {
+        /// The other side's Dock.
+        market: EntityId,
+        /// Sailing out (true) or home.
+        out: bool,
+    },
 }
 
 /// Stages of the gather cycle.
@@ -280,6 +294,15 @@ impl HashState for Order {
                 h.write_u8(11);
                 h.write(relic);
                 h.write(temple);
+            }
+            Order::Unload { at } => {
+                h.write_u8(12);
+                h.write(at);
+            }
+            Order::Trade { market, out } => {
+                h.write_u8(13);
+                h.write(market);
+                h.write_bool(*out);
             }
             Order::Attack {
                 target,

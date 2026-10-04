@@ -108,6 +108,13 @@ impl Selection {
         })
     }
 
+    /// Selected units of `player` of one kind.
+    pub fn own_kind(&self, sim: &Simulation, player: u8, kind: KindId) -> Vec<EntityId> {
+        self.filter(sim, |i| {
+            sim.world().owner[i] == player && sim.world().kind[i] == kind
+        })
+    }
+
     /// Selected villagers of `player`.
     pub fn own_villagers(&self, sim: &Simulation, player: u8) -> Vec<EntityId> {
         self.filter(sim, |i| {

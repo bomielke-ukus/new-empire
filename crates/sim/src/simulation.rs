@@ -1402,6 +1402,7 @@ impl Simulation {
         self.movement();
         self.separation();
         self.keep_off_blocked();
+        self.carry_passengers();
         lap.mark(&mut t.movement);
         self.acquire();
         self.strike();
@@ -1732,6 +1733,10 @@ impl Simulation {
             // A relic in hand stays on the map.
             self.drop_relics_of(id, self.world.pos[i]);
         }
+        if info.mobile && info.garrison > 0 {
+            // A transport scuttled takes everyone aboard with it.
+            self.drown_passengers(slot);
+        }
         if info.footprint > 0 && self.world.dying[i] == 0 && self.world.inside[i].is_none() {
             // A standing building goes: anyone inside steps out first, and
             // its footprint opens. Rubble opened its footprint when it fell.
@@ -1981,15 +1986,52 @@ impl Simulation {
                 }
             }
             CommandKind::Garrison { ids, building } => {
-                if self.shelter_slot(building, p).is_none() {
+                let Some(bs) = self.shelter_slot(building, p) else {
+                    return;
+                };
+                // Boats board nothing and shelter nowhere.
+                let boarding: Vec<Slot> = ids
+                    .iter()
+                    .filter_map(|&id| self.owned_mobile(id, p))
+                    .filter(|s| !self.naval(s.index()) && s.index() != bs.index())
+                    .collect();
+                for slot in &boarding {
+                    let i = slot.index();
+                    self.world.order[i] = Order::Garrison { building };
+                    self.world.nav[i] = None;
+                    self.world.move_target[i] = None;
+                }
+                // A transport comes in to meet them (`GD-NAVAL-03`).
+                if kinds::info(self.world.kind[bs.index()]).mobile && !boarding.is_empty() {
+                    self.come_alongside(bs, &boarding);
+                }
+            }
+            CommandKind::Trade { ids, dock } => {
+                if self.market_for(dock, p).is_none() {
                     return;
                 }
                 for id in ids {
                     if let Some(slot) = self.owned_mobile(id, p) {
                         let i = slot.index();
-                        self.world.order[i] = Order::Garrison { building };
-                        self.world.nav[i] = None;
-                        self.world.move_target[i] = None;
+                        if self.world.kind[i] == kinds::TRADE_BOAT {
+                            self.world.order[i] = Order::Trade {
+                                market: dock,
+                                out: true,
+                            };
+                            self.world.nav[i] = None;
+                        }
+                    }
+                }
+            }
+            CommandKind::Unload { ids, target } => {
+                let at = self.clamp_to_map(target);
+                for id in ids {
+                    if let Some(slot) = self.owned_mobile(id, p) {
+                        let i = slot.index();
+                        if self.naval(i) && kinds::garrisons(self.world.kind[i]) {
+                            self.world.order[i] = Order::Unload { at };
+                            self.world.nav[i] = None;
+                        }
                     }
                 }
             }
@@ -2368,6 +2410,8 @@ impl Simulation {
                 Order::Patrol { from, to, leg } => self.tick_patrol(slot, from, to, leg),
                 Order::Flee { target, into } => self.tick_flee(slot, target, into),
                 Order::Garrison { building } => self.tick_garrison(slot, building),
+                Order::Unload { at } => self.tick_unload(slot, at),
+                Order::Trade { market, out } => self.tick_trade(slot, market, out),
                 Order::Move { .. } => {
                     if self.nav_settled(i) {
                         self.world.nav[i] = None;

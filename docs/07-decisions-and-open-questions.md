@@ -445,8 +445,26 @@ other element as a target, given the order or not, and a unit sent
 after one across the shore that has gone as near as its element allows
 and is still out of reach gives up (`GD-NAVAL-02`). A building is hit
 from beside it, so hand weapons can still burn a Dock. The Greeks'
-ships are 30% faster. The transport, the trade boat and the Islands map
-follow.
+ships are 30% faster.
+
+A transport is a garrison that moves. A unit told to board walks to the
+land nearest the boat and waits there, the boat comes in to the water
+nearest the party, and each steps aboard in reach; aboard, it rides
+where the boat goes. Told to unload somewhere, the boat sails to the
+water nearest the place and puts everyone ashore on the land beside it.
+At sea, nobody steps off; a transport that sinks, or is scuttled, takes
+everyone aboard with it; one converted brings them over. A trade boat
+loads 20 wood at a Dock of its side's, sells it at another side's Dock
+(an enemy's will do: there are no alliances yet) for 10 gold and
+three quarters of a gold a tile from its side's nearest Dock, brings the
+gold home and goes again, waiting at home while there is no wood.
+
+Islands puts the starts on a ring two fifths of the map out with
+little jitter and gives each the land within half the distance to its
+nearest neighbour, then cuts a channel of deep water along the line
+halfway between every two, no nearer a start than twelve tiles; a map
+where any start can still walk to another is thrown away and the next
+seed tried. Relics go on any island.
 
 ## Open questions
 

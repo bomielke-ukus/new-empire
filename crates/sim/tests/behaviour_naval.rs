@@ -464,3 +464,241 @@ fn greek_ships_are_faster() {
     assert_eq!(greek, 30);
     assert!(base.is_positive());
 }
+
+/// Open water by the shore at least `apart` tiles from `from`, with the
+/// land it faces: a second landing place along the coast.
+fn landing_away_from(sim: &Simulation, from: (i32, i32), apart: i32) -> (i32, i32) {
+    let n = sim.map().width();
+    (0..n)
+        .flat_map(|y| (0..n).map(move |x| (x, y)))
+        .filter(|&(x, y)| sim.nav().passable(x, y))
+        .filter(|&(x, y)| (x - from.0).abs().max((y - from.1).abs()) >= apart)
+        .filter(|&(x, y)| {
+            (-1..=1).any(|dy| (-1..=1).any(|dx| sim.water_grid().passable(x + dx, y + dy)))
+        })
+        .min_by_key(|&(x, y)| ((x - from.0).pow(2) + (y - from.1).pow(2), x, y))
+        .expect("more coast")
+}
+
+fn board(sim: &mut Simulation, ids: Vec<EntityId>, transport: EntityId) {
+    sim.issue(Command {
+        player: 0,
+        kind: CommandKind::Garrison {
+            ids,
+            building: transport,
+        },
+    });
+}
+
+fn aboard(sim: &Simulation, id: EntityId) -> Option<EntityId> {
+    sim.world().inside[index_of(sim, id)]
+}
+
+/// Three clubmen board a transport from the beach, ride it along the coast
+/// and are put ashore where they were sent.
+///
+/// REQ: GD-NAVAL-03
+#[test]
+fn a_transport_carries_soldiers_and_puts_them_ashore() {
+    let mut sim = coast();
+    let (sea, land) = offshore(&sim, 3);
+    let boat = put(&mut sim, 0, kinds::TRANSPORT, sea.0, sea.1);
+    let men: Vec<EntityId> = (0..3)
+        .map(|k| {
+            let t = sim
+                .nav()
+                .nearest_passable(land.0, land.1 + k, 3, None)
+                .unwrap();
+            put(&mut sim, 0, kinds::CLUBMAN, t.0, t.1)
+        })
+        .collect();
+    board(&mut sim, men.clone(), boat);
+    for _ in 0..1200 {
+        sim.step();
+        if men.iter().all(|&m| aboard(&sim, m) == Some(boat)) {
+            break;
+        }
+    }
+    for &m in &men {
+        assert_eq!(aboard(&sim, m), Some(boat), "aboard");
+    }
+    // Riding: wherever the boat goes, they are.
+    let there = landing_away_from(&sim, land, 15);
+    sim.issue(Command {
+        player: 0,
+        kind: CommandKind::Unload {
+            ids: vec![boat],
+            target: sim::nav::centre(there),
+        },
+    });
+    run(&mut sim, 20);
+    for &m in &men {
+        assert_eq!(pos_of(&sim, m), pos_of(&sim, boat), "riding");
+    }
+    for _ in 0..3000 {
+        sim.step();
+        if men.iter().all(|&m| aboard(&sim, m).is_none()) {
+            break;
+        }
+    }
+    for &m in &men {
+        assert_eq!(aboard(&sim, m), None, "ashore");
+        assert!(!wet(&sim, tile_of(&sim, m)), "on land");
+        assert!(
+            pos_of(&sim, m).distance(sim::nav::centre(there)) < sim::Fx::from_int(6),
+            "where they were sent"
+        );
+    }
+    assert!(matches!(
+        sim.world().order[index_of(&sim, boat)],
+        Order::Idle
+    ));
+    sim.check().expect("invariants hold");
+    sim.replay().verify().expect("replays");
+}
+
+/// At sea, nobody gets off; and a boat cannot go aboard anything.
+///
+/// REQ: GD-NAVAL-03
+#[test]
+fn nobody_steps_off_at_sea_and_boats_do_not_board() {
+    let mut sim = coast();
+    let (sea, land) = offshore(&sim, 1);
+    let boat = put(&mut sim, 0, kinds::TRANSPORT, sea.0, sea.1);
+    let man = put(&mut sim, 0, kinds::CLUBMAN, land.0, land.1);
+    board(&mut sim, vec![man], boat);
+    run(&mut sim, 200);
+    assert_eq!(aboard(&sim, man), Some(boat));
+    let (far, _) = offshore(&sim, 6);
+    sim.issue(move_to(0, vec![boat], sim::nav::centre(far)));
+    run(&mut sim, 1200);
+    sim.issue(Command {
+        player: 0,
+        kind: CommandKind::Ungarrison { building: boat },
+    });
+    run(&mut sim, 2);
+    assert_eq!(aboard(&sim, man), Some(boat), "still aboard at sea");
+    let fisher = put(&mut sim, 0, kinds::FISHING_BOAT, far.0, far.1 + 1);
+    board(&mut sim, vec![fisher], boat);
+    run(&mut sim, 2);
+    assert!(!matches!(
+        sim.world().order[index_of(&sim, fisher)],
+        Order::Garrison { .. }
+    ));
+}
+
+/// A transport that sinks takes everyone aboard down with it.
+///
+/// REQ: GD-NAVAL-03
+#[test]
+fn a_sunk_transport_drowns_its_passengers() {
+    let mut sim = coast();
+    let (sea, land) = offshore(&sim, 2);
+    let boat = put(&mut sim, 0, kinds::TRANSPORT, sea.0, sea.1);
+    let man = put(&mut sim, 0, kinds::CLUBMAN, land.0, land.1);
+    board(&mut sim, vec![man], boat);
+    run(&mut sim, 200);
+    assert_eq!(aboard(&sim, man), Some(boat));
+    let pop = sim.player(0).unwrap().pop;
+    let galleys: Vec<EntityId> = (0..3)
+        .map(|k| {
+            let w = sim
+                .water_grid()
+                .nearest_passable(sea.0 + 2, sea.1 + k, 4, Some(sea))
+                .unwrap();
+            put(&mut sim, 1, kinds::WAR_GALLEY, w.0, w.1)
+        })
+        .collect();
+    attack(&mut sim, 1, galleys, boat);
+    run(&mut sim, 1200);
+    assert!(!alive(&sim, boat), "sunk");
+    assert!(sim.world().slot(man).is_none(), "drowned");
+    assert!(sim.player(0).unwrap().pop < pop);
+    sim.check().expect("invariants hold");
+}
+
+/// A trade boat takes wood out to another side's Dock and brings gold
+/// home, the more the further it sails; with no wood it waits at home.
+///
+/// REQ: GD-NAVAL-04
+#[test]
+fn a_trade_boat_turns_wood_into_gold() {
+    let mut sim = coast();
+    let (hx, hy) = dock_site(&sim);
+    let home = put(&mut sim, 0, kinds::DOCK, hx, hy);
+    // Another side's Dock along the coast, by water from ours.
+    let n = sim.map().width();
+    let fp = kinds::info(kinds::DOCK).footprint as i32;
+    let here = sim.water_grid().nearest_passable(hx, hy, 4, None).unwrap();
+    let (mx, my) = (0..n)
+        .flat_map(|y| (0..n).map(move |x| (x, y)))
+        .filter(|&(x, y)| (x - hx).abs().max((y - hy).abs()) >= 25)
+        .filter(|&(x, y)| sim.can_place(1, kinds::DOCK, x, y).is_ok())
+        .find(|&(x, y)| {
+            sim::nav::footprint_ring(x, y, fp).iter().any(|&t| {
+                sim.water_grid().passable(t.0, t.1) && sim.water_grid().connected(here, t)
+            })
+        })
+        .expect("a second Dock site on the same sea");
+    let market = put(&mut sim, 1, kinds::DOCK, mx, my);
+    let boat = put(&mut sim, 0, kinds::TRADE_BOAT, here.0, here.1);
+    let start = sim.player(0).unwrap().stockpile;
+    sim.issue(Command {
+        player: 0,
+        kind: CommandKind::Trade {
+            ids: vec![boat],
+            dock: market,
+        },
+    });
+    let gold = |sim: &Simulation| sim.player(0).unwrap().stockpile[Resource::Gold.index()];
+    let mut trips = 0;
+    let mut last = gold(&sim);
+    for _ in 0..12_000 {
+        sim.step();
+        if gold(&sim) > last {
+            trips += 1;
+            last = gold(&sim);
+            if trips == 2 {
+                break;
+            }
+        }
+    }
+    assert_eq!(trips, 2, "two round trips");
+    let tiles = pos_of(&sim, home).distance(pos_of(&sim, market)).floor();
+    let earned = gold(&sim) - start[Resource::Gold.index()];
+    assert_eq!(earned, 2 * sim::transport::trade_gold(tiles));
+    assert!(
+        earned > 2 * sim::transport::TRADE_LOAD,
+        "a profit for the distance"
+    );
+    let wood = sim.player(0).unwrap().stockpile[Resource::Wood.index()];
+    assert!(wood <= start[Resource::Wood.index()] - 2 * sim::transport::TRADE_LOAD);
+    assert!(matches!(
+        sim.world().order[index_of(&sim, boat)],
+        Order::Trade { .. }
+    ));
+    sim.replay().verify().expect("replays");
+}
+
+/// A trade boat trades only at another side's Dock.
+///
+/// REQ: GD-NAVAL-04
+#[test]
+fn a_trade_boat_does_not_trade_at_home() {
+    let mut sim = coast();
+    let (dock, fisher) = dock_and_boat(&mut sim);
+    let here = tile_of(&sim, fisher);
+    let boat = put(&mut sim, 0, kinds::TRADE_BOAT, here.0, here.1);
+    sim.issue(Command {
+        player: 0,
+        kind: CommandKind::Trade {
+            ids: vec![boat],
+            dock,
+        },
+    });
+    run(&mut sim, 2);
+    assert!(matches!(
+        sim.world().order[index_of(&sim, boat)],
+        Order::Idle
+    ));
+}

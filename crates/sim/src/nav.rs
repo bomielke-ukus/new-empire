@@ -51,6 +51,9 @@ pub struct NavGrid {
 
 const ORTHO: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 
+/// The four orthogonal steps.
+pub const ORTHO_STEPS: [(i32, i32); 4] = ORTHO;
+
 impl Default for NavGrid {
     /// An empty grid: what a save from before boats reads for the water.
     fn default() -> NavGrid {

@@ -213,6 +213,14 @@ runs home like a villager. A priest can convert a priest.
   range, and archers, towers and siege on land shoot back. Hand weapons
   cannot fight a ship, and nothing waits at the water's edge for a target
   it cannot reach.
+- **[GD-NAVAL-03]** A transport carries units over the water: they board
+  it from the shore and it comes in to meet them; sent to land, it sails
+  to the water nearest and puts them ashore there. At sea nobody steps
+  off, and a transport that sinks takes everyone aboard with it. On the
+  Islands map every start has an island of its own, and only boats cross.
+- **[GD-NAVAL-04]** A trade boat takes wood from a Dock of its side's to
+  another side's Dock and brings gold home, the more the further it
+  sails, over and over until told otherwise.
 
 **As built** (2026-10-04, `docs/07` D33): the water is its own grid with
 its own flow fields; a group of boats and walkers ordered somewhere goes
@@ -224,8 +232,11 @@ wet map types, a tile or more from the shore and within six of it.
 The warships: the Archer Ship (Tool Age, 100W 20G, 110 HP, 5 pierce at
 range 5), the War Galley (Bronze, 130W 50G, 200 HP, 9 pierce at 6) and
 the Catapult Ship (Iron, 160W 100G, 180 HP, 45 siege at 9 with a blast,
-two population). Transports, trade boats and the Islands map are to
-come.
+two population). The Transport (Tool Age, 75W, 150 HP) holds ten. The
+Trade Boat (Bronze, 100W, 100 HP) takes 20 wood a trip and brings home
+10 gold and three quarters of a gold for each tile between the market
+and its side's nearest Dock. A right-click on land with a loaded
+transport sails it there to unload; ALL ASHORE unloads where it lies.
 
 ---
 
@@ -335,16 +346,17 @@ being killed. This one change removes most of the original's cruelty.
 - **Random map types for the full game:** Inland, Coastal, Continental,
   Highland, Islands, Narrows, Oasis. **Slice ships Inland only.**
 
-  **As built** (2026-10-04): all but Islands, chosen on the setup screen.
+  **As built** (2026-10-04): all seven, chosen on the setup screen.
   Highland is hillier, its mines richer and its forests thinner; Oasis is
   desert round a lake in the middle with six groves of palms on its shore;
   Coastal has a sea down one side, the starts moved away from it; Continental
   is a round land in a sea; Narrows is a river through the middle, between
   the starts, crossed at three fords that are kept clear of forest. No
   water lies within 14 tiles of a start, and every start's kit is the
-  same. Until there are ships (naval, below) water is only in the way:
-  nothing crosses or stands in it, and nobody fishes. Islands needs ships
-  to be played at all, and waits for them.
+  same. Islands puts every start on an island of its own on a ring two
+  fifths of the map out, a channel of sea cut between every two however
+  many players there are; only boats cross (`docs/07` D33). Boats sail
+  every wet map (§5.6).
 - **[GD-MAP-01]** Map generation is seeded and deterministic: the same seed always produces the
   same map, and starting positions are balanced (equal resources within a
   tolerance, verified by the generator before it returns).

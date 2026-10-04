@@ -1769,6 +1769,30 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
             }
             c
         }
+        kinds::TRANSPORT | kinds::TRADE_BOAT => {
+            // A broad hull with a sail of the player colour: open benches
+            // for a transport, bales of goods for a trade boat.
+            let mut c = Canvas::new(60, 52, (30, 42));
+            c.ellipse(30.0, 43.0, 25.0, 8.0, SHADOW);
+            c.ellipse(30.0 + dx * 3.0, 37.0, 23.0, 9.0, BLACK);
+            c.ellipse(30.0 + dx * 3.0, 36.0, 22.0, 8.0, BROWN);
+            c.ellipse(30.0 + dx * 3.0, 34.0, 18.0, 4.0, BROWN_DARK);
+            c.rect(29, 6, 2, 28, BLACK);
+            c.rect(20, 8, 20, 13, BLACK);
+            c.rect(21, 9, 18, 11, P_BASE);
+            if kind == kinds::TRADE_BOAT {
+                for k in 0..3 {
+                    let x = 16 + k * 10;
+                    c.rect(x, 28, 8, 6, BLACK);
+                    c.rect(x + 1, 29, 6, 4, TAN);
+                }
+            } else {
+                for k in 0..4 {
+                    c.rect(14 + k * 9, 33, 6, 2, BROWN_DARK);
+                }
+            }
+            c
+        }
         kinds::FISH => {
             // Two fish under rippled water.
             let mut c = Canvas::new(32, 24, (16, 18));
@@ -2455,13 +2479,15 @@ mod tests {
     /// their models are rendered (`docs/10` §5). The list only shrinks.
     /// Kinds still drawn as placeholders. A new kind goes here until its
     /// set is rendered.
-    const AWAITING_ART: [KindId; 6] = [
+    const AWAITING_ART: [KindId; 8] = [
         kinds::DOCK,
         kinds::FISHING_BOAT,
         kinds::FISH,
         kinds::ARCHER_SHIP,
         kinds::WAR_GALLEY,
         kinds::CATAPULT_SHIP,
+        kinds::TRANSPORT,
+        kinds::TRADE_BOAT,
     ];
 
     #[test]

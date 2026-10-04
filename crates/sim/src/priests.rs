@@ -141,11 +141,18 @@ impl Simulation {
         self.world.move_target[t] = None;
         self.world.stance[t] = Stance::default_for(kind);
         self.world.queue_mut(t).clear();
-        // A priest turned brings its relic.
+        // A priest turned brings its relic, and a transport its passengers.
         let id = self.world.id_at(ts);
         if let Some(relic) = self.carried_relic(id) {
             if let Some(rs) = self.world.slot(relic) {
                 self.world.owner[rs.index()] = to;
+            }
+        }
+        for aboard in self.garrison_of(id) {
+            if let Some(ps) = self.world.slot(aboard) {
+                let p = ps.index();
+                self.world.owner[p] = to;
+                self.world.stance[p] = Stance::default_for(self.world.kind[p]);
             }
         }
         self.world.reload[i] = FAITH_TICKS;

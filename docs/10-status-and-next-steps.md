@@ -2085,6 +2085,36 @@ the trade boat, Islands and the opponent's use of all of it follow.
   and shore shoot each other; a clubman cannot fight a ship; a ship sent
   inland gives up; the Greek bonus.
 
+### Work record: naval, third part — transports, Islands and trade (2026-10-04)
+
+- **Transports** (`sim::transport`, `GD-NAVAL-03`): ten aboard. Boarding
+  is the garrison order on a moving carrier: the walker makes for the
+  land nearest the boat and waits (`board`), and the boat comes in to the
+  water nearest the party (`come_alongside`). Aboard, units ride where it
+  goes (`carry_passengers`, for boats only, so a carried relic is as it
+  was). `CommandKind::Unload` / `Order::Unload` sail to the water nearest
+  the place and put everyone ashore on the land beside it
+  (`put_ashore`); `Ungarrison` on a transport lands them only if land is
+  within three tiles. A transport that sinks or is scuttled drowns its
+  passengers; one converted brings them over.
+- **Islands** (`MapKind::Islands`): starts on a ring at 40% of the map
+  with ±2° jitter; each island as wide as half the gap to the nearest
+  start; a deep channel on the bisector between every two starts, no
+  nearer either than 12 tiles; a map where starts still connect is
+  rejected. Relics on any island (`place_relics_on`). The other map
+  types' starts and maps are unchanged.
+- **Trade** (`GD-NAVAL-04`): the Trade Boat, `CommandKind::Trade` and
+  `Order::Trade` — 20 wood out, `trade_gold(tiles)` = 10 + ¾ a tile home.
+- **App and HUD**: a right-click on land with a loaded transport
+  unloads there; a trade boat right-clicked onto another side's Dock
+  trades; the transport's ALL ASHORE (U); the Dock trains the transport
+  (H) and the trade boat (M); placeholders for both.
+- **Tests**: transports board, ride and land, nobody gets off at sea and
+  boats do not board, a sunk transport drowns its passengers; a trade
+  boat's two round trips and their gold, and no trade at home; every
+  island is its own and on the sea (up to eight players on the smallest
+  map); the app's two right-clicks.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the
@@ -2093,10 +2123,10 @@ detailed soldiers and the new roster are rendered (chunk 3);
 priests, relics and the Wonder are in (chunk 4) and the opponent uses
 them (chunk 5); five map types are in (chunk 6) and the eight
 civilizations (chunk 7); the opponent researches its technologies and
-builds Storehouses by its work; naval has begun with the water, the Dock
-and fishing (above). Next: warships, transports, the trade boat and
-Islands, the opponent at sea, the boats' art, then the other three
-architecture sets.
+builds Storehouses by its work; naval is in the simulation — the water,
+the Dock, fishing, warships, transports, trade and Islands (above).
+Next: the opponent at sea (fishing, warships, and transports on
+Islands), the boats' art, then the other three architecture sets.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded
