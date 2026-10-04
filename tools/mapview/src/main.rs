@@ -32,6 +32,8 @@ use view::{
 
 struct Args {
     seed: u64,
+    /// The map type (`--map coastal`).
+    map: sim::MapKind,
     size: u16,
     players: u8,
     ticks: u64,
@@ -111,6 +113,7 @@ fn parse() -> Result<Args, String> {
         screen: None,
         difficulty: None,
         keys: None,
+        map: sim::MapKind::Inland,
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -122,6 +125,12 @@ fn parse() -> Result<Args, String> {
         let num = |v: &str| v.parse::<f32>().map_err(|e| format!("{key}: {e}"));
         match key.as_str() {
             "--seed" => a.seed = val.parse().map_err(|e| format!("{key}: {e}"))?,
+            "--map" => {
+                a.map = sim::MapKind::PLAYABLE
+                    .into_iter()
+                    .find(|k| k.name().eq_ignore_ascii_case(val))
+                    .ok_or_else(|| format!("--map: no map called {val}"))?
+            }
             "--size" => a.size = val.parse().map_err(|e| format!("{key}: {e}"))?,
             "--players" => a.players = val.parse().map_err(|e| format!("{key}: {e}"))?,
             "--ticks" => {
@@ -283,7 +292,7 @@ fn run() -> Result<(), String> {
     }
     let config = sim::SimConfig {
         map: sim::MapSpec {
-            kind: sim::MapKind::Inland,
+            kind: a.map,
             size: a.size,
             players: a.players,
         },

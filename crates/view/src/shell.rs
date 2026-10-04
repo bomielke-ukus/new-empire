@@ -92,7 +92,7 @@ impl MapSize {
 /// A setting on the setup screen.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Field {
-    /// The map generator. One in the slice; the rest come with M8.
+    /// The map type.
     Map,
     /// Tiles per side.
     Size,
@@ -181,7 +181,7 @@ impl Setup {
     /// their bounds.
     pub fn adjust(&mut self, field: Field, delta: i32) {
         match field {
-            Field::Map => {}
+            Field::Map => self.kind = cycle(&MapKind::PLAYABLE, self.kind, delta),
             Field::Size => self.size = cycle(&MapSize::ALL, self.size, delta),
             Field::Opponents => {
                 let n = (self.opponents.len() as i32 + delta).clamp(1, MAX_OPPONENTS as i32);
@@ -614,8 +614,8 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
         "MAP",
         &kind_name(setup.kind),
         Field::Map,
-        false,
-        "MORE MAPS IN M8",
+        true,
+        "",
         None,
     );
     row(
@@ -745,10 +745,7 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
 
 /// The map generator's name for the setup screen.
 fn kind_name(kind: MapKind) -> String {
-    match kind {
-        MapKind::Flat => "FLAT".to_string(),
-        MapKind::Inland => "INLAND".to_string(),
-    }
+    kind.name().to_uppercase()
 }
 
 /// The settings screen's second page (`GD-A11Y-02`): every letter the
@@ -1364,8 +1361,8 @@ mod tests {
             assert!(find(&plain, ShellAction::Adjust(field, 1)).enabled);
         }
         assert!(
-            !find(&plain, ShellAction::Adjust(Field::Map, 1)).enabled,
-            "one map kind in the slice"
+            find(&plain, ShellAction::Adjust(Field::Map, 1)).enabled,
+            "the map types are chosen here"
         );
         assert!(find(&plain, ShellAction::Start).enabled);
         assert!(find(&plain, ShellAction::Back).enabled);

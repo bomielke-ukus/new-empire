@@ -307,6 +307,17 @@ being killed. This one change removes most of the original's cruelty.
 - **Map sizes:** Tiny 96², Small 128², Medium 168², Large 200², Giant 240².
 - **Random map types for the full game:** Inland, Coastal, Continental,
   Highland, Islands, Narrows, Oasis. **Slice ships Inland only.**
+
+  **As built** (2026-10-04): all but Islands, chosen on the setup screen.
+  Highland is hillier, its mines richer and its forests thinner; Oasis is
+  desert round a lake in the middle with six groves of palms on its shore;
+  Coastal has a sea down one side, the starts moved away from it; Continental
+  is a round land in a sea; Narrows is a river through the middle, between
+  the starts, crossed at three fords that are kept clear of forest. No
+  water lies within 14 tiles of a start, and every start's kit is the
+  same. Until there are ships (naval, below) water is only in the way:
+  nothing crosses or stands in it, and nobody fishes. Islands needs ships
+  to be played at all, and waits for them.
 - **[GD-MAP-01]** Map generation is seeded and deterministic: the same seed always produces the
   same map, and starting positions are balanced (equal resources within a
   tolerance, verified by the generator before it returns).

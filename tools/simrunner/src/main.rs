@@ -11,7 +11,7 @@
 //! simrunner matrix [--out FILE]
 //! simrunner battle [--save FILE]
 //! simrunner balance [--matches N] [--seed N] [--dump DIR]
-//! simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--stats] [--save FILE]
+//! simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--map KIND] [--stats] [--save FILE]
 //!                  [--difficulty easy,standard,hard,hardest] (one per player, repeating)
 //! simrunner versus [--matches N] [--seed N] [--ticks N] [--size N] [--difficulty hard,easy]
 //!                  [--expect FILE] [--update] [--min-wins N] (the RM-M5-01 acceptance)
@@ -51,6 +51,7 @@ struct Flags {
     timeout: Option<u64>,
     save: Option<String>,
     difficulty: Option<String>,
+    map: Option<String>,
     expect: Option<String>,
     min_wins: Option<u32>,
     out: Option<String>,
@@ -107,6 +108,7 @@ fn parse(args: &[String]) -> Result<Flags, String> {
             }
             "--save" => f.save = Some(value(&mut f)?),
             "--difficulty" => f.difficulty = Some(value(&mut f)?),
+            "--map" => f.map = Some(value(&mut f)?),
             "--expect" => f.expect = Some(value(&mut f)?),
             "--min-wins" => {
                 let v = value(&mut f)?;
@@ -892,7 +894,7 @@ fn usage(err: &str) -> ExitCode {
     eprintln!("  simrunner matrix [--out FILE]");
     eprintln!("  simrunner battle [--save FILE]");
     eprintln!("  simrunner balance [--matches N] [--seed N] [--dump DIR]");
-    eprintln!("  simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--stats] [--save FILE]");
+    eprintln!("  simrunner ai     [--matches N] [--seed N] [--ticks N] [--players N] [--size N] [--map KIND] [--stats] [--save FILE]");
     eprintln!(
         "                   [--difficulty easy,standard,hard,hardest] (one per player, repeating)"
     );
@@ -938,12 +940,22 @@ fn ai(f: &Flags) -> ExitCode {
     if first.checked_add(u64::from(matches) - 1).is_none() {
         return usage("seed range overflows");
     }
+    let kind = match &f.map {
+        None => sim::MapKind::Inland,
+        Some(name) => match sim::MapKind::PLAYABLE
+            .into_iter()
+            .find(|k| k.name().eq_ignore_ascii_case(name))
+        {
+            Some(k) => k,
+            None => return usage(&format!("--map: no map called {name}")),
+        },
+    };
     let start = Instant::now();
     for n in 0..matches {
         let seed = first + u64::from(n);
         let config = SimConfig {
             map: sim::MapSpec {
-                kind: sim::MapKind::Inland,
+                kind,
                 size,
                 players,
             },

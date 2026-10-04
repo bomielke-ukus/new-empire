@@ -275,8 +275,9 @@ people.
 
 Under way (2026-10-04): the Bronze and Iron Ages' soldiers are in the
 simulation and the opponent fields them; priests, relics and the Wonder
-and Relic victories are in; cheat codes are in (`docs/10`). Still to come:
-the civilizations, the other map types and naval.
+and Relic victories are in; cheat codes are in; five of the six other map
+types are in (`docs/10`). Still to come: the civilizations, naval, and
+Islands with it.
 
 - Iron Age and its full unit and tech roster
 - All 8 civilizations with bonuses and tech-tree denials

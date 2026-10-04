@@ -1871,14 +1871,46 @@ relics the second needs (`docs/07` D31, answering Q2).
   beats Easy 20 of 20; the six records long enough for a Temple are
   rewritten. It still builds no Wonder of its own.
 
+### Work record: M8 chunk 6 — the map types (2026-10-04)
+
+`docs/02` §9's map types, all but Islands, which needs ships. The setup
+screen's MAP row now turns through Inland, Highland, Oasis, Coastal,
+Continental and Narrows; `mapview --map` and `simrunner ai --map` take
+them too.
+
+- **How they are made.** Inland's own generator is untouched, so every
+  Inland map and the corpus are as they were. The others share its
+  pieces: Highland steps the ground up at lower noise (36/48/60 against
+  50/64/78), with 160% of the mines and 70% of the forests away from the
+  starts; Oasis paints desert first, pours a lake in the middle, and
+  grows six groves round it, with 35% of the other forests. The water of
+  Coastal (a sea 22% deep down a side the seed picks, the starts' ring
+  moved off it and smaller), Continental (a round land, 40% of the map
+  across, in a sea) and Narrows (a river seven tiles wide through the
+  middle, half-way between the first two starts' bearings so they fall on
+  either shore, crossed at three fords that no forest may grow across)
+  is a noise-bent depth: three tiles in is deep, one or two shallow, and
+  two of sand along its edge. Water lies at the lowest level and blocks
+  everything. None lies within 14 tiles of a start.
+- **Relics** go in last as on Inland, but on a map with too little open
+  ground for five at the full distances (Continental with eight sides)
+  they are placed closer to the starts and each other, down to half.
+- **Checked.** Every type, six seeds each, at two players on 96 tiles,
+  four on 128 and eight on 168: every start has its kit on dry land, the
+  map validates in at most six attempts, and has its relics; the water
+  maps have water and the others none; the Narrows has starts on both
+  shores. Hard against Standard plays every type for 25 minutes.
+- **Not yet.** Islands, and anything on water: docks, fishing, ships.
+  The palms are the ordinary trees.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the
 detailed soldiers and the new roster's models are rendering (chunk 3);
-priests, relics and the Wonder are in (chunk 4, above). Next: the
-opponent's use of priests, relics and the Wonder, then the civilizations,
-the map types and naval.
+priests, relics and the Wonder are in (chunk 4) and the opponent uses
+them (chunk 5); five map types are in (chunk 6, above). Next: the
+civilizations, then naval and Islands.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded
