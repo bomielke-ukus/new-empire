@@ -293,3 +293,38 @@ fn a_match_with_civilizations_replays() {
     run(&mut sim, 10);
     sim.replay().verify().expect("replays");
 }
+
+/// A unit converted to a side whose kind has fewer hit points keeps no
+/// more than that side's full health.
+#[test]
+fn a_converted_unit_has_no_more_than_its_new_sides_health() {
+    let mut sim = arena([Civ::Egyptians, Civ::Greeks]);
+    let chariot = put(&mut sim, 0, kinds::CHARIOT_ARCHER, 14, 10);
+    sim.issue(Command {
+        player: 0,
+        kind: CommandKind::SetStance {
+            ids: vec![chariot],
+            stance: Stance::Passive,
+        },
+    });
+    run(&mut sim, 3);
+    let base = kinds::info(kinds::CHARIOT_ARCHER).max_health;
+    assert_eq!(hp(&sim, chariot), Fx::from_int(base * 133 / 100));
+    let priest = put(&mut sim, 1, kinds::PRIEST, 10, 10);
+    sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Attack {
+            ids: vec![priest],
+            target: chariot,
+        },
+    });
+    for _ in 0..400 {
+        sim.step();
+        if sim.world().owner[index_of(&sim, chariot)] == 1 {
+            break;
+        }
+    }
+    assert_eq!(sim.world().owner[index_of(&sim, chariot)], 1);
+    assert_eq!(hp(&sim, chariot), Fx::from_int(base));
+    sim.check().unwrap();
+}

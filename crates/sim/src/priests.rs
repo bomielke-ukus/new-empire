@@ -131,6 +131,11 @@ impl Simulation {
         let from = self.world.owner[t];
         let kind = self.world.kind[t];
         self.world.owner[t] = to;
+        // No more health than its new side's kind has (`docs/02` §11).
+        let full = Fx::from_int(self.max_health_of(to, kind));
+        if self.world.health[t] > full {
+            self.world.health[t] = full;
+        }
         self.world.order[t] = Order::Idle;
         self.world.nav[t] = None;
         self.world.move_target[t] = None;
