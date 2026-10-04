@@ -450,6 +450,13 @@ Storehouse by the trees or the mine once a third of their gatherers walk more
 than eight tiles to drop off, moves gatherers from a resource piled past 1000 to
 one running short, and saves for the next age after ten minutes in an age
 whatever its army. Hard saves for a Wonder after ten minutes in the Iron Age.
+At sea (`crate::navy`): with fish or an enemy over the water near home, it
+builds a Dock on open sea where its villagers can walk to build it, keeps
+fishing boats (Easy 2, Standard 4, Hard 6), keeps warships (Standard 2, Hard 4)
+when the enemy is at sea or over the water, and looks for an enemy it has not
+found with a ship along the edge of the water it has seen. Standard and Hard
+carry the army over in transports once it has gathered, when the enemy cannot
+be walked to, and land it on the shore nearest the enemy's Town Center.
 
 ---
 

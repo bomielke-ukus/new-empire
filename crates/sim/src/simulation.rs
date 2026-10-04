@@ -1669,6 +1669,39 @@ impl Simulation {
         self.water = water;
     }
 
+    /// Where a boat trained at the building anchored at `(ax, ay)` comes
+    /// out: the nearest open water beside it in the largest body of water
+    /// there, so a cove shut off by the land is passed over for the sea.
+    fn boat_exit(&self, ax: i32, ay: i32, fp: i32) -> Option<Tile> {
+        let reach = fp / 2 + 3;
+        let near: Vec<Tile> = (-reach..=reach)
+            .flat_map(|dy| (-reach..=reach).map(move |dx| (ax + dx, ay + dy)))
+            .filter(|&(x, y)| self.water.passable(x, y))
+            .collect();
+        let labels: std::collections::BTreeSet<u16> = near
+            .iter()
+            .map(|&(x, y)| self.water.component(x, y))
+            .collect();
+        let mut sizes: std::collections::BTreeMap<u16, u32> =
+            labels.iter().map(|&l| (l, 0)).collect();
+        if sizes.len() > 1 {
+            for y in 0..self.water.height() {
+                for x in 0..self.water.width() {
+                    if let Some(n) = sizes.get_mut(&self.water.component(x, y)) {
+                        *n += 1;
+                    }
+                }
+            }
+        }
+        let sea = sizes
+            .iter()
+            .max_by_key(|(l, n)| (**n, core::cmp::Reverse(**l)))
+            .map(|(l, _)| *l)?;
+        near.into_iter()
+            .filter(|&(x, y)| self.water.component(x, y) == sea)
+            .min_by_key(|&(x, y)| ((x - ax).pow(2) + (y - ay).pow(2), y, x))
+    }
+
     /// Whether the thing in slot `i` is of the water: a boat, a Dock, fish.
     pub(crate) fn naval(&self, i: usize) -> bool {
         kinds::info(self.world.kind[i]).naval
@@ -3613,7 +3646,7 @@ impl Simulation {
             let fp = kinds::info(self.world.kind[i]).footprint as i32;
             let (ax, ay) = nav::anchor_tile(self.world.pos[i], fp);
             let exit = if info.naval {
-                self.water.nearest_passable(ax, ay, fp / 2 + 3, None)
+                self.boat_exit(ax, ay, fp)
             } else {
                 self.nav.nearest_passable(ax, ay + fp / 2 + 1, 4, None)
             };

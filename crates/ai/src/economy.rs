@@ -67,6 +67,18 @@ pub struct BuildOrder {
     /// before reads no.
     #[serde(default)]
     pub research: bool,
+    /// Fishing boats kept while there are fish near home; none keeps the
+    /// side off the water altogether (`crate::navy`). A save from before
+    /// reads none.
+    #[serde(default)]
+    pub fishers: u32,
+    /// Warships kept when the enemy is over the water or at sea.
+    #[serde(default)]
+    pub warships: u32,
+    /// Whether it carries its army over the water to an enemy it cannot
+    /// walk to.
+    #[serde(default)]
+    pub ferries: bool,
 }
 
 fn standard_hunters() -> u32 {
@@ -145,6 +157,9 @@ impl BuildOrder {
                 priests: 0,
                 wonder: false,
                 research: false,
+                fishers: 2,
+                warships: 0,
+                ferries: false,
             },
             Difficulty::Standard => BuildOrder {
                 villagers: [8, 16, 22, 26],
@@ -169,6 +184,9 @@ impl BuildOrder {
                 priests: 2,
                 wonder: false,
                 research: true,
+                fishers: 4,
+                warships: 2,
+                ferries: true,
             },
             Difficulty::Hard | Difficulty::Hardest => BuildOrder {
                 villagers: [10, 20, 28, 32],
@@ -192,6 +210,9 @@ impl BuildOrder {
                 priests: 3,
                 wonder: true,
                 research: true,
+                fishers: 6,
+                warships: 4,
+                ferries: true,
             },
         }
     }

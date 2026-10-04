@@ -393,6 +393,17 @@ impl<'a> FoggedView<'a> {
         self.sim.can_build(self.player, kind)
     }
 
+    /// How many of the player's units are aboard `boat`, one of theirs;
+    /// none for anyone else's.
+    pub fn aboard(&self, boat: EntityId) -> usize {
+        match self.sim.world().slot(boat) {
+            Some(s) if self.sim.world().owner[s.index()] == self.player => {
+                self.sim.garrison_of(boat).len()
+            }
+            _ => 0,
+        }
+    }
+
     /// Whether the player could place `kind` anchored at a tile they have
     /// explored. Ground never seen answers as blocked: nothing is known
     /// of it.

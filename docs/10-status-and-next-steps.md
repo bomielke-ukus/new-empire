@@ -2115,6 +2115,38 @@ the trade boat, Islands and the opponent's use of all of it follow.
   island is its own and on the sea (up to eight players on the smallest
   map); the app's two right-clicks.
 
+### Work record: naval, fourth part — the opponent at sea (2026-10-04)
+
+- **`ai::navy`.** A Dock once the Stone Age's buildings stand, where
+  there is water near home worth one (fish, or an enemy over the water):
+  the nearest site the opponent may place, with land beside it that it
+  knows is open and joined to home (a sandbar or a tree-locked strip
+  will not do) and water beside it that is open sea, not a pond.
+  Fishing boats on the fish it knows of; warships when the enemy is at
+  sea or over the water, the best the age allows; one to find an enemy
+  not yet found by sailing to the edge of the water seen.
+- **The ferry.** When the enemy (its Town Center, or the nearest enemy
+  building known) cannot be walked to over the land the opponent has
+  seen, and it has a Dock, the army waits at home instead of walking to
+  the shore; the navy spends before the army; transports are trained,
+  the gathered army boards, sails to the shore nearest the enemy and is
+  put ashore, and the army manager takes it from there. Whoever misses
+  the boat stands down for the next one.
+- **In the simulation**, two fixes the opponent found: a boat trained at
+  a Dock comes out onto the largest water beside it (a Dock against a
+  cove trained boats into a two-tile pocket); `Military` keeps warships
+  and transports out of the land army, and ALL OUT leaves transports'
+  passengers aboard.
+- **Results.** On Islands, Hard beats Easy inside an hour (seed 1 in the
+  test); in Hard against Hard both sides land waves of 10 to 19 soldiers
+  every few minutes from about twenty minutes in. Inland play is
+  unchanged: the Hard-against-Easy record still matches.
+- **Tests** (`tools/simrunner/tests/ai_navy.rs`): Standard fishes on
+  Islands; Hard carries its army across and wins.
+- **Not yet.** The opponent does not trade, does not escort its
+  transports, and lands only near the enemy's Town Center. On Coastal
+  maps whose sea is far from its start it builds no Dock.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the
@@ -2125,8 +2157,8 @@ them (chunk 5); five map types are in (chunk 6) and the eight
 civilizations (chunk 7); the opponent researches its technologies and
 builds Storehouses by its work; naval is in the simulation — the water,
 the Dock, fishing, warships, transports, trade and Islands (above).
-Next: the opponent at sea (fishing, warships, and transports on
-Islands), the boats' art, then the other three architecture sets.
+The opponent goes to sea (above). Next: the boats' art, then the other
+three architecture sets.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded

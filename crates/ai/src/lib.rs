@@ -8,13 +8,14 @@
 //! (`TA-AI-01`).
 //!
 //! The economy manager and the build orders are in [`economy`], the
-//! military manager in [`military`], the technologies in [`research`] and
-//! the priests in [`temple`].
+//! military manager in [`military`], the technologies in [`research`], the
+//! boats in [`navy`] and the priests in [`temple`].
 
 #![warn(missing_docs)]
 
 pub mod economy;
 pub mod military;
+pub mod navy;
 pub mod research;
 pub mod temple;
 
@@ -80,6 +81,9 @@ pub struct Opponent {
     economy: Economy,
     /// The military manager.
     military: Military,
+    /// The navy (`navy`). A save from before reads an idle one.
+    #[serde(default)]
+    navy: navy::Navy,
 }
 
 impl Opponent {
@@ -95,6 +99,7 @@ impl Opponent {
             order: BuildOrder::for_difficulty(difficulty),
             economy: Economy::default(),
             military: Military::default(),
+            navy: navy::Navy::default(),
         }
     }
 
@@ -149,12 +154,21 @@ impl Opponent {
         if !army_first {
             kinds.extend(research::think(view, &self.order, &mut stock));
         }
+        // An enemy over the water waits for the navy to carry the army,
+        // and the navy's boats come before more soldiers.
+        let by_land = self.navy.by_land(view) || !self.navy.has_dock(view);
+        if !by_land {
+            kinds.extend(self.navy.think(view, &self.order, &mut stock));
+        }
         kinds.extend(
             self.military
-                .think(view, &self.order, &mut self.rng, &mut stock),
+                .think(view, &self.order, &mut self.rng, &mut stock, by_land),
         );
         if army_first {
             kinds.extend(research::think(view, &self.order, &mut stock));
+        }
+        if by_land {
+            kinds.extend(self.navy.think(view, &self.order, &mut stock));
         }
         kinds.extend(temple::think(
             view,
