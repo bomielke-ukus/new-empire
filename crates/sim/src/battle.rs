@@ -349,6 +349,17 @@ impl Simulation {
         Fx::from_int(combat::range_of(k, &self.modifiers(self.world.owner[i]))) + REACH
     }
 
+    /// Whether `i` could ever hit `j`: anything on its own element, and a
+    /// unit across the shore only with a weapon that reaches over the
+    /// water (`docs/07` D33). A building is hit from beside it, whatever it
+    /// stands in.
+    pub(crate) fn reaches(&self, i: usize, j: usize) -> bool {
+        let target = kinds::info(self.world.kind[j]);
+        !target.mobile
+            || self.naval(i) == target.naval
+            || kinds::info(self.world.kind[i]).combat.range > 0
+    }
+
     /// True if `i` can hit `target` from where it stands.
     fn in_range(&self, i: usize, target: Slot) -> bool {
         let reach = self.reach_of(i);
@@ -382,7 +393,7 @@ impl Simulation {
                 return;
             }
             let k = kinds::info(self.world.kind[j]);
-            if k.mobile == buildings || k.class == kinds::Class::Other {
+            if k.mobile == buildings || k.class == kinds::Class::Other || !self.reaches(i, j) {
                 return;
             }
             let d = pos.distance_sq_raw(self.world.pos[j]);
@@ -516,6 +527,17 @@ impl Simulation {
         // Walk toward it, re-aiming when it has moved a tile or the trip
         // has ended short.
         let arrive = (self.reach_of(i) - Fx::HALF).max(Fx::HALF);
+        // Across the shore, a walk that ended short of where it was sent
+        // ended as near as this unit's element goes: out of reach is out
+        // of the fight.
+        let cut_off = matches!(
+            &self.world.nav[i],
+            Some(n) if n.state == NavState::Arrived && n.goal.distance(tpos) > arrive + Fx::ONE
+        );
+        if cut_off && self.naval(i) != self.naval(ts.index()) {
+            self.finish_fight(i, then);
+            return;
+        }
         let stale = match &self.world.nav[i] {
             None => true,
             Some(n) => {

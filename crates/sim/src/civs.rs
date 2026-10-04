@@ -4,9 +4,9 @@
 //! configuration ([`crate::SimConfig::civs`]); a match that names none
 //! plays every side as it played before there were any.
 //!
-//! The spec's table names a few things the game does not have yet: ships,
-//! guard towers, a priest's second tier. Those bonuses and denials wait
-//! for them; D32 says where each of the rest landed.
+//! The spec's table names a few things the game does not have yet: guard
+//! towers, a priest's second tier. Those bonuses and denials wait for
+//! them; D32 says where each of the rest landed, and D33 the ships.
 
 use crate::entity::KindId;
 use crate::kinds::{self, Resource};
@@ -105,6 +105,12 @@ const ARCHERS: &[KindId] = &[
     kinds::HORSE_ARCHER,
 ];
 const SIEGE: &[KindId] = &[kinds::STONE_THROWER, kinds::CATAPULT, kinds::BALLISTA];
+const SHIPS: &[KindId] = &[
+    kinds::FISHING_BOAT,
+    kinds::ARCHER_SHIP,
+    kinds::WAR_GALLEY,
+    kinds::CATAPULT_SHIP,
+];
 
 const TABLE: [CivInfo; 8] = [
     CivInfo {
@@ -132,8 +138,9 @@ const TABLE: [CivInfo; 8] = [
         bonuses: &[
             Bonus::Speed(&[kinds::HOPLITE, kinds::LEGIONARY], 25),
             Bonus::Early(tech::LEGION, Age::Bronze),
+            Bonus::Speed(SHIPS, 30),
         ],
-        about: "HOPLITES +25% SPEED, LEGION IN THE BRONZE AGE",
+        about: "HOPLITES +25% SPEED, LEGION IN BRONZE, SHIPS +30% SPEED",
         denied: &[kinds::CHARIOT_ARCHER, kinds::HORSE_ARCHER],
         denied_techs: &[],
     },

@@ -394,7 +394,7 @@ names one of them waits for it; the rest are read onto what exists:
 | Civ | Bonuses as built | Denied as built |
 |---|---|---|
 | Egyptians | Gold +20%; Chariot Archers +33% HP; priests convert from 2 tiles further | the Academy, Hoplite and Legionary (the Legion), Heavy Cavalry |
-| Greeks | Hoplites and Legionaries +25% speed; the Legion upgrade from the Bronze Age (the spec's "hoplites in Bronze" is every side's already); ships +30% waits for ships | Chariot Archer, Horse Archer |
+| Greeks | Hoplites and Legionaries +25% speed; the Legion upgrade from the Bronze Age (the spec's "hoplites in Bronze" is every side's already); ships +30% speed (since D33) | Chariot Archer, Horse Archer |
 | Assyrians | Villagers +10% speed; Slingers, Bowmen, Chariot and Horse Archers strike 20% more often | the Legion upgrade ("heavy infantry upgrades") |
 | Babylonians | Walls, the gate and towers +60% HP; stone +20% | Heavy Cavalry ("cavalry upgrades"); Torsion and the Catapult ("siege workshop tier 2") |
 | Persians | Hunting +30%; War Elephants +50% speed | Ballista; guard towers wait for them |
@@ -438,8 +438,15 @@ names them yet, so the per-class technology tables keep their eight
 entries and a ship's is none; old saves and hashes keep their shape.
 
 The warships the spec leaves unnamed are three, one an age from the
-Tool Age (the owner agreed): an archer ship, a war galley, a catapult
-ship. They, the transport, the trade boat and the Islands map follow.
+Tool Age (the owner agreed): the Archer Ship, the War Galley and the
+Catapult Ship, trained at the Dock. They fight across the shore with
+what reaches over the water: a melee unit never takes a unit of the
+other element as a target, given the order or not, and a unit sent
+after one across the shore that has gone as near as its element allows
+and is still out of reach gives up (`GD-NAVAL-02`). A building is hit
+from beside it, so hand weapons can still burn a Dock. The Greeks'
+ships are 30% faster. The transport, the trade boat and the Islands map
+follow.
 
 ## Open questions
 

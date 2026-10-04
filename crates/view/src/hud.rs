@@ -702,6 +702,9 @@ fn train_hotkey(kind: KindId) -> char {
         kinds::BALLISTA => 'B',
         kinds::PRIEST => 'P',
         kinds::FISHING_BOAT => 'F',
+        kinds::ARCHER_SHIP => 'B',
+        kinds::WAR_GALLEY => 'G',
+        kinds::CATAPULT_SHIP => 'O',
         _ => 'N',
     }
 }
@@ -716,6 +719,7 @@ fn unit_label(kind: KindId) -> String {
         kinds::WAR_ELEPHANT => "ELEPHANT".to_string(),
         kinds::STONE_THROWER => "THROWER".to_string(),
         kinds::FISHING_BOAT => "FISHER".to_string(),
+        kinds::CATAPULT_SHIP => "CAT. SHIP".to_string(),
         other => kinds::info(other).name.to_uppercase(),
     }
 }

@@ -371,9 +371,15 @@ mod tests {
         assert!(hits_friends(DamageType::Siege));
         assert!(!hits_friends(DamageType::Melee));
         assert!(!hits_friends(DamageType::Pierce));
+        // Siege engines fire it, and the Catapult Ship, a siege engine on
+        // a hull (`docs/07` D33).
         for k in kinds::all() {
             if k.combat.damage == DamageType::Siege {
-                assert_eq!(k.class, Class::Siege, "{}: only siege fires siege", k.name);
+                assert!(
+                    matches!(k.class, Class::Siege | Class::Ship),
+                    "{}: only siege fires siege",
+                    k.name
+                );
             }
         }
     }

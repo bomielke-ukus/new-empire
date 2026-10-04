@@ -1893,7 +1893,9 @@ impl Simulation {
                             }
                             continue;
                         }
-                        if kinds::info(self.world.kind[i]).combat.attack == 0 {
+                        if kinds::info(self.world.kind[i]).combat.attack == 0
+                            || !self.reaches(i, ts.index())
+                        {
                             continue;
                         }
                         let then = if hunt && self.world.kind[i] == kinds::VILLAGER {

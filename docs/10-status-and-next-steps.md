@@ -2067,6 +2067,24 @@ the trade boat, Islands and the opponent's use of all of it follow.
 - **Not yet.** Warships, transports, trade, Islands; the opponent builds
   no Dock. On Coastal the sea can lie sixty tiles from a start.
 
+### Work record: naval, second part — warships (2026-10-04)
+
+- **Three warships** at the Dock (`docs/02` §5.6): the Archer Ship (Tool
+  Age), the War Galley (Bronze) and the Catapult Ship (Iron, two
+  population, a blast like the Catapult's).
+- **Across the shore** (`Simulation::reaches`): a unit is a target for
+  another on the other element only if the attacker's weapon reaches
+  over the water, so a clubman neither takes a ship for a target nor
+  obeys an order to attack one; ships, archers, towers and siege shoot
+  across. A chase across the shore that arrived as near as its element
+  goes, out of reach, ends the fight instead of waiting at the edge.
+- **The Greeks' ships** are 30% faster (D32's last waiting bonus but the
+  guard towers and the priests' tier).
+- **HUD**: the Dock trains on F, B, G and O; placeholders for the three.
+- **Tests** (`GD-NAVAL-02`): an Archer Ship sinks a fishing boat; ship
+  and shore shoot each other; a clubman cannot fight a ship; a ship sent
+  inland gives up; the Greek bonus.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the

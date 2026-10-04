@@ -89,6 +89,12 @@ pub const BALLISTA: KindId = 39;
 pub const PRIEST: KindId = 40;
 /// A fishing boat: gathers fish from the water (`docs/02` §5.1).
 pub const FISHING_BOAT: KindId = 50;
+/// The Tool Age's warship: archers on a light hull (`docs/07` D33).
+pub const ARCHER_SHIP: KindId = 53;
+/// The Bronze Age's warship: a war galley, more archers, more hull.
+pub const WAR_GALLEY: KindId = 54;
+/// The Iron Age's warship: a catapult on a heavy hull, for the shore.
+pub const CATAPULT_SHIP: KindId = 55;
 
 /// Wood to reseed a farm.
 pub const FARM_RESEED_COST: Cost = [0, 60, 0, 0];
@@ -704,6 +710,47 @@ const TABLE: &[KindInfo] = &[
         naval: true,
         ..unit(FISHING_BOAT, "Fishing Boat", 45, 13, [0, 50, 0, 0], 30)
     },
+    // The warships (`docs/07` D33): archers that shoot over the water at
+    // anything in reach, ashore or afloat, and a catapult for the shore.
+    KindInfo {
+        age: Age::Tool,
+        class: Class::Ship,
+        combat: Combat {
+            line_of_sight: 7,
+            ..ranged(5, 5, 3)
+        },
+        trained_at: Some(DOCK),
+        naval: true,
+        ..unit(ARCHER_SHIP, "Archer Ship", 110, 16, [0, 100, 0, 20], 35)
+    },
+    KindInfo {
+        age: Age::Bronze,
+        class: Class::Ship,
+        combat: Combat {
+            melee_armour: 1,
+            line_of_sight: 8,
+            ..ranged(9, 6, 4)
+        },
+        trained_at: Some(DOCK),
+        naval: true,
+        ..unit(WAR_GALLEY, "War Galley", 200, 16, [0, 130, 0, 50], 45)
+    },
+    KindInfo {
+        age: Age::Iron,
+        class: Class::Ship,
+        pop_cost: 2,
+        combat: thrown(45, 9, 100, 10),
+        trained_at: Some(DOCK),
+        naval: true,
+        ..unit(
+            CATAPULT_SHIP,
+            "Catapult Ship",
+            180,
+            12,
+            [0, 160, 0, 100],
+            60,
+        )
+    },
     KindInfo {
         pop_provided: 5,
         dropoff: true,
@@ -988,7 +1035,7 @@ mod tests {
         assert_eq!(trained_at(SIEGE_WORKSHOP).count(), 3);
         assert_eq!(trained_at(TEMPLE).count(), 1);
         assert_eq!(trained_at(TOWN_CENTER).count(), 1);
-        assert_eq!(trained_at(DOCK).count(), 1);
+        assert_eq!(trained_at(DOCK).count(), 4);
         // A boat is of the water and so is where it is trained; nothing
         // of the water lives on land.
         for k in all() {

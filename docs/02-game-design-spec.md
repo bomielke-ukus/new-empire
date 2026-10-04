@@ -208,6 +208,11 @@ runs home like a villager. A priest can convert a priest.
   beside it, and trains the boats onto the water beside it. Fish lie in
   the water; only a fishing boat gathers them, and it brings its catch to
   a Dock, which takes nothing from the land.
+- **[GD-NAVAL-02]** Warships fight across the shore with what reaches over
+  the water: a warship shoots at boats and at anything on land in its
+  range, and archers, towers and siege on land shoot back. Hand weapons
+  cannot fight a ship, and nothing waits at the water's edge for a target
+  it cannot reach.
 
 **As built** (2026-10-04, `docs/07` D33): the water is its own grid with
 its own flow fields; a group of boats and walkers ordered somewhere goes
@@ -216,7 +221,11 @@ beside it and water beside it. A fishing boat holds 15 (a villager 10),
 gathers at the villager's rate and is trained in 30 seconds for 50 wood.
 Fish hold 350 food: about one for every seventy tiles of water on the
 wet map types, a tile or more from the shore and within six of it.
-Warships, transports, trade boats and the Islands map are to come.
+The warships: the Archer Ship (Tool Age, 100W 20G, 110 HP, 5 pierce at
+range 5), the War Galley (Bronze, 130W 50G, 200 HP, 9 pierce at 6) and
+the Catapult Ship (Iron, 160W 100G, 180 HP, 45 siege at 9 with a blast,
+two population). Transports, trade boats and the Islands map are to
+come.
 
 ---
 

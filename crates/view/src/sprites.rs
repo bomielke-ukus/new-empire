@@ -1745,6 +1745,30 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
             c.circle(18.0 - dx * 6.0, 28.0, 3.0, SKIN);
             c
         }
+        kinds::ARCHER_SHIP | kinds::WAR_GALLEY | kinds::CATAPULT_SHIP => {
+            // A long hull, a square sail of the player colour, and its
+            // weapon: a row of archers' heads, or a catapult's arm.
+            let big = kind != kinds::ARCHER_SHIP;
+            let (hw, w) = if big { (24.0, 64) } else { (19.0, 56) };
+            let cx = w as f32 / 2.0;
+            let mut c = Canvas::new(w, 56, (cx as i16, 46));
+            c.ellipse(cx, 47.0, hw + 2.0, 7.0, SHADOW);
+            c.ellipse(cx + dx * 3.0, 41.0, hw, 8.0, BLACK);
+            c.ellipse(cx + dx * 3.0, 40.0, hw - 1.0, 7.0, BROWN_DARK);
+            c.ellipse(cx + dx * 3.0, 38.0, hw - 4.0, 3.0, BROWN);
+            c.rect(cx as i32 - 1, 8, 2, 30, BLACK);
+            c.rect(cx as i32 - 10, 10, 20, 14, BLACK);
+            c.rect(cx as i32 - 9, 11, 18, 12, P_BASE);
+            if kind == kinds::CATAPULT_SHIP {
+                c.line((cx - 12.0, 36.0), (cx - 2.0, 24.0), 3.0, BLACK);
+                c.line((cx - 12.0, 36.0), (cx - 2.0, 24.0), 1.5, BROWN);
+            } else {
+                for k in 0..if big { 4 } else { 3 } {
+                    c.circle(cx - hw + 10.0 + k as f32 * 8.0, 34.0, 3.0, SKIN);
+                }
+            }
+            c
+        }
         kinds::FISH => {
             // Two fish under rippled water.
             let mut c = Canvas::new(32, 24, (16, 18));
@@ -2431,7 +2455,14 @@ mod tests {
     /// their models are rendered (`docs/10` §5). The list only shrinks.
     /// Kinds still drawn as placeholders. A new kind goes here until its
     /// set is rendered.
-    const AWAITING_ART: [KindId; 3] = [kinds::DOCK, kinds::FISHING_BOAT, kinds::FISH];
+    const AWAITING_ART: [KindId; 6] = [
+        kinds::DOCK,
+        kinds::FISHING_BOAT,
+        kinds::FISH,
+        kinds::ARCHER_SHIP,
+        kinds::WAR_GALLEY,
+        kinds::CATAPULT_SHIP,
+    ];
 
     #[test]
     fn a_set_named_for_an_age_draws_its_kind_in_that_age() {

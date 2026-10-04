@@ -306,3 +306,161 @@ fn a_match_with_boats_replays() {
     run(&mut sim, 2000);
     sim.replay().verify().expect("replays");
 }
+
+/// Open water `d` tiles out from land near player 0's coast, and the land
+/// tile it faces.
+fn offshore(sim: &Simulation, d: i32) -> ((i32, i32), (i32, i32)) {
+    let (x, y) = dock_site(sim);
+    let n = sim.map().width();
+    let mut best = None;
+    for ty in 0..n {
+        for tx in 0..n {
+            if !sim.water_grid().passable(tx, ty) {
+                continue;
+            }
+            // The nearest land, and whether it is exactly `d` out.
+            let land = (1..=d + 1).find_map(|r| {
+                (-r..=r)
+                    .flat_map(|dy| (-r..=r).map(move |dx| (dx, dy)))
+                    .filter(|&(dx, dy)| dx.abs().max(dy.abs()) == r)
+                    .map(|(dx, dy)| (tx + dx, ty + dy))
+                    .find(|&(lx, ly)| sim.nav().passable(lx, ly))
+                    .map(|l| (r, l))
+            });
+            if let Some((r, l)) = land {
+                if r == d {
+                    let k = (tx - x).pow(2) + (ty - y).pow(2);
+                    if best.is_none_or(|(bk, _, _)| k < bk) {
+                        best = Some((k, (tx, ty), l));
+                    }
+                }
+            }
+        }
+    }
+    let (_, sea, land) = best.expect("a coast");
+    (sea, land)
+}
+
+fn attack(sim: &mut Simulation, player: u8, ids: Vec<EntityId>, target: EntityId) {
+    sim.issue(Command {
+        player,
+        kind: CommandKind::Attack { ids, target },
+    });
+}
+
+fn alive(sim: &Simulation, id: EntityId) -> bool {
+    sim.world()
+        .slot(id)
+        .is_some_and(|s| sim.world().dying[s.index()] == 0)
+}
+
+/// An archer ship sinks a fishing boat.
+///
+/// REQ: GD-NAVAL-02
+#[test]
+fn an_archer_ship_sinks_a_fishing_boat() {
+    let mut sim = coast();
+    let (sea, _) = offshore(&sim, 4);
+    let ship = put(&mut sim, 0, kinds::ARCHER_SHIP, sea.0, sea.1);
+    let prey = sim
+        .water_grid()
+        .nearest_passable(sea.0 + 3, sea.1, 3, Some(sea))
+        .expect("water nearby");
+    let boat = put(&mut sim, 1, kinds::FISHING_BOAT, prey.0, prey.1);
+    attack(&mut sim, 0, vec![ship], boat);
+    run(&mut sim, 1200);
+    assert!(!alive(&sim, boat), "sunk");
+    assert!(alive(&sim, ship));
+}
+
+/// Across the shore, bow meets bow: a warship shoots a villager on the
+/// beach unprompted, and a bowman on the beach shoots the warship.
+///
+/// REQ: GD-NAVAL-02
+#[test]
+fn warships_and_the_shore_shoot_each_other() {
+    let mut sim = coast();
+    let (sea, land) = offshore(&sim, 3);
+    let ship = put(&mut sim, 0, kinds::ARCHER_SHIP, sea.0, sea.1);
+    let villager = put(&mut sim, 1, kinds::VILLAGER, land.0, land.1);
+    let hp = sim.world().health[index_of(&sim, villager)];
+    run(&mut sim, 200);
+    assert!(
+        !alive(&sim, villager) || sim.world().health[index_of(&sim, villager)] < hp,
+        "the ship took the villager on its own"
+    );
+    let bowman = put(&mut sim, 1, kinds::BOWMAN, land.0, land.1);
+    let hull = sim.world().health[index_of(&sim, ship)];
+    attack(&mut sim, 1, vec![bowman], ship);
+    run(&mut sim, 200);
+    assert!(
+        sim.world().health[index_of(&sim, ship)] < hull,
+        "hit from the beach"
+    );
+}
+
+/// A clubman cannot fight a ship: told to, it does nothing, and a ship off
+/// the beach does not draw it into the sea.
+///
+/// REQ: GD-NAVAL-02
+#[test]
+fn a_clubman_cannot_fight_a_ship() {
+    let mut sim = coast();
+    let (sea, land) = offshore(&sim, 2);
+    let boat = put(&mut sim, 1, kinds::FISHING_BOAT, sea.0, sea.1);
+    let clubman = put(&mut sim, 0, kinds::CLUBMAN, land.0, land.1);
+    sim.issue(Command {
+        player: 0,
+        kind: CommandKind::SetStance {
+            ids: vec![clubman],
+            stance: sim::Stance::Aggressive,
+        },
+    });
+    attack(&mut sim, 0, vec![clubman], boat);
+    run(&mut sim, 2);
+    assert!(!matches!(
+        sim.world().order[index_of(&sim, clubman)],
+        Order::Attack { .. }
+    ));
+    run(&mut sim, 200);
+    assert!(!matches!(
+        sim.world().order[index_of(&sim, clubman)],
+        Order::Attack { .. }
+    ));
+    assert!(alive(&sim, boat));
+}
+
+/// A warship sent at something far inland sails as near as the water goes
+/// and, out of reach there, gives up rather than waiting at the shore.
+///
+/// REQ: GD-NAVAL-02
+#[test]
+fn a_warship_gives_up_on_what_is_out_of_reach_inland() {
+    let mut sim = coast();
+    let (sea, _) = offshore(&sim, 2);
+    let ship = put(&mut sim, 0, kinds::ARCHER_SHIP, sea.0, sea.1);
+    let tc = owned(&sim, 1, kinds::TOWN_CENTER)[0];
+    attack(&mut sim, 0, vec![ship], tc);
+    let mut ended = false;
+    for _ in 0..6000 {
+        sim.step();
+        assert!(wet(&sim, tile_of(&sim, ship)));
+        if !matches!(
+            sim.world().order[index_of(&sim, ship)],
+            Order::Attack { .. }
+        ) {
+            ended = true;
+            break;
+        }
+    }
+    assert!(ended, "still on the attack");
+}
+
+/// The Greeks' ships are 30% faster (`docs/02` §11).
+#[test]
+fn greek_ships_are_faster() {
+    let base = kinds::info(kinds::WAR_GALLEY).speed_per_second;
+    let greek = sim::Civ::Greeks.speed_pct(kinds::WAR_GALLEY);
+    assert_eq!(greek, 30);
+    assert!(base.is_positive());
+}
