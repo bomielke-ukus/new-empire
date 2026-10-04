@@ -2,16 +2,16 @@
 # Rewrite with --update; a changed line is a changed opponent or simulation.
 seed 1 ticks 33826 winner p0 by Elimination scores 13096,4463 hash 8bbb91ab06743093
 seed 2 ticks 33661 winner p0 by Elimination scores 12536,4943 hash dd9d97d6add75ae4
-seed 3 ticks 33227 winner p0 by Elimination scores 13612,4979 hash 2955263af8b624f1
-seed 4 ticks 40073 winner p0 by Elimination scores 15091,5694 hash ee84c6a415d02081
-seed 5 ticks 37114 winner p0 by Elimination scores 13503,4855 hash d9e41b4c30515d39
-seed 6 ticks 38393 winner p0 by Elimination scores 13144,5660 hash 6b1cd2aef6d9ba9a
+seed 3 ticks 33227 winner p0 by Elimination scores 13567,4979 hash 5c35e0c4b6c0f27e
+seed 4 ticks 37445 winner p0 by Elimination scores 14648,5563 hash 76f64c550d6f40cd
+seed 5 ticks 36526 winner p0 by Elimination scores 13967,4795 hash b9d1f38b35cbe484
+seed 6 ticks 38067 winner p0 by Elimination scores 13451,5710 hash ead7b763a18d1eba
 seed 7 ticks 23711 winner p0 by Elimination scores 8504,2875 hash 77670604969836fb
 seed 8 ticks 21994 winner p0 by Elimination scores 8647,3131 hash a3f0622188a5f3e8
-seed 9 ticks 34280 winner p0 by Elimination scores 14354,4688 hash d75d718d7f1ab08b
+seed 9 ticks 34249 winner p0 by Elimination scores 14234,4688 hash 85c6bef11691cfa5
 seed 10 ticks 24299 winner p0 by Elimination scores 7551,3542 hash beca4be2070c6674
 seed 11 ticks 33698 winner p0 by Elimination scores 13510,4737 hash 24a61ffff5a43b9f
-seed 12 ticks 34392 winner p0 by Elimination scores 14003,4936 hash d93f623c5ec9b12d
+seed 12 ticks 35772 winner p0 by Elimination scores 15272,5081 hash 87c7aa014ad4d6c4
 seed 13 ticks 22920 winner p0 by Elimination scores 8547,1945 hash 7daad9790db7677b
 seed 14 ticks 34879 winner p0 by Elimination scores 12817,4624 hash fd26a2400ad5e559
 seed 15 ticks 48000 winner p0 by Score scores 14818,7918 hash 5a317c977e5514d1

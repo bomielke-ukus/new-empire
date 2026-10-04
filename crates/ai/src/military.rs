@@ -39,6 +39,10 @@ pub struct Military {
     attack: Option<(Vec2Fx, u64)>,
     /// The tick of the last alarm answered.
     answered: Option<u64>,
+    /// Where the army is while it is out: the middle of the soldiers away
+    /// from home, for the priests to follow.
+    #[serde(default)]
+    army_at: Option<Vec2Fx>,
 }
 
 /// A soldier: mobile, armed, and not a villager or the scout.
@@ -52,6 +56,11 @@ fn is_soldier_kind(kind: KindId) -> bool {
 }
 
 impl Military {
+    /// Where the army is while it is out, for the priests to follow.
+    pub fn army_at(&self) -> Option<Vec2Fx> {
+        self.army_at
+    }
+
     /// Every tick, before thinking: what the bell says.
     pub fn observe(&mut self, view: &FoggedView<'_>) {
         let tick = view.tick();
@@ -223,10 +232,52 @@ impl Military {
             let target = enemy_tc.map(|(_, pos)| pos).or_else(|| target_from(from))?;
             Some((CommandKind::AttackMove { ids, target }, target))
         };
+        // An enemy clock running (`GD-WIN-02`, `GD-WIN-03`): every idle
+        // soldier goes at it now, whatever the army's size. Every side is
+        // told where a Wonder stands; the relics are in the enemy's
+        // Temples, the nearest one known, or failing that its Town Center.
+        let wonder = view
+            .wonders()
+            .into_iter()
+            .filter(|(o, _, _)| enemy(*o))
+            .min_by_key(|(_, _, left)| *left)
+            .map(|(_, pos, _)| pos);
+        let relic_temple = view
+            .relic_clock()
+            .filter(|(o, _)| enemy(*o))
+            .and_then(|(o, _)| {
+                seen.iter()
+                    .filter(|s| s.owner == o && s.kind == kinds::TEMPLE)
+                    .map(|s| s.pos)
+                    .chain(
+                        view.remembered()
+                            .into_iter()
+                            .filter(|r| r.owner == o && r.kind == kinds::TEMPLE)
+                            .map(|r| fogged::nav::centre(r.tile)),
+                    )
+                    .min_by_key(|p| (p.distance_sq_raw(tc.pos), p.x.raw(), p.y.raw()))
+                    .or(enemy_tc.map(|(_, p)| p))
+            });
+        let clock_target = wonder.or(relic_temple);
+        if let Some(target) = clock_target {
+            let idle: Vec<EntityId> = soldiers
+                .iter()
+                .filter(|s| s.job == Job::Idle && !s.inside)
+                .map(|s| s.id)
+                .collect();
+            if !idle.is_empty() {
+                out.push(CommandKind::SetStance {
+                    ids: idle.clone(),
+                    stance: Stance::Aggressive,
+                });
+                out.push(CommandKind::AttackMove { ids: idle, target });
+                self.attack = Some((target, tick));
+            }
+        }
         let n_home = idle_home.len() as u32;
         let assault = n_home >= order.attack_size
             || (tick >= order.attack_by && n_home >= (order.attack_size * 3).div_ceil(4));
-        if assault && !out_already && self.threats.is_empty() {
+        if clock_target.is_none() && assault && !out_already && self.threats.is_empty() {
             if let Some((order, target)) = orders_for(idle_home.clone(), tc.pos) {
                 out.push(CommandKind::SetStance {
                     ids: idle_home,
@@ -241,7 +292,7 @@ impl Military {
             .filter(|s| s.job == Job::Idle && !home(s.pos))
             .map(|s| s.id)
             .collect();
-        if let Some(&lead) = idle_away.first() {
+        if let (Some(&lead), None) = (idle_away.first(), clock_target) {
             let from = soldiers
                 .iter()
                 .find(|s| s.id == lead)
@@ -254,6 +305,23 @@ impl Military {
                 }),
             }
         }
+
+        // Where the army is, while it is out.
+        let away: Vec<Vec2Fx> = soldiers
+            .iter()
+            .filter(|s| !home(s.pos) && !s.inside)
+            .map(|s| s.pos)
+            .collect();
+        self.army_at = (self.attack.is_some() && !away.is_empty()).then(|| {
+            let n = away.len() as i32;
+            let (sx, sy) = away.iter().fold((0i64, 0i64), |(x, y), p| {
+                (x + i64::from(p.x.raw()), y + i64::from(p.y.raw()))
+            });
+            Vec2Fx::new(
+                fogged::Fx::from_raw((sx / i64::from(n)) as i32),
+                fogged::Fx::from_raw((sy / i64::from(n)) as i32),
+            )
+        });
 
         // ----- Training, to the composition, with what is left after the
         // reserve.

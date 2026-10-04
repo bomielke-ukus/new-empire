@@ -1843,10 +1843,33 @@ relics the second needs (`docs/07` D31, answering Q2).
 - **Recorded again.** Relics on generated maps change every generated
   match: the eight corpus entries on them have new digests (the four on
   flat maps do not), and the Hard-against-Easy record is rewritten.
-- **Not yet.** The opponent does not train priests, fetch relics, build a
-  Wonder or go after one; a player can win on either clock against it
-  unopposed. The Wonder and the relic are drawn as placeholders until
-  rendered.
+- **Not yet.** The Wonder and the relic are drawn as placeholders until
+  rendered. The opponent's use of them is the next record.
+
+### Work record: M8 chunk 5 — the opponent's priests and its answer to the clocks (2026-10-04)
+
+- **The clocks.** An enemy Wonder standing, or an enemy holding every
+  relic, and the opponent sends every idle soldier at it at once, as an
+  aggressive attack-move, whatever the size of its army: at the Wonder,
+  which every side is told of, or at the nearest Temple of the holder's
+  it knows of, or its Town Center. A Wonder of the player's draws the
+  army within seconds of standing (`tools/simrunner/tests/ai_temple.rs`).
+- **Priests.** Standard keeps two and Hard three; Easy never leaves the
+  Tool Age. From the Bronze Age the economy builds a Temple after the
+  age's own buildings, and the priests are trained there with gold kept
+  in reserve. An idle priest takes a relic in hand into the Temple, goes
+  for the nearest relic it knows of that no other priest is fetching (in
+  sight, or remembered where it was seen), and otherwise, with its faith
+  back, converts the dearest enemy unit within 8 tiles; while the army is
+  out, an idle priest at home goes to where the army is. The view gives
+  the opponent a priest's relic, its faith, what it is fetching or
+  converting, and the public clocks; no more than its panel shows a
+  player.
+- **What it does in a match.** In Hard against Hard the Bronze Age comes
+  late (around half an hour in), so its priests do too; a rich Hard
+  opponent alone has relics in its Temple inside 25 minutes. Hard still
+  beats Easy 20 of 20; the six records long enough for a Temple are
+  rewritten. It still builds no Wonder of its own.
 
 ### Resume here next session
 

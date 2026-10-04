@@ -53,6 +53,11 @@ pub struct BuildOrder {
     /// before there was hunting reads the Standard number.
     #[serde(default = "standard_hunters")]
     pub hunters: u32,
+    /// Priests kept from the Bronze Age, at a Temple by the Town Center,
+    /// for the relics and to turn the enemy's (`docs/02` §5.5). A save
+    /// from before priests reads none.
+    #[serde(default)]
+    pub priests: u32,
 }
 
 fn standard_hunters() -> u32 {
@@ -115,6 +120,7 @@ impl BuildOrder {
                 towers: 0,
                 barracks: 1,
                 hunters: 1,
+                priests: 0,
             },
             Difficulty::Standard => BuildOrder {
                 villagers: [8, 16, 22, 26],
@@ -136,6 +142,7 @@ impl BuildOrder {
                 towers: 0,
                 barracks: 1,
                 hunters: 2,
+                priests: 2,
             },
             Difficulty::Hard | Difficulty::Hardest => BuildOrder {
                 villagers: [10, 20, 28, 32],
@@ -156,6 +163,7 @@ impl BuildOrder {
                 towers: 1,
                 barracks: 2,
                 hunters: 3,
+                priests: 3,
             },
         }
     }
@@ -609,7 +617,14 @@ impl Economy {
                     }
                 }
             }
-            for &kind in AGE_BUILDINGS[age] {
+            // An order that keeps priests wants a Temple from the Bronze
+            // Age, after the age's own buildings (`crate::temple`).
+            let temple: &[KindId] = if age >= 2 && order.priests > 0 {
+                &[kinds::TEMPLE]
+            } else {
+                &[]
+            };
+            for &kind in AGE_BUILDINGS[age].iter().chain(temple) {
                 if farms_short {
                     // Farms first.
                     break;
@@ -860,7 +875,7 @@ pub(crate) fn builder(
         Job::Gathering(r) if Some(r) == prefer => 1,
         Job::Gathering(Resource::Wood) => 2,
         Job::Gathering(_) | Job::Hunting(_) => 3,
-        Job::Busy => 4,
+        Job::Busy | Job::Fetching(_) | Job::Converting(_) => 4,
         Job::Building(_) | Job::Repairing(_) | Job::Unknown => 9,
     };
     villagers

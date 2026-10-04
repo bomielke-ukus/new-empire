@@ -40,6 +40,11 @@ pub enum Job {
     Repairing(EntityId),
     /// Hunting an animal, to gather its carcass after (`GD-ECON-06`).
     Hunting(EntityId),
+    /// A priest going for a relic, or taking one home (`GD-WIN-03`).
+    Fetching(EntityId),
+    /// A priest going to convert a unit, or chanting at it
+    /// (`GD-PRIEST-01`).
+    Converting(EntityId),
     /// Anything else: walking, fighting, sheltering.
     Busy,
     /// Someone else's: not known.
@@ -231,6 +236,8 @@ impl<'a> FoggedView<'a> {
                             then: sim::Then::Hunt(_),
                             ..
                         } => Job::Hunting(target),
+                        sim::Order::Relic { relic, .. } => Job::Fetching(relic),
+                        sim::Order::Convert { target, .. } => Job::Converting(target),
                         _ => Job::Busy,
                     }
                 };
@@ -284,6 +291,46 @@ impl<'a> FoggedView<'a> {
                 })
                 .collect()
         })
+    }
+
+    /// Whether one of the player's own priests has a relic in hand.
+    pub fn carrying_relic(&self, id: EntityId) -> bool {
+        let world = self.sim.world();
+        world
+            .slot(id)
+            .is_some_and(|s| world.owner[s.index()] == self.player)
+            && self.sim.carried_relic(id).is_some()
+    }
+
+    /// Whether one of the player's own priests has its faith back
+    /// (`GD-PRIEST-02`): the panel shows it.
+    pub fn faith_full(&self, id: EntityId) -> bool {
+        let world = self.sim.world();
+        world.slot(id).is_some_and(|s| {
+            world.owner[s.index()] == self.player
+                && world.kind[s.index()] == kinds::PRIEST
+                && world.reload[s.index()] == 0
+        })
+    }
+
+    /// Every finished Wonder standing: whose, where, and the ticks its
+    /// clock has left. Every side is told of one and sees it on the
+    /// minimap (`GD-WIN-02`).
+    pub fn wonders(&self) -> Vec<(PlayerId, Vec2Fx, u64)> {
+        let world = self.sim.world();
+        self.sim
+            .wonder_clocks()
+            .into_iter()
+            .filter_map(|(id, owner, left)| {
+                world.slot(id).map(|s| (owner, world.pos[s.index()], left))
+            })
+            .collect()
+    }
+
+    /// The side holding every relic, and the ticks its clock has left;
+    /// every side is told (`GD-WIN-03`).
+    pub fn relic_clock(&self) -> Option<(PlayerId, u64)> {
+        self.sim.relic_clock()
     }
 
     /// The player's villagers with nothing to do.

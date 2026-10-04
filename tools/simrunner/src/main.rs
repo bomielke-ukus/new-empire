@@ -1063,10 +1063,11 @@ fn ai(f: &Flags) -> ExitCode {
                             .map_or_else(|e| e.to_string(), |_| "ok".into())
                     });
                     line.push_str(&format!(
-                        "\n     jobs {jobs:?}\n     buildings {buildings:?}\n     trained {:?}\n     queue {queue:?}, train villager: {train:?}\n     food in sight: {} nodes, {} left",
+                        "\n     jobs {jobs:?}\n     buildings {buildings:?}\n     trained {:?}\n     queue {queue:?}, train villager: {train:?}\n     food in sight: {} nodes, {} left\n     relics held {}",
                         trained[p as usize],
                         food.len(),
-                        food.iter().sum::<i32>()
+                        food.iter().sum::<i32>(),
+                        sim.relics_held(p)
                     ));
                 }
                 line
