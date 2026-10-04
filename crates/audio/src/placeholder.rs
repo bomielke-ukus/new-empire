@@ -49,6 +49,7 @@ fn clips_for(cue: Cue) -> Vec<Clip> {
         Cue::Select(c) => (0..2).map(|v| ack(c, v, true)).collect(),
         Cue::Work(t) => (0..3).map(|v| work(t, v)).collect(),
         Cue::Hit { building } => (0..3).map(|v| hit(building, v)).collect(),
+        Cue::Impact => (0..2).map(impact).collect(),
         Cue::Death(c) => (0..2).map(|v| death(c, v)).collect(),
         Cue::Completed => vec![chime(&[523.0, 784.0], 140, 0.5)],
         Cue::Trained => vec![chime(&[880.0], 220, 0.4)],
@@ -142,6 +143,15 @@ fn hit(building: bool, variation: usize) -> Clip {
             .tone(200.0 * v, 120.0, 60, Wave::Sine, 0.4)
             .done()
     }
+}
+
+/// A stone coming down: a heavy crack and the ground answering.
+fn impact(variation: usize) -> Clip {
+    let v = 1.0 + variation as f32 * 0.08;
+    Synth::new()
+        .burst(70, 900.0 * v, 0.7)
+        .tone(70.0 * v, 45.0, 260, Wave::Sine, 0.6)
+        .done()
 }
 
 /// A fall: a unit's cry down, a building's rumble.
@@ -326,27 +336,32 @@ const E4: f32 = 329.63;
 const G4: f32 = 392.0;
 const A4: f32 = 440.0;
 
-/// A stem: sixteen seconds at sixty beats a minute, the instruments
-/// added age by age (`docs/05` §5.3): the frame drum and the bone flute,
-/// then the lyre, then the low chorus, then all of it denser.
+/// A note by its MIDI number: 69 is A4, 440 Hz.
+fn hz(midi: i32) -> f32 {
+    440.0 * 2f32.powf((midi - 69) as f32 / 12.0)
+}
+
+/// Each age's stem is its own piece: its own tempo, mode and tune, so an
+/// age reached is heard as well as seen (`docs/05` §5.3). The band grows
+/// with the player: the Stone Age is a frame drum and a bone flute; the
+/// Tool Age brings the lyre and a shaker; the Bronze Age a horn over the
+/// low chorus; the Iron Age war drums, a snare and the horn high and loud.
 fn stem(age: Age) -> Clip {
-    let mut l = Loop::new(16_000);
-    let dense = age >= Age::Bronze;
-    // The frame drum: on the twos, softer on the off-beats, every beat
-    // once the chorus is in.
-    for beat in 0..16u32 {
-        let at = beat * 1000;
-        if beat.is_multiple_of(2) {
-            l.drum(at, 0.9);
-        } else if dense {
-            l.drum(at, 0.4);
-        }
-        if age == Age::Iron {
-            l.drum(at + 500, 0.25);
-        }
+    match age {
+        Age::Stone => stone_stem(),
+        Age::Tool => tool_stem(),
+        Age::Bronze => bronze_stem(),
+        Age::Iron => iron_stem(),
     }
-    // The bone flute: a phrase, a rest, an answer, a rest. Sparse.
-    let octave = if age == Age::Iron { 2.0 } else { 1.0 };
+}
+
+/// Sixty beats a minute in A minor pentatonic: the drum on the twos, the
+/// flute's phrase, a long rest, its answer. Sparse.
+fn stone_stem() -> Clip {
+    let mut l = Loop::new(16_000);
+    for beat in (0..16u32).step_by(2) {
+        l.drum(beat * 1000, 0.9);
+    }
     let phrase = [
         (1000, A4, 600),
         (1700, G4, 500),
@@ -358,25 +373,160 @@ fn stem(age: Age) -> Clip {
         (10_300, A4, 1400),
     ];
     for (at, f, ms) in phrase {
-        l.flute(at, f * octave, ms, 0.5);
+        l.flute(at, f, ms, 0.5);
     }
-    // The lyre, from the Tool Age: an arpeggio through the rests.
-    if age >= Age::Tool {
-        let notes = [A3, C4, E4, G4];
-        let every = if age == Age::Iron { 250 } else { 500 };
-        let mut at = 6000;
-        let mut k = 0;
-        while at < 16_000 {
-            if !(9000..12_000).contains(&at) {
-                l.pluck(at, notes[k % notes.len()], 0.35);
-                k += 1;
-            }
-            at += every;
+    l.finish(0.5)
+}
+
+/// Eighty beats a minute in D dorian, lighter on its feet: the lyre picks
+/// out a running figure, the flute sings over it, a shaker ticks the
+/// off-beats and the drum walks.
+fn tool_stem() -> Clip {
+    const BEAT: u32 = 750;
+    let mut l = Loop::new(32 * BEAT);
+    for beat in 0..32u32 {
+        let at = beat * BEAT;
+        match beat % 4 {
+            0 => l.drum(at, 0.9),
+            2 => l.drum(at, 0.6),
+            3 => l.drum(at + BEAT / 2, 0.4),
+            _ => {}
+        }
+        l.shaker(at + BEAT / 2, 0.35);
+    }
+    // The lyre's figure, two bars long, round the chords of D dorian.
+    let figure = [
+        [62, 69, 74, 69],
+        [60, 67, 72, 67],
+        [65, 69, 72, 69],
+        [64, 67, 71, 67],
+    ];
+    for bar in 0..8u32 {
+        for (k, &n) in figure[(bar % 4) as usize].iter().enumerate() {
+            l.pluck(bar * 4 * BEAT + k as u32 * BEAT, hz(n), 0.4);
+            l.pluck(
+                bar * 4 * BEAT + k as u32 * BEAT + BEAT / 2,
+                hz(n + 12),
+                0.15,
+            );
         }
     }
-    // The low chorus, from the Bronze Age: a drone under everything.
-    if dense {
-        l.drone(&[110.0, 110.7, 164.8], Wave::Saw, 400.0, 0.12);
+    // The tune: up through the mode, a turn, home.
+    let tune = [
+        (0, 69, 2),
+        (2, 72, 1),
+        (3, 74, 1),
+        (4, 76, 2),
+        (6, 74, 1),
+        (7, 72, 1),
+        (8, 71, 3),
+        (12, 72, 1),
+        (13, 71, 1),
+        (14, 69, 2),
+        (16, 67, 2),
+        (18, 69, 1),
+        (19, 71, 1),
+        (20, 72, 2),
+        (22, 71, 1),
+        (23, 67, 1),
+        (24, 69, 4),
+    ];
+    for (beat, n, beats) in tune {
+        l.flute(beat * BEAT, hz(n), beats * BEAT - 60, 0.45);
+    }
+    l.finish(0.5)
+}
+
+/// Ninety-six beats a minute in G mixolydian, a procession: the drum on
+/// every beat with the weight on one and three, a bass walking the roots,
+/// the chorus holding the fifth, and a horn with the tune.
+fn bronze_stem() -> Clip {
+    const BEAT: u32 = 625;
+    let mut l = Loop::new(32 * BEAT);
+    l.drone(&[hz(43), hz(43) * 1.004, hz(50)], Wave::Saw, 380.0, 0.12);
+    for beat in 0..32u32 {
+        let at = beat * BEAT;
+        l.drum(at, if beat % 2 == 0 { 0.9 } else { 0.45 });
+    }
+    // The bass: root, fifth, the flat seventh, the fifth, a bar each.
+    let roots = [43, 50, 41, 50, 43, 48, 50, 43];
+    for (bar, &n) in roots.iter().enumerate() {
+        let at = bar as u32 * 4 * BEAT;
+        l.bass(at, hz(n), 2 * BEAT - 40, 0.5);
+        l.bass(at + 2 * BEAT, hz(n), BEAT - 40, 0.35);
+        l.bass(at + 3 * BEAT, hz(n + 7), BEAT - 40, 0.35);
+    }
+    let tune = [
+        (0, 67, 2),
+        (2, 71, 2),
+        (4, 74, 3),
+        (7, 72, 1),
+        (8, 71, 2),
+        (10, 69, 2),
+        (12, 65, 4),
+        (16, 67, 2),
+        (18, 69, 1),
+        (19, 71, 1),
+        (20, 72, 2),
+        (22, 74, 2),
+        (24, 71, 2),
+        (26, 69, 2),
+        (28, 67, 4),
+    ];
+    for (beat, n, beats) in tune {
+        l.horn(beat * BEAT, hz(n), beats * BEAT - 50, 0.4);
+    }
+    // The lyre answers in the long notes.
+    for (beat, n) in [(13, 74), (14, 72), (15, 69), (29, 74), (30, 71), (31, 67)] {
+        l.pluck(beat * BEAT, hz(n), 0.3);
+    }
+    l.finish(0.5)
+}
+
+/// A hundred and twelve beats a minute in C harmonic minor, to war: the
+/// drums doubled on every beat, a snare on two and four, a low saw bass
+/// hammering the root, and the horn high over it all with the raised
+/// seventh's bite.
+fn iron_stem() -> Clip {
+    const BEAT: u32 = 536;
+    let mut l = Loop::new(32 * BEAT);
+    l.drone(&[hz(36), hz(43)], Wave::Saw, 300.0, 0.1);
+    for beat in 0..32u32 {
+        let at = beat * BEAT;
+        l.drum(at, 1.0);
+        l.drum(at + BEAT / 2, 0.5);
+        if beat % 2 == 1 {
+            l.snare(at, 0.5);
+        }
+    }
+    let ostinato = [36, 36, 43, 44];
+    for beat in 0..32u32 {
+        let n = ostinato[(beat % 4) as usize];
+        l.bass(beat * BEAT, hz(n), BEAT - 60, 0.45);
+    }
+    let tune = [
+        (0, 72, 2),
+        (2, 75, 1),
+        (3, 79, 1),
+        (4, 77, 2),
+        (6, 75, 1),
+        (7, 74, 1),
+        (8, 72, 2),
+        (10, 71, 2),
+        (12, 72, 4),
+        (16, 79, 2),
+        (18, 80, 1),
+        (19, 79, 1),
+        (20, 77, 2),
+        (22, 75, 2),
+        (24, 74, 1),
+        (25, 75, 1),
+        (26, 71, 2),
+        (28, 72, 4),
+    ];
+    for (beat, n, beats) in tune {
+        l.horn(beat * BEAT, hz(n), beats * BEAT - 40, 0.45);
+        l.horn(beat * BEAT, hz(n - 12), beats * BEAT - 40, 0.2);
     }
     l.finish(0.5)
 }
@@ -508,6 +658,30 @@ impl Loop {
         self.tone(at_ms, f, f * 0.995, 450, Wave::Triangle, gain);
     }
 
+    /// A horn: two saws a breath apart, swelling in, held, low-passed so
+    /// it is brass and not a buzz.
+    fn horn(&mut self, at_ms: u32, f: f32, ms: u32, gain: f32) {
+        let v = held_samples(&[f, f * 1.004], ms, Wave::Saw, 1600.0, 70);
+        self.lay(at_ms, &v, gain);
+    }
+
+    /// A bass note: a triangle held for its length, dark.
+    fn bass(&mut self, at_ms: u32, f: f32, ms: u32, gain: f32) {
+        let v = held_samples(&[f], ms, Wave::Triangle, 700.0, 15);
+        self.lay(at_ms, &v, gain);
+    }
+
+    /// A shaker: a hiss, gone at once.
+    fn shaker(&mut self, at_ms: u32, gain: f32) {
+        self.burst(at_ms, 35, 7000.0, gain);
+    }
+
+    /// A snare: a crack of noise over a short knock.
+    fn snare(&mut self, at_ms: u32, gain: f32) {
+        self.burst(at_ms, 110, 2600.0, gain);
+        self.tone(at_ms, 190.0, 150.0, 60, Wave::Sine, 0.5 * gain);
+    }
+
     /// A sustained chord under the whole loop, low-passed, each
     /// frequency rounded to whole cycles so the seam is silent.
     fn drone(&mut self, freqs: &[f32], wave: Wave, cutoff: f32, gain: f32) {
@@ -616,6 +790,42 @@ fn tone_samples(from: f32, to: f32, ms: u32, wave: Wave) -> Vec<f32> {
         .collect()
 }
 
+/// A held note: the frequencies summed, swelling in over `attack_ms`,
+/// held, and let go over the last tenth, through a one-pole low-pass at
+/// `cutoff` Hz.
+fn held_samples(freqs: &[f32], ms: u32, wave: Wave, cutoff: f32, attack_ms: u32) -> Vec<f32> {
+    let n = samples(ms);
+    let attack = samples(attack_ms).max(1);
+    let release = (n / 10).max(1);
+    let a = 1.0 - (-std::f32::consts::TAU * cutoff / RATE as f32).exp();
+    let mut phases = vec![0.0_f32; freqs.len()];
+    let mut y = 0.0_f32;
+    (0..n)
+        .map(|i| {
+            let mut raw = 0.0;
+            for (p, f) in phases.iter_mut().zip(freqs) {
+                *p = (*p + f / RATE as f32) % 1.0;
+                raw += match wave {
+                    Wave::Sine => (*p * std::f32::consts::TAU).sin(),
+                    Wave::Square => {
+                        if *p < 0.5 {
+                            0.6
+                        } else {
+                            -0.6
+                        }
+                    }
+                    Wave::Triangle => 1.0 - 4.0 * (*p - 0.5).abs(),
+                    Wave::Saw => 2.0 * *p - 1.0,
+                };
+            }
+            y += a * (raw / freqs.len() as f32 - y);
+            let up = (i as f32 / attack as f32).min(1.0);
+            let down = ((n - i) as f32 / release as f32).min(1.0);
+            y * up * down
+        })
+        .collect()
+}
+
 /// Filtered noise with the standard envelope.
 fn burst_samples(seed: &mut u64, ms: u32, cutoff: f32) -> Vec<f32> {
     let n = samples(ms);
@@ -653,9 +863,17 @@ mod tests {
             let (first, last) = (c.samples[0], *c.samples.last().unwrap());
             assert!((first - last).abs() < 0.08, "{l:?}: seam {first} to {last}");
         }
-        let stone = lib.layer(Layer::Stem(Age::Stone)).unwrap();
-        let iron = lib.layer(Layer::Stem(Age::Iron)).unwrap();
-        assert_ne!(stone.samples, iron.samples, "the ages differ");
+        // Each age is its own piece, down to its length: a different tempo
+        // and tune, not the same loop with another layer on it.
+        let lengths: Vec<u64> = Age::ALL
+            .iter()
+            .map(|&a| lib.layer(Layer::Stem(a)).unwrap().duration_ms())
+            .collect();
+        for (i, a) in lengths.iter().enumerate() {
+            for b in &lengths[i + 1..] {
+                assert_ne!(a, b, "the ages differ: {lengths:?}");
+            }
+        }
     }
 
     /// Every cue has its placeholder: three to five variations for an

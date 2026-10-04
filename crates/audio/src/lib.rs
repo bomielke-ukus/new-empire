@@ -74,6 +74,8 @@ pub enum Cue {
         /// Whether the target is a building.
         building: bool,
     },
+    /// A siege engine's stone came down.
+    Impact,
     /// A unit of the class died; a building of the class fell.
     Death(Class),
     /// A building finished.
@@ -133,6 +135,7 @@ impl Cue {
         }
         out.push(Cue::Hit { building: false });
         out.push(Cue::Hit { building: true });
+        out.push(Cue::Impact);
         for c in VOICED {
             out.push(Cue::Death(c));
         }
@@ -158,6 +161,7 @@ impl Cue {
             Cue::Ack(_) | Cue::Select(_) => Bus::Voice,
             Cue::Work(_)
             | Cue::Hit { .. }
+            | Cue::Impact
             | Cue::Death(_)
             | Cue::Completed
             | Cue::Trained
@@ -188,6 +192,7 @@ impl Cue {
             Cue::Work(t) => format!("work-{}", task_name(t)),
             Cue::Hit { building: false } => "hit-unit".to_string(),
             Cue::Hit { building: true } => "hit-building".to_string(),
+            Cue::Impact => "impact".to_string(),
             Cue::Death(c) => format!("death-{}", class_name(c)),
             Cue::Completed => "completed".to_string(),
             Cue::Trained => "trained".to_string(),
