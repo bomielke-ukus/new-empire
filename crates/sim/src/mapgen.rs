@@ -498,6 +498,7 @@ fn varied(rng: &mut Rng, spec: &MapSpec) -> Option<Generated> {
         return None;
     }
     place_relics_within(&mut g, true);
+    place_fish(&mut g);
     Some(Generated {
         tiles: g.tiles,
         spawns: g.spawns,
@@ -789,6 +790,40 @@ fn place_relics_within(g: &mut Gen, relax: bool) {
             if !put && relax {
                 break;
             }
+        }
+    }
+}
+
+/// Fish in the water (`docs/02` §3.2): one for each seventy tiles of
+/// water, up to six a player, each in open water a tile or more from the
+/// shore and within six of it, where a Dock's boats can reach them, and
+/// four tiles or more from the next. Placed last, so the rest of the map
+/// is what it was before there were fish.
+fn place_fish(g: &mut Gen) {
+    let size = g.size;
+    let wet = |g: &Gen, x: i32, y: i32| g.in_bounds(x, y) && g.tiles.terrain(x, y).is_water();
+    let water = (0..size)
+        .flat_map(|y| (0..size).map(move |x| (x, y)))
+        .filter(|&(x, y)| wet(g, x, y))
+        .count() as i32;
+    let wanted = (water / 70).min(6 * g.starts.len() as i32);
+    let mut placed: Vec<(i32, i32)> = Vec::new();
+    for _ in 0..wanted * 40 {
+        if placed.len() as i32 >= wanted {
+            break;
+        }
+        let x = g.rng.range_i32(1, size - 1);
+        let y = g.rng.range_i32(1, size - 1);
+        let open = (-1..=1).all(|dy| (-1..=1).all(|dx| wet(g, x + dx, y + dy)));
+        let shore = (-6..=6).any(|dy| (-6..=6).any(|dx: i32| !wet(g, x + dx, y + dy)));
+        if open
+            && shore
+            && placed
+                .iter()
+                .all(|&(px, py)| (px - x).abs().max((py - y).abs()) >= 4)
+        {
+            g.place(kinds::FISH, GAIA, x, y);
+            placed.push((x, y));
         }
     }
 }

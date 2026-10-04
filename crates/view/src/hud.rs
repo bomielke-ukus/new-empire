@@ -646,9 +646,9 @@ fn short_name(kind: KindId) -> &'static str {
 /// so its keys need only be distinct from each other and the general keys.
 fn build_hotkey(kind: KindId) -> char {
     match kind {
-        // Every letter is spoken for (`docs/04` §23): the Town Center and
-        // the Wonder are placed by clicking their buttons.
-        kinds::TOWN_CENTER | kinds::WONDER => ' ',
+        // Every letter is spoken for (`docs/04` §23): the Town Center, the
+        // Wonder and the Dock are placed by clicking their buttons.
+        kinds::TOWN_CENTER | kinds::WONDER | kinds::DOCK => ' ',
         kinds::PALISADE_WALL => 'P',
         kinds::STONE_WALL => 'N',
         kinds::GATE => 'G',
@@ -701,6 +701,7 @@ fn train_hotkey(kind: KindId) -> char {
         kinds::STONE_THROWER | kinds::CATAPULT => 'O',
         kinds::BALLISTA => 'B',
         kinds::PRIEST => 'P',
+        kinds::FISHING_BOAT => 'F',
         _ => 'N',
     }
 }
@@ -714,6 +715,7 @@ fn unit_label(kind: KindId) -> String {
         kinds::HORSE_ARCHER => "H. ARCHER".to_string(),
         kinds::WAR_ELEPHANT => "ELEPHANT".to_string(),
         kinds::STONE_THROWER => "THROWER".to_string(),
+        kinds::FISHING_BOAT => "FISHER".to_string(),
         other => kinds::info(other).name.to_uppercase(),
     }
 }

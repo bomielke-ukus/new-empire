@@ -467,7 +467,7 @@ impl Economy {
         // animal is taken before the next is killed and left to rot.
         let dropoffs: Vec<Vec2Fx> = mine
             .iter()
-            .filter(|s| !s.site && kinds::info(s.kind).dropoff)
+            .filter(|s| !s.site && kinds::info(s.kind).dropoff && !kinds::info(s.kind).naval)
             .map(|s| s.pos)
             .collect();
         let reach = Fx::from_int(HUNT_RANGE).raw() as u64;

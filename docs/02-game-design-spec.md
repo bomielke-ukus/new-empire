@@ -200,6 +200,24 @@ second to the most wounded unit of the priest's side within 4 tiles, not
 to a siege engine. A priest at its chant does not run when hit; idle, it
 runs home like a villager. A priest can convert a priest.
 
+### 5.6 The water
+
+- **[GD-NAVAL-01]** Boats move on the water and nothing else does: a boat
+  never stands on land and a walker never stands in the water, shallow or
+  deep. The Dock is built in the water against the shore, from the land
+  beside it, and trains the boats onto the water beside it. Fish lie in
+  the water; only a fishing boat gathers them, and it brings its catch to
+  a Dock, which takes nothing from the land.
+
+**As built** (2026-10-04, `docs/07` D33): the water is its own grid with
+its own flow fields; a group of boats and walkers ordered somewhere goes
+as two. A Dock is three tiles square, every tile of it water, with land
+beside it and water beside it. A fishing boat holds 15 (a villager 10),
+gathers at the villager's rate and is trained in 30 seconds for 50 wood.
+Fish hold 350 food: about one for every seventy tiles of water on the
+wet map types, a tile or more from the shore and within six of it.
+Warships, transports, trade boats and the Islands map are to come.
+
 ---
 
 ## 6. Buildings

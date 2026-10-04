@@ -1902,7 +1902,11 @@ impl App {
         let i = slot.index();
         let world = self.sim.world();
         let villagers = !self.selection.own_villagers(&self.sim, ME).is_empty();
-        if villagers && gatherable_by_me(&self.sim, i) {
+        let gatherers = !self
+            .selection
+            .own_gatherers_for(&self.sim, ME, world.kind[i])
+            .is_empty();
+        if gatherers && gatherable_by_me(&self.sim, i) {
             return Some(Target::Gather);
         }
         if villagers && world.owner[i] == ME && world.construction[i].is_some() {
@@ -2194,9 +2198,13 @@ impl App {
                 });
                 return;
             }
-            if !villagers.is_empty() && gatherable {
+            // Villagers on the land's nodes, fishing boats on fish.
+            let gatherers = self
+                .selection
+                .own_gatherers_for(&self.sim, ME, world.kind[i]);
+            if !gatherers.is_empty() && gatherable {
                 self.issue(CommandKind::Gather {
-                    ids: villagers,
+                    ids: gatherers,
                     node: id,
                 });
                 return;

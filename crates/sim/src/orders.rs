@@ -4,7 +4,7 @@
 use crate::entity::{EntityId, KindId};
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
-use crate::kinds::{Cost, Resource, CARRY_CAPACITY};
+use crate::kinds::{Class, Cost, Resource, CARRY_CAPACITY};
 use crate::tech::{Age, TechId};
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
@@ -593,6 +593,21 @@ impl Modifiers {
             Fx::from_int(100 + self.gather_rate_pct[r.index()]),
             Fx::from_int(100),
         )
+    }
+
+    /// A per-class table's entry for `c`. The tables predate ships and no
+    /// technology touches them yet, so a ship's entry is none (and old
+    /// saves and hashes keep their shape).
+    pub fn of(table: &[i32; 8], c: Class) -> i32 {
+        table.get(c.index()).copied().unwrap_or(0)
+    }
+
+    /// Adds `n` to a per-class table's entry for `c`; nothing for a ship,
+    /// which no technology names.
+    pub fn add(table: &mut [i32; 8], c: Class, n: i32) {
+        if let Some(v) = table.get_mut(c.index()) {
+            *v += n;
+        }
     }
 
     /// Carry capacity after modifiers.

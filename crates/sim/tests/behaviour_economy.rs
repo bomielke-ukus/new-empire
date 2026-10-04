@@ -70,18 +70,26 @@ fn the_storehouse_and_town_center_accept_every_resource() {
     // The claim is that *every* resource goes to the same building, so no kind
     // may narrow it. There is no per-resource field to check: acceptance is a
     // single boolean, which is the design decision D5 made concrete. Assert
-    // that nothing else in the table claims to be a drop-off, so a future
-    // Granary cannot appear without this test noticing.
+    // that nothing else on land claims to be a drop-off, so a future
+    // Granary cannot appear without this test noticing. The water has its
+    // own: the Dock, where boats bring fish (`docs/02` §6), and nothing on
+    // land drops off there.
     let dropoffs: Vec<&str> = kinds::all()
         .iter()
-        .filter(|i| i.dropoff)
+        .filter(|i| i.dropoff && !i.naval)
         .map(|i| i.name)
         .collect();
     assert_eq!(
         dropoffs,
         vec!["Town Center", "Storehouse"],
-        "only these two accept resources"
+        "only these two accept resources on land"
     );
+    let water: Vec<&str> = kinds::all()
+        .iter()
+        .filter(|i| i.dropoff && i.naval)
+        .map(|i| i.name)
+        .collect();
+    assert_eq!(water, vec!["Dock"], "and the Dock on the water");
 }
 
 /// Placement is the skill [GD-ECON-04] names, so the villager must actually

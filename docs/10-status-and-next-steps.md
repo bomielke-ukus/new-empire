@@ -2025,6 +2025,48 @@ researches like a player, and the reason it stalled is fixed.
   from the ordinary start. `simrunner ai --stats` lists what each side
   researched and gathered. The Hard-against-Easy record is rewritten.
 
+### Work record: naval, first part — the water, the Dock and fishing (2026-10-04)
+
+Boats are in the simulation (`docs/02` §5.6, `docs/07` D33). This part
+is the ground they stand on and the first of them; warships, transports,
+the trade boat, Islands and the opponent's use of all of it follow.
+
+- **A second grid.** `Simulation::water` is a `NavGrid` with the water
+  open and the land blocked, built from the map with
+  `NavGrid::water_from_map`; Docks and fish block it where they stand.
+  It has its own sector graph and flow fields in `Scratch`. Path planning
+  runs once per element (`plan_paths(naval)`), and walking, the push
+  between units, being put back on open ground, standing, approaching a
+  target and spreading a group all ask the grid of the unit's element
+  (`grid_of`). Move, attack-move and patrol part a mixed group by element
+  (`by_element`). The water grid is derived, so it is not hashed; a save
+  from before reads it empty and `rebuild_water` makes it. Every corpus
+  match is on dry ground and keeps its digest.
+- **Kinds.** `KindInfo::naval`; `Class::Ship` (the per-class technology
+  tables keep their eight entries, read through `Modifiers::of`/`add`,
+  and a ship's is none); the Dock (27), the fishing boat (50) and fish
+  (105). `kinds::gathers`, `can_gather` and `carry_base`.
+- **The Dock** is placed only where all nine of its tiles are open water
+  with open land and open water beside them (`PlaceError::NeedsShore`),
+  is built by villagers from the land, trains boats onto the water beside
+  it, and is the drop-off for boats only (`is_dropoff_for` matches the
+  gatherer's element). The HUD places it by its button, every letter
+  being taken.
+- **Fishing.** A fishing boat takes a Gather order on fish and nothing
+  else, and a villager the reverse; the boat's hold is 15. The app sends
+  selected fishing boats to fish on a right-click.
+- **Fish** on the wet map types (`mapgen::place_fish`), after everything
+  else so the rest of each map is unchanged.
+- **Placeholders** for the Dock, the boat and fish (`AWAITING_ART`).
+  Goldens: the six scenes with the build grid or the controls overlay
+  rebaked for the Dock's button.
+- **Tests** (`crates/sim/tests/behaviour_naval.rs`, `GD-NAVAL-01`): the
+  Dock's placement, built from the shore, trained boats on the water, a
+  catch brought home, fish a boat's and the land a villager's, boats and
+  walkers each on their own element, a mixed group parting, a replay.
+- **Not yet.** Warships, transports, trade, Islands; the opponent builds
+  no Dock. On Coastal the sea can lie sixty tiles from a start.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the
@@ -2033,8 +2075,10 @@ detailed soldiers and the new roster are rendered (chunk 3);
 priests, relics and the Wonder are in (chunk 4) and the opponent uses
 them (chunk 5); five map types are in (chunk 6) and the eight
 civilizations (chunk 7); the opponent researches its technologies and
-builds Storehouses by its work (above). Next: naval and Islands, and the
-other three architecture sets.
+builds Storehouses by its work; naval has begun with the water, the Dock
+and fishing (above). Next: warships, transports, the trade boat and
+Islands, the opponent at sea, the boats' art, then the other three
+architecture sets.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded

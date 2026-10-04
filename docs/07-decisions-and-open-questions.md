@@ -410,9 +410,40 @@ player picks theirs and the opponents' are dealt from the seed. The four
 architecture sets are named per civilization but not drawn: every side's
 buildings look the same until the other three sets are made.
 
+### D33 — Boats move on a grid of their own; the Dock stands in the water at the shore
+**Date:** 2026-10-04 · **Decided by:** Claude, on the owner's instruction to build naval next; Q1's recommendation (hold naval until M8)
+
+Q1 named the cost: water doubles the pathfinding surface. It is paid
+once, as a second `NavGrid` where the water is open and the land
+blocked, with its own sector graph and flow fields; every place a unit
+asks the grid (planning, walking, standing, approaching, spreading a
+group, stepping out of a building) asks the grid of its element. A group
+of boats and walkers ordered somewhere parts and goes as two. Shallow
+water stays closed to walkers, as it was: fords are land, and a boat
+can sail anywhere wet. The water grid is derived from the map and the
+Docks and fish standing in it, so it is not hashed and a match without
+boats hashes as before; a save from before boats reads it empty and it
+is rebuilt.
+
+The Dock is three tiles square, every tile of it open water, with open
+land beside it to be built from and open water beside it for its boats;
+anywhere else it is refused ("goes in the water by the shore"). It is
+the water's drop-off: a fishing boat's catch goes there and nothing from
+the land does, so the land keeps its one drop-off type (D5). Every
+letter is a key already, so the Dock is placed by its button, like the
+Town Center and the Wonder.
+
+Ships are a class of their own for the counter system. No technology
+names them yet, so the per-class technology tables keep their eight
+entries and a ship's is none; old saves and hashes keep their shape.
+
+The warships the spec leaves unnamed are three, one an age from the
+Tool Age (the owner agreed): an archer ship, a war galley, a catapult
+ship. They, the transport, the trade boat and the Islands map follow.
+
 ## Open questions
 
-### Q1 — Naval in the vertical slice, or after?
+### Q1 — Naval in the vertical slice, or after? — **answered, see D33**
 Water doubles the pathfinding surface (separate navigation domain, transports,
 shore-landing edge cases) for one map type. **Recommendation:** hold until M8.
 

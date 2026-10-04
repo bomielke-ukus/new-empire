@@ -1707,6 +1707,54 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
             c.rect(12, 7, 8, 2, BLACK);
             c
         }
+        kinds::DOCK => {
+            // A deck of planks on posts, standing in the water, a bollard
+            // at each outer corner and a pennant of the player colour.
+            let (w, h) = (64 * fp, 32 * fp + 20);
+            let cx = w as f32 / 2.0;
+            let cy = h as f32 - 16.0 * fp as f32;
+            let mut c = Canvas::new(w, h, (cx as i16, cy as i16));
+            let (hw, hh) = (cx - 2.0, 16.0 * fp as f32 - 2.0);
+            for (px, py) in [
+                (cx - hw + 6.0, cy),
+                (cx + hw - 6.0, cy),
+                (cx, cy + hh - 4.0),
+            ] {
+                c.rect(px as i32 - 2, py as i32 - 6, 4, 10, BROWN_DARK);
+            }
+            c.diamond(cx, cy - 6.0, hw, hh, BLACK);
+            c.diamond(cx, cy - 6.0, hw - 1.0, hh - 1.0, BROWN);
+            for k in 1..(4 * fp as i32) {
+                let t = k as f32 / (4.0 * fp as f32);
+                let (sx, sy) = (cx - hw + t * hw, cy - 6.0 + t * hh);
+                c.line((sx, sy), (sx + hw, sy - hh), 1.0, BROWN_DARK);
+            }
+            c.rect(cx as i32 - 1, (cy - hh - 26.0) as i32, 2, 22, BLACK);
+            c.rect(cx as i32 + 1, (cy - hh - 26.0) as i32, 10, 6, P_BASE);
+            c
+        }
+        kinds::FISHING_BOAT => {
+            // A small hull with a mast and a sail of the player colour.
+            let mut c = Canvas::new(48, 44, (24, 36));
+            c.ellipse(24.0, 37.0, 18.0, 6.0, SHADOW);
+            c.ellipse(24.0 + dx * 2.0, 32.0, 16.0, 7.0, BLACK);
+            c.ellipse(24.0 + dx * 2.0, 31.0, 15.0, 6.0, BROWN);
+            c.ellipse(24.0 + dx * 2.0, 30.0, 12.0, 3.0, BROWN_DARK);
+            c.rect(23, 8, 2, 22, BLACK);
+            c.convex(&[(25.0, 9.0), (36.0, 22.0), (25.0, 24.0)], P_BASE);
+            c.circle(18.0 - dx * 6.0, 28.0, 3.0, SKIN);
+            c
+        }
+        kinds::FISH => {
+            // Two fish under rippled water.
+            let mut c = Canvas::new(32, 24, (16, 18));
+            c.ellipse(16.0, 18.0, 13.0, 5.0, SHADOW);
+            c.ellipse(11.0, 16.0, 6.0, 2.5, LIMESTONE_DARK);
+            c.convex(&[(5.0, 16.0), (2.0, 13.0), (2.0, 19.0)], LIMESTONE_DARK);
+            c.ellipse(21.0, 19.0, 6.0, 2.5, LIMESTONE);
+            c.convex(&[(27.0, 19.0), (30.0, 16.0), (30.0, 22.0)], LIMESTONE);
+            c
+        }
         kinds::PALISADE_WALL => palisade(),
         kinds::STONE_WALL => stone_wall(),
         kinds::GATE => gate(false),
@@ -2381,9 +2429,9 @@ mod tests {
 
     /// The Bronze and Iron Ages' soldiers, drawn as placeholders until
     /// their models are rendered (`docs/10` §5). The list only shrinks.
-    /// Kinds still drawn as placeholders: none. A new kind goes here until
-    /// its set is rendered.
-    const AWAITING_ART: [KindId; 0] = [];
+    /// Kinds still drawn as placeholders. A new kind goes here until its
+    /// set is rendered.
+    const AWAITING_ART: [KindId; 3] = [kinds::DOCK, kinds::FISHING_BOAT, kinds::FISH];
 
     #[test]
     fn a_set_named_for_an_age_draws_its_kind_in_that_age() {

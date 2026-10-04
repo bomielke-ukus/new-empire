@@ -100,6 +100,14 @@ impl Selection {
         })
     }
 
+    /// Selected units of `player` that can gather from a node of
+    /// `node`: villagers for the land's, fishing boats for fish.
+    pub fn own_gatherers_for(&self, sim: &Simulation, player: u8, node: KindId) -> Vec<EntityId> {
+        self.filter(sim, |i| {
+            sim.world().owner[i] == player && kinds::can_gather(sim.world().kind[i], node)
+        })
+    }
+
     /// Selected villagers of `player`.
     pub fn own_villagers(&self, sim: &Simulation, player: u8) -> Vec<EntityId> {
         self.filter(sim, |i| {

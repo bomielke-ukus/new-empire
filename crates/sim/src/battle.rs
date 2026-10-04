@@ -1119,6 +1119,10 @@ impl Simulation {
         // An open gate's tile is already clear; the counts saturate.
         self.nav.unblock_footprint(ax, ay, info.footprint as i32);
         self.nav.refresh();
+        if info.naval {
+            self.water.unblock_footprint(ax, ay, info.footprint as i32);
+            self.water.refresh();
+        }
         self.world.production[i] = None;
         self.world.construction[i] = None;
         self.world.resource[i] = 0;

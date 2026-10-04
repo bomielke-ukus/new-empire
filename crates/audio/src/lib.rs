@@ -233,6 +233,7 @@ fn class_name(c: Class) -> &'static str {
         Class::Siege => "siege",
         Class::Building => "building",
         Class::Animal => "animal",
+        Class::Ship => "ship",
     }
 }
 
