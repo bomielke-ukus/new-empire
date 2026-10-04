@@ -1661,7 +1661,10 @@ rendered sets had one look; only the placeholders changed with the age.
   plastered walls and a stone base course. Iron Age: slate roofs, walls of
   dressed stone, white cornices and corner pilasters. The roof is what
   reads from the camera's height, so each age has its own roof colour:
-  straw, wood brown, terracotta, slate grey.
+  straw, wood brown, terracotta, slate grey. The market and the siege
+  workshop have no walls to restyle and age in their own models: the
+  market's square goes from earth to stone to white paving round an
+  obelisk, the workshop takes a slate roof and a stone back wall.
 - **Figures.** `kit.age_dress` dresses the villager and the infantry.
   Villagers: a belt, then a linen cap, a straw hat with a brim, a dark
   hood and a cape. Soldiers: a hide cap, belt and shoulder wraps in the

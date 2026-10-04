@@ -288,9 +288,17 @@ def stable():
 
 def market():
     """Three stalls under awnings of the owner's colour, with crates and jars
-    in the square between them."""
+    in the square between them. It has no walls for the ages to restyle, so
+    its square shows the age: beaten earth in the Tool Age, stone in the
+    Bronze, white paving round a stone obelisk in the Iron."""
     b = kit.Building("Market", 2)
-    kit.foundation(b, "market", 1.8, 1.8, "stone_light")
+    square = {1: "earth", 3: "white"}.get(kit.STYLE_AGE, "stone_light")
+    kit.foundation(b, "market", 1.8, 1.8, square)
+    if kit.STYLE_AGE == 3:
+        b.add(kit.box("market_plinth", (0.2, 0.2, 0.06), "stone_light", (0.42, -0.05, 0.0)),
+              kit.FINISHED)
+        b.add(kit.pyramid("market_obelisk", (0.1, 0.1, 0.62), "stone_light",
+                          (0.42, -0.05, 0.06)), kit.FINISHED)
     stalls = [(-0.45, -0.45), (0.45, -0.4), (-0.4, 0.45)]
     for i, (x, y) in enumerate(stalls):
         pts = [(x - 0.3, y - 0.25), (x + 0.3, y - 0.25), (x + 0.3, y + 0.25), (x - 0.3, y + 0.25)]
@@ -401,9 +409,13 @@ def siege_workshop():
     corners = [(-w / 2, -d / 2), (w / 2, -d / 2), (w / 2, d / 2), (-w / 2, d / 2)]
     kit.posts(b, "siege_half", corners, h * 0.5, kit.HALF_WALLS, radius=0.05)
     kit.posts(b, "siege_post", corners, h, kit.FULL_WALLS, radius=0.05)
-    b.add(kit.box("siege_back", (w, 0.06, h), "wood_dark", (0.0, -d / 2, 0.0)), kit.FULL_WALLS)
-    b.add(kit.gable("siege_roof", (w + 0.2, d + 0.2, 0.35), "wood_dark", (0.0, 0.0, h)),
-          kit.FINISHED)
+    # An open shed has no walls for the ages to restyle (kit.style_building):
+    # in the Iron Age its back wall is stone and its roof slate.
+    iron = kit.STYLE_AGE == 3
+    b.add(kit.box("siege_back", (w, 0.06, h), "stone_light" if iron else "wood_dark",
+                  (0.0, -d / 2, 0.0)), kit.FULL_WALLS)
+    b.add(kit.gable("siege_roof", (w + 0.2, d + 0.2, 0.35), "slate" if iron else "wood_dark",
+                    (0.0, 0.0, h)), kit.FINISHED)
     b.add(kit.box("siege_cloth", (w * 0.6, 0.03, 0.1), "player", (0.0, d / 2 + 0.12, h - 0.03)),
           kit.FINISHED)
     kit.disc(b, "siege_wheel", 0.26, 0.07, "wood_dark", (0.2, 0.1, 0.26), kit.FINISHED,
