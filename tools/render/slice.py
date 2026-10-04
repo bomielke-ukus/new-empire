@@ -44,8 +44,8 @@ def spearman():
 
 def clubman():
     """Stone Age: bare-headed, a hide kilt, a club."""
-    h = kit.Humanoid("Clubman")
-    h.hold(kit.club("club"))
+    h = kit.Humanoid("Clubman", beard=True)
+    h.hold(kit.club("club"), follows=True)
     h.animate("swing")
     return h.root
 
@@ -53,7 +53,7 @@ def clubman():
 def axeman():
     """The clubman's line upgraded: a bronze cap and a bronze axe."""
     h = kit.Humanoid("Axeman", helmet="cap", helmet_mat="bronze")
-    h.hold(kit.axe("axe"))
+    h.hold(kit.axe("axe"), follows=True)
     h.animate("swing")
     return h.root
 
@@ -89,6 +89,94 @@ def light_cavalry():
     r.hold(kit.lance("lance"))
     r.animate()
     return r.root
+
+
+def swordsman():
+    """Bronze Age line infantry: a bronze cap, a leather cuirass, a round
+    shield of the owner's colour and a short broad sword."""
+    h = kit.Humanoid("Swordsman", helmet="cap", helmet_mat="bronze")
+    kit.cuirass(h, "hide")
+    h.hold(kit.sword("sword"), follows=True)
+    h.carry_shield(kit.round_shield("shield", radius=0.12))
+    h.animate("swing")
+    return h.root
+
+
+def hoplite():
+    """The Academy's heavy infantry: a crested bronze helmet, a bronze
+    breastplate and greaves, a long spear and the great round shield."""
+    h = kit.Humanoid("Hoplite", helmet="crest", helmet_mat="bronze")
+    kit.cuirass(h, "bronze")
+    kit.greaves(h, "bronze")
+    h.hold(kit.spear("spear", length=1.2))
+    h.carry_shield(kit.round_shield("aspis", radius=0.17))
+    h.animate("thrust")
+    return h.root
+
+
+def legionary():
+    """The Hoplite line's last tier: an iron helmet with a crest, iron
+    mail, a tall curved shield and an iron sword."""
+    h = kit.Humanoid("Legionary", helmet="crest", helmet_mat="iron")
+    kit.cuirass(h, "iron")
+    h.hold(kit.sword("gladius", metal="iron"), follows=True)
+    h.carry_shield(kit.tower_shield("scutum"))
+    h.animate("swing")
+    return h.root
+
+
+def chariot_archer():
+    """A bowman standing in a two-wheeled car behind a bay horse."""
+    c = kit.Chariot("ChariotArcher")
+    c.animate()
+    return c.root
+
+
+def horse_archer():
+    """A light rider on a pale horse with a bow and a quiver at the hip."""
+    r = kit.Rider("HorseArcher", coat="straw", helmet="cap", helmet_mat="hide")
+    r.hold(kit.bow("bow"), lean=0.0)
+    r.animate()
+    return r.root
+
+
+def heavy_cavalry():
+    """The shock rider: a dark horse in a bronze peytral and a caparison of
+    the owner's colour, a crested helmet, a breastplate, a heavy lance."""
+    r = kit.Rider("HeavyCavalry", coat="horse_dark", mane="hair", helmet="crest",
+                  helmet_mat="bronze", barding="bronze", cuirass="bronze")
+    r.hold(kit.spear("lance", length=1.25))
+    r.animate()
+    return r.root
+
+
+def war_elephant():
+    """A war elephant with a howdah of the owner's colour and its driver."""
+    e = kit.Elephant("WarElephant")
+    e.animate()
+    return e.root
+
+
+def stone_thrower():
+    """A torsion engine on four wheels that flings a stone from a sling."""
+    e = kit.Engine("StoneThrower", "thrower")
+    e.animate()
+    return e.root
+
+
+def catapult():
+    """The Stone Thrower made larger and ironbound, a bucket for the stone."""
+    e = kit.Engine("Catapult", "catapult")
+    e.animate()
+    return e.root
+
+
+def ballista():
+    """A great crossbow on a two-wheeled carriage, a shield of the owner's
+    colour across its front."""
+    e = kit.Engine("Ballista", "ballista")
+    e.animate()
+    return e.root
 
 
 # --------------------------------------------------------------------------
@@ -912,6 +1000,16 @@ SUBJECTS = {
     "gold_mine": (gold_mine, "SmallBuilding", "node"),
     "stone_mine": (stone_mine, "SmallBuilding", "node"),
     "gazelle": (gazelle, "Foot", "unit"),
+    "swordsman": (swordsman, "Foot", "unit"),
+    "hoplite": (hoplite, "Foot", "unit"),
+    "legionary": (legionary, "Foot", "unit"),
+    "chariot_archer": (chariot_archer, "Heavy", "unit"),
+    "horse_archer": (horse_archer, "Mounted", "unit"),
+    "heavy_cavalry": (heavy_cavalry, "Mounted", "unit"),
+    "war_elephant": (war_elephant, "Heavy", "unit"),
+    "stone_thrower": (stone_thrower, "Heavy", "unit"),
+    "catapult": (catapult, "Heavy", "unit"),
+    "ballista": (ballista, "Heavy", "unit"),
 }
 SUBJECTS.update({"ground_" + g: (globals()["ground_" + g], "Terrain", "ground") for g in GROUNDS})
 
@@ -930,6 +1028,7 @@ AGED = {
     "market": (1, 2, 3), "watch_tower": (1, 2, 3),
     "temple": (3,), "academy": (3,), "siege_workshop": (3,), "government_centre": (3,),
     "villager": (1, 2, 3), "clubman": (1, 2, 3), "axeman": (1, 2, 3), "spearman": (1, 2, 3),
+    "swordsman": (3,), "hoplite": (3,),
 }
 
 

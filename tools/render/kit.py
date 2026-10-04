@@ -94,6 +94,10 @@ COLOURS = {
     "white": srgb(0.88, 0.86, 0.80),
     # The dark of a window or a doorway: the room behind it, unlit.
     "opening": srgb(0.10, 0.08, 0.07),
+    # The war elephant's hide and toenails; tusks.
+    "elephant": srgb(0.5, 0.48, 0.46),
+    "elephant_toe": srgb(0.66, 0.63, 0.58),
+    "ivory": srgb(0.93, 0.9, 0.82),
     # Split-wood shingles, the Tool Age's roofs; slate, the Iron Age's.
     "shingle": srgb(0.46, 0.37, 0.27),
     "slate": srgb(0.36, 0.39, 0.44),
@@ -255,6 +259,7 @@ def _mesh(name, verts, faces, mat, location=(0.0, 0.0, 0.0), rotation=(0.0, 0.0,
 # The parts of a figure or an animal that are flesh, and so rounded.
 BODY_PARTS = {
     "leg_l", "leg_r", "arm_l", "arm_r", "torso", "head", "skirt",
+    "shin_l", "shin_r", "fore_l", "fore_r", "kilt",
     "r_leg_l", "r_leg_r", "r_arm_l", "r_arm_r", "r_torso", "r_head",
     "barrel", "neck", "belly", "mane", "tail",
     "leg_fl", "leg_fr", "leg_bl", "leg_br",
@@ -411,86 +416,257 @@ def hold_frames(objects):
 
 # --------------------------------------------------------------------------
 # The humanoid.
+#
+# A figure 0.86 units tall with jointed limbs: a thigh from the hip and a
+# shin from the knee down to a sandal, an upper arm from the shoulder and a
+# forearm from the elbow down to a hand; a torso broad at the shoulders
+# over a kilt, a neck, and a head with a nose, eyes and hair, or a helmet.
+# At 70 px on a Retina screen the shapes read; boxes read as toys.
 
 ARM_LENGTH = 0.26
 SHOULDER_Z = 0.64
 HIP_Z = 0.34
+UPPER_ARM = 0.14
+FOREARM = 0.12
+THIGH = 0.165
+SHIN = 0.14
+FOOT_H = 0.035
+SHOULDER_X = 0.165
+# Where the head's centre sits, and its half-sizes.
+HEAD_Z = 0.748
+HEAD = (0.072, 0.078, 0.088)
 
 # Half the standing height: a body pitched flat about its feet lies out this
 # far, so this is how far back it slides to stay on its own tile.
 FALLEN_CENTRE = 0.43
 
 
-class Humanoid:
-    """A figure 0.86 units tall, the villager's proportions, built from boxes.
+def _recalc(obj):
+    """Points every face of `obj` outward."""
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(obj.data)
+    bm.free()
+    for poly in obj.data.polygons:
+        poly.use_smooth = True
+    return obj
 
-    `dress` picks the clothes: "tunic" (legs showing) or "robe" (a skirt to
-    the ground, for the priest). Heads can carry a `helmet` ("cap", "crest",
-    "cone" or None). A `weapon` is held in the right hand and a `shield` on
-    the left arm. Parts are parented to `body`, one level below the root, so
-    the root stays free for render_sheet.py's turntable.
+
+def ellipsoid(name, radii, mat, location=(0.0, 0.0, 0.0), segments=14, rings=9,
+              upper=False):
+    """An ellipsoid with half-sizes `radii` about `location`, smooth; only
+    its upper half, closed flat, when `upper` (a dome: a helmet, a cap)."""
+    rx, ry, rz = radii
+    first = rings // 2 if upper else 1
+    verts = [] if upper else [(0.0, 0.0, -rz)]
+    lats = []
+    for r in range(first, rings):
+        phi = math.pi * r / rings - math.pi / 2.0
+        lats.append(phi)
+    if upper:
+        lats = [0.0] + [p for p in lats if p > 1e-6]
+    for phi in lats:
+        for s in range(segments):
+            th = 2.0 * math.pi * s / segments
+            verts.append((rx * math.cos(phi) * math.cos(th),
+                          ry * math.cos(phi) * math.sin(th), rz * math.sin(phi)))
+    verts.append((0.0, 0.0, rz))
+    top = len(verts) - 1
+    base = 0 if upper else 1
+    faces = []
+    if upper:
+        faces.append(tuple(range(segments)))
+    else:
+        for s in range(segments):
+            faces.append((0, base + s, base + (s + 1) % segments))
+    for r in range(len(lats) - 1):
+        for s in range(segments):
+            a = base + r * segments + s
+            b = base + r * segments + (s + 1) % segments
+            faces.append((a, b, b + segments, a + segments))
+    last = base + (len(lats) - 1) * segments
+    for s in range(segments):
+        faces.append((last + s, last + (s + 1) % segments, top))
+    obj = _mesh(name, verts, faces, mat, location)
+    return _recalc(obj)
+
+
+def loft(name, bottom, top, height, mat, location=(0.0, 0.0, 0.0), lean=0.0):
+    """A box `height` tall whose bottom is `bottom` = (x, y) across and its
+    top `top`, the top pushed `lean` forward: a torso, a kilt, a cloth."""
+    (bw, bd), (tw, td) = bottom, top
+    verts = [(-bw / 2, -bd / 2, 0.0), (bw / 2, -bd / 2, 0.0), (bw / 2, bd / 2, 0.0),
+             (-bw / 2, bd / 2, 0.0),
+             (-tw / 2, -td / 2 + lean, height), (tw / 2, -td / 2 + lean, height),
+             (tw / 2, td / 2 + lean, height), (-tw / 2, td / 2 + lean, height)]
+    faces = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
+             (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
+    return _mesh(name, verts, faces, mat, location)
+
+
+def oval(name, bottom, top, height, mat, location=(0.0, 0.0, 0.0), lean=0.0, sides=16):
+    """A frustum of oval section `height` tall: half-sizes `bottom` = (x, y)
+    at its foot and `top` at its head, the top pushed `lean` forward. A
+    torso that narrows to the waist, a kilt that flares."""
+    (bx, by), (tx, ty) = bottom, top
+    verts = []
+    for rx, ry, z, dy in ((bx, by, 0.0, 0.0), (tx, ty, height, lean)):
+        for k in range(sides):
+            a = 2.0 * math.pi * k / sides
+            verts.append((rx * math.cos(a), ry * math.sin(a) + dy, z))
+    faces = [tuple(reversed(range(sides))), tuple(range(sides, 2 * sides))]
+    for k in range(sides):
+        j = (k + 1) % sides
+        faces.append((k, j, sides + j, sides + k))
+    return _recalc(_mesh(name, verts, faces, mat, location))
+
+
+def limb(name, length, r_top, r_bottom, mat, location=(0.0, 0.0, 0.0),
+         rotation=(0.0, 0.0, 0.0)):
+    """A limb hung from its joint at `location`: a tapered round length."""
+    return cylinder(name, r_bottom, length, mat, location, sides=12, pivot="top",
+                    rotation=rotation, top_radius=r_top)
+
+
+def head_and_helmet(add, n, centre, helmet=None, helmet_mat="bronze", hair=True,
+                    beard=False):
+    """The head about `centre`: skin, a nose, two eyes, and hair, a helmet or
+    both. `add(key, obj)` takes each piece onto the body. Helmets: "cap" (a
+    dome with a rim), "crest" (a dome, cheek pieces and a crest of the
+    owner's colour), "cone" (a point, a rim and a nose guard), "band" (a
+    headband over the hair)."""
+    x, y, z = centre
+    hx, hy, hz = HEAD
+    add("head", ellipsoid(n + "_head", HEAD, "skin", (x, y, z)))
+    add("nose", box(n + "_nose", (0.022, 0.03, 0.03), "skin", (x, y + hy + 0.004, z - 0.03)))
+    for side in (-1.0, 1.0):
+        add("eye_%s" % ("l" if side < 0 else "r"),
+            box(n + "_eye", (0.016, 0.01, 0.012), "opening",
+                (x + side * 0.027, y + hy - 0.005, z + 0.005)))
+    if beard:
+        add("beard", ellipsoid(n + "_beard", (0.058, 0.04, 0.045), "hair",
+                               (x, y + hy * 0.6, z - hz * 0.7)))
+    if hair and helmet in (None, "band"):
+        add("hair", ellipsoid(n + "_hair", (hx + 0.006, hy + 0.004, hz * 0.78), "hair",
+                              (x, y - 0.012, z + 0.024)))
+    top = z + hz * 0.25
+    if helmet in ("cap", "crest"):
+        add("helmet", ellipsoid(n + "_helmet", (hx + 0.011, hy + 0.011, hz * 0.8), helmet_mat,
+                                (x, y, top), upper=True))
+        add("helmet_rim", cylinder(n + "_rim", hx + 0.015, 0.016, helmet_mat,
+                                   (x, y, top - 0.006), sides=14))
+        if helmet == "crest":
+            # A crescent of horsehair from brow to nape, seated on the dome.
+            outer = [(0.1 * math.cos(math.pi * k / 10), 0.075 * math.sin(math.pi * k / 10))
+                     for k in range(11)]
+            inner = [(0.082 * math.cos(math.pi * k / 10), 0.035 * math.sin(math.pi * k / 10))
+                     for k in range(10, -1, -1)]
+            add("crest", profile_x(n + "_crest", outer + inner, 0.03, "player",
+                                   (x, y - 0.006, top + hz * 0.45)))
+            for side in (-1.0, 1.0):
+                add("cheek_%s" % ("l" if side < 0 else "r"),
+                    box(n + "_cheek", (0.014, 0.05, 0.065), helmet_mat,
+                        (x + side * (hx + 0.006), y + 0.035, z - 0.05)))
+    elif helmet == "cone":
+        add("helmet", cylinder(n + "_rim", hx + 0.016, 0.02, helmet_mat,
+                               (x, y, top - 0.006), sides=14))
+        add("helmet_top", cone(n + "_cone", hx + 0.012, 0.13, helmet_mat, (x, y, top),
+                               sides=14))
+        add("nasal", box(n + "_nasal", (0.016, 0.012, 0.06), helmet_mat,
+                         (x, y + hy + 0.01, z - 0.045)))
+    elif helmet == "band":
+        add("helmet", cylinder(n + "_band", hx + 0.008, 0.022, "linen",
+                               (x, y - 0.004, z + 0.012), sides=14))
+
+
+class Humanoid:
+    """A figure 0.86 units tall, the villager's proportions, jointed.
+
+    `dress` picks the clothes: "tunic" (a kilt and bare legs) or "robe" (a
+    skirt to the ground, for the priest). Heads can carry a `helmet` ("cap",
+    "crest", "cone", "band" or None). A `weapon` is held in the right hand
+    and a `shield` on the left forearm. Parts are parented to `body`, one
+    level below the root, so the root stays free for render_sheet.py's
+    turntable; the shins hang from the thighs and the forearms from the
+    upper arms, so a knee and an elbow bend.
     """
 
     # Which age's dress it wears past the Stone Age (`age_dress`).
     COSTUME = "soldier"
 
     def __init__(self, root_name, tunic="player", dress="tunic", helmet=None,
-                 helmet_mat="bronze", hair=True):
+                 helmet_mat="bronze", hair=True, beard=False, legs="skin"):
         self.root = empty(root_name)
         self.body = empty(root_name + "_body", parent=self.root)
         self.parts = {}
+        n = root_name
         add = self._add
-        legs = "trouser" if dress == "tunic" else tunic
-        add("leg_l", box("leg_l", (0.10, 0.11, HIP_Z), legs, (-0.062, 0.0, HIP_Z), "top"))
-        add("leg_r", box("leg_r", (0.10, 0.11, HIP_Z), legs, (0.062, 0.0, HIP_Z), "top"))
-        add("torso", box("torso", (0.27, 0.17, 0.32), tunic, (0.0, 0.0, HIP_Z)))
+        legs = legs if dress == "tunic" else tunic
+        for side, x in (("l", -0.062), ("r", 0.062)):
+            thigh = add("leg_" + side, limb(n + "_thigh_" + side, THIGH, 0.05, 0.04, legs,
+                                            (x, 0.0, HIP_Z)))
+            shin = add("shin_" + side, limb(n + "_shin_" + side, SHIN, 0.04, 0.03, legs,
+                                            (0.0, 0.0, -THIGH)), parent=thigh)
+            foot = box(n + "_foot_" + side, (0.068, 0.12, FOOT_H), "hide",
+                       (0.0, 0.026, -SHIN - FOOT_H + 0.004))
+            foot.parent = shin
         if dress == "robe":
-            # A skirt to the ground hides the legs' swing but keeps the walk.
-            add("skirt", box("skirt", (0.29, 0.19, HIP_Z), tunic, (0.0, 0.0, 0.0)))
-        add("head", box("head", (0.19, 0.18, 0.17), "skin", (0.0, 0.01, 0.66)))
-        if hair and helmet is None:
-            add("hair", box("hair", (0.20, 0.19, 0.05), "hair", (0.0, 0.01, 0.81)))
-        if helmet == "cap":
-            add("helmet", box("helmet", (0.21, 0.20, 0.08), helmet_mat, (0.0, 0.01, 0.79)))
-        elif helmet == "crest":
-            add("helmet", box("helmet", (0.21, 0.20, 0.08), helmet_mat, (0.0, 0.01, 0.79)))
-            add("crest", box("crest", (0.04, 0.22, 0.07), "player", (0.0, 0.0, 0.86)))
-        elif helmet == "band":
-            add("hair", box("hair", (0.20, 0.19, 0.05), "hair", (0.0, 0.01, 0.81)))
-            add("helmet", box("band", (0.205, 0.195, 0.04), "linen", (0.0, 0.01, 0.76)))
-        elif helmet == "cone":
-            add("helmet", box("helmet_rim", (0.21, 0.20, 0.04), helmet_mat, (0.0, 0.01, 0.79)))
-            add("helmet_top", pyramid("helmet_top", (0.19, 0.18, 0.12), helmet_mat,
-                                      (0.0, 0.01, 0.83)))
-        add("arm_l", box("arm_l", (0.075, 0.09, ARM_LENGTH), "skin",
-                         (-0.17, 0.0, SHOULDER_Z), "top"))
-        add("arm_r", box("arm_r", (0.075, 0.09, ARM_LENGTH), "skin",
-                         (0.17, 0.0, SHOULDER_Z), "top"))
+            add("skirt", oval(n + "_skirt", (0.15, 0.11), (0.115, 0.08), HIP_Z + 0.05, tunic))
+        else:
+            add("kilt", oval(n + "_kilt", (0.135, 0.1), (0.11, 0.075), 0.18, tunic,
+                             (0.0, 0.0, HIP_Z - 0.13)))
+        # The trunk: narrow at the waist, broad at the chest, the shoulders
+        # a rounded yoke across its top.
+        add("torso", oval(n + "_torso", (0.1, 0.068), (0.128, 0.078),
+                          SHOULDER_Z - 0.03 - (HIP_Z + 0.02), tunic,
+                          (0.0, 0.0, HIP_Z + 0.02), lean=0.01))
+        add("yoke", ellipsoid(n + "_yoke", (0.165, 0.08, 0.05), tunic,
+                              (0.0, 0.01, SHOULDER_Z - 0.03)))
+        add("waist", oval(n + "_belt", (0.104, 0.072), (0.104, 0.072), 0.03, "hide",
+                          (0.0, 0.0, HIP_Z + 0.02)))
+        add("neck", cylinder(n + "_neck", 0.036, 0.07, "skin", (0.0, 0.006, SHOULDER_Z - 0.005),
+                             sides=12))
+        head_and_helmet(add, n, (0.0, 0.012, HEAD_Z), helmet, helmet_mat, hair, beard)
+        for side, x in (("l", -SHOULDER_X), ("r", SHOULDER_X)):
+            upper = add("arm_" + side, limb(n + "_upper_" + side, UPPER_ARM, 0.038, 0.03,
+                                            "skin", (x, 0.0, SHOULDER_Z - 0.005)))
+            sleeve = limb(n + "_sleeve_" + side, 0.065, 0.047, 0.04, tunic)
+            sleeve.parent = upper
+            fore = add("fore_" + side, limb(n + "_fore_" + side, FOREARM, 0.031, 0.024, "skin",
+                                            (0.0, 0.0, -UPPER_ARM)), parent=upper)
+            grip = ellipsoid(n + "_hand_" + side, (0.027, 0.03, 0.034), "skin",
+                             (0.0, 0.004, -FOREARM - 0.014))
+            grip.parent = fore
         self.weapon = None
         self.weapon_hand = "right"
         self.weapon_lean = 0.0
+        self.weapon_follows = False
         self.shield = None
         if STYLE_AGE:
             age_dress(self, STYLE_AGE, self.COSTUME)
 
-    def _add(self, key, obj):
-        obj.parent = self.body
+    def _add(self, key, obj, parent=None):
+        obj.parent = parent if parent is not None else self.body
         self.parts[key] = obj
-        # A body is rounded, limbs, head and trunk all but capsules; what it
+        # A body is rounded: the ends of its limbs, its trunk; what it
         # wears keeps its shape, or a cone helmet's rim turns into a brim.
         if key in BODY_PARTS:
             soften(obj, 0.42, 3, limit=0.06)
         return obj
 
-    def hold(self, weapon, hand="right", lean=22.0):
+    def hold(self, weapon, hand="right", lean=22.0, follows=False):
         """`weapon` is an empty whose children are the weapon, gripped at its
         origin. It follows the `hand` and keeps its own angle, leaned `lean`
         degrees out from the body so it shows past the figure's outline
-        when the figure faces the viewer."""
+        when the figure faces the viewer; with `follows` it turns with the
+        forearm too, as a club or an axe does in a blow."""
         weapon.parent = self.body
         self.weapon = weapon
         self.weapon_hand = hand
         self.weapon_lean = _deg(lean) * (1.0 if hand == "right" else -1.0)
+        self.weapon_follows = follows
 
     def wear(self, key, obj):
         """Something that rides on the body, a quiver say, and moves with it."""
@@ -498,7 +674,7 @@ class Humanoid:
 
     def carry_shield(self, shield):
         """`shield` hangs on the left forearm and swings with it."""
-        shield.parent = self.parts["arm_l"]
+        shield.parent = self.parts["fore_l"]
         self.shield = shield
 
     def animate(self, style):
@@ -524,22 +700,26 @@ class Humanoid:
                     obj.keyframe_insert("location", frame=frame)
                     obj.keyframe_insert("rotation_euler", frame=frame)
                 if self.weapon is not None:
-                    arm, side = (("arm_l", -1.0) if self.weapon_hand == "left"
-                                 else ("arm_r", 1.0))
-                    self.weapon.location = hand(limbs.get(arm, 0.0), side=side)
-                    self.weapon.rotation_euler = (weapon_angle, self.weapon_lean, 0.0)
+                    side = "l" if self.weapon_hand == "left" else "r"
+                    arm, fore = limbs.get("arm_" + side, 0.0), limbs.get("fore_" + side, 0.0)
+                    self.weapon.location = hand(arm, -1.0 if side == "l" else 1.0, fore)
+                    turn = fore if self.weapon_follows else 0.0
+                    self.weapon.rotation_euler = (weapon_angle + turn, self.weapon_lean, 0.0)
                     self.weapon.keyframe_insert("location", frame=frame)
                     self.weapon.keyframe_insert("rotation_euler", frame=frame)
         hold_frames([self.body, self.weapon] + list(self.parts.values()))
 
 
-def hand(arm_angle, side):
-    """Where the right (side 1) or left (-1) hand is, in body space, with the
-    arm swung `arm_angle` about the shoulder."""
-    x = 0.17 * side
-    y = ARM_LENGTH * math.sin(arm_angle)
-    z = SHOULDER_Z - ARM_LENGTH * math.cos(arm_angle)
-    return (x, y, z)
+def hand(arm_angle, side, fore=0.0):
+    """Where the right (side 1) or left (-1) hand grips, in body space, with
+    the upper arm swung `arm_angle` about the shoulder and the forearm bent
+    a further `fore` at the elbow."""
+    x = SHOULDER_X * side
+    ey = UPPER_ARM * math.sin(arm_angle)
+    ez = SHOULDER_Z - 0.005 - UPPER_ARM * math.cos(arm_angle)
+    reach = FOREARM + 0.014
+    a = arm_angle + fore
+    return (x, ey + reach * math.sin(a), ez - reach * math.cos(a))
 
 
 def _deg(d):
@@ -548,10 +728,12 @@ def _deg(d):
 
 def humanoid_pose(anim, i, count, style):
     """One frame: the body's bob and pitch, each limb's swing, the weapon's
-    angle. Positive swing brings a limb forward (+Y). At 34 px the silhouette
-    is the whole performance, so the motion is broad and simple."""
+    angle. Positive swing brings a limb forward (+Y); a positive elbow
+    brings the forearm up in front, a negative knee the shin back. At 70 px
+    the silhouette is most of the performance, so the motion is broad."""
     body = {"dy": 0.0, "dz": 0.0, "rot_x": 0.0, "scale_z": 1.0}
-    limbs = {"leg_l": 0.0, "leg_r": 0.0, "arm_l": 0.0, "arm_r": 0.0}
+    limbs = {"leg_l": 0.0, "leg_r": 0.0, "arm_l": 0.0, "arm_r": 0.0,
+             "fore_l": _deg(12.0), "fore_r": _deg(18.0)}
     # The weapon's angle from upright: 0 holds it point up, -90 points it
     # forward.
     carry = {"thrust": _deg(-12.0), "swing": _deg(-20.0), "shoot": 0.0,
@@ -562,47 +744,68 @@ def humanoid_pose(anim, i, count, style):
         body["dz"] = 0.006 * math.sin(2.0 * math.pi * i / count)
         limbs["arm_l"] = _deg(4.0)
         limbs["arm_r"] = _deg(10.0)
+        limbs["fore_r"] = _deg(30.0)
 
     elif anim == "walk":
         phase = 2.0 * math.pi * i / count
-        limbs["leg_l"] = _deg(26.0) * math.sin(phase)
-        limbs["leg_r"] = _deg(26.0) * math.sin(phase + math.pi)
+        limbs["leg_l"] = _deg(28.0) * math.sin(phase)
+        limbs["leg_r"] = _deg(28.0) * math.sin(phase + math.pi)
+        # The knee folds as the leg comes through, lifting the foot.
+        limbs["shin_l"] = _deg(-42.0) * max(0.0, math.cos(phase))
+        limbs["shin_r"] = _deg(-42.0) * max(0.0, math.cos(phase + math.pi))
         limbs["arm_l"] = _deg(18.0) * math.sin(phase + math.pi)
         limbs["arm_r"] = _deg(10.0) + _deg(8.0) * math.sin(phase)
+        limbs["fore_l"] = _deg(20.0) + _deg(10.0) * max(0.0, math.sin(phase + math.pi))
+        limbs["fore_r"] = _deg(30.0)
         body["dz"] = 0.018 * abs(math.sin(phase))
 
     elif anim == "attack":
         # The blow lands on index 3, the manifest's impact frame.
         if style == "thrust":
             keys = [20.0, 35.0, 10.0, 80.0, 70.0, 40.0]
+            elbows = [70.0, 80.0, 90.0, 5.0, 15.0, 45.0]
             limbs["arm_r"] = _deg(keys[i])
+            limbs["fore_r"] = _deg(elbows[i])
             limbs["arm_l"] = _deg(keys[i] * 0.6)
+            limbs["fore_l"] = _deg(40.0)
             weapon = _deg(-90.0) if i >= 2 else _deg(-60.0)
             body["rot_x"] = _deg(8.0) if i == 3 else 0.0
-            limbs["leg_l"] = _deg(16.0)
-            limbs["leg_r"] = _deg(-10.0)
+            limbs["leg_l"] = _deg(18.0)
+            limbs["leg_r"] = _deg(-12.0)
+            limbs["shin_r"] = _deg(-10.0)
         elif style == "shoot":
-            # Bow up at full draw, loosed on the impact frame.
+            # The bow out on a straight left arm, the right hand drawing the
+            # string back to the cheek, loosed on the impact frame.
             draw = [60.0, 80.0, 85.0, 85.0, 80.0, 60.0]
             limbs["arm_l"] = _deg(draw[i])
-            limbs["arm_r"] = _deg(draw[i] - (35.0 if i < 3 else 10.0))
+            limbs["fore_l"] = _deg(5.0)
+            limbs["arm_r"] = _deg(draw[i] - (20.0 if i < 3 else 5.0))
+            limbs["fore_r"] = _deg(95.0 if i < 3 else 30.0)
         elif style == "sling":
             keys = [-40.0, -120.0, -200.0, -280.0, -330.0, -360.0]
             limbs["arm_r"] = _deg(keys[i])
+            limbs["fore_r"] = _deg(10.0)
             limbs["arm_l"] = _deg(20.0)
             weapon = _deg(keys[i])
         elif style == "bless":
             lift = [30.0, 70.0, 110.0, 140.0, 120.0, 60.0]
             limbs["arm_l"] = _deg(lift[i])
             limbs["arm_r"] = _deg(lift[i])
+            limbs["fore_l"] = limbs["fore_r"] = _deg(20.0)
         else:
+            # Wound back over the shoulder with the elbow folded, then the
+            # arm comes over and straightens into the blow.
             keys = [-55.0, -70.0, -20.0, 75.0, 60.0, 30.0]
+            elbows = [60.0, 75.0, 50.0, 5.0, 15.0, 30.0]
             limbs["arm_r"] = _deg(keys[i])
+            limbs["fore_r"] = _deg(elbows[i])
             limbs["arm_l"] = _deg(-keys[i] * 0.25)
+            limbs["fore_l"] = _deg(35.0)
             weapon = _deg(keys[i]) + carry
             body["rot_x"] = _deg(-keys[i] * 0.12)
-            limbs["leg_l"] = _deg(10.0)
-            limbs["leg_r"] = _deg(-8.0)
+            limbs["leg_l"] = _deg(12.0)
+            limbs["leg_r"] = _deg(-10.0)
+            limbs["shin_r"] = _deg(-12.0)
 
     elif anim in ("death", "decay"):
         if anim == "death":
@@ -616,8 +819,11 @@ def humanoid_pose(anim, i, count, style):
         body["dz"] = -0.05 * t
         limbs["arm_l"] = _deg(-50.0) * t
         limbs["arm_r"] = _deg(-70.0) * t
+        limbs["fore_l"] = _deg(12.0) + _deg(30.0) * t
+        limbs["fore_r"] = _deg(18.0) - _deg(10.0) * t
         limbs["leg_l"] = _deg(18.0) * t
         limbs["leg_r"] = _deg(-12.0) * t
+        limbs["shin_l"] = _deg(-25.0) * t
         weapon = carry + _deg(-70.0) * t
         if anim == "decay":
             s = (i + 1) / float(count)
@@ -630,94 +836,162 @@ def humanoid_pose(anim, i, count, style):
 # --------------------------------------------------------------------------
 # Weapons, each gripped at its empty's origin and standing point up.
 
-def spear(name):
+def blade(name, width, length, thick, mat, location=(0.0, 0.0, 0.0), widest=0.35):
+    """A leaf-shaped blade standing on `location`: widest `widest` of the
+    way up, coming to a point, a ridge down each face."""
+    w, t, h = width / 2.0, thick / 2.0, length
+    m = h * widest
+    verts = [(0.0, 0.0, 0.0), (w, 0.0, m), (0.0, t, m), (-w, 0.0, m), (0.0, -t, m),
+             (0.0, 0.0, h)]
+    faces = [(0, 2, 1), (0, 3, 2), (0, 4, 3), (0, 1, 4),
+             (1, 2, 5), (2, 3, 5), (3, 4, 5), (4, 1, 5)]
+    return _recalc(_mesh(name, verts, faces, mat, location))
+
+
+def profile_x(name, points, thick, mat, location=(0.0, 0.0, 0.0)):
+    """A flat shape drawn in y and z, `points` round its outline, `thick`
+    across in x: an axe's blade, a crest."""
+    n = len(points)
+    t = thick / 2.0
+    verts = [(-t, y, z) for y, z in points] + [(t, y, z) for y, z in points]
+    faces = [tuple(range(n)), tuple(range(2 * n - 1, n - 1, -1))]
+    for i in range(n):
+        j = (i + 1) % n
+        faces.append((i, j, n + j, n + i))
+    return _recalc(_mesh(name, verts, faces, mat, location))
+
+
+def _grip(name, parts):
     grip = empty(name)
-    shaft = cylinder(name + "_shaft", 0.026, 1.00, "wood", (0.0, 0.0, -0.32), sides=6)
-    tip = cone(name + "_tip", 0.05, 0.16, "bronze", (0.0, 0.0, 0.68), sides=6)
-    for part in (shaft, tip):
+    for part in parts:
         part.parent = grip
     return grip
+
+
+def spear(name, metal="bronze", length=1.0):
+    return _grip(name, [
+        cylinder(name + "_shaft", 0.017, length, "wood", (0.0, 0.0, -0.32), sides=8),
+        blade(name + "_blade", 0.055, 0.17, 0.016, metal, (0.0, 0.0, length - 0.34)),
+        cylinder(name + "_butt", 0.004, 0.06, metal, (0.0, 0.0, -0.38), sides=8,
+                 top_radius=0.019),
+    ])
 
 
 def club(name, head="wood_dark"):
-    grip = empty(name)
-    handle = cylinder(name + "_handle", 0.03, 0.32, "wood", (0.0, 0.0, -0.06), sides=6)
-    knob = cylinder(name + "_head", 0.075, 0.18, head, (0.0, 0.0, 0.22), sides=8,
-                    top_radius=0.06)
-    for part in (handle, knob):
-        part.parent = grip
-    return grip
+    return _grip(name, [
+        cylinder(name + "_handle", 0.02, 0.32, "wood", (0.0, 0.0, -0.06), sides=8,
+                 top_radius=0.026),
+        clump(name + "_head", 0.06, head, (0.0, 0.0, 0.28), seed=3, lumps=0.22, squash=1.4),
+    ])
 
 
-def axe(name):
-    grip = empty(name)
-    handle = cylinder(name + "_handle", 0.028, 0.42, "wood", (0.0, 0.0, -0.10), sides=6)
-    blade = box(name + "_blade", (0.045, 0.20, 0.15), "bronze", (0.0, 0.08, 0.18))
-    for part in (handle, blade):
-        part.parent = grip
-    return grip
+def axe(name, metal="bronze"):
+    edge = [(0.0, 0.12), (0.05, 0.11), (0.12, 0.07), (0.16, 0.13), (0.17, 0.2),
+            (0.16, 0.27), (0.12, 0.31), (0.05, 0.25), (0.0, 0.24)]
+    return _grip(name, [
+        cylinder(name + "_handle", 0.018, 0.44, "wood", (0.0, 0.0, -0.1), sides=8),
+        profile_x(name + "_blade", edge, 0.018, metal),
+        cylinder(name + "_socket", 0.028, 0.13, metal, (0.0, 0.0, 0.115), sides=8),
+    ])
 
 
-def sword(name):
-    grip = empty(name)
-    hilt = box(name + "_hilt", (0.035, 0.035, 0.09), "wood_dark", (0.0, 0.0, -0.05))
-    guard = box(name + "_guard", (0.13, 0.04, 0.03), "bronze", (0.0, 0.0, 0.04))
-    blade = box(name + "_blade", (0.055, 0.02, 0.38), "iron", (0.0, 0.0, 0.07))
-    for part in (hilt, guard, blade):
-        part.parent = grip
-    return grip
+def sword(name, metal="bronze"):
+    return _grip(name, [
+        cylinder(name + "_hilt", 0.016, 0.1, "wood_dark", (0.0, 0.0, -0.06), sides=8),
+        ellipsoid(name + "_pommel", (0.024, 0.024, 0.02), metal, (0.0, 0.0, -0.065)),
+        box(name + "_guard", (0.1, 0.03, 0.022), metal, (0.0, 0.0, 0.035)),
+        blade(name + "_blade", 0.06, 0.4, 0.012, metal, (0.0, 0.0, 0.055), widest=0.6),
+    ])
+
+
+def rod(name, a, b, radius, mat, sides=6, top_radius=None):
+    """A round rod from `a` to `b`, both in the y-z plane (x = a[0])."""
+    dy, dz = b[1] - a[1], b[2] - a[2]
+    length = math.hypot(dy, dz)
+    angle = math.atan2(-dy, dz)
+    return cylinder(name, radius, length, mat, a, sides=sides,
+                    rotation=(angle, 0.0, 0.0), top_radius=top_radius)
 
 
 def bow(name):
-    grip = empty(name)
-    upper = box(name + "_upper", (0.035, 0.035, 0.34), "wood", (0.0, 0.04, 0.0),
-                rotation=(_deg(-14.0), 0, 0))
-    lower = box(name + "_lower", (0.035, 0.035, 0.34), "wood", (0.0, 0.04, 0.0), pivot="top",
-                rotation=(_deg(14.0), 0, 0))
-    string = box(name + "_string", (0.012, 0.012, 0.66), "linen", (0.0, -0.04, -0.33))
-    for part in (upper, lower, string):
-        part.parent = grip
-    return grip
+    """A recurve bow: the limbs curving back from the grip toward the
+    archer and their tips flicking forward again, the string straight
+    between the tips."""
+    curve = [(0.03, 0.0), (0.022, 0.1), (0.0, 0.2), (-0.018, 0.28), (-0.01, 0.335)]
+    parts = []
+    for sign, tag in ((1.0, "u"), (-1.0, "d")):
+        pts = [(0.0, y, z * sign) for y, z in curve]
+        for k in range(len(pts) - 1):
+            r = 0.013 if k < 2 else 0.009
+            parts.append(rod("%s_limb%d%s" % (name, k, tag), pts[k], pts[k + 1], r, "wood"))
+    tip = curve[-1]
+    parts.append(rod(name + "_string", (0.0, tip[0], -tip[1]), (0.0, tip[0], tip[1]), 0.0035,
+                     "linen", sides=4))
+    parts.append(cylinder(name + "_grip", 0.017, 0.08, "hide", (0.0, 0.03, -0.04), sides=8))
+    return _grip(name, parts)
 
 
 def sling(name):
-    grip = empty(name)
-    cord = box(name + "_cord", (0.018, 0.018, 0.24), "rope", (0.0, 0.0, -0.24))
-    pouch = box(name + "_pouch", (0.075, 0.075, 0.075), "hide", (0.0, 0.0, -0.30))
-    for part in (cord, pouch):
-        part.parent = grip
-    return grip
+    return _grip(name, [
+        cylinder(name + "_cord", 0.007, 0.24, "rope", (0.0, 0.0, -0.24), sides=5),
+        ellipsoid(name + "_pouch", (0.035, 0.035, 0.03), "hide", (0.0, 0.0, -0.27)),
+    ])
 
 
 def staff(name):
-    grip = empty(name)
-    shaft = cylinder(name + "_shaft", 0.026, 0.84, "wood", (0.0, 0.0, -0.32), sides=6)
-    top = box(name + "_top", (0.10, 0.10, 0.10), "bronze", (0.0, 0.0, 0.52))
-    for part in (shaft, top):
-        part.parent = grip
-    return grip
+    return _grip(name, [
+        cylinder(name + "_shaft", 0.018, 0.84, "wood", (0.0, 0.0, -0.32), sides=8),
+        ellipsoid(name + "_top", (0.045, 0.045, 0.05), "bronze", (0.0, 0.0, 0.55)),
+    ])
 
 
 def quiver(name):
     """A quiver on the back, its arrows showing over the right shoulder."""
     root = empty(name)
-    case = box(name + "_case", (0.07, 0.07, 0.30), "hide", (0.07, -0.11, 0.42),
-               rotation=(0.0, _deg(-18.0), 0.0))
-    fletch = box(name + "_fletch", (0.06, 0.06, 0.08), "white", (0.12, -0.11, 0.70),
-                 rotation=(0.0, _deg(-18.0), 0.0))
-    for part in (case, fletch):
+    tilt = (0.0, _deg(-18.0), 0.0)
+    case = cylinder(name + "_case", 0.036, 0.30, "hide", (0.07, -0.11, 0.42), sides=10,
+                    rotation=tilt, top_radius=0.04)
+    case.parent = root
+    for k, dx in enumerate((-0.015, 0.0, 0.015)):
+        shaft = cylinder("%s_arrow%d" % (name, k), 0.005, 0.12, "wood",
+                         (0.165 + dx, -0.11 + dx, 0.70), sides=4, rotation=tilt)
+        fletch = box("%s_fletch%d" % (name, k), (0.012, 0.03, 0.05), "white",
+                     (0.19 + dx, -0.11 + dx, 0.79), rotation=tilt)
+        shaft.parent = fletch.parent = root
+    return root
+
+
+def round_shield(name, face="player", radius=0.13, rim="bronze"):
+    """A round shield on the forearm, seen edge-on from the side, face-on
+    from the front: a face, a rim of metal or hide, a boss."""
+    root = empty(name, location=(-0.05, 0.02, -0.06))
+    side = (0.0, _deg(90.0), 0.0)
+    disc = cylinder(name + "_disc", radius, 0.022, face, (-0.004, 0.0, 0.0), sides=18,
+                    pivot="centre", rotation=side)
+    ring = cylinder(name + "_rim", radius + 0.012, 0.016, rim, (0.006, 0.0, 0.0), sides=18,
+                    pivot="centre", rotation=side)
+    boss = ellipsoid(name + "_boss", (0.022, radius * 0.28, radius * 0.28), rim,
+                     (-0.018, 0.0, 0.0))
+    for part in (disc, ring, boss):
         part.parent = root
     return root
 
 
-def round_shield(name, face="player"):
-    """A round shield seen edge-on from the side, face-on from the front."""
-    root = empty(name, location=(-0.05, 0.02, -0.16))
-    disc = cylinder(name + "_disc", 0.13, 0.03, face, (0.0, 0.0, 0.0), sides=12,
-                    pivot="centre", rotation=(0.0, _deg(90.0), 0.0))
-    boss = cylinder(name + "_boss", 0.04, 0.035, "bronze", (-0.02, 0.0, 0.0), sides=8,
-                    pivot="centre", rotation=(0.0, _deg(90.0), 0.0))
-    for part in (disc, boss):
+def tower_shield(name, face="player"):
+    """The legionary's tall curved shield: a face of the owner's colour,
+    metal edging and a boss."""
+    root = empty(name, location=(-0.06, 0.03, -0.02))
+    w, h = 0.21, 0.36
+    parts = []
+    for k, y in enumerate((-w / 3.0, 0.0, w / 3.0)):
+        bow_out = -0.02 if k != 1 else -0.03
+        parts.append(box("%s_panel%d" % (name, k), (0.02, w / 3.0 + 0.004, h), face,
+                         (bow_out, y, -h / 2.0)))
+    for z in (-h / 2.0, h / 2.0):
+        parts.append(box(name + "_edge", (0.026, w + 0.01, 0.016), "iron", (-0.028, 0.0, z - 0.008)))
+    parts.append(ellipsoid(name + "_boss", (0.025, 0.045, 0.045), "iron", (-0.045, 0.0, 0.0)))
+    parts.append(box(name + "_band", (0.024, 0.02, h * 0.8), "gold", (-0.04, 0.0, -h * 0.4)))
+    for part in parts:
         part.parent = root
     return root
 
@@ -1065,41 +1339,62 @@ def timber_frame(b, name, at, w, d, h, frames):
 
 
 def age_dress(h, age, costume):
-    """A figure's dress for its age. Soldiers: a belt, a cap and shoulder
-    wraps of hide in the Tool Age; a bronze cap, pads and greaves in the
-    Bronze; iron ones and a cape in the Iron, where a bronze helmet turns
-    iron too. Villagers: a belt, then a cap of linen, a hat of straw, a dark
-    hood and a cape. The head carries most of it: on a sprite 34 px tall the
-    head is what reads. What it wears keeps its owner's tunic in view, where
-    the colour that says whose it is lies."""
+    """A figure's dress for its age. Soldiers: a cap and shoulder wraps of
+    hide in the Tool Age; a bronze cap, pads and greaves in the Bronze;
+    iron ones and a cape in the Iron, where a bronze helmet turns iron too.
+    Villagers: a linen cap, then a straw hat with a brim, then a dark hood
+    and a cape. The head carries most of it: on a sprite 34 px tall the
+    head is what reads. What it wears keeps its owner's tunic in view,
+    where the colour that says whose it is lies."""
     body = h.parts
-    def on(part, key, size, mat, at=(0.0, 0.0, 0.0)):
-        piece = box("%s_%s" % (h.root.name, key), size, mat, at)
+    hx, hy, hz = HEAD
+    top = HEAD_Z + hz * 0.25
+
+    def on(part, key, piece):
         piece.parent = body[part] if part else h.body
+        soften(piece, 0.3, 2, limit=0.02)
         return piece
-    on(None, "belt", (0.285, 0.185, 0.045), "hide", (0.0, 0.0, HIP_Z))
+
+    def dome(key, mat, grow=0.011, tall=0.8, at=0.0):
+        return on(None, key, ellipsoid("%s_%s" % (h.root.name, key),
+                                       (hx + grow, hy + grow, hz * tall), mat,
+                                       (0.0, 0.012 - at, top), upper=True))
+
     if costume == "villager":
-        head = {1: "linen", 2: "straw", 3: "wood_dark"}[age]
-        on(None, "hat", (0.215, 0.205, 0.075), head, (0.0, 0.01, 0.79))
+        mat = {1: "linen", 2: "straw", 3: "wood_dark"}[age]
+        if age == 3:
+            # A hood: down over the back of the head and the neck.
+            dome("hat", mat, grow=0.016, tall=0.95, at=0.012)
+            on(None, "hood_back", ellipsoid(h.root.name + "_hood", (hx + 0.012, 0.05, hz),
+                                            mat, (0.0, -0.04, HEAD_Z - 0.01)))
+        else:
+            dome("hat", mat, tall=0.7)
         if age == 2:
-            on(None, "brim", (0.29, 0.28, 0.02), "straw", (0.0, 0.01, 0.79))
+            on(None, "brim", cylinder(h.root.name + "_brim", 0.15, 0.012, "straw",
+                                      (0.0, 0.012, top - 0.004), sides=18))
     else:
         metal = {1: "hide", 2: "bronze", 3: "iron"}[age]
         if "helmet" not in body:
-            on(None, "cap", (0.215, 0.205, 0.085), metal, (0.0, 0.01, 0.785))
+            dome("cap", metal)
+            on(None, "cap_rim", cylinder(h.root.name + "_cap_rim", hx + 0.015, 0.016, metal,
+                                         (0.0, 0.012, top - 0.006), sides=14))
         elif age == 3:
-            for key in ("helmet", "helmet_top"):
+            for key in ("helmet", "helmet_top", "helmet_rim", "nasal", "cheek_l", "cheek_r"):
                 part = body.get(key)
                 if part is not None and part.data.materials[0].name == "bronze":
                     part.data.materials[0] = material("iron")
         for side in ("l", "r"):
-            on("arm_" + side, "pad_" + side, (0.1, 0.11, 0.08), metal, (0.0, 0.0, -0.08))
+            on("arm_" + side, "pad_" + side,
+               box("%s_pad_%s" % (h.root.name, side), (0.095, 0.1, 0.075), metal,
+                   (0.0, 0.0, -0.07)))
             if age >= 2:
-                on("leg_" + side, "greave_" + side, (0.115, 0.125, 0.15), metal,
-                   (0.0, 0.0, -HIP_Z + 0.02))
+                on("shin_" + side, "greave_" + side,
+                   limb("%s_greave_%s" % (h.root.name, side), 0.11, 0.046, 0.038, metal,
+                        (0.0, 0.004, -0.02)))
     if age == 3:
-        on(None, "cape", (0.25, 0.03, 0.34), "hide" if costume == "villager" else "wood_dark",
-           (0.0, -0.1, HIP_Z - 0.02))
+        on(None, "cape", loft(h.root.name + "_cape", (0.27, 0.03), (0.25, 0.03), 0.34,
+                              "hide" if costume == "villager" else "wood_dark",
+                              (0.0, -0.1, HIP_Z - 0.04)))
 
 
 # --------------------------------------------------------------------------
@@ -1193,7 +1488,8 @@ def villager_pose(anim, i, count):
     down). Every task loops, so its last frame leads back to its first;
     the blow lands on the fourth."""
     body = {"dy": 0.0, "dz": 0.0, "rot_x": 0.0, "scale_z": 1.0}
-    limbs = {"leg_l": _deg(12.0), "leg_r": _deg(-10.0), "arm_l": 0.0, "arm_r": 0.0}
+    limbs = {"leg_l": _deg(12.0), "leg_r": _deg(-10.0), "arm_l": 0.0, "arm_r": 0.0,
+             "fore_l": _deg(15.0), "fore_r": _deg(10.0), "shin_r": _deg(-8.0)}
     tool = 0.0
     swings = {
         # (right arm, tool, body pitch), a key per frame.
@@ -1224,14 +1520,17 @@ def villager_pose(anim, i, count):
         phase = 2.0 * math.pi * i / count
         limbs["leg_l"] = _deg(24.0) * math.sin(phase)
         limbs["leg_r"] = _deg(24.0) * math.sin(phase + math.pi)
+        limbs["shin_l"] = _deg(-38.0) * max(0.0, math.cos(phase))
+        limbs["shin_r"] = _deg(-38.0) * max(0.0, math.cos(phase + math.pi))
         body["dz"] = 0.016 * abs(math.sin(phase))
         if anim == "carry_wood":
             # A hand up to the logs on the shoulder; the other arm swings.
             limbs["arm_r"] = _deg(125.0)
             limbs["arm_l"] = _deg(16.0) * math.sin(phase + math.pi)
         else:
-            # Both arms under the load in front.
-            limbs["arm_r"] = limbs["arm_l"] = _deg(38.0)
+            # Both arms under the load in front, the elbows bent to it.
+            limbs["arm_r"] = limbs["arm_l"] = _deg(20.0)
+            limbs["fore_r"] = limbs["fore_l"] = _deg(55.0)
     return body, limbs, tool
 
 
@@ -1286,7 +1585,7 @@ class Villager(Humanoid):
                     obj.keyframe_insert("location", frame=frame)
                     obj.keyframe_insert("rotation_euler", frame=frame)
                 for tool, _ in self.tools:
-                    tool.location = hand(limbs.get("arm_r", 0.0), side=1.0)
+                    tool.location = hand(limbs.get("arm_r", 0.0), 1.0, limbs.get("fore_r", 0.0))
                     tool.rotation_euler = (angle, 0.0, 0.0)
                     tool.keyframe_insert("location", frame=frame)
                     tool.keyframe_insert("rotation_euler", frame=frame)
@@ -1313,64 +1612,134 @@ def _span(anim):
 # --------------------------------------------------------------------------
 # The horse and its rider.
 
-class Rider:
-    """A horse 0.72 units nose to tail with a rider on its back, facing +Y.
+def horse(add, n, coat="horse", mane="horse_dark"):
+    """A horse facing +Y about the origin, its hooves on the ground: a barrel between a deep chest and a round rump, a neck arched
+    up to a long head with ears, eyes and a dark muzzle, a mane and a tail,
+    and legs jointed at the knee and the hock down to dark hooves. Its parts
+    go onto the body through `add(key, obj, parent=None)` under the keys
+    `rider_pose` swings: "head", "neck", "tail", "leg_fl" and "shin_fl" and
+    the like."""
+    leg = Rider.LEG
+    add("barrel", ellipsoid(n + "_barrel", (0.14, 0.3, 0.16), coat, (0.0, -0.01, 0.5)))
+    add("chest", ellipsoid(n + "_chest", (0.13, 0.14, 0.165), coat, (0.0, 0.19, 0.515)))
+    add("rump", ellipsoid(n + "_rump", (0.145, 0.15, 0.155), coat, (0.0, -0.21, 0.53)))
+    # The neck leans forward and up from the withers; the head hangs
+    # from the poll, nose down, and nods about it.
+    tilt = _deg(-40.0)
+    neck = add("neck", cylinder(n + "_neck", 0.088, 0.3, coat, (0.0, 0.24, 0.58), sides=14,
+                                rotation=(tilt, 0.0, 0.0), top_radius=0.06))
+    crest = cylinder(n + "_mane", 0.032, 0.32, mane, (0.0, -0.06, -0.01), sides=6,
+                     top_radius=0.024)
+    crest.parent = neck
+    poll = (0.0, 0.24 - 0.3 * math.sin(tilt), 0.58 + 0.3 * math.cos(tilt))
+    head = add("head", limb(n + "_head", 0.27, 0.062, 0.044, coat, poll,
+                            rotation=(_deg(60.0), 0.0, 0.0)))
+    for side in (-1.0, 1.0):
+        ear = cone(n + "_ear", 0.016, 0.06, coat, (side * 0.026, 0.01, -0.01), sides=6)
+        ear.parent = head
+        eye = ellipsoid(n + "_eye", (0.012, 0.012, 0.012), "opening",
+                        (side * 0.045, 0.0, -0.07))
+        eye.parent = head
+    nose = ellipsoid(n + "_muzzle", (0.04, 0.042, 0.035), "horse_dark", (0.0, 0.0, -0.25))
+    nose.parent = head
+    add("tail", limb(n + "_tail", 0.3, 0.04, 0.02, mane, (0.0, -0.34, 0.58),
+                     rotation=(_deg(-22.0), 0.0, 0.0)))
+    for key, x, y in (("fl", -0.075, 0.2), ("fr", 0.075, 0.2),
+                      ("bl", -0.08, -0.22), ("br", 0.08, -0.22)):
+        upper = add("leg_" + key, limb(n + "_leg_" + key, 0.19, 0.062, 0.04, coat,
+                                       (x, y, leg)))
+        lower = add("shin_" + key, limb(n + "_cannon_" + key, 0.185, 0.03, 0.026, coat,
+                                        (0.0, 0.0, -0.19)), parent=upper)
+        hoof = limb(n + "_hoof_" + key, 0.045, 0.026, 0.032, "horse_dark",
+                    (0.0, 0.004, -0.185))
+        hoof.parent = lower
 
-    The horse's legs swing from the hip in diagonal pairs at the walk; the
-    rider sits, carries the `weapon` in the right hand and strikes with it.
-    Everything hangs off `body`, one level below the root, so the root stays
-    free for render_sheet.py's turntable.
+
+class Rider:
+    """A horse 0.8 units nose to tail with a rider on its back, facing +Y.
+
+    The horse has a barrel between a deep chest and a round rump, a neck
+    arched up to a long head with ears and a muzzle, a mane and a tail, and
+    jointed legs down to dark hooves; the legs swing from the shoulder and
+    the hip in diagonal pairs at the walk and fold at the knee and the hock
+    as they come through. The rider sits astride with the thighs forward
+    and the shins down the horse's sides, carries the `weapon` in the right
+    hand and strikes with it. Everything hangs off `body`, one level below
+    the root, so the root stays free for render_sheet.py's turntable.
     """
 
-    LEG = 0.40
+    LEG = 0.42
     BACK = 0.62
 
     def __init__(self, root_name, coat="horse", tunic="player", helmet=None,
-                 helmet_mat="bronze", saddle_cloth=True):
+                 helmet_mat="bronze", saddle_cloth=True, mane="horse_dark", barding=None,
+                 cuirass=None):
         self.root = empty(root_name)
         self.body = empty(root_name + "_body", parent=self.root)
         self.parts = {}
+        n = root_name
         add = self._add
         leg, back = self.LEG, self.BACK
-        add("barrel", box("barrel", (0.24, 0.66, back - leg), coat, (0.0, 0.0, leg)))
-        add("neck", box("neck", (0.13, 0.16, 0.30), coat, (0.0, 0.30, back - 0.08),
-                        rotation=(_deg(-30.0), 0.0, 0.0)))
-        add("head", box("head", (0.12, 0.26, 0.12), coat, (0.0, 0.44, back + 0.16)))
-        add("mane", box("mane", (0.04, 0.16, 0.10), "horse_dark", (0.0, 0.26, back + 0.10),
-                        rotation=(_deg(-30.0), 0.0, 0.0)))
-        add("tail", box("tail", (0.05, 0.05, 0.28), "horse_dark", (0.0, -0.33, back - 0.02),
-                        "top", rotation=(_deg(-25.0), 0.0, 0.0)))
-        for key, x, y in (("leg_fl", -0.08, 0.25), ("leg_fr", 0.08, 0.25),
-                          ("leg_bl", -0.08, -0.25), ("leg_br", 0.08, -0.25)):
-            add(key, box(key, (0.07, 0.08, leg), coat, (x, y, leg), "top"))
+        horse(add, n, coat, mane)
+        if barding:
+            # Armour on the horse: a plate over the chest and a cloth of the
+            # owner's colour hanging to the belly.
+            add("peytral", ellipsoid(n + "_peytral", (0.135, 0.05, 0.11), barding,
+                                     (0.0, 0.3, 0.53)))
+            add("caparison", oval(n + "_caparison", (0.16, 0.3), (0.15, 0.28), 0.2, tunic,
+                                  (0.0, -0.04, back - 0.17)))
         if saddle_cloth:
-            add("cloth", box("cloth", (0.28, 0.24, 0.10), tunic, (0.0, -0.02, back - 0.06)))
-        # The rider, seated: legs down the horse's sides, torso on its back.
-        seat = back + 0.02
-        add("r_leg_l", box("r_leg_l", (0.08, 0.10, 0.24), "trouser", (-0.15, 0.02, seat), "top"))
-        add("r_leg_r", box("r_leg_r", (0.08, 0.10, 0.24), "trouser", (0.15, 0.02, seat), "top"))
-        add("r_torso", box("r_torso", (0.24, 0.15, 0.28), tunic, (0.0, -0.02, seat)))
-        add("r_head", box("r_head", (0.17, 0.16, 0.15), "skin", (0.0, -0.01, seat + 0.29)))
-        top = seat + 0.44
-        if helmet is None:
-            add("r_hair", box("r_hair", (0.18, 0.17, 0.05), "hair", (0.0, -0.01, top)))
-        elif helmet == "cone":
-            add("r_helmet", box("r_helmet", (0.19, 0.18, 0.04), helmet_mat, (0.0, -0.01, top)))
-            add("r_helmet_top", pyramid("r_helmet_top", (0.17, 0.16, 0.11), helmet_mat,
-                                        (0.0, -0.01, top + 0.04)))
-        else:
-            add("r_helmet", box("r_helmet", (0.19, 0.18, 0.07), helmet_mat, (0.0, -0.01, top)))
-        self.shoulder_z = seat + 0.27
-        add("r_arm_l", box("r_arm_l", (0.07, 0.08, 0.22), "skin", (-0.155, 0.0, self.shoulder_z), "top"))
-        add("r_arm_r", box("r_arm_r", (0.07, 0.08, 0.22), "skin", (0.155, 0.0, self.shoulder_z), "top"))
+            add("cloth", loft(n + "_cloth", (0.3, 0.27), (0.27, 0.24), 0.05, tunic,
+                              (0.0, -0.04, back - 0.045)))
+            add("saddle", loft(n + "_saddle", (0.17, 0.2), (0.15, 0.17), 0.035, "hide",
+                               (0.0, -0.04, back)))
+        # The rider, astride: thighs forward along the horse's flanks, shins
+        # hanging down its sides.
+        seat = back + 0.035
+        for side, x in (("l", -0.1), ("r", 0.1)):
+            out = -1.0 if side == "l" else 1.0
+            # Forward and a little down (80 degrees about x), splayed out
+            # round the barrel (about z); the shin turned back to hang.
+            thigh = add("r_leg_" + side, limb(n + "_r_thigh_" + side, 0.13, 0.05, 0.04, "trouser",
+                                              (x, -0.02, seat + 0.03),
+                                              rotation=(_deg(80.0), 0.0, _deg(-15.0) * out)))
+            shin = add("r_shin_" + side, limb(n + "_r_shin_" + side, 0.15, 0.038, 0.03, "trouser",
+                                              (0.0, 0.0, -0.13),
+                                              rotation=(_deg(-74.0), 0.0, 0.0)), parent=thigh)
+            boot = box(n + "_r_boot_" + side, (0.06, 0.1, 0.035), "hide",
+                       (0.0, 0.02, -0.17))
+            boot.parent = shin
+        add("r_kilt", oval(n + "_r_kilt", (0.125, 0.1), (0.11, 0.08), 0.07, tunic,
+                           (0.0, -0.03, seat)))
+        add("r_torso", oval(n + "_r_torso", (0.095, 0.064), (0.12, 0.074), 0.23, tunic,
+                            (0.0, -0.03, seat + 0.04), lean=0.015))
+        add("r_yoke", ellipsoid(n + "_r_yoke", (0.155, 0.075, 0.048), tunic,
+                                (0.0, -0.02, seat + 0.27)))
+        if cuirass:
+            add("r_cuirass", oval(n + "_r_cuirass", (0.1, 0.07), (0.127, 0.08), 0.2, cuirass,
+                                  (0.0, -0.03, seat + 0.06), lean=0.015))
+        add("r_neck", cylinder(n + "_r_neck", 0.033, 0.06, "skin", (0.0, -0.02, seat + 0.29),
+                               sides=12))
+        head_and_helmet(lambda k, o: add("r_" + k, o), n + "_r",
+                        (0.0, -0.018, seat + 0.29 + 0.1), helmet, helmet_mat)
+        self.shoulder = (0.15, -0.02, seat + 0.285)
+        for side, x in (("l", -0.15), ("r", 0.15)):
+            upper = add("r_arm_" + side, limb(n + "_r_upper_" + side, 0.13, 0.036, 0.029, "skin",
+                                              (x, -0.02, seat + 0.285)))
+            sleeve = limb(n + "_r_sleeve_" + side, 0.06, 0.044, 0.038, tunic)
+            sleeve.parent = upper
+            fore = add("r_fore_" + side, limb(n + "_r_fore_" + side, 0.11, 0.029, 0.023, "skin",
+                                              (0.0, 0.0, -0.13)), parent=upper)
+            grip = ellipsoid(n + "_r_hand_" + side, (0.025, 0.028, 0.03), "skin",
+                             (0.0, 0.004, -0.124))
+            grip.parent = fore
         self.weapon = None
 
-    def _add(self, key, obj):
-        obj.parent = self.body
+    def _add(self, key, obj, parent=None):
+        obj.parent = parent if parent is not None else self.body
         self.parts[key] = obj
-        # A body is rounded, limbs, head and trunk all but capsules; what it
-        # wears keeps its shape, or a cone helmet's rim turns into a brim.
-        if key in BODY_PARTS:
+        # Rounded ends to the trunk's boxes; the round parts are round.
+        if key in ("cloth", "saddle"):
             soften(obj, 0.42, 3, limit=0.06)
         return obj
 
@@ -1378,6 +1747,14 @@ class Rider:
         weapon.parent = self.body
         self.weapon = weapon
         self.weapon_lean = _deg(lean)
+
+    def grip(self, arm, fore):
+        """Where the rider's right hand is, the arm swung `arm` and the
+        elbow bent `fore`."""
+        x, y, z = self.shoulder
+        ey, ez = y + 0.13 * math.sin(arm), z - 0.13 * math.cos(arm)
+        a, reach = arm + fore, 0.124
+        return (x, ey + reach * math.sin(a), ez - reach * math.cos(a))
 
     def animate(self):
         scene = bpy.context.scene
@@ -1400,9 +1777,8 @@ class Rider:
                     obj.keyframe_insert("location", frame=frame)
                     obj.keyframe_insert("rotation_euler", frame=frame)
                 if self.weapon is not None:
-                    arm = swings.get("r_arm_r", 0.0)
-                    self.weapon.location = (0.155, 0.22 * math.sin(arm),
-                                            self.shoulder_z - 0.22 * math.cos(arm))
+                    self.weapon.location = self.grip(swings.get("r_arm_r", 0.0),
+                                                     swings.get("r_fore_r", 0.0))
                     self.weapon.rotation_euler = (weapon_angle, self.weapon_lean, 0.0)
                     self.weapon.keyframe_insert("location", frame=frame)
                     self.weapon.keyframe_insert("rotation_euler", frame=frame)
@@ -1419,7 +1795,7 @@ def rider_pose(anim, i, count):
     """One frame for horse and rider: the body's bob, roll and slide, each
     part's swing about x, the rider's weapon angle."""
     body = {"dx": 0.0, "dz": 0.0, "roll": 0.0, "scale_z": 1.0}
-    s = {}
+    s = {"r_fore_r": _deg(30.0), "r_fore_l": _deg(55.0), "r_arm_l": _deg(15.0)}
     weapon = _deg(-15.0)
 
     if anim == "idle":
@@ -1430,10 +1806,16 @@ def rider_pose(anim, i, count):
     elif anim == "walk":
         phase = 2.0 * math.pi * i / count
         a = _deg(24.0) * math.sin(phase)
-        # Diagonal pairs: near fore with off hind, then the other two.
+        # Diagonal pairs: near fore with off hind, then the other two. A leg
+        # folds at the knee or hock as it comes forward.
+        bend = _deg(-45.0) * max(0.0, math.cos(phase))
+        other = _deg(-45.0) * max(0.0, math.cos(phase + math.pi))
         s["leg_fl"], s["leg_br"] = a, a
         s["leg_fr"], s["leg_bl"] = -a, -a
+        s["shin_fl"], s["shin_br"] = bend, -bend * 0.6
+        s["shin_fr"], s["shin_bl"] = other, -other * 0.6
         s["head"] = _deg(5.0) * math.sin(2.0 * phase)
+        s["neck"] = _deg(3.0) * math.sin(2.0 * phase)
         s["tail"] = _deg(8.0) * math.sin(phase)
         body["dz"] = 0.015 * abs(math.sin(phase))
         s["r_arm_r"] = _deg(15.0)
@@ -1441,7 +1823,9 @@ def rider_pose(anim, i, count):
 
     elif anim == "attack":
         keys = [20.0, 40.0, 10.0, 85.0, 70.0, 35.0]
+        elbows = [60.0, 75.0, 85.0, 5.0, 15.0, 40.0]
         s["r_arm_r"] = _deg(keys[i])
+        s["r_fore_r"] = _deg(elbows[i])
         s["r_arm_l"] = _deg(20.0)
         weapon = _deg(-90.0) if i >= 2 else _deg(-55.0)
         s["head"] = _deg(-8.0) if i == 3 else 0.0
@@ -1454,6 +1838,8 @@ def rider_pose(anim, i, count):
         body["dz"] = -0.02 * t
         for leg in ("leg_fl", "leg_fr", "leg_bl", "leg_br"):
             s[leg] = _deg(20.0) * t
+        for leg in ("shin_fl", "shin_fr", "shin_bl", "shin_br"):
+            s[leg] = _deg(-30.0) * t
         s["head"] = _deg(25.0) * t
         s["r_arm_r"] = _deg(-40.0) * t
         weapon = _deg(-15.0) + _deg(-60.0) * t
@@ -1481,6 +1867,456 @@ def javelin(name):
     for part in (shaft, tip):
         part.parent = grip
     return grip
+
+
+# --------------------------------------------------------------------------
+# Armour for the later ages' soldiers.
+
+def cuirass(h, mat):
+    """A breastplate over the figure's trunk, in `mat`."""
+    return h.wear("cuirass", oval(h.root.name + "_cuirass", (0.106, 0.074), (0.133, 0.083),
+                                  SHOULDER_Z - 0.05 - (HIP_Z + 0.03), mat,
+                                  (0.0, 0.0, HIP_Z + 0.03), lean=0.01))
+
+
+def greaves(h, mat):
+    """Shin guards on both legs."""
+    for side in ("l", "r"):
+        g = limb("%s_greave_%s" % (h.root.name, side), 0.11, 0.047, 0.039, mat,
+                 (0.0, 0.004, -0.02))
+        g.parent = h.parts["shin_" + side]
+
+
+def wheel(name, radius, mat="wood_dark", spokes=8, thick=0.03):
+    """A spoked wheel on an empty at its hub, turning about x: a rim of
+    rods, spokes, a hub."""
+    hub = empty(name)
+    rim = []
+    n = 14
+    for k in range(n):
+        a0, a1 = 2 * math.pi * k / n, 2 * math.pi * (k + 1) / n
+        p0 = (0.0, radius * math.cos(a0), radius * math.sin(a0))
+        p1 = (0.0, radius * math.cos(a1), radius * math.sin(a1))
+        rim.append(rod("%s_rim%d" % (name, k), p0, p1, thick * 0.6, mat, sides=6))
+    for k in range(spokes):
+        a = 2 * math.pi * k / spokes
+        rim.append(rod("%s_spoke%d" % (name, k), (0.0, 0.0, 0.0),
+                       (0.0, radius * math.cos(a), radius * math.sin(a)), thick * 0.3, mat,
+                       sides=5))
+    rim.append(cylinder(name + "_hub", thick * 1.2, thick * 2.2, mat, (0.0, 0.0, 0.0), sides=10,
+                        pivot="centre", rotation=(0.0, _deg(90.0), 0.0)))
+    for part in rim:
+        part.parent = hub
+    return hub
+
+
+# --------------------------------------------------------------------------
+# The chariot: a horse, a car on two wheels, an archer standing in it.
+
+class Chariot:
+    """A horse drawing a two-wheeled car with an archer standing in it, 1.55
+    units from the horse's nose to the car's tail, facing +Y. The horse
+    walks as a rider's does; the wheels turn; the archer stands, and at the
+    attack draws and looses."""
+
+    CAR_Y = -0.62
+
+    def __init__(self, root_name, coat="horse", tunic="player"):
+        self.root = empty(root_name)
+        self.body = empty(root_name + "_body", parent=self.root)
+        self.parts = {}
+        n = root_name
+        add = self._add
+        horse(add, n, coat)
+        y = self.CAR_Y
+        add("collar", oval(n + "_collar", (0.12, 0.05), (0.1, 0.045), 0.06, tunic,
+                           (0.0, 0.3, 0.6)))
+        add("pole", rod(n + "_pole", (0.0, y + 0.12, 0.3), (0.0, 0.3, 0.6), 0.02, "wood"))
+        add("floor", box(n + "_floor", (0.4, 0.3, 0.04), "wood", (0.0, y, 0.3)))
+        add("front", loft(n + "_front", (0.4, 0.04), (0.34, 0.04), 0.3, tunic,
+                          (0.0, y + 0.15, 0.32)))
+        for side in (-1.0, 1.0):
+            add("rail_%d" % side, rod(n + "_rail", (side * 0.19, y + 0.15, 0.6),
+                                      (side * 0.19, y - 0.12, 0.42), 0.012, "wood"))
+        add("axle", cylinder(n + "_axle", 0.018, 0.54, "wood_dark", (0.0, y, 0.21), sides=8,
+                             pivot="centre", rotation=(0.0, _deg(90.0), 0.0)))
+        self.wheels = []
+        for side in (-1.0, 1.0):
+            w = wheel("%s_wheel_%d" % (n, side), 0.21)
+            w.parent = self.body
+            w.location = (side * 0.25, y, 0.21)
+            self.wheels.append(w)
+        self.archer = Humanoid(n + "_archer", tunic=tunic, helmet="cap", helmet_mat="bronze")
+        self.archer.hold(bow(n + "_bow"), hand="left", lean=0.0)
+        self.archer.root.parent = self.body
+        self.archer.root.location = (0.0, y, 0.32)
+        self.archer.root.scale = (0.92, 0.92, 0.92)
+
+    def _add(self, key, obj, parent=None):
+        obj.parent = parent if parent is not None else self.body
+        self.parts[key] = obj
+        return obj
+
+    def animate(self):
+        scene = bpy.context.scene
+        scene.frame_start, scene.frame_end = 1, 30
+        rest = {k: (tuple(o.location), tuple(o.rotation_euler)) for k, o in self.parts.items()}
+        arest = {k: tuple(o.location) for k, o in self.archer.parts.items()}
+        a = self.archer
+        for anim, (first, last) in MOBILE_SPANS.items():
+            count = last - first + 1
+            for i in range(count):
+                frame = first + i
+                body, swings, _ = rider_pose(anim, i, count)
+                self.body.location = (body["dx"], 0.0, body["dz"])
+                self.body.rotation_euler = (0.0, body["roll"], 0.0)
+                self.body.scale = (1.0, 1.0, body["scale_z"])
+                for path in ("location", "rotation_euler", "scale"):
+                    self.body.keyframe_insert(path, frame=frame)
+                for key, obj in self.parts.items():
+                    loc, rot = rest[key]
+                    obj.location = loc
+                    obj.rotation_euler = (rot[0] + swings.get(key, 0.0), rot[1], rot[2])
+                    obj.keyframe_insert("location", frame=frame)
+                    obj.keyframe_insert("rotation_euler", frame=frame)
+                turn = 0.0
+                if anim == "walk":
+                    turn = -2.0 * math.pi * i / count
+                for w in self.wheels:
+                    w.rotation_euler = (turn, 0.0, 0.0)
+                    w.keyframe_insert("rotation_euler", frame=frame)
+                # The archer stands in the car: the walk is the car's.
+                pose = {"walk": "idle", "death": "idle", "decay": "idle"}.get(anim, anim)
+                b, limbs, weapon_angle = humanoid_pose(pose, i if pose == anim else 0,
+                                                       count, "shoot")
+                a.body.location = (0.0, b["dy"], b["dz"])
+                a.body.rotation_euler = (b["rot_x"], 0.0, 0.0)
+                for path in ("location", "rotation_euler"):
+                    a.body.keyframe_insert(path, frame=frame)
+                for key, obj in a.parts.items():
+                    obj.location = arest[key]
+                    obj.rotation_euler = (limbs.get(key, 0.0), 0.0, 0.0)
+                    obj.keyframe_insert("location", frame=frame)
+                    obj.keyframe_insert("rotation_euler", frame=frame)
+                a.weapon.location = hand(limbs.get("arm_l", 0.0), -1.0, limbs.get("fore_l", 0.0))
+                a.weapon.rotation_euler = (weapon_angle, a.weapon_lean, 0.0)
+                a.weapon.keyframe_insert("location", frame=frame)
+                a.weapon.keyframe_insert("rotation_euler", frame=frame)
+        hold_frames([self.body, a.body, a.weapon] + self.wheels + list(self.parts.values())
+                    + list(a.parts.values()))
+
+
+# --------------------------------------------------------------------------
+# The war elephant.
+
+class Elephant:
+    """A war elephant 1.5 units from trunk to tail, facing +Y: a great grey
+    body on four pillar legs, a head with fanned ears, ivory tusks and a
+    trunk of three joints, a howdah of the owner's colour on its back with
+    a driver on its neck. It walks in diagonal pairs, its trunk swaying;
+    at the attack it rears its head and swings the trunk; it falls onto its
+    side."""
+
+    def __init__(self, root_name, tunic="player"):
+        self.root = empty(root_name)
+        self.body = empty(root_name + "_body", parent=self.root)
+        self.parts = {}
+        n = root_name
+        add = self._add
+        hide = "elephant"
+        add("barrel", ellipsoid(n + "_barrel", (0.28, 0.5, 0.3), hide, (0.0, -0.03, 0.74)))
+        add("rump", ellipsoid(n + "_rump", (0.26, 0.24, 0.28), hide, (0.0, -0.36, 0.76)))
+        head = add("head", ellipsoid(n + "_head", (0.21, 0.2, 0.24), hide, (0.0, 0.5, 0.86)))
+        for side in (-1.0, 1.0):
+            ear = ellipsoid(n + "_ear", (0.025, 0.16, 0.2), hide, (side * 0.2, -0.1, 0.02))
+            ear.rotation_euler = (0.0, 0.0, _deg(-25.0) * side)
+            ear.parent = head
+            tusk = rod(n + "_tusk", (side * 0.09, 0.15, -0.12), (side * 0.12, 0.36, -0.2), 0.026,
+                       "ivory", sides=8, top_radius=0.008)
+            tusk.parent = head
+            eye = ellipsoid(n + "_eye", (0.016, 0.016, 0.016), "opening",
+                            (side * 0.17, 0.1, 0.06))
+            eye.parent = head
+        t1 = add("trunk1", limb(n + "_trunk1", 0.26, 0.085, 0.065, hide, (0.0, 0.66, 0.82),
+                                rotation=(_deg(18.0), 0.0, 0.0)))
+        t2 = add("trunk2", limb(n + "_trunk2", 0.24, 0.065, 0.048, hide, (0.0, 0.0, -0.26),
+                                rotation=(_deg(-10.0), 0.0, 0.0)), parent=t1)
+        add("trunk3", limb(n + "_trunk3", 0.2, 0.048, 0.034, hide, (0.0, 0.0, -0.24),
+                           rotation=(_deg(-25.0), 0.0, 0.0)), parent=t2)
+        add("tail", limb(n + "_tail", 0.32, 0.03, 0.015, hide, (0.0, -0.58, 0.84),
+                         rotation=(_deg(-12.0), 0.0, 0.0)))
+        for key, x, y in (("fl", -0.16, 0.28), ("fr", 0.16, 0.28),
+                          ("bl", -0.16, -0.36), ("br", 0.16, -0.36)):
+            upper = add("leg_" + key, limb(n + "_leg_" + key, 0.3, 0.13, 0.115, hide, (x, y, 0.6)))
+            lower = add("shin_" + key, limb(n + "_shin_" + key, 0.24, 0.115, 0.105, hide,
+                                            (0.0, 0.0, -0.3)), parent=upper)
+            foot = cylinder(n + "_foot_" + key, 0.125, 0.06, "elephant_toe", (0.0, 0.0, -0.3),
+                            sides=14, top_radius=0.11)
+            foot.parent = lower
+        # The howdah: a blanket of the owner's colour and a low wooden
+        # platform with a rim of it, on the back.
+        add("blanket", oval(n + "_blanket", (0.3, 0.36), (0.28, 0.34), 0.08, tunic,
+                            (0.0, -0.08, 0.96)))
+        add("howdah", loft(n + "_howdah", (0.42, 0.5), (0.46, 0.54), 0.16, "wood",
+                           (0.0, -0.1, 1.04)))
+        add("howdah_rim", loft(n + "_rim", (0.48, 0.56), (0.48, 0.56), 0.04, tunic,
+                               (0.0, -0.1, 1.2)))
+        # The driver astride the neck.
+        add("d_torso", oval(n + "_d_torso", (0.085, 0.06), (0.11, 0.068), 0.22, "linen",
+                            (0.0, 0.36, 1.08), lean=0.01))
+        head_and_helmet(lambda k, o: add("d_" + k, o), n + "_d", (0.0, 0.372, 1.39), "band")
+        for side in (-1.0, 1.0):
+            add("d_arm_%d" % side, limb(n + "_d_arm", 0.2, 0.033, 0.026, "skin",
+                                        (side * 0.13, 0.38, 1.28),
+                                        rotation=(_deg(40.0), 0.0, 0.0)))
+            add("d_leg_%d" % side, limb(n + "_d_leg", 0.24, 0.045, 0.034, "linen",
+                                        (side * 0.12, 0.36, 1.1),
+                                        rotation=(_deg(30.0), 0.0, _deg(25.0) * side)))
+        self.weapon = None
+
+    def _add(self, key, obj, parent=None):
+        obj.parent = parent if parent is not None else self.body
+        self.parts[key] = obj
+        return obj
+
+    def animate(self):
+        scene = bpy.context.scene
+        scene.frame_start, scene.frame_end = 1, 30
+        rest = {k: (tuple(o.location), tuple(o.rotation_euler)) for k, o in self.parts.items()}
+        for anim, (first, last) in MOBILE_SPANS.items():
+            count = last - first + 1
+            for i in range(count):
+                frame = first + i
+                body, swings = elephant_pose(anim, i, count)
+                self.body.location = (body["dx"], 0.0, body["dz"])
+                self.body.rotation_euler = (0.0, body["roll"], 0.0)
+                self.body.scale = (1.0, 1.0, body["scale_z"])
+                for path in ("location", "rotation_euler", "scale"):
+                    self.body.keyframe_insert(path, frame=frame)
+                for key, obj in self.parts.items():
+                    loc, rot = rest[key]
+                    obj.location = loc
+                    obj.rotation_euler = (rot[0] + swings.get(key, 0.0), rot[1], rot[2])
+                    obj.keyframe_insert("location", frame=frame)
+                    obj.keyframe_insert("rotation_euler", frame=frame)
+        hold_frames([self.body] + list(self.parts.values()))
+
+
+# An elephant on its side lies out along +X about this far from its middle.
+FALLEN_ELEPHANT = 0.6
+
+
+def elephant_pose(anim, i, count):
+    """One frame of the elephant: the body's bob, roll and slide, each
+    part's swing about x."""
+    body = {"dx": 0.0, "dz": 0.0, "roll": 0.0, "scale_z": 1.0}
+    s = {}
+    if anim == "idle":
+        w = math.sin(2.0 * math.pi * i / count)
+        s["trunk1"], s["trunk2"] = _deg(4.0) * w, _deg(8.0) * w
+        s["tail"] = _deg(6.0) * w
+    elif anim == "walk":
+        phase = 2.0 * math.pi * i / count
+        a = _deg(16.0) * math.sin(phase)
+        bend = _deg(-22.0) * max(0.0, math.cos(phase))
+        other = _deg(-22.0) * max(0.0, math.cos(phase + math.pi))
+        s["leg_fl"], s["leg_br"] = a, a
+        s["leg_fr"], s["leg_bl"] = -a, -a
+        s["shin_fl"], s["shin_br"] = bend, -bend * 0.5
+        s["shin_fr"], s["shin_bl"] = other, -other * 0.5
+        s["trunk1"] = _deg(8.0) * math.sin(phase)
+        s["trunk2"] = _deg(10.0) * math.sin(phase + 0.8)
+        s["head"] = _deg(3.0) * math.sin(2.0 * phase)
+        s["tail"] = _deg(10.0) * math.sin(phase)
+        body["dz"] = 0.02 * abs(math.sin(phase))
+    elif anim == "attack":
+        # The head up and the trunk lifted, then swung down on the blow.
+        head = [-6.0, -14.0, -18.0, 10.0, 6.0, 0.0]
+        trunk = [-30.0, -60.0, -80.0, 30.0, 15.0, 0.0]
+        s["head"] = _deg(head[i])
+        s["trunk1"] = _deg(trunk[i])
+        s["trunk2"] = _deg(trunk[i] * 0.6)
+        s["leg_fl"] = s["leg_fr"] = _deg(-12.0 if i < 3 else 8.0)
+        body["dz"] = 0.04 if i in (1, 2) else 0.0
+    elif anim in ("death", "decay"):
+        t = i / float(count - 1) if anim == "death" else 1.0
+        ease = t * t
+        body["roll"] = _deg(82.0) * ease
+        body["dx"] = -FALLEN_ELEPHANT * ease
+        body["dz"] = -0.03 * t
+        for leg in ("leg_fl", "leg_fr", "leg_bl", "leg_br"):
+            s[leg] = _deg(15.0) * t
+        s["trunk1"] = _deg(30.0) * t
+        if anim == "decay":
+            k = (i + 1) / float(count)
+            body["scale_z"] = 1.0 - 0.12 * k
+            body["dz"] = -0.03 - 0.03 * k
+    return body, s
+
+
+# --------------------------------------------------------------------------
+# Siege engines.
+
+class Engine:
+    """A siege engine on wheels, facing +Y. `kind` is "thrower" (a torsion
+    arm that flings a stone from a sling: the Stone Thrower), "catapult" (the
+    same, larger, ironbound, a bucket for the stone) or "ballista" (a great
+    crossbow on a carriage). It rolls on its wheels; at the attack the arm
+    comes over and strikes its crossbar, or the bow's string is drawn back
+    and loosed, on the impact frame; it falls apart on its side."""
+
+    def __init__(self, root_name, kind="thrower", tunic="player"):
+        self.root = empty(root_name)
+        self.body = empty(root_name + "_body", parent=self.root)
+        self.parts = {}
+        self.kind = kind
+        n = root_name
+        add = self._add
+        big = 1.15 if kind == "catapult" else 1.0
+        fit = "iron" if kind == "catapult" else "bronze"
+        r = 0.16 * big
+        self.wheels = []
+        wheels = ((-0.27, 0.32), (0.27, 0.32), (-0.27, -0.32), (0.27, -0.32))
+        if kind == "ballista":
+            wheels = ((-0.25, -0.15), (0.25, -0.15))
+        for k, (x, y) in enumerate(wheels):
+            w = wheel("%s_wheel%d" % (n, k), r, spokes=6)
+            w.parent = self.body
+            w.location = (x * big, y * big, r)
+            self.wheels.append(w)
+        if kind == "ballista":
+            add("trail", rod(n + "_trail", (0.0, -0.15, r), (0.0, -0.62, 0.04), 0.035, "wood"))
+            add("axle", cylinder(n + "_axle", 0.02, 0.5, "wood_dark", (0.0, -0.15, r), sides=8,
+                                 pivot="centre", rotation=(0.0, _deg(90.0), 0.0)))
+            add("mount", box(n + "_mount", (0.1, 0.1, 0.22), "wood", (0.0, -0.12, r)))
+            add("stock", box(n + "_stock", (0.1, 0.8, 0.07), "wood", (0.0, -0.05, r + 0.22)))
+            add("frame", box(n + "_frame", (0.2, 0.12, 0.2), fit, (0.0, 0.25, r + 0.16)))
+            add("shield", loft(n + "_shield", (0.4, 0.03), (0.36, 0.03), 0.13, tunic,
+                               (0.0, 0.36, r + 0.04)))
+            self.arms = []
+            for side in (-1.0, 1.0):
+                arm = add("arm_%d" % side, limb(n + "_bowarm", 0.34, 0.028, 0.02, "wood",
+                                                (side * 0.08, 0.26, r + 0.3),
+                                                rotation=(0.0, _deg(-80.0) * side, 0.0)))
+                self.arms.append(arm)
+            add("string", rod(n + "_string", (-0.4, 0.18, r + 0.3), (0.4, 0.18, r + 0.3), 0.006,
+                              "linen", sides=4))
+            add("bolt", rod(n + "_bolt", (0.0, 0.0, r + 0.3), (0.0, 0.55, r + 0.3), 0.014,
+                            "wood", sides=6))
+            tip = add("bolt_tip", blade(n + "_tip", 0.04, 0.08, 0.02, "iron", (0.0, 0.55, r + 0.3)))
+            tip.rotation_euler = (_deg(-90.0), 0.0, 0.0)
+        else:
+            L = 0.9 * big
+            for side in (-1.0, 1.0):
+                add("beam_%d" % side, box(n + "_beam", (0.07, L, 0.08), "wood",
+                                          (side * 0.2 * big, 0.0, r + 0.02)))
+                add("upright_%d" % side, box(n + "_upright", (0.06, 0.07, 0.4 * big), "wood",
+                                             (side * 0.2 * big, 0.12, r + 0.1)))
+            for y in (-0.38 * big, 0.38 * big):
+                add("cross_%d" % int(y * 100), box(n + "_cross", (0.46 * big, 0.06, 0.06), "wood",
+                                                   (0.0, y, r + 0.06)))
+            add("stop", box(n + "_stop", (0.46 * big, 0.08, 0.08), fit,
+                            (0.0, 0.12, r + 0.1 + 0.4 * big)))
+            add("bundle", cylinder(n + "_skein", 0.07 * big, 0.4 * big, "rope", (0.0, -0.12, r + 0.12),
+                                   sides=10, pivot="centre", rotation=(0.0, _deg(90.0), 0.0)))
+            # The arm hangs from the skein at the back, laid back to rest.
+            arm = add("throw_arm", limb(n + "_arm", 0.62 * big, 0.04, 0.03, "wood",
+                                        (0.0, -0.12, r + 0.12),
+                                        rotation=(_deg(-100.0), 0.0, 0.0)))
+            if kind == "catapult":
+                cup = ellipsoid(n + "_bucket", (0.09, 0.09, 0.05), "iron",
+                                (0.0, 0.0, -0.62 * big), upper=True)
+                cup.parent = arm
+                for k, y in enumerate((-0.2, 0.0, 0.2)):
+                    band = cylinder("%s_band%d" % (n, k), 0.034, 0.03, fit, (0.0, 0.0, -0.2 + y * 0.6),
+                                    sides=10)
+                    band.parent = arm
+            else:
+                sling_cord = limb(n + "_sling", 0.16, 0.008, 0.008, "rope", (0.0, 0.0, -0.62))
+                sling_cord.parent = arm
+                pouch = ellipsoid(n + "_pouch", (0.04, 0.04, 0.035), "hide",
+                                  (0.0, 0.0, -0.79))
+                pouch.parent = arm
+            stone = ellipsoid(n + "_stone", (0.05, 0.05, 0.05), "stone",
+                              (0.0, 0.0, -0.62 * big - (0.03 if kind == "catapult" else 0.17)))
+            stone.parent = arm
+            self.stone = stone
+            add("banner", box(n + "_banner", (0.03, 0.14, 0.12), tunic,
+                              (0.2 * big + 0.03, 0.12, r + 0.3 * big)))
+
+    def _add(self, key, obj, parent=None):
+        obj.parent = parent if parent is not None else self.body
+        self.parts[key] = obj
+        return obj
+
+    def animate(self):
+        scene = bpy.context.scene
+        scene.frame_start, scene.frame_end = 1, 30
+        rest = {k: (tuple(o.location), tuple(o.rotation_euler)) for k, o in self.parts.items()}
+        stone = getattr(self, "stone", None)
+        for anim, (first, last) in MOBILE_SPANS.items():
+            count = last - first + 1
+            for i in range(count):
+                frame = first + i
+                body, swings, loaded = engine_pose(self.kind, anim, i, count)
+                self.body.location = (body["dx"], 0.0, body["dz"])
+                self.body.rotation_euler = (0.0, body["roll"], 0.0)
+                self.body.scale = (1.0, 1.0, body["scale_z"])
+                for path in ("location", "rotation_euler", "scale"):
+                    self.body.keyframe_insert(path, frame=frame)
+                for key, obj in self.parts.items():
+                    loc, rot = rest[key]
+                    obj.location = loc
+                    obj.rotation_euler = (rot[0] + swings.get(key, 0.0), rot[1], rot[2])
+                    obj.keyframe_insert("location", frame=frame)
+                    obj.keyframe_insert("rotation_euler", frame=frame)
+                for w in self.wheels:
+                    w.rotation_euler = (swings.get("wheels", 0.0), 0.0, 0.0)
+                    w.keyframe_insert("rotation_euler", frame=frame)
+                if stone is not None:
+                    stone.hide_render = not loaded
+                    stone.keyframe_insert("hide_render", frame=frame)
+        hold_frames([self.body] + self.wheels + list(self.parts.values())
+                    + ([stone] if stone is not None else []))
+
+
+# A siege engine on its side lies out along +X about this far from its middle.
+FALLEN_ENGINE = 0.3
+
+
+def engine_pose(kind, anim, i, count):
+    """One frame of a siege engine: the body's roll and slide, each part's
+    swing about x (the arm's, the wheels'), and whether the stone is in the
+    sling."""
+    body = {"dx": 0.0, "dz": 0.0, "roll": 0.0, "scale_z": 1.0}
+    s = {}
+    loaded = True
+    if anim == "walk":
+        s["wheels"] = -2.0 * math.pi * i / count
+    elif anim == "attack":
+        if kind == "ballista":
+            draw = [0.0, -0.06, -0.12, 0.0, 0.0, 0.0]
+            s["string"] = 0.0
+            s["arm_-1"] = s["arm_1"] = _deg(draw[i] * 100.0)
+            loaded = i < 3
+        else:
+            # Wound down, held, then the arm comes over to the crossbar on
+            # the blow and the stone is gone; the crew winds it back.
+            arm = [-8.0, -14.0, -16.0, 95.0, 80.0, 30.0]
+            s["throw_arm"] = _deg(arm[i])
+            loaded = i < 3
+            body["dz"] = 0.015 if i == 3 else 0.0
+    elif anim in ("death", "decay"):
+        t = i / float(count - 1) if anim == "death" else 1.0
+        ease = t * t
+        body["roll"] = _deg(75.0) * ease
+        body["dx"] = -FALLEN_ENGINE * ease
+        s["throw_arm"] = _deg(40.0) * t
+        loaded = False
+        if anim == "decay":
+            k = (i + 1) / float(count)
+            body["scale_z"] = 1.0 - 0.2 * k
+    return body, s, loaded
 
 
 # --------------------------------------------------------------------------
