@@ -274,8 +274,9 @@ people.
 ## M8 — Breadth
 
 Under way (2026-10-04): the Bronze and Iron Ages' soldiers are in the
-simulation and the opponent fields them; priests, relics and the Wonder
-and Relic victories are in; cheat codes are in; five of the six other map
+simulation and the opponent fields them, drawn as detailed figures with
+the rest of the units; priests, relics and the Wonder and Relic victories
+are in, rendered; cheat codes are in; five of the six other map
 types are in; the eight civilizations are in, in one architecture set
 (`docs/10`). Still to come: naval, and Islands with it, and the other
 three architecture sets.

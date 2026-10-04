@@ -116,6 +116,10 @@ pilasters, slate roofs. The infantry go from tunics to hide caps and
 wraps, then bronze and then iron caps, pads and greaves, with a cape in the
 Iron Age; villagers from bare heads to a linen cap, a straw hat and a hood.
 The ranged soldiers, the riders, the farm and the walls have one look.
+The figures are jointed, with faces, hair or helmets, belts and shaped
+weapons, and the riders sit horses of the same build (2026-10-04, after
+the owner found the first figures too plain). The Wonder is Iron Age only
+and has the one look.
 
 ---
 

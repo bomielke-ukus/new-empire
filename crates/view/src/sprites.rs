@@ -724,9 +724,10 @@ fn glyph(ch: char, idx: u8) -> Canvas {
 }
 
 /// Atlas texture width. Height grows to fit, up to the GPU's limit (8192 a
-/// side by default): with every rendered set and its age looks loaded, a
-/// narrower atlas would run past it.
-pub const ATLAS_WIDTH: u32 = 4096;
+/// side by default): with every rendered set, its age looks and the later
+/// ages' soldiers loaded, a narrower atlas runs past it. One byte a pixel
+/// (`R8Uint`), so the whole square is 64 MB.
+pub const ATLAS_WIDTH: u32 = 8192;
 
 /// A frame waiting to be packed.
 struct Entry {
@@ -885,6 +886,7 @@ pub fn kind_for_set(name: &str) -> Option<KindId> {
         "ballista" => kinds::BALLISTA,
         "priest" => kinds::PRIEST,
         "relic" => kinds::RELIC,
+        "wonder" => kinds::WONDER,
         _ => return None,
     })
 }
@@ -2298,6 +2300,31 @@ mod tests {
             let rendered = a.frame(k.id, 1).unwrap().0.scale == 2;
             assert_eq!(rendered, !AWAITING_ART.contains(&k.id), "{}", k.name);
         }
+        // The later ages' soldiers and the priest walk, strike and fall.
+        for k in [
+            kinds::SWORDSMAN,
+            kinds::HOPLITE,
+            kinds::LEGIONARY,
+            kinds::CHARIOT_ARCHER,
+            kinds::HORSE_ARCHER,
+            kinds::HEAVY_CAVALRY,
+            kinds::WAR_ELEPHANT,
+            kinds::STONE_THROWER,
+            kinds::CATAPULT,
+            kinds::BALLISTA,
+            kinds::PRIEST,
+        ] {
+            for anim in [Anim::Walk, Anim::Work, Anim::Death] {
+                assert!(
+                    a.anim_info(k, anim).is_some(),
+                    "{} has no {anim:?}",
+                    kinds::info(k).name
+                );
+            }
+        }
+        // The Wonder rises through its stages to its own rubble.
+        assert!(a.stage_frame(kinds::WONDER, 2).is_some());
+        assert!(a.own_rubble(kinds::WONDER).is_some());
         assert!(a.glyph('A', false).is_some());
         // A wall has an arm toward each of its eight neighbours; the gate
         // stands shut and open in four orientations.
@@ -2354,21 +2381,9 @@ mod tests {
 
     /// The Bronze and Iron Ages' soldiers, drawn as placeholders until
     /// their models are rendered (`docs/10` §5). The list only shrinks.
-    const AWAITING_ART: [KindId; 13] = [
-        kinds::PRIEST,
-        kinds::WONDER,
-        kinds::RELIC,
-        kinds::SWORDSMAN,
-        kinds::HOPLITE,
-        kinds::LEGIONARY,
-        kinds::CHARIOT_ARCHER,
-        kinds::HORSE_ARCHER,
-        kinds::HEAVY_CAVALRY,
-        kinds::WAR_ELEPHANT,
-        kinds::STONE_THROWER,
-        kinds::CATAPULT,
-        kinds::BALLISTA,
-    ];
+    /// Kinds still drawn as placeholders: none. A new kind goes here until
+    /// its set is rendered.
+    const AWAITING_ART: [KindId; 0] = [];
 
     #[test]
     fn a_set_named_for_an_age_draws_its_kind_in_that_age() {

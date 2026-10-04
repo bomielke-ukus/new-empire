@@ -179,6 +179,90 @@ def ballista():
     return e.root
 
 
+def priest():
+    """A long robe of undyed linen with a stole of the owner's colour down
+    its front, shaven and bearded, a tall staff with a bronze head; at its
+    chant it lifts its hands (kit's "bless")."""
+    h = kit.Humanoid("Priest", tunic="linen", dress="robe", hair=False, beard=True)
+    h.wear("stole", kit.box("Priest_stole", (0.05, 0.02, 0.34), "player",
+                            (0.0, 0.082, kit.HIP_Z - 0.06)))
+    h.hold(kit.staff("staff"))
+    h.animate("bless")
+    return h.root
+
+
+def relic():
+    """A gilded casket on a low stone plinth, the poles it is carried by
+    along its sides, two small figures kneeling on its lid."""
+    root = kit.empty("Relic")
+    parts = [
+        kit.box("relic_plinth", (0.4, 0.32, 0.06), "stone_light"),
+        kit.box("relic_chest", (0.27, 0.18, 0.16), "gold", (0.0, 0.0, 0.06)),
+        kit.box("relic_band", (0.282, 0.19, 0.03), "wood_dark", (0.0, 0.0, 0.12)),
+        kit.box("relic_lid", (0.3, 0.21, 0.03), "gold", (0.0, 0.0, 0.22)),
+    ]
+    for side, y in (("l", -0.11), ("r", 0.11)):
+        parts.append(kit.cylinder("relic_pole_" + side, 0.013, 0.48, "wood",
+                                  (-0.24, y, 0.13), sides=8,
+                                  rotation=(0.0, kit._deg(90.0), 0.0)))
+    for k, x in enumerate((-0.075, 0.075)):
+        parts.append(kit.clump("relic_figure_%d" % k, 0.05, "gold", (x, 0.0, 0.28),
+                               seed=90 + k, lumps=0.25, squash=1.3))
+    for p in parts:
+        p.parent = root
+    return root
+
+
+def wonder():
+    """The Iron Age's monument: a ziggurat of dressed stone in three great
+    steps with a stair up its face, a white shrine ringed with columns on
+    its top under a gilded roof, and the owner's colour on banners at the
+    corners of its lowest step. Iron Age only, so built in the Iron Age's
+    materials whatever the set's name."""
+    kit.STYLE_AGE = 3
+    b = kit.Building("Wonder", 5)
+    kit.foundation(b, "wonder", 4.7, 4.7)
+    z = 0.0
+    tiers = [(4.4, 0.5, kit.WALLS), (3.3, 0.45, kit.FULL_WALLS), (2.25, 0.4, kit.FINISHED)]
+    for k, (w, h, frames) in enumerate(tiers):
+        b.add(kit.box("wonder_tier%d" % k, (w, w, h), "stone_light", (0.0, 0.0, z)), frames)
+        # A band of white stone just under each step's edge; not level
+        # with the step's top, where two faces would fight.
+        b.add(kit.box("wonder_cornice%d" % k, (w + 0.08, w + 0.08, 0.06), "white",
+                      (0.0, 0.0, z + h - 0.1)), frames)
+        z += h
+    # The stair up the +Y face, in flights between the steps.
+    for k in range(9):
+        y = 2.2 - k * 0.13
+        b.add(kit.box("wonder_stair%d" % k, (0.7, 0.16, 0.15 * (k + 1)), "stone",
+                      (0.0, y, 0.0)), kit.FULL_WALLS)
+    # The shrine.
+    top = z
+    b.add(kit.box("wonder_cella", (1.3, 1.3, 0.8), "white", (0.0, 0.0, top)), kit.FINISHED)
+    import math as _m
+    for i in range(16):
+        a = 2 * _m.pi * i / 16
+        b.add(kit.cylinder("wonder_col_%d" % i, 0.06, 0.8, "white",
+                           (0.92 * _m.cos(a), 0.92 * _m.sin(a), top), sides=8), kit.FINISHED)
+    b.add(kit.box("wonder_entablature", (2.05, 2.05, 0.12), "white", (0.0, 0.0, top + 0.8)),
+          kit.FINISHED)
+    b.add(kit.pyramid("wonder_roof", (2.15, 2.15, 0.7), "gold", (0.0, 0.0, top + 0.92)),
+          kit.FINISHED)
+    # The owner's colour: banners on poles at the lowest step's corners, and
+    # a band along the shrine's frieze.
+    for i, (x, y) in enumerate([(2.1, 2.1), (2.1, -2.1), (-2.1, 2.1)]):
+        b.add(kit.cylinder("wonder_pole_%d" % i, 0.02, 1.1, "wood", (x, y, 0.5), sides=6),
+              kit.FINISHED)
+        b.add(kit.box("wonder_banner_%d" % i, (0.03, 0.32, 0.42), "player",
+                      (x, y - 0.17, 1.12)), kit.FINISHED)
+    b.add(kit.box("wonder_frieze", (2.07, 2.07, 0.05), "player", (0.0, 0.0, top + 0.83)),
+          kit.FINISHED)
+    kit.scaffold(b, "wonder", 3.4, 3.4, 1.4)
+    kit.rubble(b, "wonder", 3.6, 0.7, mats=("stone_light", "white", "stone"), count=16)
+    b.finish()
+    return b.root
+
+
 # --------------------------------------------------------------------------
 # Buildings.
 
@@ -1010,6 +1094,9 @@ SUBJECTS = {
     "stone_thrower": (stone_thrower, "Heavy", "unit"),
     "catapult": (catapult, "Heavy", "unit"),
     "ballista": (ballista, "Heavy", "unit"),
+    "priest": (priest, "Foot", "unit"),
+    "relic": (relic, "SmallBuilding", "node"),
+    "wonder": (wonder, "Wonder", "building"),
 }
 SUBJECTS.update({"ground_" + g: (globals()["ground_" + g], "Terrain", "ground") for g in GROUNDS})
 

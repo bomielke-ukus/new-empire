@@ -1778,6 +1778,43 @@ ran low, which in a later age's economy is always.
   (`RM-M5-01`); the record is rewritten. `simrunner ai --stats` now
   lists what each side trained, by kind.
 
+### Work record: M8 chunk 3 — detailed figures and the new roster's art (2026-10-04)
+
+The owner, playing on the Mac, found the soldiers too plain: blocks for
+bodies and horses like tables. The figures are rebuilt and every unit is
+rendered again, with the later ages' soldiers rendered for the first time.
+
+- **The figure** (`kit.Humanoid`). Jointed: thighs carry shins and upper
+  arms carry forearms, so knees and elbows bend in the walk and the
+  blows. A lofted torso narrow at the waist with a yoke of shoulders, a
+  kilt or a robe, a belt, sleeves, a neck, a face with a nose and eyes,
+  hair or a beard; helmets as a cap, a crested helm (the crest a
+  crescent, not a block), a cone or a band. Weapons have shape: a leaf
+  blade, a recurved bow, a crescent axe, a knobbed club, a broad sword,
+  a tower shield and a rimmed round one.
+- **The horse** is one model for every rider, built of the same lofted
+  pieces with a neck, a head, a mane and jointed legs; the rider sits it
+  with bent legs. The chariot, the war elephant (with a howdah of the
+  owner's colour) and the three engines are new models.
+- **The ages' dress** is redone on the new body: domes on the helmets,
+  pads on the upper arms, greaves on the shins, a lofted cape.
+- **The sets.** The eight first sets, the ten Bronze and Iron Age
+  soldiers (`slice.py`), and the fourteen aged sets of the villager and
+  the infantry, the swordsman and the hoplite now in the Iron Age too:
+  32 sets, rendered in about three hours on the CPU.
+- **The priest, the relic and the Wonder** are modelled too: the priest
+  in a linen robe with a stole of the owner's colour and a staff, lifting
+  its hands to chant; the relic a gilded casket on a plinth; the Wonder a
+  ziggurat of three steps with a stair, a shrine of columns under a gilded
+  roof and the owner's banners, in the Wonder size class (five tiles).
+  The relic is neutral (`atlas validate`'s `NEUTRAL_SETS`): no owner's
+  colour, no construction, no rubble. With these three the placeholders
+  are all replaced (`view::sprites::AWAITING_ART` is empty).
+- **The atlas** would need 10011 rows at 4096 wide, more than the GPU's
+  8192, so it is 8192 wide now (`ATLAS_WIDTH`): 5109 rows, a 64 MB
+  texture where it was 32 MB.
+- **Goldens:** 24 of the 28 scenes rebaked for the new figures.
+
 ### Work record: M8 chunk 4, first part — priests (2026-10-04)
 
 The Priest (`docs/02` §5.5) is trained at the Temple from the Bronze Age
@@ -1807,7 +1844,7 @@ for 125 gold: 25 hit points, no attack, passive like a villager.
   for the side that lost it, and puts a notice on both sides' stacks.
 - **Not yet.** The priest is drawn as a placeholder (a robe, a stole in
   the player colour and a staff) until its model is rendered; the
-  computer opponent trains none.
+  computer opponent trains none. (Both done since: chunks 3 and 5.)
 
 ### Work record: M8 chunk 4, second part — relics and the Wonder (2026-10-04)
 
@@ -1844,7 +1881,8 @@ relics the second needs (`docs/07` D31, answering Q2).
   match: the eight corpus entries on them have new digests (the four on
   flat maps do not), and the Hard-against-Easy record is rewritten.
 - **Not yet.** The Wonder and the relic are drawn as placeholders until
-  rendered. The opponent's use of them is the next record.
+  rendered. The opponent's use of them is the next record. (Both done
+  since: chunks 3 and 5.)
 
 ### Work record: M8 chunk 5 — the opponent's priests and its answer to the clocks (2026-10-04)
 
@@ -1938,7 +1976,7 @@ tier waits for it).
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the
-detailed soldiers and the new roster's models are rendering (chunk 3);
+detailed soldiers and the new roster are rendered (chunk 3);
 priests, relics and the Wonder are in (chunk 4) and the opponent uses
 them (chunk 5); five map types are in (chunk 6) and the eight
 civilizations (chunk 7, above). Next: naval and Islands, and the other
@@ -2156,9 +2194,10 @@ Stated so they are not rediscovered.
   nobody fishes (the
   simulation has no boats), and no rendered set has a second
   civilisation's look. A modeller's work can replace any set by name.
-- **The sprite atlas is 83% full** (6802 of 8192 rows at 4096 wide). A
-  second civilisation's sets, or another batch the size of the ages, will
-  need a second atlas page or a texture array, not a wider texture.
+- **The sprite atlas is 62% full** (5109 of 8192 rows at 8192 wide, a
+  64 MB texture; 84 sets). 8192 is the widest texture the GPU limits
+  allow, so a second civilisation's sets will need a second atlas page or
+  a texture array.
 - **The opponent researches no technology but ages and line upgrades**:
   no Toolworking, Leather Armour, Fletching, gathering or farming
   technology. It reaches the Iron Age in some long matches, not all, so
