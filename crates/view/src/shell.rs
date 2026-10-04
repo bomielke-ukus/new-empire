@@ -753,7 +753,10 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
     s.centred(
         x + pw / 2.0,
         civ_y,
-        &fit(&format!("{}: {}", civ.name.to_uppercase(), civ.about), pw - 32.0),
+        &fit(
+            &format!("{}: {}", civ.name.to_uppercase(), civ.about),
+            pw - 32.0,
+        ),
         Ink::Gold,
         1.0,
     );
