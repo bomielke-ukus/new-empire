@@ -3,6 +3,10 @@
 use sim::kinds;
 use sim::{GatherPhase, NavState, Order, Simulation, Vec2Fx, RUBBLE_TICKS, TICK_MS};
 
+/// How long a building takes to come down into its rubble, in ticks: under
+/// the dust cloud (`feedback.rs`), which outlasts it.
+pub const COLLAPSE_TICKS: u16 = 16;
+
 /// How long the age-up sweep takes to cross a settlement, in ms.
 pub const SWEEP_MS: u32 = 1800;
 /// How long each building glows as the sweep passes it.
@@ -384,6 +388,20 @@ impl Scene {
                 sprite.y += full - sprite.h;
             }
             sprites.push(sprite);
+            // A building coming down: for its first moments it stands over
+            // its rubble and sinks into it, faster as it goes. A site has no
+            // building to bring down.
+            if !info.mobile && world.dying[i] > 0 && world.construction[i].is_none() {
+                let since = RUBBLE_TICKS.saturating_sub(world.dying[i]) as f32 + alpha;
+                if since < COLLAPSE_TICKS as f32 {
+                    if let Some((standing, _)) = atlas.frame_at(look, 0, Anim::Idle, 0) {
+                        let t = since / COLLAPSE_TICKS as f32;
+                        let mut s = overlay(standing, gx, gy, row, depth + 0.51, i as u32);
+                        sink(&mut s, standing, t * t);
+                        sprites.push(s);
+                    }
+                }
+            }
             // A wall reaches for the walls beside it.
             if kinds::is_wall(kind) && standing {
                 push_arms(
@@ -668,6 +686,16 @@ fn villager_anim(sim: &Simulation, i: usize, anim: Anim) -> Option<Anim> {
         },
         _ => None,
     }
+}
+
+/// Lowers `sprite`, drawn from `frame`, `gone` (0 to 1) of its height into
+/// the ground: its top rows drawn that much lower, its bottom cut away.
+fn sink(sprite: &mut SpriteInstance, frame: &crate::sprites::Frame, gone: f32) {
+    let cut = ((f32::from(frame.h) * gone.clamp(0.0, 1.0)) as u16).min(frame.h);
+    let scale = f32::from(frame.scale.max(1));
+    sprite.vh = frame.h - cut;
+    sprite.h = f32::from(sprite.vh) / scale;
+    sprite.y += (f32::from(cut) / scale).round();
 }
 
 /// The walls and gates in view or remembered, by tile, with their owners:
@@ -1438,5 +1466,93 @@ mod tests {
             "chops, then carries: {seen:?}"
         );
         assert!(!seen.contains(&Anim::Work), "no swing stands in: {seen:?}");
+    }
+
+    /// A building that falls sinks into its rubble under the dust for its
+    /// first moments, then only the rubble is left.
+    #[test]
+    fn a_falling_building_sinks_into_its_rubble() {
+        use sim::{Command, CommandKind};
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
+        let (sheets, _) = crate::sheets::load_all(&dir);
+        let atlas = Atlas::with_sheets(&sheets);
+        let mut sim = Simulation::new(
+            5,
+            SimConfig {
+                map: MapSpec {
+                    kind: MapKind::Flat,
+                    size: 48,
+                    players: 2,
+                },
+                wander: false,
+                ..SimConfig::default()
+            },
+        );
+        let spawn = |sim: &mut Simulation, player, kind, x, y| {
+            sim.issue(Command {
+                player,
+                kind: CommandKind::Spawn {
+                    kind,
+                    pos: sim::nav::centre((x, y)),
+                },
+            });
+        };
+        spawn(&mut sim, 1, kinds::HOUSE, 30, 30);
+        for k in 0..6 {
+            spawn(&mut sim, 0, kinds::CLUBMAN, 26 + k, 27);
+        }
+        for _ in 0..3 {
+            sim.step();
+        }
+        let w = sim.world();
+        let house_slot = w
+            .slots()
+            .find(|s| w.kind[s.index()] == kinds::HOUSE)
+            .unwrap();
+        let (hi, house) = (house_slot.index(), w.id_at(house_slot));
+        let clubs: Vec<_> = w
+            .slots()
+            .filter(|s| w.kind[s.index()] == kinds::CLUBMAN)
+            .map(|s| w.id_at(s))
+            .collect();
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Attack {
+                ids: clubs,
+                target: house,
+            },
+        });
+        for _ in 0..6000 {
+            sim.step();
+            if sim.world().dying[hi] > 0 {
+                break;
+            }
+        }
+        assert!(sim.world().dying[hi] > 0, "the house fell");
+        let standing = atlas.frame_at(kinds::HOUSE, 0, Anim::Idle, 0).unwrap().0;
+        let drawn = |sim: &Simulation| {
+            let scene = Scene::build(sim, &atlas, None, 0.0);
+            scene
+                .sprites
+                .iter()
+                .filter(|s| s.slot == hi as u32 && (s.u, s.v) == (standing.x, standing.y))
+                .copied()
+                .collect::<Vec<_>>()
+        };
+        let first = drawn(&sim);
+        assert_eq!(first.len(), 1, "the house still stands over its rubble");
+        for _ in 0..COLLAPSE_TICKS / 2 {
+            sim.step();
+        }
+        let half = drawn(&sim);
+        assert_eq!(half.len(), 1);
+        assert!(
+            half[0].vh < first[0].vh && half[0].y > first[0].y,
+            "sinking"
+        );
+        for _ in 0..COLLAPSE_TICKS {
+            sim.step();
+        }
+        assert!(drawn(&sim).is_empty(), "only the rubble is left");
     }
 }

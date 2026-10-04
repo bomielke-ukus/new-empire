@@ -1823,8 +1823,7 @@ Stated so they are not rediscovered.
 - **Every sound is a placeholder** (`docs/07` Q7): synthesised tones and
   noise, the stems and the beds included. Recordings under
   `assets/sounds/<cue>/`, `stem-title/`, `stem-<age>/`, `stem-combat/` and
-  `bed-<kind>/`
-  replace them by name.
+  `bed-<kind>/` replace them by name.
 - **The title theme is a placeholder too** (2026-10-04): a slow drone,
   drum, flute and lyre under the title and the other screens outside a
   match, cross-fading with the match's stem (`audio::score`); a recording
@@ -1841,7 +1840,9 @@ Stated so they are not rediscovered.
   building and node the simulation has is modelled, with its deaths,
   construction stages and rubble. The ground is blended colour under one
   grain per type, repeated on every tile, with no variants or transition
-  tiles (`docs/07` D28). A building's collapse is a cloud over its rubble, nobody fishes (the
+  tiles (`docs/07` D28). A falling building sinks into its rubble
+  under a dust cloud (`scene::COLLAPSE_TICKS`) rather than breaking apart,
+  nobody fishes (the
   simulation has no boats), and no rendered set has its later ages' look
   or a second civilisation's. A modeller's work can replace any set by
   name.
