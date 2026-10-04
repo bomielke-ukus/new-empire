@@ -158,7 +158,7 @@ per type; the variants and mask transitions above are not built.
 | Ambient beds | 1 per terrain type | Low, looping, positional |
 | UI | Click, invalid, notification, research complete | |
 | Age fanfare | 1 per age | Short, distinct, memorable |
-| Music | 1 stem per age + 1 combat stem | Cross-faded |
+| Music | 1 title theme + 1 stem per age + 1 combat stem | Cross-faded; the theme plays outside a match |
 
 ### 5.2 Rules
 

@@ -698,8 +698,8 @@ impl App {
         }
     }
 
-    /// No match on screen: the score and the beds go quiet.
-    fn hear_nothing(&mut self) {
+    /// No match on screen: the title theme, and the beds go quiet.
+    fn hear_title(&mut self) {
         let now = self.now_ms();
         for f in self.score.update(None, 0, now) {
             self.fade(f);
@@ -1289,7 +1289,7 @@ impl App {
     /// The title and the setup screen: no world, a backdrop and buttons,
     /// and on the setup screen the seed's map as the minimap will show it.
     fn frame_shell(&mut self, now: Instant) {
-        self.hear_nothing();
+        self.hear_title();
         let input = self.shell_input();
         let screen = match self.shell {
             Shell::Title => shell::title(&self.atlas, &input),

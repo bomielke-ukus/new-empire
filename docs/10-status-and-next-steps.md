@@ -1822,9 +1822,13 @@ Stated so they are not rediscovered.
 
 - **Every sound is a placeholder** (`docs/07` Q7): synthesised tones and
   noise, the stems and the beds included. Recordings under
-  `assets/sounds/<cue>/`, `stem-<age>/`, `stem-combat/` and `bed-<kind>/`
+  `assets/sounds/<cue>/`, `stem-title/`, `stem-<age>/`, `stem-combat/` and
+  `bed-<kind>/`
   replace them by name.
-- **No stem plays on the title screen.**
+- **The title theme is a placeholder too** (2026-10-04): a slow drone,
+  drum, flute and lyre under the title and the other screens outside a
+  match, cross-fading with the match's stem (`audio::score`); a recording
+  under `assets/sounds/stem-title/` replaces it by name.
 - **The performance numbers are from a shared-runner-class machine**
   (`docs/09` §8): every §12 row is inside its budget there, but the
   measurement on the Mac is the owner's (`F4`). Rendering is read, not

@@ -33,6 +33,7 @@ pub fn layers() -> Vec<(Layer, Clip)> {
         .into_iter()
         .map(|l| {
             let clip = match l {
+                Layer::Title => title(),
                 Layer::Stem(age) => stem(age),
                 Layer::Combat => combat(),
                 Layer::Bed(b) => bed(b),
@@ -380,6 +381,46 @@ fn stem(age: Age) -> Clip {
     l.finish(0.5)
 }
 
+/// The title theme: twenty-four seconds, slower and wider than any age's
+/// stem. A low drone of the chorus, a heartbeat on the frame drum, the bone
+/// flute's long phrase rising and falling over it, the lyre answering.
+fn title() -> Clip {
+    let mut l = Loop::new(24_000);
+    l.drone(
+        &[A3 / 2.0, A3 / 2.0 * 1.003, E4 / 2.0],
+        Wave::Saw,
+        350.0,
+        0.1,
+    );
+    for beat in (0..24_000u32).step_by(3000) {
+        l.drum(beat, 0.55);
+        l.drum(beat + 400, 0.3);
+    }
+    let phrase = [
+        (1500, E4, 1400),
+        (3000, G4, 900),
+        (4000, A4, 2200),
+        (6600, G4, 700),
+        (7400, E4, 700),
+        (8200, D4, 2400),
+        (13_500, C4, 900),
+        (14_500, D4, 900),
+        (15_500, E4, 1800),
+        (17_600, A3, 2800),
+    ];
+    for (at, f, ms) in phrase {
+        l.flute(at, f, ms, 0.45);
+    }
+    let lyre = [A3, C4, E4, A4, E4, C4];
+    for (k, at) in (10_800..13_200).step_by(400).enumerate() {
+        l.pluck(at, lyre[k % lyre.len()], 0.3);
+    }
+    for (k, at) in (20_600..23_400).step_by(450).enumerate() {
+        l.pluck(at, lyre[(k + 2) % lyre.len()], 0.25);
+    }
+    l.finish(0.5)
+}
+
 /// The combat stem: eight seconds of fast drums and a pulse under them.
 fn combat() -> Clip {
     let mut l = Loop::new(8000);
@@ -606,7 +647,7 @@ mod tests {
         for l in Layer::all() {
             let c = lib.layer(l).unwrap();
             let ms = c.duration_ms();
-            assert!((4000..=20_000).contains(&ms), "{l:?}: {ms} ms");
+            assert!((4000..=30_000).contains(&ms), "{l:?}: {ms} ms");
             let peak = c.samples.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
             assert!(peak > 0.3 && peak <= 0.5001, "{l:?}: peak {peak}");
             let (first, last) = (c.samples[0], *c.samples.last().unwrap());
