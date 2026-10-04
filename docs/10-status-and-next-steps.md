@@ -1740,6 +1740,16 @@ a computer opponent, and a replay being watched takes no orders at all.
 The view's own replay of the feedback now issues each recorded command as
 whoever gave it. The joke units the spec also asks for are not built.
 
+### Work record: the next idle soldier on `,` (2026-10-04)
+
+The owner asked for a key to cycle through idle units. `.` already did the
+villagers (`docs/03` §2); `,` now does the soldiers the same way: every
+unit of the player's that is not a villager, out in the open with no
+order (`Simulation::idle_soldiers`), one at a time with the camera brought
+to each, round and round. It is rebindable on the settings screen as
+NEXT IDLE SOLDIER and listed in the controls overlay and the release
+notes' keys.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the

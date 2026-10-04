@@ -280,6 +280,21 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
             .join(" ")
     };
     let l = |k: &str, a: &str| (lk(k), a.to_string());
+    // Every letter a soldier is trained with, once each, in table order.
+    let mut letters: Vec<char> = Vec::new();
+    for k in kinds::all() {
+        if k.trained_at.is_some() && k.id != kinds::VILLAGER {
+            let c = train_hotkey(k.id);
+            if !letters.contains(&c) {
+                letters.push(c);
+            }
+        }
+    }
+    let train_letters = letters
+        .iter()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
     // The general keys are the player's bindings, so the overlay cannot
     // disagree with the settings screen.
     let pan: Vec<String> = [
@@ -312,9 +327,13 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
         s("SHIFT", "ADD TO THE SELECTION; QUEUE AN ORDER"),
         s("CTRL+0-9", "SAVE A GROUP, 0-9 RECALLS"),
         (key(Control::NextIdle), "NEXT IDLE VILLAGER".to_string()),
+        (
+            key(Control::NextIdleSoldier),
+            "NEXT IDLE SOLDIER".to_string(),
+        ),
         s("RIGHT", "MOVE, GATHER, BUILD, RALLY"),
         l("T", "STOP"),
-        l("C P G B L", "TRAIN AT A BARRACKS, RANGE, STABLE"),
+        l(&train_letters, "TRAIN AT A MILITARY BUILDING"),
         s("RIGHT", "ON AN ENEMY: ATTACK"),
         s("RIGHT", "ON A TOWER OR TOWN CENTER: GARRISON"),
         l("T", "AT A BUILDING: ALL OUT"),

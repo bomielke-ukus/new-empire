@@ -16,6 +16,8 @@ pub struct Selection {
     pub drag_from: Option<(f32, f32)>,
     /// Last idle villager cycled to, for the `.` key.
     pub idle_cursor: usize,
+    /// Last idle soldier cycled to, for the `,` key.
+    pub soldier_cursor: usize,
 }
 
 impl Selection {
@@ -137,15 +139,29 @@ impl Selection {
     /// Cycles to the next idle villager, returning it.
     pub fn next_idle(&mut self, sim: &Simulation, player: u8) -> Option<EntityId> {
         let idle = sim.idle_villagers(player);
-        if idle.is_empty() {
-            return None;
-        }
-        self.idle_cursor %= idle.len();
-        let id = idle[self.idle_cursor];
-        self.idle_cursor += 1;
+        let id = cycle(&idle, &mut self.idle_cursor)?;
         self.set(vec![id]);
         Some(id)
     }
+
+    /// Cycles to the next idle soldier, returning it.
+    pub fn next_idle_soldier(&mut self, sim: &Simulation, player: u8) -> Option<EntityId> {
+        let idle = sim.idle_soldiers(player);
+        let id = cycle(&idle, &mut self.soldier_cursor)?;
+        self.set(vec![id]);
+        Some(id)
+    }
+}
+
+/// The one after the last of `ids` cycled to, round and round.
+fn cycle(ids: &[EntityId], cursor: &mut usize) -> Option<EntityId> {
+    if ids.is_empty() {
+        return None;
+    }
+    *cursor %= ids.len();
+    let id = ids[*cursor];
+    *cursor += 1;
+    Some(id)
 }
 
 /// How far from a sprite's drawn pixels a click still picks it, in window

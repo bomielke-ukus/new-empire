@@ -807,6 +807,27 @@ impl Simulation {
             .collect()
     }
 
+    /// `p`'s soldiers standing idle, in slot order: every unit of theirs
+    /// that is not a villager, out in the open with no order. A unit
+    /// sheltering in a building is not idle; it was put there.
+    pub fn idle_soldiers(&self, p: PlayerId) -> Vec<EntityId> {
+        self.world
+            .slots()
+            .filter(|s| {
+                let i = s.index();
+                let k = kinds::info(self.world.kind[i]);
+                self.world.owner[i] == p
+                    && self.world.dying[i] == 0
+                    && self.world.inside[i].is_none()
+                    && k.mobile
+                    && k.combat.attack > 0
+                    && self.world.kind[i] != kinds::VILLAGER
+                    && self.world.order[i] == Order::Idle
+            })
+            .map(|s| self.world.id_at(s))
+            .collect()
+    }
+
     /// Whether `p` could build a `kind` at all right now, wherever it went:
     /// the age, what it needs standing, and the cost. The panel greys a
     /// button with these words; [`Simulation::can_place`] adds the ground.

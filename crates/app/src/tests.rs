@@ -67,6 +67,50 @@ fn camera_keys_pan_without_building_or_spending_and_release_stops_panning() {
     }
 }
 
+/// `,` cycles through the soldiers standing idle, round and round, and
+/// brings the camera to each; a villager or a soldier with an order is
+/// never one of them. `.` still does the villagers.
+#[test]
+fn comma_cycles_the_idle_soldiers_and_never_a_villager() {
+    let mut app = app();
+    let a = spawn(&mut app, kinds::CLUBMAN, 10, 10);
+    let b = spawn(&mut app, kinds::CLUBMAN, 14, 10);
+    let busy = spawn(&mut app, kinds::CLUBMAN, 18, 10);
+    app.issue(CommandKind::Move {
+        ids: vec![busy],
+        target: Vec2Fx::from_int(30, 30),
+    });
+    step(&mut app, 3);
+    draw(&mut app);
+    let idle = app.sim.idle_soldiers(ME);
+    assert!(idle.contains(&a) && idle.contains(&b) && !idle.contains(&busy));
+    let world = app.sim.world();
+    assert!(idle
+        .iter()
+        .all(|&id| world.kind[world.slot(id).unwrap().index()] != kinds::VILLAGER));
+    let tap = |app: &mut App| {
+        app.keyboard_input(KeyCode::Comma, ElementState::Pressed, false);
+        app.keyboard_input(KeyCode::Comma, ElementState::Released, false);
+    };
+    let mut seen = Vec::new();
+    for _ in 0..idle.len() {
+        tap(&mut app);
+        assert_eq!(app.selection.ids.len(), 1);
+        let id = app.selection.ids[0];
+        let p = app.sim.world().pos[app.sim.world().slot(id).unwrap().index()];
+        let mut there = app.camera;
+        there.look_at_tile(view::fx_to_f32(p.x), view::fx_to_f32(p.y));
+        assert_eq!(app.camera.focus, there.focus, "the camera comes to it");
+        seen.push(id);
+    }
+    let (mut sorted, mut want) = (seen.clone(), idle.clone());
+    sorted.sort();
+    want.sort();
+    assert_eq!(sorted, want, "each idle soldier once");
+    tap(&mut app);
+    assert_eq!(app.selection.ids, vec![seen[0]], "and round again");
+}
+
 /// Enter opens the line, the code is typed, Enter gives 1000 of what it
 /// names; the letters typed are text, not orders, and the camera stays.
 ///

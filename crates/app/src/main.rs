@@ -2440,8 +2440,13 @@ impl App {
                     self.camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
                 }
             }
-            Some(Control::NextIdle) => {
-                if let Some(id) = self.selection.next_idle(&self.sim, ME) {
+            Some(control @ (Control::NextIdle | Control::NextIdleSoldier)) => {
+                let next = if control == Control::NextIdle {
+                    self.selection.next_idle(&self.sim, ME)
+                } else {
+                    self.selection.next_idle_soldier(&self.sim, ME)
+                };
+                if let Some(id) = next {
                     let i = self.sim.world().slot(id).unwrap().index();
                     let p = self.sim.world().pos[i];
                     self.camera
