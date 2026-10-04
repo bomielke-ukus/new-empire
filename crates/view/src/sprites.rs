@@ -2487,10 +2487,7 @@ mod tests {
     /// their models are rendered (`docs/10` §5). The list only shrinks.
     /// Kinds still drawn as placeholders. A new kind goes here until its
     /// set is rendered.
-    const AWAITING_ART: [KindId; 2] = [
-        kinds::WAR_GALLEY,
-        kinds::CATAPULT_SHIP,
-    ];
+    const AWAITING_ART: [KindId; 1] = [kinds::CATAPULT_SHIP];
 
     #[test]
     fn a_set_named_for_an_age_draws_its_kind_in_that_age() {
