@@ -26,7 +26,7 @@ use crate::fog;
 use crate::fx_to_f32;
 use crate::iso;
 use crate::palette;
-use crate::sprites::{Anim, Atlas};
+use crate::sprites::{self, Anim, Atlas};
 use crate::walls::{self, Piece};
 use std::collections::HashMap;
 
@@ -64,6 +64,14 @@ pub struct SpriteInstance {
     /// Light out of 255: full for what is in sight, [`fog::EXPLORED`] for
     /// what is drawn from memory.
     pub light: u8,
+}
+
+/// The architecture `p` builds in (`docs/02` §11), by
+/// [`sprites::arch_index`]: the first set's when the match named no
+/// civilization.
+fn arch_of(sim: &Simulation, p: sim::PlayerId) -> u8 {
+    sim.civ(p)
+        .map_or(0, |c| sprites::arch_index(c.info().architecture))
 }
 
 /// A building the player is about to place.
@@ -211,7 +219,7 @@ impl Scene {
             let age = sim
                 .player(world.owner[i])
                 .map_or(0, |p| p.age.index() as u8);
-            let look = atlas.variant(kind, age);
+            let look = atlas.variant(kind, age, arch_of(sim, world.owner[i]));
             // What the unit is doing decides which animation plays; the clock
             // is game time plus a per-slot phase so a crowd does not march in
             // lockstep. Presentation only: nothing here feeds the simulation.
@@ -429,7 +437,7 @@ impl Scene {
             for ((x, y), m) in f.memories() {
                 let info = kinds::info(m.kind);
                 let fp = info.footprint.max(1) as i32;
-                let look = atlas.variant(m.kind, m.age);
+                let look = atlas.variant(m.kind, m.age, arch_of(sim, m.owner));
                 let at = piece_of(m.owner);
                 let gate = (m.kind == kinds::GATE && !m.site)
                     .then(|| atlas.gate_frame(look, walls::gate_line((x, y), &at), false))
@@ -536,7 +544,7 @@ impl Scene {
                     piece_of(g.player)(x, y)
                 }
             };
-            let look = atlas.variant(g.kind, g.age);
+            let look = atlas.variant(g.kind, g.age, arch_of(sim, g.player));
             for ((x, y), ok) in tiles {
                 let centre = sim::nav::building_centre(x, y, fp as i32);
                 let (cx, cy) = (fx_to_f32(centre.x), fx_to_f32(centre.y));

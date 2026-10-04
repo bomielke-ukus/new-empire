@@ -37,8 +37,9 @@ pub const UI_GLYPH: KindId = 60_000;
 pub const UI_GLYPH_DARK: KindId = 61_000;
 /// Gold glyphs, for the age banner, at this id plus the character index.
 pub const UI_GLYPH_GOLD: KindId = 62_000;
-/// Age-styled placeholder variants live above this: `AGE_VARIANT_BASE +
-/// age * 1000 + kind`. See [`Atlas::variant`].
+/// A kind's looks for an age or an architecture live above this:
+/// `AGE_VARIANT_BASE + (architecture * 4 + age) * 500 + kind`, below the
+/// UI's ids. See [`Atlas::variant`].
 pub const AGE_VARIANT_BASE: KindId = 50_000;
 
 /// The colour text is drawn in.
@@ -234,8 +235,9 @@ pub struct Atlas {
     frames: Vec<Frame>,
     lookup: HashMap<(KindId, u8, Anim, u8), usize>,
     anims: HashMap<(KindId, Anim), AnimInfo>,
-    /// `(kind, age index)` to the id its age-styled frames are filed under.
-    variants: HashMap<(KindId, u8), KindId>,
+    /// `(kind, age index, architecture index)` to the id its frames in that
+    /// look are filed under.
+    variants: HashMap<(KindId, u8, u8), KindId>,
     /// Names of the rendered sets that replaced placeholders.
     pub loaded_sets: Vec<String>,
 }
@@ -288,10 +290,20 @@ impl Atlas {
     /// anew only for the ages that change it (`house_tool`, `temple_iron`;
     /// see [`set_target`]), so a temple keeps its own look in the Bronze Age
     /// and a slinger in every age.
-    pub fn variant(&self, kind: KindId, age: u8) -> KindId {
+    pub fn variant(&self, kind: KindId, age: u8, arch: u8) -> KindId {
+        // The architecture's own look, of the latest age it has one for;
+        // without one, the first set's.
+        if arch > 0 {
+            if let Some(id) = (0..=age)
+                .rev()
+                .find_map(|a| self.variants.get(&(kind, a, arch)).copied())
+            {
+                return id;
+            }
+        }
         (1..=age)
             .rev()
-            .find_map(|a| self.variants.get(&(kind, a)).copied())
+            .find_map(|a| self.variants.get(&(kind, a, 0)).copied())
             .unwrap_or(kind)
     }
 
@@ -328,21 +340,22 @@ impl Atlas {
     pub fn with_sheets(sheets: &[crate::sheets::Sheet]) -> Atlas {
         let mut canvases: Vec<Entry> = Vec::new();
         let mut anims: HashMap<(KindId, Anim), AnimInfo> = HashMap::new();
-        let mut variants: HashMap<(KindId, u8), KindId> = HashMap::new();
+        let mut variants: HashMap<(KindId, u8, u8), KindId> = HashMap::new();
         let mut loaded_sets = Vec::new();
         let mut covered: Vec<KindId> = Vec::new();
         for sheet in sheets {
-            let Some((base, age)) = set_target(&sheet.name) else {
+            let Some((base, age, arch)) = set_target(&sheet.name) else {
                 continue;
             };
-            // The Stone Age set is the kind itself; a later age's is filed
-            // under its variant id, as the placeholders' are.
-            let kind = if age == 0 {
+            // The first architecture's Stone Age set is the kind itself; any
+            // other look is filed under its variant id, as the
+            // placeholders' are.
+            let kind = if age == 0 && arch == 0 {
                 covered.push(base);
                 base
             } else {
-                let id = variant_id(base, age);
-                variants.insert((base, age), id);
+                let id = look_id(base, age, arch);
+                variants.insert((base, age, arch), id);
                 id
             };
             loaded_sets.push(sheet.name.clone());
@@ -479,7 +492,7 @@ impl Atlas {
             // The Stone Age look is the kind itself; the three later ages
             // are drawn in their materials and filed under variant ids.
             for age in 1..=3u8 {
-                if variants.contains_key(&(k.id, age)) {
+                if variants.contains_key(&(k.id, age, 0)) {
                     // Drawn by a rendered set.
                     continue;
                 }
@@ -514,7 +527,7 @@ impl Atlas {
                 } else {
                     canvases.push(still(id, 0, draw_kind_aged(k.id, 1, age)));
                 }
-                variants.insert((k.id, age), id);
+                variants.insert((k.id, age, 0), id);
             }
         }
         for &idx in SOLIDS {
@@ -856,17 +869,38 @@ fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
 /// [`sim::Age::index`]).
 const AGE_SUFFIXES: [(&str, u8); 3] = [("_tool", 1), ("_bronze", 2), ("_iron", 3)];
 
-/// The kind a rendered sprite set draws and the age it draws it in, by the
-/// set's name: `house` is the house as built in the Stone Age, and in any
-/// later age without a set of its own; `house_tool`, `house_bronze` and
-/// `house_iron` are the house in the three ages after it.
-pub fn set_target(name: &str) -> Option<(KindId, u8)> {
-    for (suffix, age) in AGE_SUFFIXES {
-        if let Some(kind) = name.strip_suffix(suffix).and_then(kind_for_set) {
-            return Some((kind, age));
-        }
+/// The suffix of a set that draws a kind in an architecture other than the
+/// first, and the architecture (by [`arch_index`]). The first, the Greek,
+/// is the set named plainly.
+const ARCH_SUFFIXES: [(&str, u8); 3] = [("_egyptian", 1), ("_mesopotamian", 2), ("_asian", 3)];
+
+/// The view's index of an architecture (`docs/02` §11): which of the sets
+/// a building is drawn from.
+pub fn arch_index(arch: sim::civs::Architecture) -> u8 {
+    use sim::civs::Architecture;
+    match arch {
+        Architecture::Greek => 0,
+        Architecture::Egyptian => 1,
+        Architecture::Mesopotamian => 2,
+        Architecture::Asian => 3,
     }
-    kind_for_set(name).map(|kind| (kind, 0))
+}
+
+/// The kind a rendered sprite set draws, the age and the architecture, by
+/// the set's name: `house` is the house as built in the Stone Age, and in
+/// any later age without a set of its own; `house_tool`, `house_bronze` and
+/// `house_iron` are the house in the three ages after it;
+/// `house_egyptian` and `house_egyptian_bronze` are the Egyptian's.
+pub fn set_target(name: &str) -> Option<(KindId, u8, u8)> {
+    let (rest, age) = AGE_SUFFIXES
+        .iter()
+        .find_map(|&(suffix, age)| name.strip_suffix(suffix).map(|rest| (rest, age)))
+        .unwrap_or((name, 0));
+    let (rest, arch) = ARCH_SUFFIXES
+        .iter()
+        .find_map(|&(suffix, arch)| rest.strip_suffix(suffix).map(|rest| (rest, arch)))
+        .unwrap_or((rest, 0));
+    kind_for_set(rest).map(|kind| (kind, age, arch))
 }
 
 /// Which kind a rendered sprite set draws, by the set's name.
@@ -1036,7 +1070,14 @@ fn facing_dir(facing: u8) -> (f32, f32) {
 
 /// The id age-styled frames of `kind` are filed under.
 pub fn variant_id(kind: KindId, age: u8) -> KindId {
-    AGE_VARIANT_BASE + age as KindId * 1000 + kind
+    look_id(kind, age, 0)
+}
+
+/// The id the frames of `kind` in an age and an architecture are filed
+/// under.
+pub fn look_id(kind: KindId, age: u8, arch: u8) -> KindId {
+    debug_assert!(kind < 500 && age < 4 && arch < 4);
+    AGE_VARIANT_BASE + (arch as KindId * 4 + age as KindId) * 500 + kind
 }
 
 /// Kinds whose placeholder changes with the owner's age: what players build,
@@ -2532,42 +2573,98 @@ mod tests {
             kinds::CLUBMAN,
         ] {
             for age in 1..=3 {
-                assert_eq!(a.variant(kind, age), variant_id(kind, age), "{kind} {age}");
+                assert_eq!(
+                    a.variant(kind, age, 0),
+                    variant_id(kind, age),
+                    "{kind} {age}"
+                );
             }
         }
-        assert_eq!(a.variant(kinds::HOUSE, 0), kinds::HOUSE);
-        assert_eq!(a.variant(kinds::TEMPLE, 2), kinds::TEMPLE);
-        assert_eq!(a.variant(kinds::TEMPLE, 3), variant_id(kinds::TEMPLE, 3));
-        assert_eq!(a.variant(kinds::SLINGER, 3), kinds::SLINGER);
-        assert_eq!(a.variant(kinds::FARM, 2), kinds::FARM);
-        let iron = a.variant(kinds::VILLAGER, 3);
+        assert_eq!(a.variant(kinds::HOUSE, 0, 0), kinds::HOUSE);
+        assert_eq!(a.variant(kinds::TEMPLE, 2, 0), kinds::TEMPLE);
+        assert_eq!(a.variant(kinds::TEMPLE, 3, 0), variant_id(kinds::TEMPLE, 3));
+        assert_eq!(a.variant(kinds::SLINGER, 3, 0), kinds::SLINGER);
+        assert_eq!(a.variant(kinds::FARM, 2, 0), kinds::FARM);
+        let iron = a.variant(kinds::VILLAGER, 3, 0);
         let (chop, _) = a.frame_at(iron, 2, Anim::Chop, 0).unwrap();
         assert_eq!(chop.anim, Anim::Chop, "an Iron Age villager still works");
         assert_ne!(
             a.frame(kinds::HOUSE, 0).unwrap().0.x,
-            a.frame(a.variant(kinds::HOUSE, 2), 0).unwrap().0.x,
+            a.frame(a.variant(kinds::HOUSE, 2, 0), 0).unwrap().0.x,
             "a Bronze Age house is its own frame"
         );
         assert!(a.stage_frame(variant_id(kinds::HOUSE, 1), 0).is_some());
     }
 
-    /// The Bronze and Iron Ages' soldiers, drawn as placeholders until
-    /// their models are rendered (`docs/10` §5). The list only shrinks.
-    /// Kinds still drawn as placeholders. A new kind goes here until its
-    /// set is rendered.
     #[test]
     fn a_set_named_for_an_age_draws_its_kind_in_that_age() {
-        assert_eq!(set_target("house"), Some((kinds::HOUSE, 0)));
-        assert_eq!(set_target("house_tool"), Some((kinds::HOUSE, 1)));
+        assert_eq!(set_target("house"), Some((kinds::HOUSE, 0, 0)));
+        assert_eq!(set_target("house_tool"), Some((kinds::HOUSE, 1, 0)));
         assert_eq!(
             set_target("town_center_bronze"),
-            Some((kinds::TOWN_CENTER, 2))
+            Some((kinds::TOWN_CENTER, 2, 0))
         );
-        assert_eq!(set_target("temple_iron"), Some((kinds::TEMPLE, 3)));
+        assert_eq!(set_target("temple_iron"), Some((kinds::TEMPLE, 3, 0)));
         // Not every name with an age's word in it is an age's set.
-        assert_eq!(set_target("stone_wall"), Some((kinds::STONE_WALL, 0)));
+        assert_eq!(set_target("stone_wall"), Some((kinds::STONE_WALL, 0, 0)));
         assert_eq!(set_target("palace_iron"), None);
         assert_eq!(set_target("iron"), None);
+    }
+
+    #[test]
+    fn a_set_named_for_an_architecture_draws_its_kind_in_it() {
+        assert_eq!(set_target("house_egyptian"), Some((kinds::HOUSE, 0, 1)));
+        assert_eq!(
+            set_target("town_center_mesopotamian_bronze"),
+            Some((kinds::TOWN_CENTER, 2, 2))
+        );
+        assert_eq!(set_target("temple_asian_iron"), Some((kinds::TEMPLE, 3, 3)));
+        // The architecture's word comes before the age's, never after.
+        assert_eq!(set_target("house_tool_egyptian"), None);
+        assert_eq!(set_target("egyptian"), None);
+        use sim::civs::Civ;
+        let arch = |c: Civ| arch_index(c.info().architecture);
+        assert_eq!(arch(Civ::Greeks), 0);
+        assert_eq!(arch(Civ::Egyptians), 1);
+        assert_eq!(arch(Civ::Babylonians), 2);
+        assert_eq!(arch(Civ::Shang), 3);
+    }
+
+    #[test]
+    fn an_architecture_draws_its_own_look_and_the_first_sets_where_it_has_none() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
+        let (mut sheets, _) = crate::sheets::load_all(&dir);
+        let named = |name: &str, sheets: &[crate::sheets::Sheet]| {
+            sheets.iter().find(|s| s.name == name).cloned().unwrap()
+        };
+        // Stand-ins: an Egyptian house for the Stone and Bronze Ages, cut
+        // from the Tool and Iron Ages' sheets so their frames differ.
+        let mut stone = named("house_tool", &sheets);
+        stone.name = "house_egyptian".into();
+        let mut bronze = named("house_iron", &sheets);
+        bronze.name = "house_egyptian_bronze".into();
+        sheets.push(stone);
+        sheets.push(bronze);
+        let a = Atlas::with_sheets(&sheets);
+        let x = |kind| a.frame(kind, 0).unwrap().0.x;
+        let page = |kind| a.frame(kind, 0).unwrap().0.page;
+        let egyptian = |age| a.variant(kinds::HOUSE, age, 1);
+        assert_eq!(egyptian(0), look_id(kinds::HOUSE, 0, 1));
+        assert_eq!(
+            egyptian(1),
+            look_id(kinds::HOUSE, 0, 1),
+            "the latest age it has"
+        );
+        assert_eq!(egyptian(2), look_id(kinds::HOUSE, 2, 1));
+        assert_eq!(egyptian(3), look_id(kinds::HOUSE, 2, 1));
+        assert_ne!(
+            (page(egyptian(0)), x(egyptian(0))),
+            (page(kinds::HOUSE), x(kinds::HOUSE))
+        );
+        // Without its own set of a kind, the first set's in that age.
+        assert_eq!(a.variant(kinds::TEMPLE, 3, 1), variant_id(kinds::TEMPLE, 3));
+        assert_eq!(a.variant(kinds::HOUSE, 2, 3), variant_id(kinds::HOUSE, 2));
+        assert_eq!(a.variant(kinds::HOUSE, 0, 2), kinds::HOUSE);
     }
 
     #[test]
