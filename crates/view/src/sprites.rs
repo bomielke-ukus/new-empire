@@ -2067,6 +2067,32 @@ mod tests {
         // The herd has its own walk now.
         let (g, _) = a.frame_at(kinds::GAZELLE, 1, Anim::Walk, 500).unwrap();
         assert_eq!(g.anim, Anim::Walk);
+        // The settlement and its people wear their owner's age; what has no
+        // set for an age keeps the look of the latest age before it.
+        for kind in [
+            kinds::HOUSE,
+            kinds::TOWN_CENTER,
+            kinds::VILLAGER,
+            kinds::CLUBMAN,
+        ] {
+            for age in 1..=3 {
+                assert_eq!(a.variant(kind, age), variant_id(kind, age), "{kind} {age}");
+            }
+        }
+        assert_eq!(a.variant(kinds::HOUSE, 0), kinds::HOUSE);
+        assert_eq!(a.variant(kinds::TEMPLE, 2), kinds::TEMPLE);
+        assert_eq!(a.variant(kinds::TEMPLE, 3), variant_id(kinds::TEMPLE, 3));
+        assert_eq!(a.variant(kinds::SLINGER, 3), kinds::SLINGER);
+        assert_eq!(a.variant(kinds::FARM, 2), kinds::FARM);
+        let iron = a.variant(kinds::VILLAGER, 3);
+        let (chop, _) = a.frame_at(iron, 2, Anim::Chop, 0).unwrap();
+        assert_eq!(chop.anim, Anim::Chop, "an Iron Age villager still works");
+        assert_ne!(
+            a.frame(kinds::HOUSE, 0).unwrap().0.x,
+            a.frame(a.variant(kinds::HOUSE, 2), 0).unwrap().0.x,
+            "a Bronze Age house is its own frame"
+        );
+        assert!(a.stage_frame(variant_id(kinds::HOUSE, 1), 0).is_some());
     }
 
     #[test]

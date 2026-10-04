@@ -1683,8 +1683,12 @@ rendered sets had one look; only the placeholders changed with the age.
   set's name and files the frames under the kind's variant id, as the
   placeholders' are. `Atlas::variant` answers with the variant drawn for
   the latest age up to the owner's, so a temple keeps its own look in the
-  Bronze Age. The atlas is 4096 wide now, to stay inside the GPU's 8192
-  limit with every set loaded.
+  Bronze Age. The atlas is 4096 wide now: with all 69 sets loaded it
+  fills 6802 of the GPU's 8192 rows, where at 2048 wide it would need
+  13727.
+- **Rendering** the 40 sets took 68 minutes on the CPU (5.8 MB of sheets).
+- **Goldens:** the five scenes in a later age (`ages-*`, `army-hud`,
+  `tooltip-hud`) rebaked; the Stone Age scenes are unchanged.
 
 ### Resume here next session
 
@@ -1900,6 +1904,9 @@ Stated so they are not rediscovered.
   nobody fishes (the
   simulation has no boats), and no rendered set has a second
   civilisation's look. A modeller's work can replace any set by name.
+- **The sprite atlas is 83% full** (6802 of 8192 rows at 4096 wide). A
+  second civilisation's sets, or another batch the size of the ages, will
+  need a second atlas page or a texture array, not a wider texture.
 - **One notification row stays open**: no Wonder to announce.
 - **The Mac build is not notarised and is Apple Silicon only.**
   Notarising needs an Apple Developer account and a signing identity in
