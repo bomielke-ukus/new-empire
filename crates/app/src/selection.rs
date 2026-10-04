@@ -93,6 +93,13 @@ impl Selection {
         })
     }
 
+    /// Selected priests of `player`.
+    pub fn own_priests(&self, sim: &Simulation, player: u8) -> Vec<EntityId> {
+        self.filter(sim, |i| {
+            sim.world().owner[i] == player && sim.world().kind[i] == kinds::PRIEST
+        })
+    }
+
     /// Selected villagers of `player`.
     pub fn own_villagers(&self, sim: &Simulation, player: u8) -> Vec<EntityId> {
         self.filter(sim, |i| {

@@ -80,6 +80,8 @@ pub const STONE_THROWER: KindId = 37;
 pub const CATAPULT: KindId = 38;
 /// Ballista: anti-unit siege, a bolt that flies like an arrow.
 pub const BALLISTA: KindId = 39;
+/// Priest: converts enemy units and heals friendly ones (`docs/02` §5.5).
+pub const PRIEST: KindId = 40;
 
 /// Wood to reseed a farm.
 pub const FARM_RESEED_COST: Cost = [0, 60, 0, 0];
@@ -662,6 +664,18 @@ const TABLE: &[KindInfo] = &[
         trained_at: Some(SIEGE_WORKSHOP),
         ..unit(BALLISTA, "Ballista", 80, 8, [0, 100, 0, 80], 40)
     },
+    // The priest is no fighter: a civilian, slow, its conversions paid for
+    // in faith (`docs/02` §5.5, `crate::priests`).
+    KindInfo {
+        age: Age::Bronze,
+        class: Class::Villager,
+        combat: Combat {
+            line_of_sight: 8,
+            ..NO_COMBAT
+        },
+        trained_at: Some(TEMPLE),
+        ..unit(PRIEST, "Priest", 25, 8, [0, 0, 0, 125], 50)
+    },
     KindInfo {
         pop_provided: 5,
         dropoff: true,
@@ -726,6 +740,7 @@ const TABLE: &[KindInfo] = &[
     },
     KindInfo {
         age: Age::Bronze,
+        trains: true,
         ..building(TEMPLE, "Temple", 400, 2, [0, 200, 0, 0], 60)
     },
     KindInfo {
@@ -895,6 +910,7 @@ mod tests {
         assert_eq!(trained_at(STABLE).count(), 4);
         assert_eq!(trained_at(ACADEMY).count(), 2);
         assert_eq!(trained_at(SIEGE_WORKSHOP).count(), 3);
+        assert_eq!(trained_at(TEMPLE).count(), 1);
         assert_eq!(trained_at(TOWN_CENTER).count(), 1);
         // Siege and elephants take two population (`GD-POP-03`).
         for k in all().iter().filter(|k| k.trained_at.is_some()) {

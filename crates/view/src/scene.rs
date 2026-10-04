@@ -582,7 +582,7 @@ pub fn order_point(sim: &Simulation, order: &Order) -> Option<Vec2Fx> {
             Some(target)
         }
         Order::Patrol { to, .. } => Some(to),
-        Order::Attack { target, .. } => of(target),
+        Order::Attack { target, .. } | Order::Convert { target, .. } => of(target),
         Order::Garrison { building } | Order::Repair { building, .. } => of(building),
         Order::Gather { node, .. } => of(node),
         Order::Build { site, .. } => of(site),

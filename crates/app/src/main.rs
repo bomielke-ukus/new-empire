@@ -1026,6 +1026,30 @@ impl App {
                         tick,
                     });
                 }
+                // A priest's work, either way round (`GD-PRIEST-01`).
+                sim::Event::Converted {
+                    kind,
+                    from,
+                    to,
+                    pos,
+                    ..
+                } if from == me || to == me => {
+                    let name = kinds::info(kind).name.to_uppercase();
+                    let (kind, text) = if from == me {
+                        (NoticeKind::Loss, format!("{name} CONVERTED BY THE ENEMY"))
+                    } else {
+                        (
+                            NoticeKind::Research,
+                            format!("{name} CONVERTED TO OUR SIDE"),
+                        )
+                    };
+                    self.notices.push(Notice {
+                        kind,
+                        text,
+                        tile: Some(tile_of(pos)),
+                        tick,
+                    });
+                }
                 _ => {}
             }
         }
@@ -1794,6 +1818,8 @@ impl App {
                 Some(Target::Repair) => CursorIcon::Cell,
                 Some(Target::Hunt) => CursorIcon::Crosshair,
                 Some(Target::Attack) => CursorIcon::Crosshair,
+                // The spec's convert cursor; the system's nearest is help.
+                Some(Target::Convert) => CursorIcon::Help,
                 Some(Target::Garrison) => CursorIcon::Copy,
                 _ => CursorIcon::Default,
             },
@@ -1823,6 +1849,11 @@ impl App {
         }
         if enemy_of_me(&self.sim, i) && !self.selection.own_fighters(&self.sim, ME).is_empty() {
             return Some(Target::Attack);
+        }
+        if self.sim.convertible(id, ME).is_some()
+            && !self.selection.own_priests(&self.sim, ME).is_empty()
+        {
+            return Some(Target::Convert);
         }
         if shelter_of_me(&self.sim, i) && !self.selection.own_mobile(&self.sim, ME).is_empty() {
             return Some(Target::Garrison);
@@ -2063,7 +2094,12 @@ impl App {
             let world = self.sim.world();
             let gatherable = gatherable_by_me(&self.sim, i);
             let site = world.owner[i] == ME && world.construction[i].is_some();
-            let fighters = self.selection.own_fighters(&self.sim, ME);
+            // Soldiers fight it; priests convert it, if it is a unit
+            // (`GD-PRIEST-01`). One command: the simulation sorts them.
+            let mut fighters = self.selection.own_fighters(&self.sim, ME);
+            if self.sim.convertible(id, ME).is_some() {
+                fighters.extend(self.selection.own_priests(&self.sim, ME));
+            }
             if !fighters.is_empty() && enemy_of_me(&self.sim, i) {
                 self.issue(CommandKind::Attack {
                     ids: fighters,
@@ -2536,6 +2572,7 @@ enum Target {
     Repair,
     Hunt,
     Attack,
+    Convert,
     Garrison,
     #[allow(dead_code)]
     Other(EntityId),

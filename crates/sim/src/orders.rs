@@ -38,7 +38,7 @@ impl Stance {
     /// The stance a fresh unit of `kind` takes. Buildings stand their
     /// ground, which is the only thing a tower can do.
     pub fn default_for(kind: KindId) -> Stance {
-        if kind == crate::kinds::VILLAGER {
+        if kind == crate::kinds::VILLAGER || kind == crate::kinds::PRIEST {
             Stance::Passive
         } else if crate::kinds::info(kind).footprint > 0 {
             Stance::StandGround
@@ -203,6 +203,14 @@ pub enum Order {
         /// Standing next to it and working.
         working: bool,
     },
+    /// A priest's: close to within reach of an enemy unit and chant until
+    /// it changes sides (`GD-PRIEST-01`).
+    Convert {
+        /// The unit.
+        target: EntityId,
+        /// Ticks of the chant still to go; 0 before it has begun.
+        chant: u16,
+    },
 }
 
 /// Stages of the gather cycle.
@@ -253,6 +261,11 @@ impl HashState for Order {
                 h.write_u8(9);
                 h.write(building);
                 h.write_bool(*working);
+            }
+            Order::Convert { target, chant } => {
+                h.write_u8(10);
+                h.write(target);
+                h.write_u16(*chant);
             }
             Order::Attack {
                 target,

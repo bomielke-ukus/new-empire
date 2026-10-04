@@ -34,6 +34,7 @@ pub mod mapgen;
 pub mod nav;
 pub mod noise;
 pub mod orders;
+pub mod priests;
 pub mod replay;
 pub mod rng;
 pub mod simulation;

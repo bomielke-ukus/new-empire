@@ -820,7 +820,7 @@ impl Simulation {
                     && self.world.dying[i] == 0
                     && self.world.inside[i].is_none()
                     && k.mobile
-                    && k.combat.attack > 0
+                    && (k.combat.attack > 0 || self.world.kind[i] == kinds::PRIEST)
                     && self.world.kind[i] != kinds::VILLAGER
                     && self.world.order[i] == Order::Idle
             })
@@ -1235,6 +1235,7 @@ impl Simulation {
         lap.mark(&mut t.movement);
         self.acquire();
         self.strike();
+        self.heal();
         self.fly();
         self.deaths();
         lap.mark(&mut t.combat);
@@ -1645,6 +1646,14 @@ impl Simulation {
                 for id in ids {
                     if let Some(slot) = self.owned_mobile(id, p) {
                         let i = slot.index();
+                        // A priest sent at an enemy unit converts it
+                        // (`GD-PRIEST-01`); at anything else it stays put.
+                        if self.world.kind[i] == kinds::PRIEST {
+                            if self.convertible(target, p).is_some() {
+                                self.begin_conversion(i, target);
+                            }
+                            continue;
+                        }
                         if kinds::info(self.world.kind[i]).combat.attack == 0 {
                             continue;
                         }
@@ -2117,6 +2126,7 @@ impl Simulation {
                 Order::Repair { building, working } => {
                     self.tick_work(slot, building, working, Job::Repair)
                 }
+                Order::Convert { target, chant } => self.tick_convert(slot, target, chant),
             }
         }
         self.advance_queues();

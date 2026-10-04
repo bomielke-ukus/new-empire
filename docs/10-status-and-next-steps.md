@@ -1778,11 +1778,43 @@ ran low, which in a later age's economy is always.
   (`RM-M5-01`); the record is rewritten. `simrunner ai --stats` now
   lists what each side trained, by kind.
 
+### Work record: M8 chunk 4, first part — priests (2026-10-04)
+
+The Priest (`docs/02` §5.5) is trained at the Temple from the Bronze Age
+for 125 gold: 25 hit points, no attack, passive like a villager.
+
+- **Conversion** (`GD-PRIEST-01`). A right-click on an enemy unit sends a
+  selected priest to it (the cursor turns to help's question mark, the
+  system's nearest to the spec's convert cursor); soldiers selected with
+  it attack, in the same command. The priest walks to within 7 tiles and
+  chants for between four and ten seconds, drawn from the simulation's
+  generator; a target that steps out of reach holds the chant while the
+  priest follows. At the end the unit is the priest's side's for good,
+  standing idle, its queue gone; the soldiers who were fighting it stop.
+  A priest at its chant does not run when hit.
+- **Faith** (`GD-PRIEST-02`). A conversion spends it; it comes back over
+  40 seconds, in the priest's reload counter, inside a building as out.
+  A spent priest sent at a unit walks there and waits for it. The panel
+  shows it as FAITH n%.
+- **What turns** (`GD-PRIEST-03`). Units of another side, siege
+  included; not buildings, not nature's animals, not the priest's own.
+- **Healing** (`GD-PRIEST-04`). A priest not converting gives 3 hit
+  points once a second to the most wounded unit of its side within 4
+  tiles, not itself and not a siege engine.
+- **Heard and told.** The chant is heard by the priest's side and by
+  whoever sees the unit it is chanting at, though the priest is in their
+  fog; a conversion rings for the side that gained it, sounds the loss
+  for the side that lost it, and puts a notice on both sides' stacks.
+- **Not yet.** The priest is drawn as a placeholder (a robe, a stole in
+  the player colour and a staff) until its model is rendered; the
+  computer opponent trains none.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the
-simulation (chunk 1, above); next the opponent learns to use them, then
-their models, then priests, relics and the Wonder.
+simulation (chunk 1) and the opponent fields them (chunk 2); the
+detailed soldiers and the new roster's models are rendering (chunk 3);
+priests are in (chunk 4, above), and relics and the Wonder are next.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded

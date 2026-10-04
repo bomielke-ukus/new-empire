@@ -50,6 +50,9 @@ fn clips_for(cue: Cue) -> Vec<Clip> {
         Cue::Work(t) => (0..3).map(|v| work(t, v)).collect(),
         Cue::Hit { building } => (0..3).map(|v| hit(building, v)).collect(),
         Cue::Impact => (0..2).map(impact).collect(),
+        Cue::Chant => (0..2).map(chant).collect(),
+        // A bell's two notes rising: the side has one more.
+        Cue::Converted => vec![chime(&[392.0, 587.0], 260, 0.45)],
         Cue::Death(c) => (0..2).map(|v| death(c, v)).collect(),
         Cue::Completed => vec![chime(&[523.0, 784.0], 140, 0.5)],
         Cue::Trained => vec![chime(&[880.0], 220, 0.4)],
@@ -151,6 +154,17 @@ fn impact(variation: usize) -> Clip {
     Synth::new()
         .burst(70, 900.0 * v, 0.7)
         .tone(70.0 * v, 45.0, 260, Wave::Sine, 0.6)
+        .done()
+}
+
+/// A priest's chant: a low voice rising and falling on a drone, long
+/// enough to turn round for.
+fn chant(variation: usize) -> Clip {
+    let v = 1.0 + variation as f32 * 0.06;
+    Synth::new()
+        .tone(147.0 * v, 165.0 * v, 420, Wave::Triangle, 0.45)
+        .tone(165.0 * v, 196.0 * v, 420, Wave::Triangle, 0.45)
+        .tone(196.0 * v, 147.0 * v, 700, Wave::Triangle, 0.4)
         .done()
 }
 

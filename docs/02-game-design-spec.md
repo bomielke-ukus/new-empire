@@ -193,6 +193,13 @@ Kept close to the original because it is the series' signature:
 - The chant is audible to both players. Hearing it near your army should make
   you react.
 
+**As built** (2026-10-04): faith is spent whole and comes back over 40
+seconds; the chant lasts four to ten seconds, and a priest without faith
+walks into reach and waits there. The healing is 3 hit points once a
+second to the most wounded unit of the priest's side within 4 tiles, not
+to a siege engine. A priest at its chant does not run when hit; idle, it
+runs home like a villager. A priest can convert a priest.
+
 ---
 
 ## 6. Buildings

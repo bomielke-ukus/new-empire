@@ -693,6 +693,7 @@ fn train_hotkey(kind: KindId) -> char {
         kinds::WAR_ELEPHANT => 'M',
         kinds::STONE_THROWER | kinds::CATAPULT => 'O',
         kinds::BALLISTA => 'B',
+        kinds::PRIEST => 'P',
         _ => 'N',
     }
 }
@@ -752,6 +753,14 @@ fn unit_tooltip(kind: KindId) -> String {
     }
     if c.blast_tenths > 0 {
         t.push_str(". HITS ALL IT LANDS AMONG, FRIENDS TOO");
+    }
+    if kind == kinds::PRIEST {
+        t.push_str(&format!(
+            ". CONVERTS AN ENEMY UNIT WITHIN {} TILES, THEN NEEDS {}S OF FAITH. HEALS UNITS NEAR IT {} HP/S",
+            sim::priests::CONVERT_RANGE,
+            sim::priests::FAITH_TICKS as u32 / sim::TICKS_PER_SECOND,
+            sim::priests::HEAL_HP
+        ));
     }
     for (class, bonus) in c.bonuses {
         t.push_str(&format!(
@@ -1606,6 +1615,14 @@ impl Hud {
                     );
                     ty += 12.0;
                 }
+                if world.kind[i] == kinds::PRIEST {
+                    // Faith: full at a spent reload (`GD-PRIEST-02`).
+                    let spent = u32::from(world.reload[i]);
+                    let full = u32::from(sim::priests::FAITH_TICKS);
+                    let pct = 100 * (full - spent.min(full)) / full;
+                    p.text(10.0, ty, &format!("FAITH {pct}%"), false, 1.0);
+                    ty += 12.0;
+                }
                 if info.combat.attack > 0 {
                     let m = sim.modifiers(world.owner[i]);
                     let armour = crate::combat_view::armour_words(info, &m);
@@ -1655,6 +1672,8 @@ impl Hud {
                     Order::Patrol { .. } => "PATROLLING",
                     Order::Flee { .. } => "FLEEING",
                     Order::Garrison { .. } => "GOING INSIDE",
+                    Order::Convert { chant: 0, .. } => "GOING TO CONVERT",
+                    Order::Convert { .. } => "CONVERTING",
                 };
                 if !job.is_empty() {
                     // What is queued behind it (`UX-CMD-04`).

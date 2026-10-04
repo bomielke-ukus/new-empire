@@ -218,6 +218,35 @@ pub enum Event {
         /// Where the villager stood.
         toward: Vec2Fx,
     },
+    /// A priest began a chant: heard by both sides (`docs/02` §5.5).
+    Chant {
+        /// The priest's side.
+        owner: PlayerId,
+        /// Where the priest stands.
+        pos: Vec2Fx,
+        /// Where the unit it chants at stands.
+        at: Vec2Fx,
+    },
+    /// A unit changed sides (`GD-PRIEST-01`).
+    Converted {
+        /// The unit.
+        target: EntityId,
+        /// What it is.
+        kind: KindId,
+        /// Whose it was.
+        from: PlayerId,
+        /// Whose it is now.
+        to: PlayerId,
+        /// Where.
+        pos: Vec2Fx,
+    },
+    /// A priest gave a wounded unit some health back (`GD-PRIEST-04`).
+    Healed {
+        /// The unit.
+        target: EntityId,
+        /// Where.
+        pos: Vec2Fx,
+    },
     /// A siege engine's shot came down, on something or on nothing.
     Landed {
         /// Where.
@@ -372,7 +401,7 @@ impl Simulation {
     }
 
     /// Turns `i` to face `target`. Buildings have one face.
-    fn face(&mut self, i: usize, target: Slot) {
+    pub(crate) fn face(&mut self, i: usize, target: Slot) {
         if !kinds::info(self.world.kind[i]).mobile {
             return;
         }
@@ -440,7 +469,8 @@ impl Simulation {
             self.finish_fight(i, then);
             return;
         };
-        if !self.can_fight(i) {
+        // Gone over to this side, by a priest's work: no target now.
+        if !self.can_fight(i) || self.world.owner[ts.index()] == self.world.owner[i] {
             self.finish_fight(i, then);
             return;
         }
@@ -614,7 +644,11 @@ impl Simulation {
         self.world.nav[i] = None;
         self.world.move_target[i] = None;
         self.world.order[i] = Order::Idle;
-        self.world.reload[i] = 0;
+        // A priest's reload is its faith, which comes back at its own
+        // pace inside or out: a door is no shortcut.
+        if self.world.kind[i] != kinds::PRIEST {
+            self.world.reload[i] = 0;
+        }
     }
 
     /// Everything inside `bs` steps out onto the nearest open tiles around
@@ -920,10 +954,14 @@ impl Simulation {
         }
         // A passive unit that is not already running runs.
         let mobile = kinds::info(self.world.kind[t]).mobile;
+        // A priest at its chant keeps chanting.
         if mobile
             && self.world.stance[t] == Stance::Passive
             && self.world.health[t] > Fx::ZERO
-            && !matches!(self.world.order[t], Order::Flee { .. })
+            && !matches!(
+                self.world.order[t],
+                Order::Flee { .. } | Order::Convert { .. }
+            )
         {
             let (safety, into) = self.safety_for(t, from);
             self.world.order[t] = Order::Flee {

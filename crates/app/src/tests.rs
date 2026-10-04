@@ -111,6 +111,63 @@ fn comma_cycles_the_idle_soldiers_and_never_a_villager() {
     assert_eq!(app.selection.ids, vec![seen[0]], "and round again");
 }
 
+/// A right-click on an enemy unit with a priest selected converts it: the
+/// cursor says so, the command goes, and the priest takes the convert
+/// order. On an enemy building the priest has nothing to do.
+///
+/// REQ: GD-PRIEST-01
+#[test]
+fn a_right_click_sends_a_priest_to_convert_an_enemy_unit() {
+    let mut app = app();
+    let priest = spawn(&mut app, kinds::PRIEST, 10, 10);
+    let foe = |app: &mut App, kind: u16, x: i32, y: i32| {
+        app.sim.issue(Command {
+            player: 1,
+            kind: CommandKind::Spawn {
+                kind,
+                pos: Vec2Fx::from_int(x, y),
+            },
+        });
+        step(app, 3);
+        let world = app.sim.world();
+        let id = world
+            .slots()
+            .filter(|s| world.owner[s.index()] == 1 && world.kind[s.index()] == kind)
+            .map(|s| world.id_at(s))
+            .last()
+            .unwrap();
+        app.sim.issue(Command {
+            player: 1,
+            kind: CommandKind::SetStance {
+                ids: vec![id],
+                stance: Stance::Passive,
+            },
+        });
+        step(app, 3);
+        id
+    };
+    let enemy = foe(&mut app, kinds::CLUBMAN, 18, 10);
+    app.selection.set(vec![priest]);
+    app.camera.look_at_tile(14.0, 10.0);
+    draw(&mut app);
+    let ep = app.sim.world().pos[app.sim.world().slot(enemy).unwrap().index()];
+    let (ex, ey) = (view::fx_to_f32(ep.x), view::fx_to_f32(ep.y));
+    let g = view::iso::project(ex, ey, view::iso::ground_height(app.sim.map(), ex, ey));
+    let (px, py) = app.camera.to_window(g.0, g.1 - 8.0);
+    assert!(
+        matches!(app.hovered_target(px, py), Some(Target::Convert)),
+        "the cursor offers conversion"
+    );
+    app.right_press(px, py);
+    step(&mut app, 3);
+    let pi = app.sim.world().slot(priest).unwrap().index();
+    assert!(
+        matches!(app.sim.world().order[pi], Order::Convert { target, .. } if target == enemy),
+        "{:?}",
+        app.sim.world().order[pi]
+    );
+}
+
 /// Enter opens the line, the code is typed, Enter gives 1000 of what it
 /// names; the letters typed are text, not orders, and the camera stays.
 ///

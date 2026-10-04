@@ -1347,6 +1347,25 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
             c
         }
         k if is_military_foot(k) => military_foot(k, facing, age, false),
+        kinds::PRIEST => {
+            // A long white robe with a stole of the player colour, and a
+            // staff held up beside it.
+            let mut c = Canvas::new(40, 48, (20, 42));
+            c.ellipse(20.0, 42.0, 11.0, 5.0, SHADOW);
+            c.ellipse(20.0, 31.0, 9.0, 13.0, BLACK);
+            c.ellipse(20.0, 31.0, 8.0, 12.0, LINEN);
+            c.ellipse(16.0, 33.0, 3.0, 9.0, LIMESTONE_DARK);
+            c.rect(19, 20, 3, 20, P_BASE);
+            c.circle(20.0, 14.0, 7.0, BLACK);
+            c.circle(20.0, 14.0, 6.0, SKIN);
+            c.circle(20.0 + dx * 5.0, 14.0 + dy * 5.0, 2.0, BLACK);
+            let sx = 20.0 + if dx < 0.0 { -10.0 } else { 10.0 };
+            c.line((sx, 40.0), (sx, 8.0), 3.0, BLACK);
+            c.line((sx, 40.0), (sx, 8.0), 1.5, BROWN);
+            c.circle(sx, 7.0, 3.0, BLACK);
+            c.circle(sx, 7.0, 2.0, GOLD);
+            c
+        }
         kinds::LIGHT_CAVALRY => {
             // The scout's horse with a rider in the player colour and a
             // lance: the same silhouette as the scout, armed.
@@ -2260,7 +2279,8 @@ mod tests {
 
     /// The Bronze and Iron Ages' soldiers, drawn as placeholders until
     /// their models are rendered (`docs/10` §5). The list only shrinks.
-    const AWAITING_ART: [KindId; 10] = [
+    const AWAITING_ART: [KindId; 11] = [
+        kinds::PRIEST,
         kinds::SWORDSMAN,
         kinds::HOPLITE,
         kinds::LEGIONARY,
