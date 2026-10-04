@@ -384,6 +384,32 @@ minutes wins (`GD-WIN-03`). It gives priests a second job and puts five
 places on the map worth fighting over. A relic on the ground is nature's
 and blocks its tile like a bush; it cannot be attacked.
 
+### D32 — The civilizations' bonuses and denials, on the game as it is
+**Date:** 2026-10-04 · **Decided by:** Claude, on the owner's instruction to build the rest of M8
+
+`docs/02` §11's table names things the game does not have: ships, guard
+towers, a priest's second tier, cavalry upgrades. A bonus or denial that
+names one of them waits for it; the rest are read onto what exists:
+
+| Civ | Bonuses as built | Denied as built |
+|---|---|---|
+| Egyptians | Gold +20%; Chariot Archers +33% HP; priests convert from 2 tiles further | the Academy, Hoplite and Legionary (the Legion), Heavy Cavalry |
+| Greeks | Hoplites and Legionaries +25% speed; the Legion upgrade from the Bronze Age (the spec's "hoplites in Bronze" is every side's already); ships +30% waits for ships | Chariot Archer, Horse Archer |
+| Assyrians | Villagers +10% speed; Slingers, Bowmen, Chariot and Horse Archers strike 20% more often | the Legion upgrade ("heavy infantry upgrades") |
+| Babylonians | Walls, the gate and towers +60% HP; stone +20% | Heavy Cavalry ("cavalry upgrades"); Torsion and the Catapult ("siege workshop tier 2") |
+| Persians | Hunting +30%; War Elephants +50% speed | Ballista; guard towers wait for them |
+| Phoenicians | Wood +30%; War Elephants cost 25% less | Stone Wall; priests' tier 2 waits for it |
+| Shang | Villagers cost 30% less; walls and the gate +100% HP | War Elephant; Torsion and the Catapult ("siege upgrades") |
+| Sumerians | Farms hold twice the food; siege engines strike 50% more often | War Elephant and Horse Archer ("cavalry beyond Bronze") |
+
+Every bonus is a number on what a side already has; nothing about how a
+unit plays changes. A match names a civilization per side in its
+configuration; one that names none (every test and corpus match before
+this) plays as before and hashes as before. On the setup screen the
+player picks theirs and the opponents' are dealt from the seed. The four
+architecture sets are named per civilization but not drawn: every side's
+buildings look the same until the other three sets are made.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?

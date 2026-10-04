@@ -833,7 +833,16 @@ impl Simulation {
                 continue;
             };
             let k = kinds::info(self.world.kind[i]);
-            self.world.reload[i] = k.combat.reload_ticks as u16;
+            // A civilization that strikes faster waits less between
+            // (`docs/02` §11).
+            let rate = self
+                .civ(self.world.owner[i])
+                .map_or(0, |c| c.rate_pct(self.world.kind[i]));
+            self.world.reload[i] = if rate == 0 {
+                k.combat.reload_ticks as u16
+            } else {
+                (k.combat.reload_ticks * 100 / (100 + rate as u32)).max(1) as u16
+            };
             self.face(i, ts);
             let from = self.world.pos[i];
             if k.combat.range > 0 {

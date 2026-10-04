@@ -532,6 +532,12 @@ fn randomised_scenario(seed: u64, ticks: u64) -> Scenario {
                 1 => vec![sim::MAX_GATHER_BONUS_PCT; 8],
                 _ => Vec::new(),
             },
+            // Half the time, civilizations for every side.
+            civs: if r.chance(1, 2) {
+                (0..8).map(|_| sim::Civ::ALL[r.below(8) as usize]).collect()
+            } else {
+                Vec::new()
+            },
         },
         style,
     }

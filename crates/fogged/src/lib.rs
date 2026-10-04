@@ -293,6 +293,11 @@ impl<'a> FoggedView<'a> {
         })
     }
 
+    /// The player's civilization, if the match named one (`docs/02` §11).
+    pub fn civ(&self) -> Option<sim::Civ> {
+        self.sim.civ(self.player)
+    }
+
     /// Whether one of the player's own priests has a relic in hand.
     pub fn carrying_relic(&self, id: EntityId) -> bool {
         let world = self.sim.world();

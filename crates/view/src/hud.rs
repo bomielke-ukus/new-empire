@@ -735,15 +735,15 @@ fn unit_plural(kind: KindId) -> String {
 
 /// The tooltip standard (`UX-TIP-01`): cost, time, what it does per hit,
 /// what it counters and what counters it.
-fn unit_tooltip(kind: KindId) -> String {
+fn unit_tooltip(kind: KindId, cost: &Cost, hp: i32) -> String {
     let u = kinds::info(kind);
     let c = &u.combat;
     let mut t = format!(
         "{}: {}, {}S. {} HP",
         u.name.to_uppercase(),
-        cost_words(&u.cost),
+        cost_words(cost),
         u.build_seconds,
-        u.max_health
+        hp
     );
     if c.attack > 0 {
         t.push_str(&format!(
@@ -888,16 +888,13 @@ impl Def {
 
 /// A unit's tooltip (`UX-TIP-01`): name and key, cost and time, what it
 /// is, what it counters and what counters it.
-fn unit_tip(kind: KindId, key: char) -> Vec<String> {
+fn unit_tip(kind: KindId, key: char, cost: &Cost, hp: i32) -> Vec<String> {
     let u = kinds::info(kind);
     let c = &u.combat;
     let mut t = vec![
         format!("{} ({key})", u.name.to_uppercase()),
-        format!("COST {}. TIME {}S", cost_words(&u.cost), u.build_seconds),
-        format!(
-            "{} HP. ARMOUR {}/{}",
-            u.max_health, c.melee_armour, c.pierce_armour
-        ),
+        format!("COST {}. TIME {}S", cost_words(cost), u.build_seconds),
+        format!("{} HP. ARMOUR {}/{}", hp, c.melee_armour, c.pierce_armour),
     ];
     if c.attack > 0 {
         let mut a = format!("ATTACK {} {}", c.attack, c.damage.name().to_uppercase());
@@ -931,12 +928,12 @@ fn unit_tip(kind: KindId, key: char) -> Vec<String> {
 
 /// A building's tooltip (`UX-TIP-01`): name and key, cost and time, what
 /// it does, the age it comes with.
-fn building_tip(kind: KindId, key: char) -> Vec<String> {
+fn building_tip(kind: KindId, key: char, cost: &Cost, hp: i32) -> Vec<String> {
     let b = kinds::info(kind);
     let mut t = vec![
         format!("{} ({key})", b.name.to_uppercase()),
-        format!("COST {}. TIME {}S", cost_words(&b.cost), b.build_seconds),
-        format!("{} HP", b.max_health),
+        format!("COST {}. TIME {}S", cost_words(cost), b.build_seconds),
+        format!("{hp} HP"),
     ];
     let trains: Vec<String> = kinds::all()
         .iter()
@@ -1121,9 +1118,13 @@ fn commands(
         ));
         let next = pl.age.next().unwrap_or(pl.age);
         for k in DEFENCES.iter().map(|id| kinds::info(*id)) {
-            if k.age > next {
+            // Too far off, or not this civilization's (`docs/02` §11).
+            if k.age > next
+                || matches!(sim.can_build(me, k.id), Err(sim::PlaceError::Denied { .. }))
+            {
                 continue;
             }
+            let (cost, hp) = (sim.cost_of(me, k.id), sim.max_health_of(me, k.id));
             let check = sim
                 .can_build(me, k.id)
                 .map_err(|e| e.to_string().to_uppercase());
@@ -1139,11 +1140,11 @@ fn commands(
                     Action::Build(k.id),
                     short_name(k.id),
                     build_hotkey(k.id),
-                    format!("{}: {}{how}", k.name.to_uppercase(), cost_words(&k.cost)),
+                    format!("{}: {}{how}", k.name.to_uppercase(), cost_words(&cost)),
                 )
-                .costing(&k.cost)
-                .lacking(&k.cost, &pl.stockpile)
-                .tipped(building_tip(k.id, build_hotkey(k.id)))
+                .costing(&cost)
+                .lacking(&cost, &pl.stockpile)
+                .tipped(building_tip(k.id, build_hotkey(k.id), &cost, hp))
                 .gated(check),
             );
         }
@@ -1158,9 +1159,11 @@ fn commands(
         let mut kinds_: Vec<&KindInfo> = kinds::all()
             .iter()
             .filter(|k| k.buildable && !k.mobile && !in_defences(k.id) && k.age <= next)
+            .filter(|k| !matches!(sim.can_build(me, k.id), Err(sim::PlaceError::Denied { .. })))
             .collect();
         kinds_.sort_by_key(|k| (k.age, k.id));
         for k in kinds_ {
+            let (cost, hp) = (sim.cost_of(me, k.id), sim.max_health_of(me, k.id));
             let check = sim
                 .can_build(me, k.id)
                 .map_err(|e| e.to_string().to_uppercase());
@@ -1169,11 +1172,11 @@ fn commands(
                     Action::Build(k.id),
                     short_name(k.id),
                     build_hotkey(k.id),
-                    format!("{}: {}", k.name.to_uppercase(), cost_words(&k.cost)),
+                    format!("{}: {}", k.name.to_uppercase(), cost_words(&cost)),
                 )
-                .costing(&k.cost)
-                .lacking(&k.cost, &pl.stockpile)
-                .tipped(building_tip(k.id, build_hotkey(k.id)))
+                .costing(&cost)
+                .lacking(&cost, &pl.stockpile)
+                .tipped(building_tip(k.id, build_hotkey(k.id), &cost, hp))
                 .gated(check),
             );
         }
@@ -1194,7 +1197,7 @@ fn commands(
             // The roster, age-locked and unresearched lines greyed with
             // the reason, so the panel shows what is coming.
             for k in sim.roster(me, kind) {
-                let u = kinds::info(k);
+                let (cost, hp) = (sim.cost_of(me, k), sim.max_health_of(me, k));
                 let check = sim
                     .can_train(me, id, k)
                     .map_err(|e| e.to_string().to_uppercase());
@@ -1203,11 +1206,11 @@ fn commands(
                         Action::Train(k),
                         unit_label(k),
                         train_hotkey(k),
-                        unit_tooltip(k),
+                        unit_tooltip(k, &cost, hp),
                     )
-                    .costing(&u.cost)
-                    .lacking(&u.cost, &pl.stockpile)
-                    .tipped(unit_tip(k, train_hotkey(k)))
+                    .costing(&cost)
+                    .lacking(&cost, &pl.stockpile)
+                    .tipped(unit_tip(k, train_hotkey(k), &cost, hp))
                     .gated(check),
                 );
             }
@@ -1440,8 +1443,13 @@ fn top_bar(
                 boxed: Some(if idle > 3 { RED } else { GOLD_DARK }),
             });
         }
+        // The side's civilization, if the match named one, and its age.
+        let age = pl.age.name().to_uppercase();
         segs.push(Seg {
-            text: pl.age.name().to_uppercase(),
+            text: match sim.civ(me) {
+                Some(civ) => format!("{} {age}", civ.name().to_uppercase()),
+                None => age,
+            },
             sub: None,
             boxed: None,
         });
@@ -1604,14 +1612,19 @@ impl Hud {
                 p.text(
                     10.0,
                     ty,
-                    &format!("HP {:.0}/{}", hp, info.max_health),
+                    &format!(
+                        "HP {:.0}/{}",
+                        hp,
+                        sim.max_health_of(world.owner[i], world.kind[i])
+                    ),
                     false,
                     1.0,
                 );
                 // Health bar.
                 let bw = text_w;
                 p.rect(10.0, ty + 10.0, bw, 6.0, BLACK, 0);
-                let frac = (hp / info.max_health as f32).clamp(0.0, 1.0);
+                let frac =
+                    (hp / sim.max_health_of(world.owner[i], world.kind[i]) as f32).clamp(0.0, 1.0);
                 p.rect(
                     11.0,
                     ty + 11.0,
@@ -1972,7 +1985,8 @@ impl Hud {
         for s in &selected {
             let i = s.index();
             let info = kinds::info(world.kind[i]);
-            let hp = fx_to_f32(world.health[i]) / info.max_health as f32;
+            let hp = fx_to_f32(world.health[i])
+                / sim.max_health_of(world.owner[i], world.kind[i]) as f32;
             let under_construction = world.construction[i].is_some();
             if hp >= 0.999 && !under_construction {
                 continue;
@@ -2292,22 +2306,38 @@ mod tests {
     /// REQ: UX-TIP-01
     #[test]
     fn unit_tooltips_follow_the_standard_and_roster_keys_are_distinct() {
-        let spear = unit_tooltip(kinds::SPEARMAN);
+        let spear = unit_tooltip(
+            kinds::SPEARMAN,
+            &kinds::info(kinds::SPEARMAN).cost,
+            kinds::info(kinds::SPEARMAN).max_health,
+        );
         assert!(
             spear.starts_with("SPEARMAN: 40 FOOD 20 WOOD, 26S. 45 HP, 4 MELEE"),
             "{spear}"
         );
         assert!(spear.contains("BONUS 6 VS CAVALRY"), "{spear}");
         assert!(spear.contains("WEAK TO SLINGERS"), "{spear}");
-        let bow = unit_tooltip(kinds::BOWMAN);
+        let bow = unit_tooltip(
+            kinds::BOWMAN,
+            &kinds::info(kinds::BOWMAN).cost,
+            kinds::info(kinds::BOWMAN).max_health,
+        );
         assert!(bow.contains("5 PIERCE RANGE 5"), "{bow}");
         assert!(
             !bow.contains("WEAK TO"),
             "nothing counters archers yet: {bow}"
         );
-        let cav = unit_tooltip(kinds::LIGHT_CAVALRY);
+        let cav = unit_tooltip(
+            kinds::LIGHT_CAVALRY,
+            &kinds::info(kinds::LIGHT_CAVALRY).cost,
+            kinds::info(kinds::LIGHT_CAVALRY).max_health,
+        );
         assert!(cav.contains("WEAK TO SPEARMEN"), "{cav}");
-        let vill = unit_tooltip(kinds::VILLAGER);
+        let vill = unit_tooltip(
+            kinds::VILLAGER,
+            &kinds::info(kinds::VILLAGER).cost,
+            kinds::info(kinds::VILLAGER).max_health,
+        );
         assert!(vill.contains("25 HP, 3 MELEE"), "{vill}");
         for b in kinds::all().iter().filter(|k| k.trains) {
             let keys: Vec<char> = kinds::trained_at(b.id)

@@ -1903,14 +1903,41 @@ them too.
 - **Not yet.** Islands, and anything on water: docks, fishing, ships.
   The palms are the ordinary trees.
 
+### Work record: M8 chunk 7 — the civilizations (2026-10-04)
+
+`docs/02` §11's eight, with the spec's table read onto the game as it is
+(`docs/07` D32: what names a ship, a guard tower or a priest's second
+tier waits for it).
+
+- **In the simulation.** `sim::civs` holds the table. A match names one
+  per side in `SimConfig::civs`; a match that names none plays and hashes
+  as before, so the corpus and the opponent's record are untouched. A
+  civilization's effects fold into the side's modifiers from the first
+  tick; hit points, speed, strike rate, cost, hunting and a priest's reach
+  are read where they apply (`Simulation::max_health_of`, `civ_speed`,
+  `cost_of`, `tech_age`), and costs are charged and refunded at the same
+  price. What it is denied is refused with its name ("NOT FOR THE
+  EGYPTIANS") and its buildings' rosters leave it out.
+- **On screen.** The setup screen's CIVILIZATION row picks the player's,
+  its bonuses written beside it; each opponent's is dealt from the seed
+  and shown on its row. The top bar names the side's civilization with
+  its age; the build grid leaves out what it is denied; buttons,
+  tooltips and health bars show its costs and hit points.
+- **The opponent.** Its army mix hands a denied kind's share to the rest.
+  Two Hard opponents, Egyptians and Greeks, play twenty minutes and field
+  nothing either is denied.
+- **Not yet.** The other three architecture sets: every civilization's
+  buildings look the same.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the
 detailed soldiers and the new roster's models are rendering (chunk 3);
 priests, relics and the Wonder are in (chunk 4) and the opponent uses
-them (chunk 5); five map types are in (chunk 6, above). Next: the
-civilizations, then naval and Islands.
+them (chunk 5); five map types are in (chunk 6) and the eight
+civilizations (chunk 7, above). Next: naval and Islands, and the other
+three architecture sets.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded

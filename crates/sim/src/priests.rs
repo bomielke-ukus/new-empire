@@ -68,7 +68,8 @@ impl Simulation {
             self.world.order[i] = Order::Idle;
             return;
         };
-        let reach = Fx::from_int(CONVERT_RANGE) + REACH;
+        let extra = self.civ(me).map_or(0, |c| c.convert_range());
+        let reach = Fx::from_int(CONVERT_RANGE + extra) + REACH;
         if self.within(i, ts, reach) {
             self.world.nav[i] = None;
             self.face(i, ts);
@@ -195,7 +196,8 @@ impl Simulation {
                 {
                     continue;
                 }
-                let missing = Fx::from_int(k.max_health) - self.world.health[j];
+                let missing =
+                    Fx::from_int(self.max_health_of(me, self.world.kind[j])) - self.world.health[j];
                 if missing > Fx::ZERO && best.is_none_or(|(m, _)| missing > m) {
                     best = Some((missing, j));
                 }

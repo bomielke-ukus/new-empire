@@ -20,6 +20,7 @@
 
 pub mod angle;
 pub mod battle;
+pub mod civs;
 pub mod combat;
 pub mod command;
 pub mod entity;
@@ -49,6 +50,7 @@ pub use battle::{
     decay_ticks, Event, Projectile, Task, BOLT_TILES, CARCASS_TICKS, DECAY_TICKS, RUBBLE_TICKS,
     WORK_PERIOD,
 };
+pub use civs::Civ;
 pub use combat::{Armour, Elevation};
 pub use command::{
     Command, CommandError, CommandKind, CommandQueue, PlayerId, Source, CHEAT_AMOUNT,

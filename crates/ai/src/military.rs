@@ -344,6 +344,15 @@ impl Military {
                 *have.entry(s.kind).or_insert(0u32) += 1;
             }
             let composition = COMPOSITION[age];
+            // A kind the civilization is denied gives its share to the
+            // rest (`docs/02` §11).
+            let civ = view.civ();
+            let whole: u32 = composition
+                .iter()
+                .filter(|(k, _)| civ.is_none_or(|c| c.allows(*k)))
+                .map(|(_, s)| *s)
+                .sum::<u32>()
+                .max(1);
             let mut best: Option<(i32, KindId, EntityId)> = None;
             for b in mine
                 .iter()
@@ -356,7 +365,7 @@ impl Military {
                     let Some(&(_, share)) = composition.iter().find(|(k, _)| *k == kind) else {
                         continue;
                     };
-                    let target = (want * share).div_ceil(100) as i32;
+                    let target = (want * share).div_ceil(whole) as i32;
                     let deficit = target - *have.get(&kind).unwrap_or(&0) as i32;
                     let cost = kinds::info(kind).cost;
                     let with_reserve = reserved(cost);

@@ -370,6 +370,12 @@ Eight civilizations for the full game, sharing four architecture sets:
 Vertical slice ships **Egyptians and Greeks** — an economic civ and a military
 civ, enough to prove asymmetry is working.
 
+**As built** (2026-10-04): all eight, read onto the units, buildings and
+technologies the game has (`docs/07` D32, which gives the table as built);
+what names something not yet in the game waits for it. The player picks a
+civilization on the setup screen; the opponents' are dealt from the seed.
+All eight build in the one architecture set there is.
+
 ---
 
 ## 12. The computer opponent

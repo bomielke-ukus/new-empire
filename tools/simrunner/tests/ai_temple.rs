@@ -113,3 +113,50 @@ fn the_opponents_priests_fetch_relics_home() {
     assert!(sim.relics_held(1) >= 1, "a relic in its Temple");
     sim.replay().verify().expect("replays");
 }
+
+/// Opponents with civilizations play a match and field nothing their
+/// civilization is denied (`docs/02` §11).
+#[test]
+fn opponents_keep_to_their_civilizations() {
+    let seed = 5;
+    let mut sim = Simulation::new(
+        seed,
+        SimConfig {
+            map: MapSpec {
+                kind: MapKind::Inland,
+                size: 96,
+                players: 2,
+            },
+            starting_stockpile: [3000; 4],
+            civs: vec![sim::Civ::Egyptians, sim::Civ::Greeks],
+            ..SimConfig::default()
+        },
+    );
+    let mut bots = [
+        Opponent::new(0, Difficulty::Hard, seed),
+        Opponent::new(1, Difficulty::Hard, seed),
+    ];
+    play(&mut sim, &mut bots, 24_000);
+    let w = sim.world();
+    let mut fielded = 0;
+    for s in w.slots() {
+        let i = s.index();
+        let owner = w.owner[i];
+        if let Some(civ) = sim.civ(owner) {
+            fielded += 1;
+            assert!(
+                civ.allows(w.kind[i]),
+                "{} have a {}",
+                civ.name(),
+                kinds::info(w.kind[i]).name
+            );
+        }
+    }
+    assert!(fielded > 40, "both sides built up: {fielded}");
+    assert!(
+        sim.player(0).unwrap().age >= sim::Age::Bronze
+            || sim.player(1).unwrap().age >= sim::Age::Bronze,
+        "a side reached the Bronze Age"
+    );
+    sim.replay().verify().expect("replays");
+}
