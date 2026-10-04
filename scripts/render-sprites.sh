@@ -3,6 +3,8 @@
 # tools/render/slice.py (or the ones named), build the Blender file, render
 # every frame through the frozen rig, and compose the frames into
 # assets/sprites/<name> with `atlas compose`, which validates the result.
+# The ground_* subjects are rendered and then made, all eight together, into
+# the ground's grain, assets/terrain/detail.png, by `atlas detail`.
 #
 #   BLENDER=/path/to/blender scripts/render-sprites.sh [NAME...]
 #
@@ -19,9 +21,12 @@ mkdir -p "$work"
 subjects=("$@")
 if [ ${#subjects[@]} -eq 0 ]; then
   mapfile -t subjects < <("$blender" --background --python tools/render/slice.py -- --list 2>/dev/null \
-    | awk 'NF == 3 && ($3 == "unit" || $3 == "building" || $3 == "node") { print $1 }')
+    | awk 'NF == 3 && ($3 == "unit" || $3 == "villager" || $3 == "building" \
+                       || $3 == "wall" || $3 == "gate" || $3 == "node" || $3 == "ground") \
+                       { print $1 }')
 fi
 
+grounds=0
 for name in "${subjects[@]}"; do
   line="$("$blender" --background --python tools/render/slice.py -- --list 2>/dev/null \
     | awk -v n="$name" '$1 == n { print $2, $3 }')"
@@ -40,8 +45,30 @@ for name in "${subjects[@]}"; do
   if [ "$what" = unit ]; then
     anims=(--anim idle=1-4 --anim walk=5-12 --anim attack=13-18 --anim death=19-26 --anim decay=27-30)
     facings=()
+  elif [ "$what" = villager ]; then
+    # Every unit's five, then the tasks and the carry walks
+    # (tools/render/kit.py, VILLAGER_SPANS).
+    anims=(--anim idle=1-4 --anim walk=5-12 --anim attack=13-18 --anim death=19-26 --anim decay=27-30
+      --anim chop=31-36 --anim mine=37-42 --anim forage=43-48 --anim farm=49-54 --anim build=55-60
+      --anim carry_wood=61-68 --anim carry_food=69-76 --anim carry_gold=77-84
+      --anim carry_stone=85-92)
+    facings=()
   elif [ "$what" = building ]; then
     anims=(--anim construction=1-3 --anim idle=4-4 --anim rubble=5-5)
+    facings=(--still 1)
+  elif [ "$what" = wall ]; then
+    # The post alone as the finished frame, then an arm toward each of the
+    # eight neighbours (tools/render/kit.py, WALL_SPANS).
+    anims=(--anim construction=1-3 --anim idle=4-4 --anim rubble=5-5 --anim arm=6-13)
+    facings=(--still 1)
+  elif [ "$what" = gate ]; then
+    # Shut and open in each of four orientations (kit.py, GATE_SPANS).
+    anims=(--anim construction=1-3 --anim idle=4-4 --anim rubble=5-5 \
+      --anim shut=6-9 --anim open=10-13)
+    facings=(--still 1)
+  elif [ "$what" = ground ]; then
+    # One tile of ground, for its grain; composed with the others below.
+    anims=(--anim ground=1-1)
     facings=(--still 1)
   else
     # A node of the map: one standing frame.
@@ -51,7 +78,16 @@ for name in "${subjects[@]}"; do
   "$blender" "$work/$name.blend" --background --python tools/render/render_sheet.py -- \
     --subject "$root" --class "$class" --out "$work/$name" "${anims[@]}" "${facings[@]}" \
     | grep -E "frames x|wrote"
+  if [ "$what" = ground ]; then
+    grounds=1
+    continue
+  fi
   cargo run --quiet -p atlas -- compose --renders "$work/$name" --set "$name" \
     --class "$class" --out "assets/sprites/$name"
 done
+if [ "$grounds" = 1 ]; then
+  # Needs every ground_* render under target/renders, this run's or an
+  # earlier one's; it says which is missing.
+  cargo run --quiet -p atlas -- detail --renders "$work"
+fi
 cargo run --quiet -p atlas -- validate | tail -1

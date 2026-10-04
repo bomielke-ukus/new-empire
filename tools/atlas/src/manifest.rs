@@ -199,6 +199,31 @@ pub const REQUIRED_MOBILE: [(&str, u32); 5] = [
 /// `construction` frames are the progress silhouette from `docs/02` §6.
 pub const REQUIRED_BUILDING: [(&str, u32); 3] = [("construction", 3), ("idle", 1), ("rubble", 1)];
 
+/// What a wall's set adds to a building's frames. A wall tile is drawn as
+/// its post (the `idle` frame) plus an `arm` toward each wall beside it, one
+/// frame per direction of the eight (`tools/render/kit.py`,
+/// `WALL_DIRECTIONS`), and the arms of two tiles meet where the tiles do.
+pub const WALL_PIECES: [(&str, u32); 1] = [("arm", 8)];
+
+/// What the gate's set adds: the gate `shut` and `open` in each of four
+/// orientations, the line of the wall it is set into.
+pub const GATE_PIECES: [(&str, u32); 2] = [("shut", 4), ("open", 4)];
+
+/// The sets that are walls, and the gate's.
+pub const WALL_SETS: [&str; 2] = ["palisade_wall", "stone_wall"];
+pub const GATE_SETS: [&str; 1] = ["gate"];
+
+/// The pieces a set must carry beyond its class's animations, by its name.
+pub fn pieces(name: &str) -> &'static [(&'static str, u32)] {
+    if WALL_SETS.contains(&name) {
+        &WALL_PIECES
+    } else if GATE_SETS.contains(&name) {
+        &GATE_PIECES
+    } else {
+        &[]
+    }
+}
+
 /// Default timing for a known animation name, from `docs/05` §2.2.
 ///
 /// Frame counts come from the art; the timings do not, and hard-coding them in
@@ -217,6 +242,10 @@ pub fn default_animation(name: &str, frames: u32) -> AnimationSpec {
         "rubble" => (200, false, None),
         // Terrain variants are chosen by the map generator, never played.
         "variants" => (1000, false, None),
+        // A wall's arms and a gate's orientations are picked by index too.
+        "arm" | "shut" | "open" => (1000, false, None),
+        // A carry is a walk with a load, at the walk's pace.
+        n if n.starts_with("carry_") => (100, true, None),
         // Villager tasks and carry variants: a working loop.
         _ => (140, true, None),
     };

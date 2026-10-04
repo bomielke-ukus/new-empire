@@ -508,8 +508,12 @@ anticipate:
   buffers the GPU does. `tools/mapview` uses it to render PNGs; the render
   crate's only unit test is naga validation of its WGSL. Any divergence
   between the two paths is a bug in `render`, by definition.
-- **Terrain blending is per-vertex colour** for now: each corner averages the
-  tiles that share it. Mask-texture blending (§7) waits for real terrain art.
+- **Terrain blending is per-vertex colour**: each corner averages the tiles
+  that share it. Over it each tile carries its type's grain (`view::detail`,
+  `docs/07` D28): `TerrainVertex` names the texel of the grain sheet each
+  corner maps to, and the terrain shader (in its fragment stage) and the
+  rasteriser (per pixel) read that sheet nearest and scale the colour by it,
+  so the two agree. Mask-texture blending (§7) is not built.
 - **Depth sorting is CPU-side** in `view::Scene` by `(x + y + footprint
   offset, slot)`; the GPU draws the instance buffer in that order with no
   depth buffer.
@@ -612,10 +616,11 @@ anticipate:
   the replay path stay permissive because tests and the soak deliberately
   run caps of 0, 6 and 12.
 - **Age variants are atlas lookups, not sprite state.** `Atlas::variant`
-  maps `(kind, age)` to the id the age-styled frames are filed under;
+  maps `(kind, age)` to the id the age-styled frames are filed under,
+  falling back to the latest earlier age that has a look of its own;
   placeholders draw four material sets (timber, mudbrick, limestone,
-  granite), and rendered sets answer with themselves until their manifests
-  carry variants. The sweep and banner are app-side timers passed into
+  granite), and a rendered set is named for its age (`house_bronze`,
+  `view::sprites::set_target`). The sweep and banner are app-side timers passed into
   `Scene::build_full` and `HudInput`, so a frame is still a pure function of
   its inputs and `mapview --sweep` can render any moment of it.
 - **The HUD owns the hotkey table.** Each button carries its key; the app

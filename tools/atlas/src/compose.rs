@@ -299,7 +299,7 @@ fn render_manifest(set: &SpriteSet) -> String {
 mod tests {
     use super::*;
     use crate::colour::Srgb;
-    use crate::manifest::REQUIRED_MOBILE;
+    use crate::manifest::{REQUIRED_BUILDING, REQUIRED_MOBILE};
     use crate::palette::PaletteSpec;
     use crate::validate::validate;
 
@@ -318,9 +318,14 @@ mod tests {
     /// class renders at, with a figure standing on the class's anchor and a
     /// magenta patch where player colour belongs.
     fn fake_render(path: &Path, w: u32, h: u32, anchor_y: u32, seed: u32) {
+        fake_render_at(path, w, h, w / 2, anchor_y, seed);
+    }
+
+    /// The same figure, standing at `cx` across the frame.
+    fn fake_render_at(path: &Path, w: u32, h: u32, cx: u32, anchor_y: u32, seed: u32) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut px = vec![0u8; (w * h * 4) as usize];
-        let (cx, base) = (w / 2, anchor_y);
+        let base = anchor_y;
         let body_h = base.min(h / 2) - 4;
         for y in (base - body_h)..base {
             for x in (cx - w / 8)..(cx + w / 8) {
@@ -467,5 +472,58 @@ mod tests {
         assert_eq!(r.animation, "carry_wood");
         assert_eq!(r.facing, "SW");
         assert_eq!(r.index, 3);
+    }
+
+    /// A building's frames, then `arms` frames of a wall's arm, each drawn
+    /// to the side of the post's anchor as a rendered arm is.
+    fn render_a_wall(dir: &Path, rig: &Rig, arms: u32) {
+        let c = &rig.classes["SmallBuilding"];
+        let (w, h) = (c.render_px[0], c.render_px[1]);
+        let anchor_y = c.anchor_px[1] * rig.projection.supersample;
+        for (anim, frames) in REQUIRED_BUILDING {
+            for i in 0..frames {
+                fake_render(&dir.join(format!("{anim}_S_{i:02}.png")), w, h, anchor_y, i);
+            }
+        }
+        for i in 0..arms {
+            let path = dir.join(format!("arm_S_{i:02}.png"));
+            fake_render_at(&path, w, h, w / 2 + w / 4, anchor_y, i);
+        }
+    }
+
+    fn compose_and_check(name: &str, arms: u32) -> Vec<String> {
+        let (palette, rig) = (palette(), rig());
+        let base = std::env::temp_dir().join(format!("atlas-compose-{name}-{arms}"));
+        std::fs::remove_dir_all(&base).ok();
+        let (renders, out) = (base.join("renders"), base.join("out"));
+        render_a_wall(&renders, &rig, arms);
+        let done = compose(&renders, name, Class::SmallBuilding, &out, &palette, &rig).unwrap();
+        let report = validate(&done.manifest, &palette).unwrap();
+        std::fs::remove_dir_all(&base).ok();
+        report.problems
+    }
+
+    #[test]
+    fn a_wall_carries_an_arm_toward_each_neighbour_beside_its_post() {
+        let problems = compose_and_check("palisade_wall", 8);
+        assert!(problems.is_empty(), "{problems:?}");
+        let problems = compose_and_check("stone_wall", 7);
+        assert!(
+            problems.iter().any(|p| p.contains("'arm' has 7 frames")),
+            "{problems:?}"
+        );
+        // Only a wall has arms, and only an arm may stand beside its anchor.
+        let problems = compose_and_check("house", 8);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("'arm' is not an animation name")),
+            "{problems:?}"
+        );
+        let problems = compose_and_check("gate", 0);
+        assert!(
+            problems.iter().any(|p| p.contains("missing the 'shut'")),
+            "{problems:?}"
+        );
     }
 }

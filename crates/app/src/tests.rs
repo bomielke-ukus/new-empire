@@ -2213,7 +2213,8 @@ fn a_bed_sits_toward_the_side_of_the_view_its_ground_is_on() {
 /// The score follows the match: the Stone stem fades in at the start and
 /// the field's bed sits under it; the Tool Age cross-fades the stems over
 /// four seconds; six units fighting in view bring the combat stem in; and
-/// the title has none of it.
+/// the title has none of it but its own theme, which the match's start
+/// fades out.
 #[test]
 fn the_score_follows_the_age_and_the_fight_and_the_beds_the_ground() {
     let mut app = app();
@@ -2317,7 +2318,7 @@ fn the_score_follows_the_age_and_the_fight_and_the_beds_the_ground() {
         }),
         "{fades:?}"
     );
-    // The title: everything out.
+    // The title: everything out but its theme, in.
     app.shell = Shell::Title;
     draw(&mut app);
     let fades = app.speaker.take_fades();
@@ -2331,6 +2332,15 @@ fn the_score_follows_the_age_and_the_fight_and_the_beds_the_ground() {
             "{layer:?} out: {fades:?}"
         );
     }
+    assert!(
+        fades.contains(&Fade {
+            layer: Layer::Title,
+            level: 1.0,
+            ms: CROSSFADE_MS,
+            pan: 0.0
+        }),
+        "the title's theme: {fades:?}"
+    );
 }
 
 /// A hint comes in context and is drawn, its count goes to the settings

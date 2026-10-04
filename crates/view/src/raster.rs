@@ -4,6 +4,7 @@
 //! renderer has a reference to match.
 
 use crate::camera::Camera;
+use crate::detail::Detail;
 use crate::fog::FogLights;
 use crate::minimap::{Minimap, MinimapRect};
 use crate::palette::{self, SHADOW};
@@ -73,9 +74,15 @@ impl Image {
 }
 
 /// Draws terrain chunks through the camera, each vertex in the fog light
-/// of its corner (`None` draws everything lit), exactly as the terrain
-/// shader does.
-pub fn draw_terrain(img: &mut Image, cam: &Camera, chunks: &[ChunkMesh], fog: Option<&FogLights>) {
+/// of its corner (`None` draws everything lit) and each pixel in the grain
+/// of its tile's type, exactly as the terrain shader does.
+pub fn draw_terrain(
+    img: &mut Image,
+    cam: &Camera,
+    chunks: &[ChunkMesh],
+    fog: Option<&FogLights>,
+    detail: &Detail,
+) {
     let visible = cam.visible_rect();
     for chunk in chunks.iter().filter(|c| c.overlaps(visible)) {
         // `as_chunks::<3>().0` rather than `chunks_exact(3)`: same triangles,
@@ -93,7 +100,8 @@ pub fn draw_terrain(img: &mut Image, cam: &Camera, chunks: &[ChunkMesh], fog: Op
                 Some(f) => lit(v.colour, f.at(v.corner[0] as i32, v.corner[1] as i32)),
                 None => v.colour,
             });
-            triangle(img, p, c);
+            let uv = v.map(|v| (v.detail[0] as f32, v.detail[1] as f32));
+            triangle(img, p, c, uv, detail);
         }
     }
 }
@@ -108,8 +116,16 @@ fn lit(c: [u8; 4], light: u8) -> [u8; 4] {
     [scale(c[0]), scale(c[1]), scale(c[2]), c[3]]
 }
 
-/// Gouraud-shaded triangle with a top-left fill rule.
-fn triangle(img: &mut Image, p: [(f32, f32); 3], c: [[u8; 4]; 3]) {
+/// Gouraud-shaded triangle with a top-left fill rule, each pixel scaled by
+/// the grain texel its interpolated `uv` falls in (nearest, as the shader
+/// reads it).
+fn triangle(
+    img: &mut Image,
+    p: [(f32, f32); 3],
+    c: [[u8; 4]; 3],
+    uv: [(f32, f32); 3],
+    detail: &Detail,
+) {
     let min_x = p
         .iter()
         .map(|q| q.0)
@@ -151,8 +167,13 @@ fn triangle(img: &mut Image, p: [(f32, f32); 3], c: [[u8; 4]; 3]) {
             let w1 = edge(p[2], p[0], fx, fy) / area;
             let w2 = edge(p[0], p[1], fx, fy) / area;
             if w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0 {
+                let u = uv[0].0 * w0 + uv[1].0 * w1 + uv[2].0 * w2;
+                let v = uv[0].1 * w0 + uv[1].1 * w1 + uv[2].1 * w2;
+                let grain = detail.texel(u.floor() as i32, v.floor() as i32) as f32
+                    / crate::detail::NEUTRAL as f32;
                 let ch = |i: usize| {
-                    (c[0][i] as f32 * w0 + c[1][i] as f32 * w1 + c[2][i] as f32 * w2).round() as u8
+                    let base = c[0][i] as f32 * w0 + c[1][i] as f32 * w1 + c[2][i] as f32 * w2;
+                    (base * grain).round().min(255.0) as u8
                 };
                 img.put(x, y, [ch(0), ch(1), ch(2), 255]);
             }
@@ -252,10 +273,36 @@ mod tests {
             &mut img,
             [(1.0, 1.0), (9.0, 1.0), (1.0, 9.0)],
             [[255, 0, 0, 255]; 3],
+            [(0.0, 0.0); 3],
+            &Detail::flat(),
         );
         assert_eq!(img.get(2, 2), [255, 0, 0, 255]);
         assert_eq!(img.get(8, 8), [0, 0, 0, 255]);
         assert_eq!(img.get(0, 0), [0, 0, 0, 255]);
+    }
+
+    /// The grain multiplies the ground: a sheet of half-neutral texels
+    /// draws it at half the brightness.
+    #[test]
+    fn the_grain_scales_the_ground() {
+        let sim = Simulation::new(3, SimConfig::default());
+        let chunks = terrain::build_all(sim.map());
+        let mut cam = Camera::new(sim.map().width(), sim.map().height(), (64.0, 48.0));
+        let (sx, sy) = sim.starts()[0];
+        cam.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
+        let mut plain = Image::new(64, 48, [0, 0, 0, 255]);
+        draw_terrain(&mut plain, &cam, &chunks, None, &Detail::flat());
+        let half = Detail {
+            width: 128,
+            height: 64 * 8,
+            texels: vec![64; 128 * 64 * 8],
+        };
+        let mut grained = Image::new(64, 48, [0, 0, 0, 255]);
+        draw_terrain(&mut grained, &cam, &chunks, None, &half);
+        let (a, b) = (plain.get(32, 24), grained.get(32, 24));
+        for i in 0..3 {
+            assert!((a[i] as i32 / 2 - b[i] as i32).abs() <= 1, "{a:?} {b:?}");
+        }
     }
 
     #[test]
@@ -268,7 +315,7 @@ mod tests {
         let (sx, sy) = sim.starts()[0];
         cam.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
         let mut img = Image::new(640, 480, [0, 0, 0, 255]);
-        draw_terrain(&mut img, &cam, &chunks, None);
+        draw_terrain(&mut img, &cam, &chunks, None, &Detail::flat());
         let black = img.pixels.iter().filter(|p| **p == [0, 0, 0, 255]).count();
         assert!(
             black < 640 * 480 / 20,
@@ -301,10 +348,10 @@ mod tests {
         let (sx, sy) = sim.starts()[0];
         cam.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
         let mut lit_img = Image::new(640, 480, [0, 0, 0, 255]);
-        draw_terrain(&mut lit_img, &cam, &chunks, None);
+        draw_terrain(&mut lit_img, &cam, &chunks, None, &Detail::flat());
         let mut fogged = Image::new(640, 480, [0, 0, 0, 255]);
         let lights = FogLights::from_fog(sim.fog(0).unwrap());
-        draw_terrain(&mut fogged, &cam, &chunks, Some(&lights));
+        draw_terrain(&mut fogged, &cam, &chunks, Some(&lights), &Detail::flat());
         // At the start the Town Center sees its surroundings: the centre
         // pixel is drawn as it would be with no fog.
         assert_eq!(fogged.get(320, 240), lit_img.get(320, 240));
@@ -326,6 +373,7 @@ mod tests {
             &cam,
             &chunks,
             Some(&FogLights::from_fog(&fog)),
+            &Detail::flat(),
         );
         let (a, b) = (explored.get(320, 240), lit_img.get(320, 240));
         assert!(

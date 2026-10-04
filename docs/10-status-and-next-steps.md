@@ -26,7 +26,7 @@ Six milestones landed; the vertical slice wants only the feel pass, M7.
 | M4 — Combat | **Landed 2026-09-13** | Two forces of 40 fight; counters work; no unit stalls in the acceptance arena; native readability approved |
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
 | M6 — Game shell | **Landed 2026-09-19** | Configure, play, save, reload and watch a replay without a terminal: the run in `crates/app/src/tests.rs`; the owner played the Mac build 2026-09-20 |
-| M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest is the owner's (§4d); the sprite art is code-built (`docs/08` §9) for every unit, building and node but the walls, gate and terrain |
+| M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest is the owner's (§4d); the sprite art is code-built (`docs/08` §9) for every unit, building and node, and the ground has a rendered grain |
 | M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
 
 The Mac checks of 2026-09-12 exercised the economy and age progression
@@ -74,9 +74,12 @@ three stages under hammering villagers; a bush thins and a vein shrinks
 as they are used; a tree falls toward whoever felled it; an attack on
 your own out of view is a red chevron at the screen's edge, and a
 flash on the minimap; a loss pings the minimap. The villagers,
-soldiers, riders, buildings, trees, bushes, veins and the herd are
-rendered models; the walls, the gate and the ground are still drawn
-procedurally. Every unit, building and technology button has a tooltip
+soldiers, riders, buildings, walls, gates, trees, bushes, veins and the
+herd are rendered models, a wall's tiles joined into one run; a
+villager chops, mines, picks, hoes and hammers at its job and walks
+its load home on its shoulder or in its arms; the ground's colours
+blend from type to type under a rendered grain of grass blades,
+pebbles, cracked hardpan, ripples, leaf litter or drifts. Every unit, building and technology button has a tooltip
 with its cost, time, what it counters and what counters it, and its
 key. Five first-time hints come in context, each at most twice, and
 SETTINGS turns them off. A refused click flashes the resource it is
@@ -97,8 +100,9 @@ Work has run as three streams that merge into this branch:
   proven end to end. The camera and light rig are frozen, `atlas` validates
   and composes sheets against the one palette (`docs/07` D19). Every
   unit, building and map node the simulation has is modelled by code in
-  `tools/render/` and rendered through it, except the walls, the gate and
-  the terrain, which still draw as procedural placeholders.
+  `tools/render/` and rendered through it, and the ground carries a grain
+  rendered from modelled patches (`docs/07` D28). Buildings, villagers and
+  infantry change their look with their owner's age (`docs/07` D29).
 - **Test and automation** (`docs/09`): CI runs the unit and behaviour tests,
   the replay corpus, the golden images, requirement traceability, the perf
   budget, generated-file drift, CLI-caller and workflow checks, and the art
@@ -1498,6 +1502,194 @@ The owner took the look and said go; `playtest-5` went out first.
   carcass). They belong to nobody, so `atlas` knows them as neutral sets:
   no player colour, and a node needs only its idle frame.
 
+### Work record: the art, walls and the gate (2026-10-03)
+
+The last kinds drawn by the old placeholder code are rendered now.
+
+- **A wall is a post and its arms.** A wall is laid a tile at a time, each
+  tile its own entity, and a run has to read as one wall whatever way it
+  turns. A wall's set holds its post as the finished frame and, as frames
+  of their own, an arm from the post to the tile's edge or corner in each
+  of the eight directions (`arm`). The scene draws each tile's post and an
+  arm toward every wall or gate of the same owner beside it
+  (`crates/view/src/walls.rs`): a diagonal is joined only when neither
+  tile between holds a piece, so a corner turns through its tile, and
+  both tiles of a joint always reach for each other. Only what the viewer
+  is shown counts, so an arm never points at a wall hidden in the fog.
+  An arm toward the viewer is drawn over its post and one away under it;
+  one running sideways on screen goes under too, because a diagonal arm's
+  inner end is cut to the pier's corner and that cut faces the viewer
+  from behind the pier. The run being dragged joins up the same way.
+- **The gate turns along its wall.** Its set holds it `shut` and `open`
+  in four orientations, the line of the walls it stands in (x, y, either
+  diagonal), and the scene picks the line from its neighbours; a wall
+  joins a gate only along that line. Its stages are square, the same
+  whichever way it will face.
+- **The models.** The palisade: a stout post banded in the owner's
+  colour, rows of sharpened stakes lashed with rope; the stone wall: a
+  square pier banded under its cap, crenellated stretches; the gate: two
+  towers with the owner's banners, a lintel, two doors across the passage
+  or swung back. `atlas` knows the new frames (`WALL_PIECES`,
+  `GATE_PIECES`) and requires them of those sets alone; an arm is the one
+  frame whose anchor may lie beside its pixels, since it is drawn on its
+  post's.
+- **The atlas is trimmed.** With these three sets the atlas passed 8192
+  rows, the texture size the GPU path asks wgpu for. Each rendered frame
+  is now packed as its drawn pixels rather than its whole cell, to edges
+  on the sheet's scale so a frame drawn at 1× samples the same pixels; the
+  rendered art takes half the room it did. At zoom 0.5 a trimmed frame
+  samples from a different starting pixel, which moved some shading in
+  `fog-scout`; the falling tree leans by the tree's drawn height now,
+  which moved a few pixels in four others.
+- **Goldens:** `siege-hud` rebaked with the joined palisade and its gate,
+  and a new `walls` scene (`mapview --scenario walls`): a corner, a T, both
+  diagonals, gates open and one held shut, a lone post.
+
+### Work record: the art, the villager at work (2026-10-03)
+
+The attack swing stood in for every job; now each job has its own.
+
+- **The villager is built like the rest.** It was the greybox script's
+  until now; `kit.Villager` builds it on the soldiers' figure (the same
+  proportions, the owner's tunic, a stone hatchet) in `slice.py`, and the
+  greybox script is gone. Its five animations are every unit's.
+- **Tasks** (`docs/05` §2.2), six frames each, looping: **chop** (the
+  hatchet swung into the trunk), **mine** (a pick brought down to the
+  vein), **farm** (a hoe to the ground), **build** (a mallet, for repair
+  too) and **forage** (bent to the bush, picking with one hand and then
+  the other, and for butchering a carcass). Each tool shows only on its
+  own animation.
+- **Carry walks**, eight frames at the walk's pace: logs on the shoulder,
+  a basket of berries, a basket of gold, a stone block in both arms.
+- **The game picks** (`scene::villager_anim`): a villager working a tree
+  chops, a vein mines, a farm hoes, anything else forages; building or
+  repairing hammers (repairing showed the villager standing idle until
+  now); walking with a load carries it. A set without these frames swings
+  and walks as before.
+- **Goldens:** every scene with a villager rebaked.
+
+### Work record: the ground's grain (2026-10-03)
+
+The owner chose a grain over the blended ground, over full tile sets
+(`docs/07` D28).
+
+- **The patches.** `slice.py` models a tile of each ground type: blades
+  of three greens, pebbles and clods on earth, hardpan cracked into
+  plates, wind ripples on sand, close ripples and long swells on water,
+  leaf litter and twigs on the forest floor, drifts on snow. Each is laid
+  again on the eight tiles round it and rendered through the terrain
+  view, so the render is one period of an endless field and tiles without
+  a seam.
+- **The sheet.** `atlas detail` turns the eight renders into
+  `assets/terrain/detail.png`: a greyscale layer each, 128 by 64, its
+  diamond averaging 128 (no change to the colour) and varying by a set
+  contrast per type, strongest on grass and litter, faint on water and
+  snow. `atlas validate` checks it; `scripts/render-sprites.sh` renders
+  the `ground_*` subjects and composes them.
+- **Drawing it.** `TerrainVertex` names the texel each tile corner maps
+  to in its type's layer; the terrain shader reads it nearest in the
+  fragment stage and the rasteriser per pixel, and both multiply the
+  colour by it (`view::detail`). The app and `mapview` load the sheet
+  from beside the sprites, and the Mac bundle carries it; without it the
+  ground draws as before. The GPU path is checked by naga here and needs
+  a look on the Mac.
+- **A golden that saw nothing.** `zoomed-out` looked at another player's
+  start through player 0's fog, which had never seen it, and had been a
+  black frame since fog of war came in. It is drawn without fog now.
+- **Goldens:** every one rebaked.
+
+### Work record: more realistic art (2026-10-03)
+
+The owner, looking at the screenshots, asked for more realistic graphics.
+Every sprite set and the ground's grain are re-rendered.
+
+- **Light.** A dim sky joins the three suns (rig.json `sky`). It is direct
+  light, so it reaches only what nothing shades: creases, undersides and
+  the ground under a body darken as they do outdoors. Bounces stay off;
+  they would tint whatever stands beside the magenta player colour pink.
+- **Shadows on the ground.** The rig lays a shadow catcher under every
+  subject but the ground patches, lit only by a sun of its own (rig.json
+  `shadow`, light-linked so it lights the ground and nothing else while
+  the three suns do not reach the ground). The shadow is short, falls back
+  and to the right, and stays inside each class's frame; `atlas quantize`
+  keeps it, however strong, as the palette's translucent shadow index.
+- **Surfaces.** Each material has a pattern in object space
+  (`kit.SURFACES`): wood grain, brick courses on mudbrick and dressed
+  stone, rows on tiled roofs, mottled stone and earth, leafy variation,
+  with relief; the colour moves either side of the base and averages it.
+- **Shapes.** Every mesh has its edges bevelled and smooth-shaded
+  (`kit.soften`); the flesh of a figure, a horse or a gazelle is rounded
+  nearly to capsules, what it wears much less. Trees, bushes, veins and
+  crops are built of lumpy clumps (`kit.clump`) rather than stacked
+  cylinders and boxes.
+- **Buildings.** A stone plinth, a framed door with a lintel and a step,
+  small windows with sills on the faces the camera sees, thatch over a
+  thick eave in two courses with a knot at the top, ridges on gables, roof
+  beams through flat-roofed walls, jars and a woodpile.
+- **A quantiser bug, fixed.** `Palette::nearest` skipped the specials at
+  248 and above but not the shadow at 239, which is black: the darkest
+  shading of every set landed on it and was drawn see-through, a horse's
+  legs most of all. It is skipped now; every set is recomposed.
+- **Goldens:** every one rebaked.
+
+### Work record: the icon, the title theme and the collapse (2026-10-04)
+
+- **The Mac app's icon** is the Town Center, rendered through the rig in
+  the first player's blue on a rounded tile of grass greens on the macOS
+  grid (`tools/render/icon.py`). It writes `packaging/macos/icon.png` and
+  `AppIcon.icns`, the .icns in plain Python so no Mac is needed;
+  `scripts/bundle-mac.sh` puts it in the app and `Info.plist` names it.
+- **Music on the title screen.** The score has a title layer
+  (`audio::Layer::Title`, the `stem-title` cue): it plays under the title
+  and the other screens outside a match and cross-fades with the age's
+  stem when a match starts or ends. It is a placeholder like every sound.
+- **A building falls.** When a building is destroyed its standing frame
+  sinks into its rubble over `scene::COLLAPSE_TICKS` (16 ticks, 0.8 s),
+  cut off at the ground and lowered row by row, under the dust cloud that
+  was already there. A site that is destroyed unbuilt does not sink.
+
+### Work record: the art, the ages (2026-10-04)
+
+`docs/05` §2.5 asks for a building to look different in each age it
+stands in, and for infantry to change costume (`docs/07` D29). The
+rendered sets had one look; only the placeholders changed with the age.
+
+- **Buildings.** `kit.STYLE_AGE` rebuilds a building in its age's
+  materials (`kit.AGE_MATERIALS`) and adds the age's work to each walled
+  block (`kit.style_building`). Tool Age: shingle roofs and a timber
+  frame of posts and rails on the mudbrick. Bronze Age: terracotta roofs,
+  plastered walls and a stone base course. Iron Age: slate roofs, walls of
+  dressed stone, white cornices and corner pilasters. The roof is what
+  reads from the camera's height, so each age has its own roof colour:
+  straw, wood brown, terracotta, slate grey. The market and the siege
+  workshop have no walls to restyle and age in their own models: the
+  market's square goes from earth to stone to white paving round an
+  obelisk, the workshop takes a slate roof and a stone back wall.
+- **Figures.** `kit.age_dress` dresses the villager and the infantry.
+  Villagers: a belt, then a linen cap, a straw hat with a brim, a dark
+  hood and a cape. Soldiers: a hide cap, belt and shoulder wraps in the
+  Tool Age, a bronze cap, pads and greaves in the Bronze, iron ones and a
+  cape in the Iron; a bronze helmet turns iron. Most of it is on the head,
+  the part of a 34 px figure that reads. The tunic stays in view, since
+  its colour says whose the figure is.
+- **Which sets.** `slice.AGED`: the eight Stone Age buildings in all
+  three later ages, the four that come with the Bronze Age in the Iron;
+  the villager, clubman, axeman and spearman in all three. The farm, the
+  walls and the gate look the same in every age; the ranged soldiers and
+  the riders keep one look (`docs/02` §4 dresses the villager and the
+  infantry). That is 40 sets, named for the age: `house_tool`,
+  `temple_iron`.
+- **In the game.** `view::sprites::set_target` reads the age from the
+  set's name and files the frames under the kind's variant id, as the
+  placeholders' are. `Atlas::variant` answers with the variant drawn for
+  the latest age up to the owner's, so a temple keeps its own look in the
+  Bronze Age. The atlas is 4096 wide now: with all 69 sets loaded it
+  fills 6802 of the GPU's 8192 rows, where at 2048 wide it would need
+  13727.
+- **Rendering** the 40 sets took 68 minutes on the CPU (5.8 MB of sheets).
+- **Goldens:** the five scenes in a later age (`ages-*`, `army-hud`,
+  `tooltip-hud`) rebaked; the Stone Age scenes are unchanged.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1505,8 +1697,7 @@ the measurement on the Mac with `F4` open during a big fight, recorded
 against `docs/09` §8's table; the six players through the `RM-M7-01`
 sheet (`docs/09` §9.1), whose tally decides the milestone and admits
 `RM-M7` to `TRACEABILITY_LANDED`. The sprite art is code-built
-(`docs/08` §9) for everything but the walls, the gate and the terrain,
-and a modeller's work can replace any set by name; the name is settled
+(`docs/08` §9) for everything, the ground's grain included, and a modeller's work can replace any set by name; the name is settled
 (`docs/07` D27). The parallel track (§4b) runs on its own branch. After M7,
 `docs/06` M8.
 
@@ -1678,9 +1869,9 @@ verified headless before anyone hears or sees it on the Mac:
 
 **Not in these chunks:** the real sprite art for two civilisations across
 three ages and its animations (`docs/06` M7 bullets 2 and 3). They are
-the art pipeline's step 3 (`docs/08` §9), which needs a modeller and a
-Blender install; nothing here can produce them. The vertical slice is not
-complete without them, and the owner decides when and by whom.
+the art pipeline's step 3 (`docs/08` §9). The owner chose on 2026-09-25
+to have them modelled here by code; every kind the simulation has is
+done (the work records above), and what is left of them is in §5.
 
 ---
 
@@ -1690,9 +1881,12 @@ Stated so they are not rediscovered.
 
 - **Every sound is a placeholder** (`docs/07` Q7): synthesised tones and
   noise, the stems and the beds included. Recordings under
-  `assets/sounds/<cue>/`, `stem-<age>/`, `stem-combat/` and `bed-<kind>/`
-  replace them by name.
-- **No stem plays on the title screen.**
+  `assets/sounds/<cue>/`, `stem-title/`, `stem-<age>/`, `stem-combat/` and
+  `bed-<kind>/` replace them by name.
+- **The title theme is a placeholder too** (2026-10-04): a slow drone,
+  drum, flute and lyre under the title and the other screens outside a
+  match, cross-fading with the match's stem (`audio::score`); a recording
+  under `assets/sounds/stem-title/` replaces it by name.
 - **The performance numbers are from a shared-runner-class machine**
   (`docs/09` §8): every §12 row is inside its budget there, but the
   measurement on the Mac is the owner's (`F4`). Rendering is read, not
@@ -1700,23 +1894,30 @@ Stated so they are not rediscovered.
 - **`RM-M7-01` is unrun.** The sheet is written (`docs/09` §9.1); the
   six players are the owner's, and `RM-M7` stays out of the traceability
   gate until their tally is in.
-- **The art is code-built and low-poly** (`docs/08` §9): every unit,
+- **The art is code-built** (`docs/08` §9), rounded and textured but
+  simple in form: every unit,
   building and node the simulation has is modelled, with its deaths,
-  construction stages and rubble, except the walls and the gate, which are
-  still drawn as runs of placeholder segments, and the terrain tiles. No
-  villager has a hammering or task-specific animation (the attack swing
-  stands in), and a building's collapse is a cloud over its rubble. A
-  modeller's work can replace any set by name.
+  construction stages and rubble. The ground is blended colour under one
+  grain per type, repeated on every tile, with no variants or transition
+  tiles (`docs/07` D28). A falling building sinks into its rubble
+  under a dust cloud (`scene::COLLAPSE_TICKS`) rather than breaking apart,
+  nobody fishes (the
+  simulation has no boats), and no rendered set has a second
+  civilisation's look. A modeller's work can replace any set by name.
+- **The sprite atlas is 83% full** (6802 of 8192 rows at 4096 wide). A
+  second civilisation's sets, or another batch the size of the ages, will
+  need a second atlas page or a texture array, not a wider texture.
 - **One notification row stays open**: no Wonder to announce.
-- **The Mac build is not notarised, Apple Silicon only, and has no icon.**
+- **The Mac build is not notarised and is Apple Silicon only.**
   Notarising needs an Apple Developer account and a signing identity in
   the workflow's secrets; an Intel slice needs a second target and `lipo`
-  (the owner has no Intel Mac, so none is planned); the icon is not drawn.
+  (the owner has no Intel Mac, so none is planned). The icon is the
+  rendered Town Center (`tools/render/icon.py`, 2026-10-04).
 - The age-up **fanfare** waits for audio (M7). The sweep and banner exist.
-- **Age variants exist for placeholders only.** Rendered sets carry no
-  variants yet; `Atlas::variant` answers with the base kind for them. The
-  sprite manifest needs a per-age entry when the art stream models the
-  slice (`docs/08` §9 step 3).
+- **The ages restyle, they do not rebuild** (`docs/07` D29): a
+  building keeps its shape through the four ages and changes its
+  materials and trim; a figure keeps its body and changes its dress. The
+  ranged soldiers and the riders have one look in every age.
 - **No resource-conservation invariant, no fuzzing, no nightly job**
   (`docs/09` §11): the parallel track in §4b.
 

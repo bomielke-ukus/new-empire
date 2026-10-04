@@ -93,6 +93,31 @@ pub enum Anim {
     Construction = 5,
     /// What a fallen building leaves.
     Rubble = 6,
+    /// A wall's arm toward a neighbour, one frame per direction
+    /// ([`crate::walls::WALL_DIRECTIONS`]).
+    Arm = 7,
+    /// A gate shut, one frame per orientation.
+    Shut = 8,
+    /// A gate open, one frame per orientation.
+    Open = 9,
+    /// A villager felling a tree.
+    Chop = 10,
+    /// A villager working a vein.
+    Mine = 11,
+    /// A villager picking a bush or butchering a carcass.
+    Forage = 12,
+    /// A villager tending a farm.
+    Farm = 13,
+    /// A villager building or repairing.
+    Build = 14,
+    /// A villager walking a load of food home.
+    CarryFood = 15,
+    /// A villager walking a load of wood home.
+    CarryWood = 16,
+    /// A villager walking a load of stone home.
+    CarryStone = 17,
+    /// A villager walking a load of gold home.
+    CarryGold = 18,
 }
 
 impl Anim {
@@ -106,6 +131,18 @@ impl Anim {
             "decay" => Some(Anim::Decay),
             "construction" => Some(Anim::Construction),
             "rubble" => Some(Anim::Rubble),
+            "arm" => Some(Anim::Arm),
+            "shut" => Some(Anim::Shut),
+            "open" => Some(Anim::Open),
+            "chop" => Some(Anim::Chop),
+            "mine" => Some(Anim::Mine),
+            "forage" => Some(Anim::Forage),
+            "farm" => Some(Anim::Farm),
+            "build" => Some(Anim::Build),
+            "carry_food" => Some(Anim::CarryFood),
+            "carry_wood" => Some(Anim::CarryWood),
+            "carry_stone" => Some(Anim::CarryStone),
+            "carry_gold" => Some(Anim::CarryGold),
             _ => None,
         }
     }
@@ -240,11 +277,16 @@ impl Atlas {
     }
 
     /// The id to look a kind up under for an owner in age `age` (by
-    /// [`sim::Age::index`]): its age-styled variant if one is drawn, else the
-    /// kind itself. Rendered sprite sets carry no variants yet, so a kind
-    /// with a set always answers with itself.
+    /// [`sim::Age::index`]): the variant drawn for the latest age up to
+    /// `age` that has one, else the kind itself. A rendered set is drawn
+    /// anew only for the ages that change it (`house_tool`, `temple_iron`;
+    /// see [`set_target`]), so a temple keeps its own look in the Bronze Age
+    /// and a slinger in every age.
     pub fn variant(&self, kind: KindId, age: u8) -> KindId {
-        self.variants.get(&(kind, age)).copied().unwrap_or(kind)
+        (1..=age)
+            .rev()
+            .find_map(|a| self.variants.get(&(kind, a)).copied())
+            .unwrap_or(kind)
     }
 
     /// Timing of an animation, if the kind has it.
@@ -274,8 +316,9 @@ impl Atlas {
     }
 
     /// The placeholder atlas, with every kind that has a rendered sprite set
-    /// in `sheets` drawn from that set instead. Sets whose name matches no
-    /// kind are ignored.
+    /// in `sheets` drawn from that set instead, and its looks in later ages
+    /// from the sets named for them. Sets whose name matches no kind are
+    /// ignored.
     pub fn with_sheets(sheets: &[crate::sheets::Sheet]) -> Atlas {
         let mut canvases: Vec<Entry> = Vec::new();
         let mut anims: HashMap<(KindId, Anim), AnimInfo> = HashMap::new();
@@ -283,10 +326,19 @@ impl Atlas {
         let mut loaded_sets = Vec::new();
         let mut covered: Vec<KindId> = Vec::new();
         for sheet in sheets {
-            let Some(kind) = kind_for_set(&sheet.name) else {
+            let Some((base, age)) = set_target(&sheet.name) else {
                 continue;
             };
-            covered.push(kind);
+            // The Stone Age set is the kind itself; a later age's is filed
+            // under its variant id, as the placeholders' are.
+            let kind = if age == 0 {
+                covered.push(base);
+                base
+            } else {
+                let id = variant_id(base, age);
+                variants.insert((base, age), id);
+                id
+            };
             loaded_sets.push(sheet.name.clone());
             for (ai, animation) in sheet.animations.iter().enumerate() {
                 let Some(anim) = Anim::from_name(&animation.name) else {
@@ -304,10 +356,18 @@ impl Atlas {
                     for frame in 0..animation.frames {
                         let (x, y, w, h) = sheet.frame_rect(ai, fi, frame);
                         let (ax, ay) = sheet.anchor_for(ai, fi, frame);
-                        let mut c = Canvas::new(w, h, (ax as i16, ay as i16));
-                        for yy in 0..h {
-                            for xx in 0..w {
-                                c.set(xx as i32, yy as i32, sheet.index_at(x + xx, y + yy));
+                        // Trimmed to what is drawn: a rendered frame is
+                        // mostly transparent, and the atlas has to fit the
+                        // GPU's texture limit (8192 a side by default). The
+                        // anchor moves with the trim, so it lands as before.
+                        let (bx, by, bw, bh) = drawn_bounds(sheet, x, y, w, h, sheet.scale);
+                        // A wall's arm is anchored on its post, outside it.
+                        let anchor = (ax as i32 - bx as i32, ay as i32 - by as i32);
+                        let mut c = Canvas::new(bw, bh, (anchor.0 as i16, anchor.1 as i16));
+                        for yy in 0..bh {
+                            for xx in 0..bw {
+                                let idx = sheet.index_at(x + bx + xx, y + by + yy);
+                                c.set(xx as i32, yy as i32, idx);
                             }
                         }
                         canvases.push(Entry {
@@ -413,6 +473,10 @@ impl Atlas {
             // The Stone Age look is the kind itself; the three later ages
             // are drawn in their materials and filed under variant ids.
             for age in 1..=3u8 {
+                if variants.contains_key(&(k.id, age)) {
+                    // Drawn by a rendered set.
+                    continue;
+                }
                 let id = variant_id(k.id, age);
                 if k.mobile {
                     for f in AUTHORED {
@@ -540,6 +604,23 @@ impl Atlas {
             .map(|&i| &self.frames[i])
     }
 
+    /// A wall's arm toward its neighbour in direction `k`
+    /// ([`crate::walls::WALL_DIRECTIONS`]), if its rendered set has arms.
+    pub fn wall_arm(&self, kind: KindId, k: u8) -> Option<&Frame> {
+        self.lookup
+            .get(&(kind, 0, Anim::Arm, k))
+            .map(|&i| &self.frames[i])
+    }
+
+    /// The gate standing across line `line` (0 to 3), shut or open, if its
+    /// rendered set has the orientations.
+    pub fn gate_frame(&self, kind: KindId, line: u8, open: bool) -> Option<&Frame> {
+        let anim = if open { Anim::Open } else { Anim::Shut };
+        self.lookup
+            .get(&(kind, 0, anim, line))
+            .map(|&i| &self.frames[i])
+    }
+
     /// A building's own rubble, if its rendered set has one.
     pub fn own_rubble(&self, kind: KindId) -> Option<&Frame> {
         self.lookup
@@ -630,8 +711,10 @@ fn glyph(ch: char, idx: u8) -> Canvas {
     c
 }
 
-/// Atlas texture width. Height grows to fit, up to the GPU's limit.
-pub const ATLAS_WIDTH: u32 = 2048;
+/// Atlas texture width. Height grows to fit, up to the GPU's limit (8192 a
+/// side by default): with every rendered set and its age looks loaded, a
+/// narrower atlas would run past it.
+pub const ATLAS_WIDTH: u32 = 4096;
 
 /// A frame waiting to be packed.
 struct Entry {
@@ -641,6 +724,38 @@ struct Entry {
     index: u8,
     scale: u8,
     canvas: Canvas,
+}
+
+/// The smallest rectangle of a sheet's frame at (`x`, `y`), `w` by `h`,
+/// that holds every drawn pixel, relative to the frame, with its edges on
+/// multiples of `scale` so the frame samples down to 1× on the same pixels
+/// as before the trim; the whole frame if nothing is drawn.
+fn drawn_bounds(
+    sheet: &crate::sheets::Sheet,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+    scale: u32,
+) -> (u32, u32, u32, u32) {
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for yy in 0..h {
+        for xx in 0..w {
+            if sheet.index_at(x + xx, y + yy) != 0 {
+                x0 = x0.min(xx);
+                y0 = y0.min(yy);
+                x1 = x1.max(xx + 1);
+                y1 = y1.max(yy + 1);
+            }
+        }
+    }
+    if x1 == 0 {
+        return (0, 0, w, h);
+    }
+    let s = scale.max(1);
+    let (x0, y0) = (x0 / s * s, y0 / s * s);
+    let (x1, y1) = (x1.div_ceil(s) * s, y1.div_ceil(s) * s);
+    (x0, y0, x1.min(w) - x0, y1.min(h) - y0)
 }
 
 /// Shelf-packs canvases into an atlas of the given width. Taller frames go
@@ -697,6 +812,23 @@ fn pack(mut canvases: Vec<Entry>, width: u32) -> Atlas {
     }
 }
 
+/// The suffix of a set that draws a kind in a later age, and the age (by
+/// [`sim::Age::index`]).
+const AGE_SUFFIXES: [(&str, u8); 3] = [("_tool", 1), ("_bronze", 2), ("_iron", 3)];
+
+/// The kind a rendered sprite set draws and the age it draws it in, by the
+/// set's name: `house` is the house as built in the Stone Age, and in any
+/// later age without a set of its own; `house_tool`, `house_bronze` and
+/// `house_iron` are the house in the three ages after it.
+pub fn set_target(name: &str) -> Option<(KindId, u8)> {
+    for (suffix, age) in AGE_SUFFIXES {
+        if let Some(kind) = name.strip_suffix(suffix).and_then(kind_for_set) {
+            return Some((kind, age));
+        }
+    }
+    kind_for_set(name).map(|kind| (kind, 0))
+}
+
 /// Which kind a rendered sprite set draws, by the set's name.
 pub fn kind_for_set(name: &str) -> Option<KindId> {
     Some(match name {
@@ -721,6 +853,9 @@ pub fn kind_for_set(name: &str) -> Option<KindId> {
         "academy" => kinds::ACADEMY,
         "siege_workshop" => kinds::SIEGE_WORKSHOP,
         "government_centre" => kinds::GOVERNMENT_CENTRE,
+        "palisade_wall" => kinds::PALISADE_WALL,
+        "stone_wall" => kinds::STONE_WALL,
+        "gate" => kinds::GATE,
         "tree" => kinds::TREE,
         "berry_bush" => kinds::BERRY_BUSH,
         "gold_mine" => kinds::GOLD_MINE,
@@ -1873,7 +2008,7 @@ mod tests {
         let a = Atlas::with_sheets(&sheets);
         assert!(a.loaded_sets.contains(&"villager".to_string()));
         for set in &a.loaded_sets {
-            assert!(kind_for_set(set).is_some(), "{set} draws no kind");
+            assert!(set_target(set).is_some(), "{set} draws no kind");
         }
         assert!(
             a.width == ATLAS_WIDTH && a.height <= 8192,
@@ -1883,8 +2018,12 @@ mod tests {
         );
         let (idle, flip) = a.frame(kinds::VILLAGER, 1).unwrap();
         assert!(!flip);
-        assert_eq!((idle.w, idle.h, idle.scale), (80, 96, 2));
-        assert_eq!((idle.draw_w(), idle.draw_h()), (40.0, 48.0));
+        // Trimmed to the figure inside its 80 x 96 cell, the anchor at its
+        // feet still.
+        assert_eq!(idle.scale, 2);
+        assert!(idle.w < 80 && idle.h < 96, "{}x{}", idle.w, idle.h);
+        assert!((0..idle.w as i16).contains(&idle.anchor_x));
+        assert!((idle.h as i16 - 8..=idle.h as i16).contains(&idle.anchor_y));
         let walk = a.anim_info(kinds::VILLAGER, Anim::Walk).unwrap();
         assert_eq!((walk.frames, walk.frame_ms, walk.loops), (8, 100, true));
         let (f0, _) = a.frame_at(kinds::VILLAGER, 2, Anim::Walk, 0).unwrap();
@@ -1897,10 +2036,22 @@ mod tests {
         assert_eq!(d.index, 7, "death holds its last frame");
         let (e, flip) = a.frame_at(kinds::VILLAGER, 7, Anim::Idle, 0).unwrap();
         assert!(flip && e.facing == 3, "east mirrors west");
-        // Kinds without a set still get placeholders, and UI frames still exist.
-        let (wall, _) = a.frame(kinds::PALISADE_WALL, 0).unwrap();
-        assert_eq!(wall.scale, 1);
+        // Every kind the simulation has is drawn from its rendered set, and
+        // the UI frames still exist.
+        for k in kinds::all() {
+            assert_eq!(a.frame(k.id, 1).unwrap().0.scale, 2, "{}", k.name);
+        }
         assert!(a.glyph('A', false).is_some());
+        // A wall has an arm toward each of its eight neighbours; the gate
+        // stands shut and open in four orientations.
+        for wall in [kinds::PALISADE_WALL, kinds::STONE_WALL] {
+            assert!((0..8).all(|k| a.wall_arm(wall, k).is_some()));
+            assert!(a.wall_arm(wall, 8).is_none());
+        }
+        for open in [false, true] {
+            assert!((0..4).all(|o| a.gate_frame(kinds::GATE, o, open).is_some()));
+        }
+        assert!(a.wall_arm(kinds::HOUSE, 0).is_none());
         // A rendered building brings its own construction stages and rubble;
         // a placeholder does not, and the scene falls back to the generic ones.
         for stage in 0..3 {
@@ -1908,16 +2059,55 @@ mod tests {
             assert_eq!((f.anim, f.index), (Anim::Construction, stage));
         }
         assert_eq!(a.own_rubble(kinds::TOWN_CENTER).unwrap().anim, Anim::Rubble);
-        assert!(a.stage_frame(kinds::PALISADE_WALL, 0).is_none());
-        assert!(a.own_rubble(kinds::PALISADE_WALL).is_none());
-        // A kind with only placeholders falls back to its single frame for any anim.
-        let (g, _) = a
-            .frame_at(kinds::PALISADE_WALL, 1, Anim::Walk, 500)
-            .unwrap();
+        assert!(a.stage_frame(kinds::PALISADE_WALL, 2).is_some());
+        assert!(a.own_rubble(kinds::GATE).is_some());
+        // A kind without an animation falls back to its standing frame.
+        let (g, _) = a.frame_at(kinds::HOUSE, 1, Anim::Walk, 500).unwrap();
         assert_eq!((g.anim, g.index), (Anim::Idle, 0));
         // The herd has its own walk now.
         let (g, _) = a.frame_at(kinds::GAZELLE, 1, Anim::Walk, 500).unwrap();
         assert_eq!(g.anim, Anim::Walk);
+        // The settlement and its people wear their owner's age; what has no
+        // set for an age keeps the look of the latest age before it.
+        for kind in [
+            kinds::HOUSE,
+            kinds::TOWN_CENTER,
+            kinds::VILLAGER,
+            kinds::CLUBMAN,
+        ] {
+            for age in 1..=3 {
+                assert_eq!(a.variant(kind, age), variant_id(kind, age), "{kind} {age}");
+            }
+        }
+        assert_eq!(a.variant(kinds::HOUSE, 0), kinds::HOUSE);
+        assert_eq!(a.variant(kinds::TEMPLE, 2), kinds::TEMPLE);
+        assert_eq!(a.variant(kinds::TEMPLE, 3), variant_id(kinds::TEMPLE, 3));
+        assert_eq!(a.variant(kinds::SLINGER, 3), kinds::SLINGER);
+        assert_eq!(a.variant(kinds::FARM, 2), kinds::FARM);
+        let iron = a.variant(kinds::VILLAGER, 3);
+        let (chop, _) = a.frame_at(iron, 2, Anim::Chop, 0).unwrap();
+        assert_eq!(chop.anim, Anim::Chop, "an Iron Age villager still works");
+        assert_ne!(
+            a.frame(kinds::HOUSE, 0).unwrap().0.x,
+            a.frame(a.variant(kinds::HOUSE, 2), 0).unwrap().0.x,
+            "a Bronze Age house is its own frame"
+        );
+        assert!(a.stage_frame(variant_id(kinds::HOUSE, 1), 0).is_some());
+    }
+
+    #[test]
+    fn a_set_named_for_an_age_draws_its_kind_in_that_age() {
+        assert_eq!(set_target("house"), Some((kinds::HOUSE, 0)));
+        assert_eq!(set_target("house_tool"), Some((kinds::HOUSE, 1)));
+        assert_eq!(
+            set_target("town_center_bronze"),
+            Some((kinds::TOWN_CENTER, 2))
+        );
+        assert_eq!(set_target("temple_iron"), Some((kinds::TEMPLE, 3)));
+        // Not every name with an age's word in it is an age's set.
+        assert_eq!(set_target("stone_wall"), Some((kinds::STONE_WALL, 0)));
+        assert_eq!(set_target("palace_iron"), None);
+        assert_eq!(set_target("iron"), None);
     }
 
     #[test]

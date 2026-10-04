@@ -1,6 +1,7 @@
 # The render rig
 
-Every sprite in the game is rendered through one camera and three lights.
+Every sprite in the game is rendered through one camera, three lights, a dim
+sky, and a sun of its own for the shadow on the ground.
 `assets/render/rig.json` is that setup, and it is **frozen**: changing a number
 in it invalidates every frame already produced, because a unit lit from a
 slightly different angle does not cut together with the ones beside it.
@@ -77,8 +78,20 @@ lands somewhere you did not intend.
   renderer produced survives into the indexed sprite. Every unit and building
   needs some, or `atlas validate` rejects it — a sprite with no player colour
   has an invisible owner.
-- **No ground plane in the render.** The film is transparent and the game draws
-  its own shadow.
+- **No ground in the sprite.** The film is transparent. The rig lays a shadow
+  catcher under the subject: it shows only the shadow falling on it, which
+  `atlas quantize` keeps as the palette's translucent shadow index. The
+  shadow is cast by its own sun (rig.json `shadow`), high over the key
+  light's side, linked to light the ground and nothing else, while the key,
+  fill and rim do not reach the ground: the subject is lit by the three suns
+  as before, and its shadow is short, falls back and to the right, and
+  stays inside the frame. Terrain renders have no catcher; they are the
+  ground.
+- **Surfaces are textured and edges rounded by the kit** (`kit.SURFACES`,
+  `kit.soften`): each material has a pattern in object space (wood grain,
+  brick courses, tile rows, mottling) that moves its colour either side of
+  the base and gives it relief, and every mesh has its sharp edges bevelled
+  and smooth-shaded, a figure's limbs most of all.
 
 ## Using it
 
@@ -149,6 +162,15 @@ class follows its footprint: one tile SmallBuilding, two MediumBuilding, three
 LargeBuilding. The camera sees the +X and +Y faces and the top, so doors and
 player colour go there.
 
+**The ages.** A subject in `slice.AGED` has a set for each later age it
+changes in, named for the age: `house_tool`, `house_bronze`, `house_iron`,
+`temple_iron`. `slice.py` sets `kit.STYLE_AGE` from the name before
+building it; `Building.finish` then swaps its materials and adds the age's
+trim (`kit.style_building`), and `Humanoid` dresses the figure for the age
+(`kit.age_dress`). The game reads the age back from the set's name
+(`view::sprites::set_target`). `--list` names every set, the aged ones
+included.
+
 Colours in `kit.COLOURS` are linear, as Blender's base colour is; `srgb()`
 converts the colour you want on screen, since a linear 0.5 renders as a pale
 0.73.
@@ -157,10 +179,13 @@ converts the colour you want on screen, since a linear 0.5 renders as a pale
 
 Written against Blender 4.x (4.5 LTS is what renders the committed sets).
 The engine is Cycles on the CPU with no light bounces: it needs no GPU, and a
-frame takes under a second, where EEVEE on a machine without one runs on
+frame takes a second or two, where EEVEE on a machine without one runs on
 software OpenGL at about twenty. Bounces are off because light off a magenta
 surface tints its neighbours pink, which the quantiser reads as player colour,
-and because EEVEE, which the rig was first written for, had none. The seed is
+and because EEVEE, which the rig was first written for, had none. The sky
+(rig.json `sky`) stands in for bounced light: it is direct light, so it
+reaches only what nothing shades, and creases, undersides and the ground
+under a body go darker as they do outdoors, with nothing tinted. The seed is
 fixed and the denoiser off, so a file renders the same pixels every time. EEVEE
 Next is the fallback; every set must come from one engine, so falling back
 means re-rendering them all. On a headless Linux machine Blender still wants

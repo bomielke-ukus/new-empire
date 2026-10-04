@@ -9,6 +9,7 @@
 
 use bytemuck::{Pod, Zeroable};
 use std::collections::HashMap;
+use view::detail::Detail;
 use view::minimap::{Minimap, MinimapRect};
 use view::{Atlas, Camera, ChunkMesh, FogLights, Scene, TerrainVertex};
 use wgpu::util::DeviceExt;
@@ -69,6 +70,10 @@ pub struct Renderer {
     /// The fog light per tile corner (`view::fog`): a single lit texel
     /// until a map's lights are uploaded.
     fog: (wgpu::Texture, wgpu::BindGroup, u32, u32),
+    grain_bgl: wgpu::BindGroupLayout,
+    /// The ground's grain (`view::detail`): a single neutral texel until a
+    /// sheet is uploaded.
+    grain: wgpu::BindGroup,
     /// Clear colour.
     pub clear: wgpu::Color,
 }
@@ -258,6 +263,23 @@ impl Renderer {
         });
         let fog = fog_texture(device, queue, &fog_bgl, &FogLights::lit(0, 0));
 
+        // The ground's grain (R8Unorm, a layer per ground type): group 2
+        // for the terrain pipeline, read in the fragment shader.
+        let grain_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("grain"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            }],
+        });
+        let grain = grain_texture(device, queue, &grain_bgl, &Detail::flat());
+
         let blend = Some(wgpu::BlendState::ALPHA_BLENDING);
         let target = |blend| {
             [Some(wgpu::ColorTargetState {
@@ -274,7 +296,7 @@ impl Renderer {
 
         let terrain_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("terrain"),
-            bind_group_layouts: &[&camera_bgl, &fog_bgl],
+            bind_group_layouts: &[&camera_bgl, &fog_bgl, &grain_bgl],
             push_constant_ranges: &[],
         });
         let terrain_targets = target(None);
@@ -287,7 +309,12 @@ impl Renderer {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<TerrainVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Unorm8x4, 2 => Uint16x2],
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x2,
+                        1 => Unorm8x4,
+                        2 => Uint16x2,
+                        3 => Uint16x2
+                    ],
                 }],
                 compilation_options: Default::default(),
             },
@@ -398,6 +425,8 @@ impl Renderer {
             minimap: None,
             fog_bgl,
             fog,
+            grain_bgl,
+            grain,
             clear: wgpu::Color {
                 r: 0.05,
                 g: 0.04,
@@ -432,6 +461,11 @@ impl Renderer {
                 },
             );
         }
+    }
+
+    /// Uploads the ground's grain for the frames that follow.
+    pub fn upload_detail(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, detail: &Detail) {
+        self.grain = grain_texture(device, queue, &self.grain_bgl, detail);
     }
 
     /// Uploads the fog light per tile corner for the frames that follow.
@@ -577,6 +611,7 @@ impl Renderer {
 
             pass.set_pipeline(&self.terrain_pipeline);
             pass.set_bind_group(1, &self.fog.1, &[]);
+            pass.set_bind_group(2, &self.grain, &[]);
             for chunk in self.chunks.values() {
                 let (l, t, r, b) = chunk.bounds;
                 if r < visible.0 || l > visible.2 || b < visible.1 || t > visible.3 {
@@ -644,6 +679,37 @@ fn fog_texture(
     (tex, bg, w, h)
 }
 
+fn grain_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    detail: &Detail,
+) -> wgpu::BindGroup {
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("grain"),
+        size: wgpu::Extent3d {
+            width: detail.width,
+            height: detail.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    write_texture(queue, &tex, &detail.texels, detail.width, detail.height, 1);
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("grain"),
+        layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::TextureView(&tex.create_view(&Default::default())),
+        }],
+    })
+}
+
 fn write_texture(
     queue: &wgpu::Queue,
     tex: &wgpu::Texture,
@@ -708,6 +774,6 @@ mod tests {
     fn gpu_structs_match_vertex_layouts() {
         assert_eq!(std::mem::size_of::<SpriteGpu>(), 48);
         assert_eq!(std::mem::size_of::<UiVertex>(), 16);
-        assert_eq!(std::mem::size_of::<TerrainVertex>(), 16);
+        assert_eq!(std::mem::size_of::<TerrainVertex>(), 20);
     }
 }

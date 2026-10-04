@@ -14,6 +14,9 @@ pub const PLAYER_RAMP_START: u8 = 240;
 pub const PLAYER_RAMP_LEN: usize = 8;
 /// Index 0 is transparent, everywhere, always.
 pub const TRANSPARENT: u8 = 0;
+/// The translucent shadow, drawn over whatever is beneath it
+/// (`assets/palette/ancient.ron`'s special of that name).
+pub const SHADOW: u8 = 239;
 
 #[derive(Deserialize, Debug)]
 pub struct RampSpec {
@@ -234,7 +237,12 @@ impl Palette {
         let mut best = (1u8, f64::MAX);
         for i in 1..248u16 {
             let i = i as u8;
-            if Self::is_player_index(i) || self.owner[i as usize].as_deref() == Some("reserve") {
+            // The shadow sits below the other specials and is black, so a
+            // black surface would land on it and be drawn see-through.
+            if Self::is_player_index(i)
+                || i == SHADOW
+                || self.owner[i as usize].as_deref() == Some("reserve")
+            {
                 continue;
             }
             let d = want.distance(Oklab::from(Linear::from(self.entries[i as usize])));
@@ -316,6 +324,19 @@ mod tests {
 
     /// No colour quantises into the reserve: a bronze helmet did, before
     /// `nearest` skipped it, and the set failed validation.
+    #[test]
+    fn a_black_surface_is_not_quantised_into_the_shadow() {
+        let p = PaletteSpec::load(std::path::Path::new("../../assets/palette/ancient.ron"))
+            .unwrap()
+            .bake()
+            .unwrap();
+        assert_eq!(p.owner[SHADOW as usize].as_deref(), Some("shadow"));
+        for v in [0u8, 6, 12] {
+            let i = p.nearest(Srgb { r: v, g: v, b: v });
+            assert_ne!(i, SHADOW, "black {v} became the translucent shadow");
+        }
+    }
+
     #[test]
     fn nothing_quantises_into_the_reserve() {
         let baked = spec().bake().unwrap();

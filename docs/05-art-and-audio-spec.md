@@ -57,6 +57,13 @@ Villagers add per-task animations: **chop, mine, forage, farm, fish, build,
 repair, carry** (carry variants show the resource being carried — this is a small
 detail that does an enormous amount of work for readability).
 
+Buildings ship with three construction stages, the finished building and its
+rubble. A wall is laid a tile at a time, so its finished frame is its post
+alone and its set adds an **arm** toward each of the eight neighbours; the game
+draws each tile's post with an arm toward each wall of the same owner beside it.
+The gate adds itself **shut** and **open** in each of four orientations, the
+line of the wall it stands in.
+
 ### 2.3 Sizes
 
 | Subject | Sprite size at 1× |
@@ -101,6 +108,15 @@ Infantry get costume variants per age too (hides → cloth → bronze → iron).
 This is the single largest art cost in the project, and it is where the money
 should go.
 
+**As built** (`docs/07` D29): a building keeps its shape and changes its
+materials and trim. Stone Age: mudbrick under thatch. Tool Age: a timber
+frame on the mudbrick, shingle roofs. Bronze Age: plaster over a stone
+base course, terracotta roofs. Iron Age: dressed stone with cornices and
+pilasters, slate roofs. The infantry go from tunics to hide caps and
+wraps, then bronze and then iron caps, pads and greaves, with a cape in the
+Iron Age; villagers from bare heads to a linen cap, a straw hat and a hood.
+The ranged soldiers, the riders, the farm and the walls have one look.
+
 ---
 
 ## 3. Terrain
@@ -115,6 +131,10 @@ should go.
   per elevation transition.
 - Decorative clutter (rocks, shrubs, bones) scattered by the map generator,
   purely visual, no collision.
+
+**As built** (`docs/07` D28): the ground's colours blend per vertex between
+types, and each tile carries its type's rendered grain over them, one layer
+per type; the variants and mask transitions above are not built.
 
 ---
 
@@ -147,7 +167,7 @@ should go.
 | Ambient beds | 1 per terrain type | Low, looping, positional |
 | UI | Click, invalid, notification, research complete | |
 | Age fanfare | 1 per age | Short, distinct, memorable |
-| Music | 1 stem per age + 1 combat stem | Cross-faded |
+| Music | 1 title theme + 1 stem per age + 1 combat stem | Cross-faded; the theme plays outside a match |
 
 ### 5.2 Rules
 

@@ -347,6 +347,19 @@ fn run() -> Result<(), String> {
 
     // Rendered sprite sets replace placeholders wherever they exist.
     let sheet_dir = a.assets.clone().or_else(view::sheets::default_dir);
+    // The ground's grain, beside the sprites (`view::detail`).
+    let detail = sheet_dir
+        .as_ref()
+        .and_then(|d| d.parent())
+        .map(|assets| assets.join("terrain").join("detail.png"))
+        .filter(|p| p.exists())
+        .map(|p| {
+            view::detail::Detail::load(&p).unwrap_or_else(|e| {
+                eprintln!("warning: {e}");
+                view::detail::Detail::flat()
+            })
+        })
+        .unwrap_or_else(view::detail::Detail::flat);
     let (sheets, errors) = sheet_dir
         .map(|d| view::sheets::load_all(&d))
         .unwrap_or_default();
@@ -532,7 +545,7 @@ fn run() -> Result<(), String> {
     }
     let mut img = raster::Image::new(a.width, a.height, [12, 10, 14, 255]);
     let lights = viewer.and_then(|p| sim.fog(p)).map(FogLights::from_fog);
-    raster::draw_terrain(&mut img, &cam, &chunks, lights.as_ref());
+    raster::draw_terrain(&mut img, &cam, &chunks, lights.as_ref(), &detail);
     let palette = view::palette::texture();
     raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.sprites);
     raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.ui);
@@ -987,6 +1000,54 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
                 },
             });
             let _ = tc;
+        }
+        "walls" => {
+            // How walls join (`crates/view/src/walls.rs`): a palisade along
+            // x turning a corner down y, with a T off it and a gate in it;
+            // a stone wall on each diagonal with a gate across it; one along
+            // x whose gate a soldier of theirs keeps shut; a lone tile. Run
+            // `--ticks 5` from here.
+            let mut lay = |kind, tiles: &[(i32, i32)]| {
+                for &(dx, dy) in tiles {
+                    sim.issue(cmd(CommandKind::Spawn {
+                        kind,
+                        pos: sim::nav::centre((sx + dx, sy + dy)),
+                    }));
+                }
+            };
+            let palisade: Vec<(i32, i32)> = (4..=10)
+                .map(|x| (x, -5))
+                .chain((-4..=1).filter(|&y| y != -2).map(|y| (10, y)))
+                .chain([(7, -4), (7, -3)])
+                .collect();
+            lay(kinds::PALISADE_WALL, &palisade);
+            lay(kinds::GATE, &[(10, -2)]);
+            lay(
+                kinds::STONE_WALL,
+                &[
+                    (-9, -3),
+                    (-8, -2),
+                    (-6, 0),
+                    (-5, 1),
+                    (-4, 7),
+                    (-3, 6),
+                    (-1, 4),
+                    (0, 3),
+                ],
+            );
+            lay(kinds::GATE, &[(-7, -1), (-2, 5)]);
+            lay(
+                kinds::STONE_WALL,
+                &[(3, 5), (4, 5), (6, 5), (7, 5), (8, 5), (12, 2)],
+            );
+            lay(kinds::GATE, &[(5, 5)]);
+            sim.issue(Command {
+                player: 1,
+                kind: CommandKind::Spawn {
+                    kind: kinds::CLUBMAN,
+                    pos: sim::nav::centre((sx + 5, sy + 7)),
+                },
+            });
         }
         "scout" => {
             // The scout rides away from the settlement past a house of

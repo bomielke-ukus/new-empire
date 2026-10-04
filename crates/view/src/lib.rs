@@ -9,6 +9,7 @@
 
 pub mod camera;
 pub mod combat_view;
+pub mod detail;
 pub mod feedback;
 pub mod fog;
 pub mod font;
@@ -27,6 +28,7 @@ pub mod sheets;
 pub mod shell;
 pub mod sprites;
 pub mod terrain;
+pub mod walls;
 
 pub use camera::Camera;
 pub use fog::FogLights;

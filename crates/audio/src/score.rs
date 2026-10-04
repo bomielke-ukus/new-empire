@@ -1,6 +1,6 @@
 //! The score and the ambience (`docs/03` §6.1, `docs/04` §8, `docs/05`
-//! §5.3): a stem per age under the match, cross-fading when the age
-//! advances; the combat stem over it while a fight is in view; and an
+//! §5.3): a title theme outside a match; a stem per age under the match,
+//! cross-fading when the age advances; the combat stem over it while a fight is in view; and an
 //! ambient bed per kind of ground under the camera, low, looping and
 //! positional (`docs/05` §5.1): toward the side of the view its ground
 //! is on.
@@ -35,6 +35,8 @@ impl Bed {
 /// A looping layer under the match.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Layer {
+    /// The title theme, outside a match.
+    Title,
     /// An age's stem.
     Stem(Age),
     /// The combat stem, over the age's.
@@ -46,7 +48,8 @@ pub enum Layer {
 impl Layer {
     /// Every layer, in a stable order.
     pub fn all() -> Vec<Layer> {
-        let mut out: Vec<Layer> = Age::ALL.into_iter().map(Layer::Stem).collect();
+        let mut out = vec![Layer::Title];
+        out.extend(Age::ALL.into_iter().map(Layer::Stem));
         out.push(Layer::Combat);
         out.extend(Bed::ALL.into_iter().map(Layer::Bed));
         out
@@ -56,15 +59,16 @@ impl Layer {
     /// world they belong to.
     pub const fn bus(self) -> Bus {
         match self {
-            Layer::Stem(_) | Layer::Combat => Bus::Music,
+            Layer::Title | Layer::Stem(_) | Layer::Combat => Bus::Music,
             Layer::Bed(_) => Bus::World,
         }
     }
 
-    /// The name of its folder under `assets/sounds`: `stem-stone`,
-    /// `stem-combat`, `bed-surf`.
+    /// The name of its folder under `assets/sounds`: `stem-title`,
+    /// `stem-stone`, `stem-combat`, `bed-surf`.
     pub fn name(self) -> String {
         match self {
+            Layer::Title => "stem-title".to_string(),
             Layer::Stem(a) => format!("stem-{}", crate::age_name(a)),
             Layer::Combat => "stem-combat".to_string(),
             Layer::Bed(Bed::Forest) => "bed-forest".to_string(),
@@ -114,6 +118,7 @@ pub const BED_GAIN: f32 = 0.35;
 /// What the score is playing.
 #[derive(Clone, Debug, Default)]
 pub struct Score {
+    title: bool,
     age: Option<Age>,
     combat: bool,
     last_fight_ms: Option<u64>,
@@ -125,6 +130,18 @@ impl Score {
     /// apply, if anything changed.
     pub fn update(&mut self, age: Option<Age>, fighting: usize, now_ms: u64) -> Vec<Fade> {
         let mut out = Vec::new();
+        // Outside a match the title theme plays, and it gives way to the
+        // match's stem as the match starts.
+        let title = age.is_none();
+        if title != self.title {
+            self.title = title;
+            out.push(Fade {
+                layer: Layer::Title,
+                level: if title { 1.0 } else { 0.0 },
+                ms: CROSSFADE_MS,
+                pan: 0.0,
+            });
+        }
         if age != self.age {
             if let Some(old) = self.age {
                 out.push(Fade {
@@ -169,6 +186,11 @@ impl Score {
             }
         }
         out
+    }
+
+    /// Whether the title theme is playing.
+    pub fn title(&self) -> bool {
+        self.title
     }
 
     /// The age whose stem is playing.
@@ -265,24 +287,40 @@ impl Ambience {
 mod tests {
     use super::*;
 
-    /// A match starts on its age's stem; the next age cross-fades the old
-    /// stem out and the new one in over four seconds; six units fighting
-    /// in view bring the combat stem in, fewer keep it for the hold and
-    /// then let it go; leaving the match takes everything out.
+    /// The title theme plays outside a match; a match starts on its
+    /// age's stem as the theme fades; the next age cross-fades the old stem
+    /// out and the new one in over four seconds; six units fighting in view
+    /// bring the combat stem in, fewer keep it for the hold and then let it
+    /// go; leaving the match takes it all out and brings the theme back.
     #[test]
     fn the_stem_follows_the_age_and_the_combat_stem_the_fight() {
         let mut s = Score::default();
-        assert!(s.update(None, 0, 0).is_empty(), "nothing on the title");
+        let theme = Fade {
+            layer: Layer::Title,
+            level: 1.0,
+            ms: CROSSFADE_MS,
+            pan: 0.0,
+        };
+        assert_eq!(s.update(None, 0, 0), vec![theme], "the title's theme");
+        assert!(s.title());
+        assert!(s.update(None, 0, 500).is_empty(), "steady");
         let start = s.update(Some(Age::Stone), 0, 1000);
         assert_eq!(
             start,
-            vec![Fade {
-                layer: Layer::Stem(Age::Stone),
-                level: 1.0,
-                ms: CROSSFADE_MS,
-                pan: 0.0
-            }]
+            vec![
+                Fade {
+                    level: 0.0,
+                    ..theme
+                },
+                Fade {
+                    layer: Layer::Stem(Age::Stone),
+                    level: 1.0,
+                    ms: CROSSFADE_MS,
+                    pan: 0.0
+                }
+            ]
         );
+        assert!(!s.title());
         assert!(s.update(Some(Age::Stone), 0, 2000).is_empty(), "steady");
         let up = s.update(Some(Age::Tool), 0, 3000);
         assert_eq!(up.len(), 2);
@@ -333,10 +371,18 @@ mod tests {
         assert!(!s.combat());
         s.update(Some(Age::Tool), 10, 20_000);
         let out = s.update(None, 0, 21_000);
-        assert_eq!(out.len(), 2, "the stem and the combat stem both leave");
-        assert!(out.iter().all(|f| f.level == 0.0));
+        assert_eq!(
+            out.len(),
+            3,
+            "the stem and the combat stem leave, the theme returns"
+        );
+        assert!(out.contains(&theme));
+        assert!(out
+            .iter()
+            .filter(|f| f.layer != Layer::Title)
+            .all(|f| f.level == 0.0));
         assert_eq!(s.age(), None);
-        assert!(!s.combat());
+        assert!(!s.combat() && s.title());
     }
 
     /// The beds follow the ground: water brings the surf up, sand the wind,

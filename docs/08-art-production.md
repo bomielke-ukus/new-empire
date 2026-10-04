@@ -385,10 +385,12 @@ proves a fresh clone can produce what the game loads.
    `atlas rig`. The one thing left that no test can prove is that the rig looks
    good, which needs a Blender install and a first model.
 2. **Greybox one unit** — model, render, quantise, validate. **Done**, and what
-   it found is §10. `tools/render/greybox_villager.py` builds the subject,
-   `render_sheet.py` renders 150 frames through the rig, `atlas compose` turns
-   them into `assets/sprites/villager`, and it passes the gate. The player
-   colour key survives shading into 7 of the ramp's 8 steps.
+   it found is §10. A greybox script built the subject, `render_sheet.py`
+   rendered 150 frames through the rig, `atlas compose` turned them into
+   `assets/sprites/villager`, and it passed the gate. The player colour key
+   survives shading into 7 of the ramp's 8 steps. The villager is now built
+   in `slice.py` like every other subject, with its tasks and loads (step 3),
+   and the greybox script is gone; git history has it.
 
    **The same unit in-game: done** (D19). The renderer now bakes this palette,
    loads every set under `assets/sprites`, and draws the villager with its
@@ -398,12 +400,17 @@ proves a fresh clone can produce what the game loads.
    architecture variants as mesh swaps. **Under way** (2026-09-25, the
    owner's choice of source, over free packs and a hired modeller): modelled
    by code from a shared kit (`tools/render/kit.py`, `slice.py`,
-   `scripts/render-sprites.sh`), low-poly by design, rendered on the CPU. The
+   `scripts/render-sprites.sh`), rendered on the CPU: rounded, textured and
+   shadowed since 2026-10-03, when the owner asked for more realism. The
    spearman and the house came first; the villager is re-rendered on the same
-   engine; the other infantry, the riders, every building but the walls
-   and gate, and the map's nodes and herd followed. Being code-authored, these models carry no copyright of their own
-   (§5.1); that matters only for a sale, and a modeller's work can replace any
-   of them by name.
+   engine; the other infantry, the riders, every building, and the map's
+   nodes and herd followed, then the walls and the gate, which join from
+   tile to tile (`crates/view/src/walls.rs`), the villager's tasks and
+   loads, the ground's grain (`docs/07` D28), and the later ages' looks of
+   the buildings, the villager and the infantry, by material and dress
+   (`docs/07` D29). Being code-authored, these
+   models carry no copyright of their own (§5.1); that matters only for a
+   sale, and a modeller's work can replace any of them by name.
 4. **Commission the icons and UI panel set** (§4.3) in parallel — they are off
    the critical path and do not depend on the render rig.
 

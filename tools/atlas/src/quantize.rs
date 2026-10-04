@@ -19,7 +19,7 @@
 
 use crate::colour::{Linear, Oklab, Srgb};
 use crate::image::Indexed;
-use crate::palette::{Palette, PLAYER_RAMP_LEN, PLAYER_RAMP_START, TRANSPARENT};
+use crate::palette::{Palette, PLAYER_RAMP_LEN, PLAYER_RAMP_START, SHADOW, TRANSPARENT};
 use std::path::Path;
 
 pub struct Options {
@@ -33,6 +33,9 @@ pub struct Options {
     /// Alpha at or below this is transparent. Anything above is opaque: an
     /// indexed sprite has no partial alpha to fall back on.
     pub alpha_cutoff: u8,
+    /// A shadow on the ground at least this strong is kept, as the
+    /// palette's translucent shadow index.
+    pub shadow_min: u8,
 }
 
 impl Default for Options {
@@ -48,18 +51,19 @@ impl Default for Options {
             },
             player_tolerance: 0.25,
             alpha_cutoff: 127,
+            shadow_min: 64,
         }
     }
 }
 
-struct Rgba {
-    width: u32,
-    height: u32,
+pub(crate) struct Rgba {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
     /// Four bytes per pixel.
-    pixels: Vec<u8>,
+    pub(crate) pixels: Vec<u8>,
 }
 
-fn read_rgba(path: &Path) -> Result<Rgba, String> {
+pub(crate) fn read_rgba(path: &Path) -> Result<Rgba, String> {
     let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut reader = png::Decoder::new(file)
         .read_info()
@@ -169,6 +173,11 @@ fn hue_distance(colour: Srgb, key: Srgb) -> f64 {
     ((ca - ka).powi(2) + (cb - kb).powi(2)).sqrt()
 }
 
+/// True for the black of a shadow: no subject's surface is this dark.
+fn is_black(c: Srgb) -> bool {
+    c.r as u32 + c.g as u32 + c.b as u32 <= 24
+}
+
 /// Maps a lightness in 0..1 onto a step of the reserved player ramp.
 fn player_step(lightness: f64) -> u8 {
     let step = (lightness * PLAYER_RAMP_LEN as f64).floor() as i64;
@@ -199,15 +208,24 @@ pub fn quantize(path: &Path, palette: &Palette, opts: &Options) -> Result<Indexe
     for y in 0..src.height {
         for x in 0..src.width {
             let i = ((y * src.width + x) * 4) as usize;
-            if src.pixels[i + 3] <= opts.alpha_cutoff {
-                out.set(x, y, TRANSPARENT);
-                continue;
-            }
+            let alpha = src.pixels[i + 3];
             let colour = Srgb {
                 r: src.pixels[i],
                 g: src.pixels[i + 1],
                 b: src.pixels[i + 2],
             };
+            // The shadow on the ground: the renderer's shadow catcher leaves
+            // it black and partly transparent. It is kept as the shadow index
+            // however strong, so a deep shadow under a body is not read as a
+            // black pixel of the body.
+            if alpha < 250 && alpha >= opts.shadow_min && is_black(colour) {
+                out.set(x, y, SHADOW);
+                continue;
+            }
+            if alpha <= opts.alpha_cutoff {
+                out.set(x, y, TRANSPARENT);
+                continue;
+            }
             let index = if hue_distance(colour, opts.player_key) <= opts.player_tolerance {
                 player_step(Oklab::from(Linear::from(colour)).l)
             } else {
@@ -263,6 +281,41 @@ mod tests {
         .unwrap();
         assert_eq!(out.get(0, 0), TRANSPARENT);
         assert_ne!(out.get(1, 0), TRANSPARENT);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_shadow_on_the_ground_becomes_the_shadow_index_however_strong() {
+        let dir = std::env::temp_dir().join("atlas-quantize-shadow");
+        let path = dir.join("r.png");
+        // A faint shadow, a strong one, a deep one, an opaque black surface,
+        // and a half-covered edge of a coloured one.
+        write_rgba(
+            &path,
+            5,
+            1,
+            &[
+                0, 0, 0, 40, 0, 0, 0, 100, 0, 0, 0, 210, 0, 0, 0, 255, 0x8f, 0x60, 0x35, 100,
+            ],
+        );
+        let out = quantize(
+            &path,
+            &palette(),
+            &Options {
+                downsample: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(out.get(0, 0), TRANSPARENT, "too faint to keep");
+        assert_eq!(out.get(1, 0), SHADOW);
+        assert_eq!(
+            out.get(2, 0),
+            SHADOW,
+            "deep, but still a shadow, not a black pixel"
+        );
+        assert!(![TRANSPARENT, SHADOW].contains(&out.get(3, 0)), "a surface");
+        assert_eq!(out.get(4, 0), TRANSPARENT, "an edge under the cutoff");
         std::fs::remove_dir_all(&dir).ok();
     }
 

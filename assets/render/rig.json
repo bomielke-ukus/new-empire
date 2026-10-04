@@ -185,6 +185,26 @@
     }
   ],
   "lights_note": "Three suns, placed by direction RELATIVE TO THE CAMERA - a component toward the viewer, one across, one up - rather than by where they sit in the image plane. That distinction is the one this rig got wrong first time: a light at 45 degrees up-left of the subject IN THE IMAGE PLANE is almost edge-on to both vertical faces the camera sees, so it lights the tops of things and leaves their sides black. The minimum illumination each visible face must receive is asserted in `atlas rig`.",
+  "sky": {
+    "colour": [
+      0.62,
+      0.7,
+      0.85
+    ],
+    "strength": 0.45,
+    "note": "A dim sky over everything, as direct light: with no bounces it only reaches what nothing shades, so creases, undersides and the ground under a body go dark the way they do outdoors. It cannot tint anything pink, which a bounce off the magenta player colour would."
+  },
+  "shadow": {
+    "direction_toward_light": [
+      0.373007,
+      -0.034587,
+      0.927184
+    ],
+    "elevation_deg": 68.0,
+    "angle_deg": 10.0,
+    "energy": 4.0,
+    "note": "The shadow on the ground comes from its own sun, high over the key light's side, that lights only the ground (a shadow catcher) and nothing else; the key, fill and rim do not reach the ground. Its shadows fall short and back to the right, inside every class's frame, and atlas quantize keeps them as the palette's translucent shadow index."
+  },
   "scale": {
     "tile_world_units": 1.0,
     "elevation_step_world_units": 0.408248,
@@ -338,7 +358,7 @@
     "file_format": "PNG",
     "colour_mode": "RGBA",
     "colour_depth": "8",
-    "note": "view_transform MUST be Standard. Blender defaults to AgX or Filmic, which desaturate and roll off the highlights, so the colours you texture are not the colours you get and the quantiser maps them somewhere you did not intend. film_transparent keeps the ground out of the sprite - the game draws its own shadow."
+    "note": "view_transform MUST be Standard. Blender defaults to AgX or Filmic, which desaturate and roll off the highlights, so the colours you texture are not the colours you get and the quantiser maps them somewhere you did not intend. film_transparent keeps the ground out of the sprite; the shadow on it comes from the shadow catcher (see \"shadow\")."
   },
   "lighting_targets": {
     "note": "Illumination reaching each visible face, as sum over lights of energy * max(0, N.L). The camera sees the +X face (screen-left), the +Y face (screen-right) and the top. All three have to be lit, and the two side faces have to differ enough to read as form without either going black.",

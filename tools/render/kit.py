@@ -37,6 +37,14 @@ BUILDING_SPANS = {
     "rubble": (5, 5),
 }
 
+# A wall: the building's five frames, its post alone as the finished one,
+# then an arm toward each of the eight neighbours it can join.
+WALL_SPANS = dict(BUILDING_SPANS, arm=(6, 13))
+
+# A gate: the building's five, the finished one shut along the game's x,
+# then shut and open in each of its four orientations.
+GATE_SPANS = dict(BUILDING_SPANS, shut=(6, 9), open=(10, 13))
+
 def srgb(r, g, b):
     """A colour as it should look on screen, in the linear values Blender's
     materials take: a base colour is linear light, so 0.5 renders as a pale
@@ -64,7 +72,7 @@ COLOURS = {
     "stone_light": srgb(0.72, 0.70, 0.66),
     "bronze": srgb(0.72, 0.50, 0.24),
     "iron": srgb(0.55, 0.56, 0.60),
-    "thatch": srgb(0.70, 0.58, 0.32),
+    "thatch": srgb(0.62, 0.53, 0.34),
     "mudbrick": srgb(0.62, 0.45, 0.30),
     "plaster": srgb(0.86, 0.80, 0.68),
     "clay_roof": srgb(0.62, 0.30, 0.18),
@@ -84,6 +92,56 @@ COLOURS = {
     "rock": srgb(0.50, 0.49, 0.47),
     "rock_light": srgb(0.66, 0.64, 0.60),
     "white": srgb(0.88, 0.86, 0.80),
+    # The dark of a window or a doorway: the room behind it, unlit.
+    "opening": srgb(0.10, 0.08, 0.07),
+    # Split-wood shingles, the Tool Age's roofs; slate, the Iron Age's.
+    "shingle": srgb(0.46, 0.37, 0.27),
+    "slate": srgb(0.36, 0.39, 0.44),
+}
+
+
+# How each material's surface is broken up, so a wall reads as brick and a
+# post as wood rather than as flat colour: a pattern in object space, how far
+# it moves the colour either side of the base (which stays the material's
+# colour on average, so the palette match does not move), and how much relief
+# it gives the surface. Patterns: "noise", "grain" (noise drawn out along
+# the object's length), "brick" (courses on the vertical faces) and
+# "courses" (horizontal bands, roof tiles).
+SURFACES = {
+    "player": ("noise", 30.0, 0.05, 0.1),
+    "skin": ("noise", 30.0, 0.04, 0.05),
+    "hair": ("grain", 60.0, 0.10, 0.2),
+    "trouser": ("noise", 40.0, 0.06, 0.1),
+    "hide": ("noise", 35.0, 0.10, 0.2),
+    "linen": ("noise", 45.0, 0.06, 0.1),
+    "rope": ("grain", 60.0, 0.12, 0.2),
+    "wood": ("grain", 30.0, 0.16, 0.25),
+    "wood_dark": ("grain", 30.0, 0.16, 0.25),
+    "bark": ("grain", 45.0, 0.24, 0.5),
+    "stone": ("noise", 18.0, 0.14, 0.4),
+    "stone_light": ("brick", 3.0, 0.10, 0.3),
+    "rock": ("noise", 16.0, 0.16, 0.5),
+    "rock_light": ("noise", 16.0, 0.14, 0.5),
+    "slab": ("noise", 20.0, 0.10, 0.3),
+    "mudbrick": ("brick", 4.0, 0.12, 0.3),
+    "plaster": ("noise", 10.0, 0.06, 0.1),
+    "white": ("noise", 10.0, 0.05, 0.1),
+    "thatch": ("grain", 24.0, 0.12, 0.3),
+    "straw": ("grain", 24.0, 0.10, 0.2),
+    "clay_roof": ("courses", 40.0, 0.14, 0.3),
+    "shingle": ("courses", 45.0, 0.16, 0.35),
+    "slate": ("courses", 40.0, 0.12, 0.3),
+    "earth": ("noise", 25.0, 0.12, 0.3),
+    "crop": ("noise", 30.0, 0.20, 0.5),
+    "leaf": ("noise", 30.0, 0.20, 0.6),
+    "leaf_dark": ("noise", 30.0, 0.20, 0.6),
+    "horse": ("noise", 30.0, 0.06, 0.1),
+    "horse_dark": ("noise", 30.0, 0.06, 0.1),
+    "horn": ("grain", 40.0, 0.10, 0.1),
+    "bronze": ("noise", 30.0, 0.08, 0.1),
+    "iron": ("noise", 30.0, 0.08, 0.1),
+    "gold": ("noise", 30.0, 0.10, 0.1),
+    "berry": ("noise", 40.0, 0.06, 0.1),
 }
 
 
@@ -93,9 +151,9 @@ def material(name):
         return mat
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    bsdf = nodes.get("Principled BSDF")
     r, g, b = COLOURS[name]
-    bsdf.inputs["Base Color"].default_value = (r, g, b, 1.0)
     # Matte: a highlight on a 34 px figure is one bright pixel that moves
     # between frames, which reads as noise rather than as shine.
     bsdf.inputs["Roughness"].default_value = 0.9
@@ -103,7 +161,75 @@ def material(name):
         if maybe in bsdf.inputs:
             bsdf.inputs[maybe].default_value = 0.1
             break
+    surface = SURFACES.get(name)
+    if surface is None:
+        bsdf.inputs["Base Color"].default_value = (r, g, b, 1.0)
+        return mat
+    pattern, scale, vary, relief = surface
+    fac = _pattern(nodes, links, pattern, scale)
+    # The base colour times a factor about 1. A brick wall is mostly brick
+    # (the pattern's light end) with thin dark mortar, so its factor is
+    # skewed for the wall as a whole to average the base colour.
+    spread = nodes.new("ShaderNodeMapRange")
+    low, high = (1.6, 0.2) if pattern == "brick" else (1.0, 1.0)
+    spread.inputs["To Min"].default_value = 1.0 - vary * low
+    spread.inputs["To Max"].default_value = 1.0 + vary * high
+    links.new(fac, spread.inputs["Value"])
+    mix = nodes.new("ShaderNodeMix")
+    mix.data_type = "RGBA"
+    mix.blend_type = "MULTIPLY"
+    mix.inputs["Factor"].default_value = 1.0
+    mix.inputs["A"].default_value = (r, g, b, 1.0)
+    links.new(spread.outputs["Result"], mix.inputs["B"])
+    links.new(mix.outputs["Result"], bsdf.inputs["Base Color"])
+    bump = nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = relief
+    bump.inputs["Distance"].default_value = 0.02
+    links.new(fac, bump.inputs["Height"])
+    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
     return mat
+
+
+def _pattern(nodes, links, pattern, scale):
+    """A 0-1 pattern socket in object space."""
+    coord = nodes.new("ShaderNodeTexCoord").outputs["Object"]
+    if pattern == "brick":
+        # Courses on the walls whichever way they face: along x + y, up z.
+        sep = nodes.new("ShaderNodeSeparateXYZ")
+        links.new(coord, sep.inputs["Vector"])
+        add = nodes.new("ShaderNodeMath")
+        add.operation = "ADD"
+        links.new(sep.outputs["X"], add.inputs[0])
+        links.new(sep.outputs["Y"], add.inputs[1])
+        comb = nodes.new("ShaderNodeCombineXYZ")
+        links.new(add.outputs["Value"], comb.inputs["X"])
+        links.new(sep.outputs["Z"], comb.inputs["Y"])
+        brick = nodes.new("ShaderNodeTexBrick")
+        brick.inputs["Scale"].default_value = scale
+        brick.inputs["Color1"].default_value = (1.0, 1.0, 1.0, 1.0)
+        brick.inputs["Color2"].default_value = (0.8, 0.8, 0.8, 1.0)
+        brick.inputs["Mortar"].default_value = (0.35, 0.35, 0.35, 1.0)
+        brick.inputs["Mortar Size"].default_value = 0.025
+        links.new(comb.outputs["Vector"], brick.inputs["Vector"])
+        grey = nodes.new("ShaderNodeRGBToBW")
+        links.new(brick.outputs["Color"], grey.inputs["Color"])
+        return grey.outputs["Val"]
+    if pattern == "courses":
+        wave = nodes.new("ShaderNodeTexWave")
+        wave.wave_type = "BANDS"
+        wave.bands_direction = "Z"
+        wave.inputs["Scale"].default_value = scale
+        wave.inputs["Distortion"].default_value = 1.0
+        links.new(coord, wave.inputs["Vector"])
+        return wave.outputs["Fac"]
+    mapping = nodes.new("ShaderNodeMapping")
+    stretch = 0.12 if pattern == "grain" else 1.0
+    mapping.inputs["Scale"].default_value = (scale, scale, scale * stretch)
+    links.new(coord, mapping.inputs["Vector"])
+    noise = nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Detail"].default_value = 4.0
+    links.new(mapping.outputs["Vector"], noise.inputs["Vector"])
+    return noise.outputs["Fac"]
 
 
 def clear():
@@ -122,6 +248,39 @@ def _mesh(name, verts, faces, mat, location=(0.0, 0.0, 0.0), rotation=(0.0, 0.0,
     obj.location = location
     obj.rotation_euler = rotation
     bpy.context.scene.collection.objects.link(obj)
+    soften(obj, 0.12, 2)
+    return obj
+
+
+# The parts of a figure or an animal that are flesh, and so rounded.
+BODY_PARTS = {
+    "leg_l", "leg_r", "arm_l", "arm_r", "torso", "head", "skirt",
+    "r_leg_l", "r_leg_r", "r_arm_l", "r_arm_r", "r_torso", "r_head",
+    "barrel", "neck", "belly", "mane", "tail",
+    "leg_fl", "leg_fr", "leg_bl", "leg_br",
+}
+
+
+def soften(obj, fraction, segments, limit=0.03):
+    """Rounds `obj`'s sharp edges by `fraction` of its thinnest side (at
+    most `limit`) in `segments` steps, smooth-shaded with the flat faces
+    kept flat: an edge that catches the light reads as made, a hard box
+    edge as a placeholder. Called again, it rounds further."""
+    if obj.type != "MESH" or not obj.data.vertices:
+        return obj
+    xs = [v.co for v in obj.data.vertices]
+    dims = [max(c[i] for c in xs) - min(c[i] for c in xs) for i in range(3)]
+    sides = [d for d in dims if d > 1e-6]
+    if not sides:
+        return obj
+    bevel = obj.modifiers.get("soften") or obj.modifiers.new("soften", "BEVEL")
+    bevel.width = min(limit, min(sides) * fraction)
+    bevel.segments = segments
+    bevel.limit_method = "ANGLE"
+    bevel.angle_limit = math.radians(40.0)
+    bevel.harden_normals = True
+    for poly in obj.data.polygons:
+        poly.use_smooth = True
     return obj
 
 
@@ -199,6 +358,31 @@ def cone(name, radius, height, mat, location=(0.0, 0.0, 0.0), sides=10):
     return _mesh(name, verts, faces, mat, location)
 
 
+def clump(name, radius, mat, location=(0.0, 0.0, 0.0), seed=0, lumps=0.28, squash=1.0):
+    """A lumpy ball of leaves: an icosphere pushed in and out by noise, so
+    a crown reads as foliage rather than as a solid."""
+    import bmesh
+    from mathutils import Vector, noise
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=3, radius=radius)
+    offset = Vector((seed * 7.31, seed * 3.17, seed * 5.53))
+    for v in bm.verts:
+        d = v.co.normalized()
+        n = noise.noise(d * 2.6 + offset) + 0.5 * noise.noise(d * 6.0 + offset)
+        v.co = d * radius * (1.0 + lumps * n)
+        v.co.z *= squash
+    mesh = bpy.data.meshes.new(name)
+    bm.to_mesh(mesh)
+    bm.free()
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+    mesh.materials.append(material(mat))
+    obj = bpy.data.objects.new(name, mesh)
+    obj.location = location
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
 def empty(name, parent=None, location=(0.0, 0.0, 0.0)):
     obj = bpy.data.objects.new(name, None)
     obj.location = location
@@ -247,6 +431,9 @@ class Humanoid:
     the root stays free for render_sheet.py's turntable.
     """
 
+    # Which age's dress it wears past the Stone Age (`age_dress`).
+    COSTUME = "soldier"
+
     def __init__(self, root_name, tunic="player", dress="tunic", helmet=None,
                  helmet_mat="bronze", hair=True):
         self.root = empty(root_name)
@@ -283,10 +470,16 @@ class Humanoid:
         self.weapon_hand = "right"
         self.weapon_lean = 0.0
         self.shield = None
+        if STYLE_AGE:
+            age_dress(self, STYLE_AGE, self.COSTUME)
 
     def _add(self, key, obj):
         obj.parent = self.body
         self.parts[key] = obj
+        # A body is rounded, limbs, head and trunk all but capsules; what it
+        # wears keeps its shape, or a cone helmet's rim turns into a brim.
+        if key in BODY_PARTS:
+            soften(obj, 0.42, 3, limit=0.06)
         return obj
 
     def hold(self, weapon, hand="right", lean=22.0):
@@ -534,15 +727,17 @@ def round_shield(name, face="player"):
 
 class Building:
     """A building as five frames: construction stages 1-3, the finished
-    building (4), its rubble (5). Each object is tagged with the frames it
+    building (4), its rubble (5), and for walls and gates the pieces after
+    them (WALL_SPANS, GATE_SPANS). Each object is tagged with the frames it
     appears on and keyed visible there and hidden elsewhere, so one file
     renders them all. The footprint is `tiles` on a side, centred on the
     origin. The camera sits out at +X +Y, so the +X and +Y faces and the top
     are what shows: doors, banners and player colour go there."""
 
-    def __init__(self, root_name, tiles):
+    def __init__(self, root_name, tiles, frames=5):
         self.root = empty(root_name)
         self.tiles = tiles
+        self.frames = frames
         self.shown = []
 
     def add(self, obj, frames):
@@ -551,10 +746,12 @@ class Building:
         return obj
 
     def finish(self):
+        if STYLE_AGE:
+            style_building(self, STYLE_AGE)
         scene = bpy.context.scene
-        scene.frame_start, scene.frame_end = 1, 5
+        scene.frame_start, scene.frame_end = 1, self.frames
         for obj, frames in self.shown:
-            for frame in range(1, 6):
+            for frame in range(1, self.frames + 1):
                 hidden = frame not in frames
                 obj.hide_render = hidden
                 obj.hide_viewport = hidden
@@ -567,6 +764,7 @@ class Building:
 # the walls from the second, the roof and dressing only when finished, and a
 # scaffold during the last stage.
 FOUNDATION = (1, 2, 3, 4)
+STAGES = (1, 2, 3)
 WALLS = (2, 3, 4)
 HALF_WALLS = (2,)
 FULL_WALLS = (3, 4)
@@ -601,16 +799,95 @@ def scaffold(b, name, w, d, h):
     b.add(box(name + "_rail_y1", (0.04, d, 0.04), "wood", (w / 2, 0.0, h * 0.7)), SCAFFOLD)
 
 
-def walls(b, name, w, d, h, mat, door=True):
+def walls(b, name, w, d, h, mat, door=True, windows=True):
     """A walled block with its full height on the finished frames and half
-    its height on the second stage; a door on the +Y face, one of the two the
-    camera sees (it sits out at +X +Y)."""
+    its height on the second stage, on a stone plinth; a framed door on the
+    +Y face and small windows on the two faces the camera sees (it sits out
+    at +X +Y)."""
     b.add(box(name + "_walls_half", (w, d, h * 0.5), mat), HALF_WALLS)
     b.add(box(name + "_walls", (w, d, h), mat), FULL_WALLS)
+    b.add(box(name + "_plinth", (w + 0.05, d + 0.05, min(0.08, h * 0.14)), "stone"), WALLS)
     if door:
-        b.add(box(name + "_door", (w * 0.22, 0.02, h * 0.62), "wood_dark",
-                  (0.0, d / 2 + 0.005, 0.0)), FULL_WALLS)
+        dw, dh, y = w * 0.22, h * 0.62, d / 2
+        b.add(box(name + "_door", (dw, 0.02, dh), "wood_dark", (0.0, y + 0.005, 0.0)),
+              FULL_WALLS)
+        for side in (-1.0, 1.0):
+            b.add(box("%s_jamb%d" % (name, side > 0), (0.035, 0.04, dh), "wood",
+                      (side * (dw / 2 + 0.0175), y + 0.01, 0.0)), FULL_WALLS)
+        b.add(box(name + "_lintel", (dw + 0.14, 0.05, 0.045), "wood", (0.0, y + 0.015, dh)),
+              FULL_WALLS)
+        b.add(box(name + "_step", (dw + 0.08, 0.08, 0.025), "stone", (0.0, y + 0.04, 0.0)),
+              FULL_WALLS)
+    if windows:
+        z = h * 0.42
+        along_x = [-w * 0.33, w * 0.33] if door else [0.0]
+        along_y = [-d * 0.25, d * 0.25] if d >= 0.9 else [0.0]
+        for i, x in enumerate(along_x if w >= 0.9 else []):
+            window(b, "%s_win_y%d" % (name, i), (x, d / 2, z), "y")
+        for i, y in enumerate(along_y):
+            window(b, "%s_win_x%d" % (name, i), (w / 2, y, z), "x")
     b.add(box(name + "_foundation", (w + 0.08, d + 0.08, 0.04), "slab"), FOUNDATION)
+
+
+def window(b, name, at, face, frames=FULL_WALLS):
+    """A small window in the wall face at `at`, facing +X or +Y: the dark
+    of the room behind, a lintel above and a sill below."""
+    x, y, z = at
+    def sized(along, out, tall):
+        return (out, along, tall) if face == "x" else (along, out, tall)
+    off = (0.006, 0.0) if face == "x" else (0.0, 0.006)
+    b.add(box(name, sized(0.1, 0.02, 0.09), "opening", (x + off[0], y + off[1], z)), frames)
+    b.add(box(name + "_lintel", sized(0.15, 0.035, 0.025), "wood",
+              (x + 2 * off[0], y + 2 * off[1], z + 0.09)), frames)
+    b.add(box(name + "_sill", sized(0.14, 0.04, 0.018), "wood",
+              (x + 2 * off[0], y + 2 * off[1], z - 0.018)), frames)
+
+
+def thatch_roof(b, name, size, location, frames=FINISHED):
+    """A thatched roof in two courses over a thick eave, with a knot of
+    straw at the top: the edge of a real thatch is a hand's breadth deep,
+    and a single pyramid reads as a lid."""
+    w, d, h = size
+    x, y, z = location
+    root2 = math.sqrt(2.0)
+    b.add(cylinder(name + "_eave", (max(w, d) + 0.04) / root2, 0.07, "thatch", (x, y, z - 0.05),
+                   sides=4, top_radius=(max(w, d) - 0.06) / root2,
+                   rotation=(0.0, 0.0, math.radians(45.0))), frames)
+    b.add(pyramid(name, (w, d, h), "thatch", (x, y, z)), frames)
+    b.add(pyramid(name + "_cap", (w * 0.5, d * 0.5, h * 0.52), "thatch", (x, y, z + h * 0.5)),
+          frames)
+    b.add(cylinder(name + "_knot", 0.03, 0.06, "wood_dark", (x, y, z + h - 0.01), sides=6),
+          frames)
+
+
+def ridge(b, name, length, location, mat, axis="x", frames=FINISHED, radius=0.035):
+    """A roll along a gable's ridge: bound straw, or ridge tiles."""
+    rot = (0.0, math.radians(90.0), 0.0) if axis == "x" else (math.radians(90.0), 0.0, 0.0)
+    b.add(cylinder(name, radius, length, mat, location, sides=8, pivot="centre", rotation=rot),
+          frames)
+
+
+def vigas(b, name, w, d, z, frames=FINISHED):
+    """Roof beams whose ends stand out of the two walls the camera sees."""
+    for i, t in enumerate([-0.35, -0.12, 0.12, 0.35]):
+        b.add(cylinder("%s_y%d" % (name, i), 0.025, 0.12, "wood", (t * w, d / 2 + 0.03, z),
+                       sides=6, pivot="centre", rotation=(math.radians(90.0), 0.0, 0.0)), frames)
+        b.add(cylinder("%s_x%d" % (name, i), 0.025, 0.12, "wood", (w / 2 + 0.03, t * d, z),
+                       sides=6, pivot="centre", rotation=(0.0, math.radians(90.0), 0.0)), frames)
+
+
+def woodpile(b, name, at, frames=FINISHED):
+    """A stack of split logs against a wall."""
+    x, y = at
+    for i, (dx, dz) in enumerate([(-0.05, 0.0), (0.05, 0.0), (0.0, 0.07)]):
+        b.add(cylinder("%s_%d" % (name, i), 0.035, 0.26, "wood", (x + dx, y, 0.035 + dz),
+                       sides=6, pivot="centre", rotation=(math.radians(90.0), 0.0, 0.0)), frames)
+
+
+def jar(b, name, at, frames=FINISHED, h=0.2):
+    """A clay storage jar."""
+    x, y = at
+    b.add(cylinder(name, 0.06, h, "clay_roof", (x, y, 0.0), sides=10, top_radius=0.045), frames)
 
 
 def foundation(b, name, w, d, mat="slab"):
@@ -646,6 +923,391 @@ def disc(b, name, radius, thick, mat, location, frames, facing="y"):
     rot = (_deg(90.0), 0.0, 0.0) if facing == "y" else (0.0, _deg(90.0), 0.0)
     b.add(cylinder(name, radius, thick, mat, location, sides=12, pivot="centre",
                    rotation=rot), frames)
+
+
+def prism(name, plan, height, mat, z=0.0):
+    """A solid standing on the polygon `plan` (XY points, counter-clockwise,
+    concave allowed), `height` tall from `z`."""
+    n = len(plan)
+    verts = [(x, y, z) for x, y in plan] + [(x, y, z + height) for x, y in plan]
+    faces = [tuple(reversed(range(n))), tuple(range(n, 2 * n))]
+    faces += [(i, (i + 1) % n, n + (i + 1) % n, n + i) for i in range(n)]
+    return _mesh(name, verts, faces, mat)
+
+
+# --------------------------------------------------------------------------
+# Walls and gates.
+#
+# A wall is laid a tile at a time, and the game draws each tile as its post
+# plus an arm toward each wall of the same owner beside it
+# (`crates/view/src/scene.rs`). The arms are frames of their own, one per
+# direction, in this order of the game's tile offsets. The game's +x is
+# Blender's +Y and its +y is Blender's +X (the camera's right is (-1, 1, 0),
+# rig.json), so a direction (dx, dy) points along Blender (dy, dx).
+WALL_DIRECTIONS = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]
+
+
+def wall_direction(k):
+    """Direction `k` as a unit vector in Blender's XY, its angle, and how
+    far an arm reaches along it: the tile's edge, or its corner for a
+    diagonal, where the neighbour's arm meets it."""
+    dx, dy = WALL_DIRECTIONS[k]
+    x, y = float(dy), float(dx)
+    n = math.hypot(x, y)
+    return (x / n, y / n), math.atan2(y, x), 0.5 * n
+
+
+def arm_frames(k):
+    """The one frame arm `k` shows on."""
+    return (WALL_SPANS["arm"][0] + k,)
+
+
+def along(unit, s, v=0.0):
+    """The point `s` along `unit` and `v` to its left."""
+    ux, uy = unit
+    return (ux * s - uy * v, uy * s + ux * v)
+
+
+def arm_plan(k, pier, width):
+    """The plan of a solid arm `width` wide from a square pier of half-size
+    `pier` to the edge of the tile. A diagonal arm leaves by the pier's
+    corner, so its inner end follows the pier's two faces: the arms are
+    drawn as sprites apart from the pier, and an end cut square would
+    either leave a gap beside the corner or poke out through it."""
+    unit, _, reach = wall_direction(k)
+    h = width / 2.0
+    dx, dy = WALL_DIRECTIONS[k]
+    if dx and dy:
+        c = pier * math.sqrt(2.0)
+        pts = [(c - h, -h), (reach, -h), (reach, h), (c - h, h), (c, 0.0)]
+    else:
+        pts = [(pier, -h), (reach, -h), (reach, h), (pier, h)]
+    return [along(unit, s, v) for s, v in pts]
+
+
+def gate_orientation(o):
+    """Orientation `o` (0-3) of a gate: the direction of its wall's line,
+    WALL_DIRECTIONS[o], as a unit vector, its angle and the run's length
+    across the tile."""
+    unit, angle, reach = wall_direction(o)
+    return unit, angle, 2.0 * reach
+
+
+# --------------------------------------------------------------------------
+# The ages. A settlement and its people change as their owner advances
+# (`docs/02` section 4): the same buildings in the materials of each age,
+# the same figures in each age's dress. `STYLE_AGE` is the age being built,
+# 0 to 3 for Stone to Iron; slice.py sets it for an aged subject
+# (`house_bronze`), and Building.finish and Humanoid apply it.
+
+STYLE_AGE = 0
+
+# What each age builds in, by the Stone Age material it replaces.
+AGE_MATERIALS = {
+    1: {"thatch": "shingle"},
+    2: {"thatch": "clay_roof", "mudbrick": "plaster"},
+    3: {"thatch": "slate", "clay_roof": "slate", "mudbrick": "stone_light",
+        "plaster": "stone_light"},
+}
+
+
+def style_building(b, age):
+    """Rebuilds `b`'s materials and adds its age's work to every walled
+    block in it: a timber frame in the Tool Age, a stone base course in the
+    Bronze, a cornice and pilasters of dressed stone in the Iron."""
+    swaps = AGE_MATERIALS.get(age, {})
+    for obj in b.root.children_recursive:
+        if obj.type != "MESH" or not obj.data.materials:
+            continue
+        name = obj.data.materials[0].name
+        if name in swaps:
+            obj.data.materials[0] = material(swaps[name])
+    walls = [(obj, frames) for obj, frames in b.shown
+             if obj.name.endswith("_walls") and obj.type == "MESH"]
+    for obj, frames in walls:
+        xs = [v.co for v in obj.data.vertices]
+        w = max(c.x for c in xs) - min(c.x for c in xs)
+        d = max(c.y for c in xs) - min(c.y for c in xs)
+        h = max(c.z for c in xs) - min(c.z for c in xs)
+        cx, cy, z0 = obj.location.x, obj.location.y, obj.location.z
+        name = obj.name
+        shown = tuple(frames)
+        if age == 1:
+            timber_frame(b, name, (cx, cy, z0), w, d, h, shown)
+        elif age == 2:
+            b.add(box(name + "_course", (w + 0.03, d + 0.03, h * 0.22), "stone_light",
+                      (cx, cy, z0)), shown)
+        elif age == 3:
+            b.add(box(name + "_cornice", (w + 0.07, d + 0.07, 0.05), "white",
+                      (cx, cy, z0 + h - 0.03)), shown)
+            for sx in (-1.0, 1.0):
+                for sy in (-1.0, 1.0):
+                    b.add(box("%s_pilaster_%d%d" % (name, sx > 0, sy > 0), (0.07, 0.07, h),
+                              "white", (cx + sx * w / 2, cy + sy * d / 2, z0)), shown)
+
+
+def timber_frame(b, name, at, w, d, h, frames):
+    """Posts and rails of dark timber standing proud of the two wall faces
+    the camera sees, clear of the door and the windows."""
+    cx, cy, z0 = at
+    beam = 0.035
+    for i, t in enumerate([-0.5, -0.17, 0.17, 0.5]):
+        b.add(box("%s_post_y%d" % (name, i), (beam, 0.02, h), "wood_dark",
+                  (cx + t * w, cy + d / 2 + 0.008, z0)), frames)
+    for i, t in enumerate([-0.5, 0.0, 0.5]):
+        b.add(box("%s_post_x%d" % (name, i), (0.02, beam, h), "wood_dark",
+                  (cx + w / 2 + 0.008, cy + t * d, z0)), frames)
+    for i, z in enumerate([h * 0.62, h - beam]):
+        b.add(box("%s_rail_y%d" % (name, i), (w, 0.02, beam), "wood_dark",
+                  (cx, cy + d / 2 + 0.01, z0 + z)), frames)
+        b.add(box("%s_rail_x%d" % (name, i), (0.02, d, beam), "wood_dark",
+                  (cx + w / 2 + 0.01, cy, z0 + z)), frames)
+
+
+def age_dress(h, age, costume):
+    """A figure's dress for its age. Soldiers: a belt, a cap and shoulder
+    wraps of hide in the Tool Age; a bronze cap, pads and greaves in the
+    Bronze; iron ones and a cape in the Iron, where a bronze helmet turns
+    iron too. Villagers: a belt, then a cap of linen, a hat of straw, a dark
+    hood and a cape. The head carries most of it: on a sprite 34 px tall the
+    head is what reads. What it wears keeps its owner's tunic in view, where
+    the colour that says whose it is lies."""
+    body = h.parts
+    def on(part, key, size, mat, at=(0.0, 0.0, 0.0)):
+        piece = box("%s_%s" % (h.root.name, key), size, mat, at)
+        piece.parent = body[part] if part else h.body
+        return piece
+    on(None, "belt", (0.285, 0.185, 0.045), "hide", (0.0, 0.0, HIP_Z))
+    if costume == "villager":
+        head = {1: "linen", 2: "straw", 3: "wood_dark"}[age]
+        on(None, "hat", (0.215, 0.205, 0.075), head, (0.0, 0.01, 0.79))
+        if age == 2:
+            on(None, "brim", (0.29, 0.28, 0.02), "straw", (0.0, 0.01, 0.79))
+    else:
+        metal = {1: "hide", 2: "bronze", 3: "iron"}[age]
+        if "helmet" not in body:
+            on(None, "cap", (0.215, 0.205, 0.085), metal, (0.0, 0.01, 0.785))
+        elif age == 3:
+            for key in ("helmet", "helmet_top"):
+                part = body.get(key)
+                if part is not None and part.data.materials[0].name == "bronze":
+                    part.data.materials[0] = material("iron")
+        for side in ("l", "r"):
+            on("arm_" + side, "pad_" + side, (0.1, 0.11, 0.08), metal, (0.0, 0.0, -0.08))
+            if age >= 2:
+                on("leg_" + side, "greave_" + side, (0.115, 0.125, 0.15), metal,
+                   (0.0, 0.0, -HIP_Z + 0.02))
+    if age == 3:
+        on(None, "cape", (0.25, 0.03, 0.34), "hide" if costume == "villager" else "wood_dark",
+           (0.0, -0.1, HIP_Z - 0.02))
+
+
+# --------------------------------------------------------------------------
+# The villager: the figure, a tool for each job, and the loads it carries
+# home. Its five animations are every unit's; the tasks and the carry walks
+# come after them (docs/05 section 2.2), and the game picks one by what the
+# villager is doing (`crates/view/src/scene.rs`).
+
+VILLAGER_SPANS = dict(MOBILE_SPANS, **{
+    "chop": (31, 36),
+    "mine": (37, 42),
+    "forage": (43, 48),
+    "farm": (49, 54),
+    "build": (55, 60),
+    "carry_wood": (61, 68),
+    "carry_food": (69, 76),
+    "carry_gold": (77, 84),
+    "carry_stone": (85, 92),
+})
+
+
+def _tool(name, handle, head_size, head_mat, head_at, below=0.06):
+    """A handle standing up from the grip with a head at `head_at` along
+    it, sticking out toward +Y."""
+    grip = empty(name)
+    parts = [cylinder(name + "_handle", 0.024, handle, "wood", (0.0, 0.0, -below), sides=6),
+             box(name + "_head", head_size, head_mat, (0.0, head_size[1] / 2 - 0.02, head_at))]
+    for p in parts:
+        p.parent = grip
+    return grip
+
+
+def hatchet(name):
+    """The villager's own tool, a stone-headed hatchet: it fells trees and
+    fights with it."""
+    return _tool(name, 0.36, (0.05, 0.12, 0.09), "stone", 0.21)
+
+
+def pick(name):
+    """A pick for stone and gold: a long head across the handle."""
+    grip = _tool(name, 0.40, (0.04, 0.14, 0.04), "stone", 0.30)
+    back = box(name + "_back", (0.04, 0.10, 0.035), "stone", (0.0, -0.06, 0.30))
+    back.parent = grip
+    return grip
+
+
+def hoe(name):
+    """A long-handled hoe, its blade flat and forward."""
+    return _tool(name, 0.58, (0.10, 0.12, 0.02), "stone", 0.46, below=0.12)
+
+
+def mallet(name):
+    """A wooden mallet for building and repair."""
+    return _tool(name, 0.26, (0.08, 0.13, 0.08), "wood_dark", 0.16, below=0.04)
+
+
+def logs(name):
+    """Three logs on the right shoulder, lying fore and aft."""
+    root = empty(name)
+    for i, (x, z) in enumerate([(0.12, 0.70), (0.19, 0.70), (0.155, 0.76)]):
+        log = cylinder("%s_%d" % (name, i), 0.04, 0.46, "wood", (x, 0.02, z), sides=6,
+                       pivot="centre", rotation=(_deg(90.0), 0.0, 0.0))
+        log.parent = root
+    return root
+
+
+def basket(name, fill):
+    """A basket held in front in both hands, heaped with `fill`."""
+    root = empty(name)
+    parts = [cylinder(name + "_basket", 0.10, 0.10, "straw", (0.0, 0.17, 0.38), sides=8,
+                      top_radius=0.12)]
+    for i, (x, y) in enumerate([(-0.04, 0.15), (0.04, 0.19), (0.0, 0.13), (0.03, 0.12),
+                                (-0.03, 0.2)]):
+        parts.append(box("%s_%d" % (name, i), (0.06, 0.06, 0.05), fill, (x, y, 0.47)))
+    for p in parts:
+        p.parent = root
+    return root
+
+
+def block(name):
+    """A dressed stone block held in front in both hands."""
+    root = empty(name)
+    b = box(name + "_stone", (0.18, 0.15, 0.13), "rock_light", (0.0, 0.17, 0.38))
+    b.parent = root
+    return root
+
+
+def villager_pose(anim, i, count):
+    """One frame of a task or a carry walk: the body, each limb's swing, and
+    the held tool's angle about X (0 holds it head up, -90 forward, 180
+    down). Every task loops, so its last frame leads back to its first;
+    the blow lands on the fourth."""
+    body = {"dy": 0.0, "dz": 0.0, "rot_x": 0.0, "scale_z": 1.0}
+    limbs = {"leg_l": _deg(12.0), "leg_r": _deg(-10.0), "arm_l": 0.0, "arm_r": 0.0}
+    tool = 0.0
+    swings = {
+        # (right arm, tool, body pitch), a key per frame.
+        "chop": [(150, 50, 0), (170, 75, 2), (130, -20, -2), (75, -105, -8), (60, -120, -9),
+                 (105, -40, -4)],
+        "mine": [(140, 40, 0), (170, 70, 4), (120, -40, -4), (45, -155, -16), (38, -165, -18),
+                 (90, -70, -8)],
+        "farm": [(100, -30, -8), (130, 20, -4), (90, -70, -10), (45, -145, -18),
+                 (35, -155, -20), (65, -110, -14)],
+        "build": [(110, -10, -4), (140, 40, -2), (100, -60, -5), (62, -120, -8),
+                  (55, -125, -8), (80, -80, -6)],
+    }
+    if anim in swings:
+        arm, angle, pitch = swings[anim][i % len(swings[anim])]
+        limbs["arm_r"] = _deg(arm)
+        # Both hands on the long tools; the free hand steadies the work.
+        limbs["arm_l"] = _deg(arm * 0.85) if anim in ("mine", "farm") else _deg(55.0)
+        tool = _deg(angle)
+        body["rot_x"] = _deg(pitch)
+        if anim in ("mine", "farm"):
+            limbs["leg_l"], limbs["leg_r"] = _deg(18.0), _deg(-14.0)
+    elif anim == "forage":
+        # Bent to the bush, picking with one hand and then the other.
+        reach = [(80, 30), (95, 50), (70, 85), (40, 95), (60, 70), (85, 40)][i % 6]
+        limbs["arm_r"], limbs["arm_l"] = _deg(reach[0]), _deg(reach[1])
+        body["rot_x"] = _deg(-14.0 if i % 3 else -10.0)
+    elif anim.startswith("carry_"):
+        phase = 2.0 * math.pi * i / count
+        limbs["leg_l"] = _deg(24.0) * math.sin(phase)
+        limbs["leg_r"] = _deg(24.0) * math.sin(phase + math.pi)
+        body["dz"] = 0.016 * abs(math.sin(phase))
+        if anim == "carry_wood":
+            # A hand up to the logs on the shoulder; the other arm swings.
+            limbs["arm_r"] = _deg(125.0)
+            limbs["arm_l"] = _deg(16.0) * math.sin(phase + math.pi)
+        else:
+            # Both arms under the load in front.
+            limbs["arm_r"] = limbs["arm_l"] = _deg(38.0)
+    return body, limbs, tool
+
+
+class Villager(Humanoid):
+    """The villager: the soldiers' figure in the owner's tunic, hatchet in
+    hand, with a tool for each job and the loads it carries home. Each tool
+    and load is shown only on the frames of its own animation."""
+
+    COSTUME = "villager"
+
+    def __init__(self, root_name):
+        super().__init__(root_name)
+        self.hold(hatchet(root_name + "_hatchet"), lean=0.0)
+        hatchet_frames = set(range(1, 31)) | _span("chop")
+        self.tools = [(self.weapon, hatchet_frames)]
+        for tool, anim in [(pick, "mine"), (hoe, "farm"), (mallet, "build")]:
+            obj = tool("%s_%s" % (root_name, anim))
+            obj.parent = self.body
+            self.tools.append((obj, _span(anim)))
+        self.loads = []
+        for make, anim in [(lambda n: logs(n), "carry_wood"),
+                           (lambda n: basket(n, "berry"), "carry_food"),
+                           (lambda n: basket(n, "gold"), "carry_gold"),
+                           (lambda n: block(n), "carry_stone")]:
+            obj = make("%s_%s" % (root_name, anim))
+            obj.parent = self.body
+            self.loads.append((obj, _span(anim)))
+
+    def animate(self, style="swing"):
+        """Keys the five animations, then the tasks and the carry walks."""
+        super().animate(style)
+        scene = bpy.context.scene
+        last = max(b for _, b in VILLAGER_SPANS.values())
+        scene.frame_start, scene.frame_end = 1, last
+        # Limbs only turn; where each one hangs never changes.
+        rest = {k: tuple(o.location) for k, o in self.parts.items()}
+        for anim, (first, end) in VILLAGER_SPANS.items():
+            if anim in MOBILE_SPANS:
+                continue
+            count = end - first + 1
+            for i in range(count):
+                frame = first + i
+                body, limbs, angle = villager_pose(anim, i, count)
+                self.body.location = (0.0, body["dy"], body["dz"])
+                self.body.rotation_euler = (body["rot_x"], 0.0, 0.0)
+                self.body.scale = (1.0, 1.0, body["scale_z"])
+                for path in ("location", "rotation_euler", "scale"):
+                    self.body.keyframe_insert(path, frame=frame)
+                for key, obj in self.parts.items():
+                    obj.location = rest[key]
+                    obj.rotation_euler = (limbs.get(key, 0.0), 0.0, 0.0)
+                    obj.keyframe_insert("location", frame=frame)
+                    obj.keyframe_insert("rotation_euler", frame=frame)
+                for tool, _ in self.tools:
+                    tool.location = hand(limbs.get("arm_r", 0.0), side=1.0)
+                    tool.rotation_euler = (angle, 0.0, 0.0)
+                    tool.keyframe_insert("location", frame=frame)
+                    tool.keyframe_insert("rotation_euler", frame=frame)
+        for obj, frames in self.tools + self.loads:
+            meshes = [c for c in obj.children_recursive if c.type == "MESH"]
+            for frame in range(1, last + 1):
+                hidden = frame not in frames
+                for m in meshes:
+                    m.hide_render = hidden
+                    m.hide_viewport = hidden
+                    m.keyframe_insert("hide_render", frame=frame)
+                    m.keyframe_insert("hide_viewport", frame=frame)
+        everything = [self.body] + list(self.parts.values())
+        everything += [o for o, _ in self.tools]
+        everything += [c for o, _ in self.tools + self.loads for c in o.children_recursive]
+        hold_frames(everything)
+
+
+def _span(anim):
+    first, last = VILLAGER_SPANS[anim]
+    return set(range(first, last + 1))
 
 
 # --------------------------------------------------------------------------
@@ -706,6 +1368,10 @@ class Rider:
     def _add(self, key, obj):
         obj.parent = self.body
         self.parts[key] = obj
+        # A body is rounded, limbs, head and trunk all but capsules; what it
+        # wears keeps its shape, or a cone helmet's rim turns into a brim.
+        if key in BODY_PARTS:
+            soften(obj, 0.42, 3, limit=0.06)
         return obj
 
     def hold(self, weapon, lean=18.0):
@@ -853,6 +1519,10 @@ class Animal:
     def _add(self, key, obj):
         obj.parent = self.body
         self.parts[key] = obj
+        # A body is rounded, limbs, head and trunk all but capsules; what it
+        # wears keeps its shape, or a cone helmet's rim turns into a brim.
+        if key in BODY_PARTS:
+            soften(obj, 0.42, 3, limit=0.06)
         return obj
 
     def animate(self):

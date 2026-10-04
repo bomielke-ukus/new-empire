@@ -248,9 +248,12 @@ which halved the tick on the eight-player maps, the ceilings lowered to
 match, an `F4` readout in the app for the measurement on a real Mac, and
 the `RM-M7-01` observation sheet (`docs/09` §9.1). The plan and the
 record are in `docs/10` §4d. What remains of M7 is the owner's: the Mac
-measurement, the six players, and the real sprite art and its animations,
-which wait on the art pipeline (`docs/08` §9 step 3) and need a modeller
-and Blender.
+measurement and the six players. The sprite art is being modelled by code
+(`docs/08` §9 step 3, the owner's choice): every unit, building and node
+the simulation has is rendered, villagers at their tasks and with their
+loads, and the ground carries a rendered grain (`docs/07` D28); the
+buildings, the villager and the infantry have a look for each age
+(`docs/07` D29).
 
 - Full audio: acknowledgments, work loops, positional world SFX, ambience,
   age fanfares, music stems, combat ducking

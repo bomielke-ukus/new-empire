@@ -398,7 +398,22 @@ mod tests {
                 .iter()
                 .map(|a| a.name.as_str())
                 .collect::<Vec<_>>(),
-            ["idle", "walk", "attack", "death", "decay"]
+            [
+                "idle",
+                "walk",
+                "attack",
+                "death",
+                "decay",
+                "build",
+                "carry_food",
+                "carry_gold",
+                "carry_stone",
+                "carry_wood",
+                "chop",
+                "farm",
+                "forage",
+                "mine"
+            ]
         );
         let (x, y, w, h) = v.frame_rect(1, 2, 3);
         assert_eq!((x, y, w, h), (240, (5 + 2) * 96, 80, 96));
