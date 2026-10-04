@@ -1750,6 +1750,34 @@ to each, round and round. It is rebindable on the settings screen as
 NEXT IDLE SOLDIER and listed in the controls overlay and the release
 notes' keys.
 
+### Work record: M8 chunk 2 — the opponent fields the later ages (2026-10-04)
+
+The computer opponent had built nothing past the Tool Age's two
+buildings, researched nothing but ages and so never had an Axeman, and in
+Hard-against-Hard matches neither side left the Tool Age in forty
+minutes: its gold share was given to food and wood whenever their stock
+ran low, which in a later age's economy is always.
+
+- **What it builds and trains.** The Academy, the Siege Workshop and the
+  Stable in the Bronze Age (the first two are the Iron Age's pair); a
+  Bronze Age army of Swordsmen, Hoplites, Bowmen, Chariot Archers, Heavy
+  Cavalry, Axemen and a few Stone Throwers, and an Iron Age one adding
+  Legionaries, Horse Archers, War Elephants, Catapults and Ballistas.
+  Siege stays a small share: its stones land on the opponent's own men.
+- **Line upgrades.** It researches the upgrade of whatever its mix
+  holds: the Axe, Legion, Torsion.
+- **Saving for the ages.** The next age is saved for once the army is
+  big enough to attack with, and the Bronze Age after ten minutes in the
+  Tool Age regardless; from the Bronze Age on, the building the next age
+  needs is saved for too. The gold share is kept from the Bronze Age on,
+  and an army reserve applies only to what a soldier costs; the
+  food-only Clubman fallback stops at the Tool Age.
+- **Result.** In Hard against Hard both sides reach the Bronze Age and
+  most the Iron, fielding Swordsmen, Hoplites, Heavy Cavalry, War
+  Elephants and Stone Throwers. Hard still beats Easy in 20 of 20
+  (`RM-M5-01`); the record is rewritten. `simrunner ai --stats` now
+  lists what each side trained, by kind.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the
@@ -1971,12 +1999,9 @@ Stated so they are not rediscovered.
 - **The sprite atlas is 83% full** (6802 of 8192 rows at 4096 wide). A
   second civilisation's sets, or another batch the size of the ages, will
   need a second atlas page or a texture array, not a wider texture.
-- **The later ages' soldiers are placeholders and the opponent ignores
-  them.** The ten Bronze and Iron Age units draw as code-drawn shapes
-  until their models are rendered (`sprites::AWAITING_ART` lists them),
-  and the computer opponent builds no Academy or Siege Workshop and
-  researches nothing but ages, so it never fields them, nor the Axeman.
-  M8 chunks 2 and 3.
+- **The opponent researches no technology but ages and line upgrades**:
+  no Toolworking, Leather Armour, Fletching, gathering or farming
+  technology. It reaches the Iron Age in some long matches, not all.
 - **One notification row stays open**: no Wonder to announce.
 - **The Mac build is not notarised and is Apple Silicon only.**
   Notarising needs an Apple Developer account and a signing identity in

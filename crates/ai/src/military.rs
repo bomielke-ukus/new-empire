@@ -9,6 +9,7 @@
 //! which is what the scout is for.
 
 use fogged::kinds::{self, Cost, Resource};
+use fogged::tech;
 use fogged::{
     Age, CommandKind, EntityId, Event, FoggedView, Item, Job, KindId, Rng, Sighting, Stance, Vec2Fx,
 };
@@ -290,10 +291,7 @@ impl Military {
                     let target = (want * share).div_ceil(100) as i32;
                     let deficit = target - *have.get(&kind).unwrap_or(&0) as i32;
                     let cost = kinds::info(kind).cost;
-                    let mut with_reserve = cost;
-                    for (c, r) in with_reserve.iter_mut().zip(RESERVE) {
-                        *c += r;
-                    }
+                    let with_reserve = reserved(cost);
                     if deficit <= 0
                         || !afford(stock, &with_reserve)
                         || view.can_train(b.id, kind).is_err()
@@ -308,8 +306,9 @@ impl Military {
             // Nothing in the composition can be paid for, usually for want
             // of wood while the food piles up: the cheapest soldier a
             // building of ours trains, paid in food alone, is better than
-            // none.
-            if best.is_none() {
+            // none. Not from the Bronze Age on, where that is a Clubman
+            // against swords: there the army waits for what it wants.
+            if best.is_none() && age < 2 {
                 let mut cheapest: Option<(i32, KindId, EntityId)> = None;
                 for b in mine
                     .iter()
@@ -338,6 +337,33 @@ impl Military {
             if let Some((_, kind, building)) = best {
                 out.push(CommandKind::Train { building, kind });
                 spend(stock, &kinds::info(kind).cost);
+            }
+        }
+
+        // ----- Line upgrades for what the army is made of: the Axe for
+        // the Axeman, Legion for the Legionary, Torsion for the Catapult.
+        // Each once, at a finished building of ours, with the reserve kept.
+        for t in tech::all() {
+            let Some((_, to)) = t.upgrades_line() else {
+                continue;
+            };
+            if !COMPOSITION[age].iter().any(|(k, _)| *k == to) {
+                continue;
+            }
+            let Some(b) = mine.iter().find(|s| s.kind == t.building && !s.site) else {
+                continue;
+            };
+            let queue = view.queue(b.id);
+            if queue.len() >= 2 || queue.contains(&Item::Tech(t.id)) {
+                continue;
+            }
+            let with_reserve = reserved(t.cost);
+            if afford(stock, &with_reserve) && view.can_research(b.id, t.id).is_ok() {
+                out.push(CommandKind::Research {
+                    building: b.id,
+                    tech: t.id,
+                });
+                spend(stock, &t.cost);
             }
         }
 
@@ -415,6 +441,18 @@ impl Military {
     }
 }
 
+/// `cost` with the reserve kept on what it is paid in: a soldier paid in
+/// food and gold leaves the wood alone, whatever wood is short.
+fn reserved(cost: Cost) -> Cost {
+    let mut out = cost;
+    for (c, r) in out.iter_mut().zip(RESERVE) {
+        if *c > 0 {
+            *c += r;
+        }
+    }
+    out
+}
+
 /// The eight compass points, in the order the scout rides them.
 const COMPASS: [(i32, i32); 8] = [
     (1, 0),
@@ -430,7 +468,10 @@ const COMPASS: [(i32, i32); 8] = [
 /// The army's shape by age index, in percent of the army target: what to
 /// train, and how much of it. A kind a building of ours cannot train yet
 /// is skipped, so the Stone Age is all clubmen and the Tool Age is axemen
-/// with bowmen and slingers once their buildings stand.
+/// (once the Axe is researched) with bowmen and slingers once their
+/// buildings stand. A line's two ends share out its part: Hoplites until
+/// Legion, Stone Throwers until Torsion. Siege is a small part of it: its
+/// stones land on the opponent's own men as readily as on anyone's.
 const COMPOSITION: [&[(KindId, u32)]; 4] = [
     &[(kinds::CLUBMAN, 100)],
     &[
@@ -440,16 +481,25 @@ const COMPOSITION: [&[(KindId, u32)]; 4] = [
         (kinds::CLUBMAN, 15),
     ],
     &[
-        (kinds::AXEMAN, 35),
-        (kinds::BOWMAN, 30),
-        (kinds::LIGHT_CAVALRY, 20),
-        (kinds::SLINGER, 15),
+        (kinds::SWORDSMAN, 25),
+        (kinds::HOPLITE, 20),
+        (kinds::BOWMAN, 20),
+        (kinds::CHARIOT_ARCHER, 10),
+        (kinds::HEAVY_CAVALRY, 10),
+        (kinds::AXEMAN, 10),
+        (kinds::STONE_THROWER, 5),
     ],
     &[
-        (kinds::AXEMAN, 35),
-        (kinds::BOWMAN, 30),
-        (kinds::LIGHT_CAVALRY, 20),
-        (kinds::SLINGER, 15),
+        (kinds::LEGIONARY, 20),
+        (kinds::HOPLITE, 5),
+        (kinds::SWORDSMAN, 15),
+        (kinds::HORSE_ARCHER, 15),
+        (kinds::BOWMAN, 10),
+        (kinds::WAR_ELEPHANT, 10),
+        (kinds::HEAVY_CAVALRY, 10),
+        (kinds::CATAPULT, 5),
+        (kinds::STONE_THROWER, 5),
+        (kinds::BALLISTA, 5),
     ],
 ];
 

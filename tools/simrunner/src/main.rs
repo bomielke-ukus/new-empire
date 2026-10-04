@@ -957,6 +957,10 @@ fn ai(f: &Flags) -> ExitCode {
             })
             .collect();
         let mut issued = 0usize;
+        // Every soldier each side trained over the match, by kind, for the
+        // statistics: what the opponents field, age by age.
+        let mut trained: Vec<std::collections::BTreeMap<&'static str, u32>> =
+            vec![Default::default(); players as usize];
         while sim.tick() < ticks {
             for bot in &mut opponents {
                 let commands = {
@@ -979,6 +983,15 @@ fn ai(f: &Flags) -> ExitCode {
                     "seed {seed}: invariant at tick {}: {e}",
                     sim.tick()
                 ));
+            }
+            for e in sim.events() {
+                if let sim::Event::Trained { kind, owner, .. } = *e {
+                    if kind != kinds::VILLAGER {
+                        if let Some(t) = trained.get_mut(owner as usize) {
+                            *t.entry(kinds::info(kind).name).or_insert(0) += 1;
+                        }
+                    }
+                }
             }
         }
         let sides: Vec<String> = (0..players)
@@ -1050,7 +1063,8 @@ fn ai(f: &Flags) -> ExitCode {
                             .map_or_else(|e| e.to_string(), |_| "ok".into())
                     });
                     line.push_str(&format!(
-                        "\n     jobs {jobs:?}\n     buildings {buildings:?}\n     queue {queue:?}, train villager: {train:?}\n     food in sight: {} nodes, {} left",
+                        "\n     jobs {jobs:?}\n     buildings {buildings:?}\n     trained {:?}\n     queue {queue:?}, train villager: {train:?}\n     food in sight: {} nodes, {} left",
+                        trained[p as usize],
                         food.len(),
                         food.iter().sum::<i32>()
                     ));
