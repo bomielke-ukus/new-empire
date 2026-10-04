@@ -1842,10 +1842,11 @@ Stated so they are not rediscovered.
   or a second civilisation's. A modeller's work can replace any set by
   name.
 - **One notification row stays open**: no Wonder to announce.
-- **The Mac build is not notarised, Apple Silicon only, and has no icon.**
+- **The Mac build is not notarised and is Apple Silicon only.**
   Notarising needs an Apple Developer account and a signing identity in
   the workflow's secrets; an Intel slice needs a second target and `lipo`
-  (the owner has no Intel Mac, so none is planned); the icon is not drawn.
+  (the owner has no Intel Mac, so none is planned). The icon is the
+  rendered Town Center (`tools/render/icon.py`, 2026-10-04).
 - The age-up **fanfare** waits for audio (M7). The sweep and banner exist.
 - **Age variants exist for placeholders only.** Rendered sets carry no
   variants yet; `Atlas::variant` answers with the base kind for them. The

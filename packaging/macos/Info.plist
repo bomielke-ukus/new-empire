@@ -12,6 +12,8 @@
   <string>en</string>
   <key>CFBundleExecutable</key>
   <string>new-empire</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleIdentifier</key>
   <string>dev.brendens-empires.game</string>
   <key>CFBundleInfoDictionaryVersion</key>
