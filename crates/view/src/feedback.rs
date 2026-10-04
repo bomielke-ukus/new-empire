@@ -382,6 +382,7 @@ impl CombatFeedback {
                 y: (gy - ay * keep).round(),
                 w: w0,
                 h: h0 * keep,
+                page: frame.page,
                 u: frame.x,
                 v: frame.y,
                 uw: frame.w,

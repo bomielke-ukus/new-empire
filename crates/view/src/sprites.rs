@@ -174,6 +174,8 @@ pub struct Frame {
     pub index: u8,
     /// Authored pixels per 1× pixel. A frame drawn at 1× is `w / scale` wide.
     pub scale: u8,
+    /// Which page of the atlas.
+    pub page: u8,
     /// Atlas rectangle.
     pub x: u16,
     /// Atlas rectangle.
@@ -223,9 +225,11 @@ pub const fn source_facing(facing8: u8) -> (u8, bool) {
 pub struct Atlas {
     /// Texture width.
     pub width: u32,
-    /// Texture height.
+    /// Height of each page.
     pub height: u32,
-    /// Palette indices, row-major.
+    /// Pages: layers of a texture array, each `width` × `height`.
+    pub pages: u32,
+    /// Palette indices, row-major, page after page.
     pub indices: Vec<u8>,
     frames: Vec<Frame>,
     lookup: HashMap<(KindId, u8, Anim, u8), usize>,
@@ -301,10 +305,10 @@ impl Atlas {
         &self.frames
     }
 
-    /// Palette index at an atlas pixel; 0 outside.
-    pub fn index_at(&self, x: u32, y: u32) -> u8 {
-        if x < self.width && y < self.height {
-            self.indices[(y * self.width + x) as usize]
+    /// Palette index at a pixel of a page; 0 outside.
+    pub fn index_at(&self, page: u8, x: u32, y: u32) -> u8 {
+        if x < self.width && y < self.height && (page as u32) < self.pages {
+            self.indices[((page as u32 * self.height + y) * self.width + x) as usize]
         } else {
             0
         }
@@ -555,7 +559,7 @@ impl Atlas {
             canvases.push(still(UI_GLYPH_DARK + i as KindId, 0, glyph(ch, BLACK)));
             canvases.push(still(UI_GLYPH_GOLD + i as KindId, 0, glyph(ch, GOLD_LIGHT)));
         }
-        let mut atlas = pack(canvases, ATLAS_WIDTH);
+        let mut atlas = pack(canvases, ATLAS_WIDTH, ATLAS_PAGE_HEIGHT);
         atlas.anims = anims;
         atlas.variants = variants;
         atlas.loaded_sets = loaded_sets;
@@ -723,11 +727,16 @@ fn glyph(ch: char, idx: u8) -> Canvas {
     c
 }
 
-/// Atlas texture width. Height grows to fit, up to the GPU's limit (8192 a
-/// side by default): with every rendered set, its age looks and the later
-/// ages' soldiers loaded, a narrower atlas runs past it. One byte a pixel
-/// (`R8Uint`), so the whole square is 64 MB.
+/// Atlas texture width. A page's height grows to fit, up to the GPU's limit
+/// (8192 a side by default): with every rendered set, its age looks and the
+/// later ages' soldiers loaded, a narrower atlas runs past it. One byte a
+/// pixel (`R8Uint`), so a full page is 64 MB.
 pub const ATLAS_WIDTH: u32 = 8192;
+
+/// The tallest a page may be; what does not fit goes on the next page, a
+/// further layer of the texture array (each architecture's buildings
+/// filled more than one).
+pub const ATLAS_PAGE_HEIGHT: u32 = 8192;
 
 /// A frame waiting to be packed.
 struct Entry {
@@ -773,17 +782,27 @@ fn drawn_bounds(
 
 /// Shelf-packs canvases into an atlas of the given width. Taller frames go
 /// first so shelves waste less.
-fn pack(mut canvases: Vec<Entry>, width: u32) -> Atlas {
+/// Shelf-packs the frames, tallest first, onto pages `width` wide and at
+/// most `page_height` tall. One page is as tall as it needs to be (to the
+/// next power of two); more than one are all `page_height`.
+fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
     canvases.sort_by_key(|e| std::cmp::Reverse(e.canvas.h));
     let mut frames = Vec::new();
     let mut lookup = HashMap::new();
-    let mut placed: Vec<(u32, u32, Canvas)> = Vec::new();
-    let (mut x, mut y, mut shelf_h) = (0u32, 0u32, 0u32);
+    let mut placed: Vec<(u32, u32, u32, Canvas)> = Vec::new();
+    let (mut page, mut x, mut y, mut shelf_h) = (0u32, 0u32, 0u32, 0u32);
+    let mut used = 0u32;
     for e in canvases {
         let c = e.canvas;
         if x + c.w > width {
             x = 0;
             y += shelf_h + 1;
+            shelf_h = 0;
+        }
+        if y + c.h > page_height {
+            page += 1;
+            x = 0;
+            y = 0;
             shelf_h = 0;
         }
         frames.push(Frame {
@@ -792,6 +811,7 @@ fn pack(mut canvases: Vec<Entry>, width: u32) -> Atlas {
             anim: e.anim,
             index: e.index,
             scale: e.scale,
+            page: page as u8,
             x: x as u16,
             y: y as u16,
             w: c.w as u16,
@@ -801,21 +821,28 @@ fn pack(mut canvases: Vec<Entry>, width: u32) -> Atlas {
         });
         lookup.insert((e.kind, e.facing, e.anim, e.index), frames.len() - 1);
         shelf_h = shelf_h.max(c.h);
-        placed.push((x, y, c));
-        x += placed.last().unwrap().2.w + 1;
+        used = used.max(y + shelf_h);
+        x += c.w + 1;
+        placed.push((page, x - c.w - 1, y, c));
     }
-    let height = (y + shelf_h).next_power_of_two().max(1);
-    let mut indices = vec![0u8; (width * height) as usize];
-    for (px, py, c) in placed {
+    let pages = page + 1;
+    let height = if pages == 1 {
+        used.next_power_of_two().clamp(1, page_height)
+    } else {
+        page_height
+    };
+    let mut indices = vec![0u8; (width * height * pages) as usize];
+    for (pg, px, py, c) in placed {
         for row in 0..c.h {
             let src = (row * c.w) as usize;
-            let dst = ((py + row) * width + px) as usize;
+            let dst = (((pg * height) + py + row) * width + px) as usize;
             indices[dst..dst + c.w as usize].copy_from_slice(&c.px[src..src + c.w as usize]);
         }
     }
     Atlas {
         width,
         height,
+        pages,
         indices,
         frames,
         lookup,
@@ -2295,7 +2322,7 @@ mod tests {
         for (i, f) in frames.iter().enumerate() {
             let painted = (0..f.h as u32)
                 .flat_map(|y| (0..f.w as u32).map(move |x| (x, y)))
-                .filter(|&(x, y)| a.index_at(f.x as u32 + x, f.y as u32 + y) != 0)
+                .filter(|&(x, y)| a.index_at(f.page, f.x as u32 + x, f.y as u32 + y) != 0)
                 .count();
             if f.kind < UI_RING && f.scale == 1 {
                 assert!(
@@ -2356,10 +2383,51 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for y in 0..g.h as u32 {
             for x in 0..g.w as u32 {
-                seen.insert(a.index_at(g.x as u32 + x, g.y as u32 + y));
+                seen.insert(a.index_at(g.page, g.x as u32 + x, g.y as u32 + y));
             }
         }
         assert_eq!(seen, [TRANSPARENT, WHITE].into_iter().collect());
+    }
+
+    #[test]
+    fn frames_that_do_not_fit_a_page_go_on_the_next() {
+        // 10 x 10 frames on 32 x 24 pages: three to a shelf (a pixel apart),
+        // two shelves to a page, so eight frames fill a page and a third.
+        let entries = (0..8)
+            .map(|k| {
+                let mut canvas = Canvas::new(10, 10, (5, 9));
+                canvas.set(0, 0, 7 + k as u8);
+                Entry {
+                    kind: k,
+                    facing: 0,
+                    anim: Anim::Idle,
+                    index: 0,
+                    scale: 1,
+                    canvas,
+                }
+            })
+            .collect();
+        let a = pack(entries, 32, 24);
+        assert_eq!((a.pages, a.height), (2, 24));
+        assert_eq!(a.indices.len(), 32 * 24 * 2);
+        assert_eq!(a.frames().iter().filter(|f| f.page == 1).count(), 2);
+        for f in a.frames() {
+            assert_eq!(a.index_at(f.page, f.x as u32, f.y as u32), 7 + f.kind as u8);
+        }
+        // One page is only as tall as it needs.
+        let one = pack(
+            vec![Entry {
+                kind: 0,
+                facing: 0,
+                anim: Anim::Idle,
+                index: 0,
+                scale: 1,
+                canvas: Canvas::new(10, 10, (5, 9)),
+            }],
+            32,
+            24,
+        );
+        assert_eq!((one.pages, one.height), (1, 16));
     }
 
     #[test]
@@ -2512,7 +2580,7 @@ mod tests {
             let mut tails = Vec::new();
             for y in 0..frame.h as u32 {
                 for x in 0..frame.w as u32 {
-                    let index = atlas.index_at(frame.x as u32 + x, frame.y as u32 + y);
+                    let index = atlas.index_at(frame.page, frame.x as u32 + x, frame.y as u32 + y);
                     let sx = if flip {
                         frame.w as f32 - 1.0 - x as f32
                     } else {
@@ -2545,7 +2613,7 @@ mod tests {
             let (f, _) = a.frame(kinds::VILLAGER, facing).unwrap();
             (0..f.h as u32)
                 .flat_map(|y| (0..f.w as u32).map(move |x| (x, y)))
-                .map(|(x, y)| a.index_at(f.x as u32 + x, f.y as u32 + y))
+                .map(|(x, y)| a.index_at(f.page, f.x as u32 + x, f.y as u32 + y))
                 .collect::<Vec<_>>()
         };
         assert_ne!(pixels(1), pixels(3));

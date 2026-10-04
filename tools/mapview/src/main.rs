@@ -386,11 +386,13 @@ fn run() -> Result<(), String> {
             .iter()
             .flat_map(|&i| pal[256 + i as usize]) // player 0's row so the ramp shows
             .collect();
-        save(path, atlas.width, atlas.height, &rgba)?;
+        // The pages one under another.
+        save(path, atlas.width, atlas.height * atlas.pages, &rgba)?;
         println!(
-            "wrote atlas {path} ({}x{}, {} frames)",
+            "wrote atlas {path} ({}x{}, {} page(s), {} frames)",
             atlas.width,
             atlas.height,
+            atlas.pages,
             atlas.frames().len()
         );
     }

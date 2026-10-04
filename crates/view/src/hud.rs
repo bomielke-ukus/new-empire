@@ -443,6 +443,7 @@ impl<'a> Painter<'a> {
             y: y.round(),
             w,
             h,
+            page: f.page,
             u: f.x,
             v: f.y,
             uw: f.w,

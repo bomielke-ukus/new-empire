@@ -41,6 +41,8 @@ pub struct SpriteInstance {
     pub w: f32,
     /// Size in px at 1×.
     pub h: f32,
+    /// Atlas page.
+    pub page: u8,
     /// Atlas rectangle, px.
     pub u: u16,
     /// Atlas rectangle, px.
@@ -369,6 +371,7 @@ impl Scene {
                 y: (gy - ay * worn).round(),
                 w: frame.draw_w() * worn,
                 h: frame.draw_h() * worn,
+                page: frame.page,
                 u: frame.x,
                 v: frame.y,
                 uw: frame.w,
@@ -663,6 +666,7 @@ fn waypoint_marks(
             y: (gy - size / 2.0 - lift).round(),
             w: size,
             h: size,
+            page: frame.page,
             u: frame.x,
             v: frame.y,
             uw: frame.w,
@@ -840,6 +844,7 @@ pub(crate) fn overlay(
         y: (gy - ay).round(),
         w: frame.draw_w(),
         h: frame.draw_h(),
+        page: frame.page,
         u: frame.x,
         v: frame.y,
         uw: frame.w,

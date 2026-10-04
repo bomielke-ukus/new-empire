@@ -126,13 +126,14 @@ impl Renderer {
             }],
         });
 
-        // Atlas (R8Uint) and palette (RGBA8) for sprites: group 1.
+        // Atlas (R8Uint, a layer a page) and palette (RGBA8) for sprites:
+        // group 1.
         let atlas_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("atlas"),
             size: wgpu::Extent3d {
                 width: atlas.width,
                 height: atlas.height,
-                depth_or_array_layers: 1,
+                depth_or_array_layers: atlas.pages,
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -141,13 +142,13 @@ impl Renderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        write_texture(
+        write_layers(
             queue,
             &atlas_tex,
             &atlas.indices,
             atlas.width,
             atlas.height,
-            1,
+            atlas.pages,
         );
         let pal = view::palette::texture();
         let pal_bytes: Vec<u8> = pal.iter().flatten().copied().collect();
@@ -181,7 +182,7 @@ impl Renderer {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Uint,
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
                     count: None,
@@ -204,9 +205,12 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        &atlas_tex.create_view(&Default::default()),
-                    ),
+                    resource: wgpu::BindingResource::TextureView(&atlas_tex.create_view(
+                        &wgpu::TextureViewDescriptor {
+                            dimension: Some(wgpu::TextureViewDimension::D2Array),
+                            ..Default::default()
+                        },
+                    )),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -546,7 +550,13 @@ impl Renderer {
         let to_gpu = |s: &view::SpriteInstance| SpriteGpu {
             rect: [s.x, s.y, s.w, s.h],
             uv: [s.u as f32, s.v as f32, s.uw as f32, s.vh as f32],
-            misc: [s.row as u32, s.flip as u32, s.screen as u32, s.light as u32],
+            // The page rides above the flip bit.
+            misc: [
+                s.row as u32,
+                s.flip as u32 | (s.page as u32) << 1,
+                s.screen as u32,
+                s.light as u32,
+            ],
         };
         let gpu: Vec<SpriteGpu> = scene
             .sprites
@@ -735,6 +745,37 @@ fn write_texture(
             width,
             height,
             depth_or_array_layers: 1,
+        },
+    );
+}
+
+/// Uploads `layers` layers of a one-byte-a-pixel texture array, laid one
+/// after another in `data`.
+fn write_layers(
+    queue: &wgpu::Queue,
+    tex: &wgpu::Texture,
+    data: &[u8],
+    width: u32,
+    height: u32,
+    layers: u32,
+) {
+    queue.write_texture(
+        wgpu::ImageCopyTexture {
+            texture: tex,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        data,
+        wgpu::ImageDataLayout {
+            offset: 0,
+            bytes_per_row: Some(width),
+            rows_per_image: Some(height),
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: layers,
         },
     );
 }

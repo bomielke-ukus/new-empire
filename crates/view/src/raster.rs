@@ -221,7 +221,7 @@ pub fn draw_sprites(
                 if s.flip {
                     sx = s.uw as u32 - 1 - sx;
                 }
-                let idx = atlas.index_at(s.u as u32 + sx, s.v as u32 + sy);
+                let idx = atlas.index_at(s.page, s.u as u32 + sx, s.v as u32 + sy);
                 if idx == palette::TRANSPARENT {
                     continue;
                 }
