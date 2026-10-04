@@ -108,6 +108,15 @@ Infantry get costume variants per age too (hides → cloth → bronze → iron).
 This is the single largest art cost in the project, and it is where the money
 should go.
 
+**As built** (`docs/07` D29): a building keeps its shape and changes its
+materials and trim. Stone Age: mudbrick under thatch. Tool Age: a timber
+frame on the mudbrick, shingle roofs. Bronze Age: plaster over a stone
+base course, terracotta roofs. Iron Age: dressed stone with cornices and
+pilasters, slate roofs. The infantry go from tunics to hide caps and
+wraps, then bronze and then iron caps, pads and greaves, with a cape in the
+Iron Age; villagers from bare heads to a linen cap, a straw hat and a hood.
+The ranged soldiers, the riders, the farm and the walls have one look.
+
 ---
 
 ## 3. Terrain

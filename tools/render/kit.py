@@ -94,6 +94,9 @@ COLOURS = {
     "white": srgb(0.88, 0.86, 0.80),
     # The dark of a window or a doorway: the room behind it, unlit.
     "opening": srgb(0.10, 0.08, 0.07),
+    # Split-wood shingles, the Tool Age's roofs; slate, the Iron Age's.
+    "shingle": srgb(0.46, 0.37, 0.27),
+    "slate": srgb(0.36, 0.39, 0.44),
 }
 
 
@@ -126,6 +129,8 @@ SURFACES = {
     "thatch": ("grain", 24.0, 0.12, 0.3),
     "straw": ("grain", 24.0, 0.10, 0.2),
     "clay_roof": ("courses", 40.0, 0.14, 0.3),
+    "shingle": ("courses", 45.0, 0.16, 0.35),
+    "slate": ("courses", 40.0, 0.12, 0.3),
     "earth": ("noise", 25.0, 0.12, 0.3),
     "crop": ("noise", 30.0, 0.20, 0.5),
     "leaf": ("noise", 30.0, 0.20, 0.6),
@@ -426,6 +431,9 @@ class Humanoid:
     the root stays free for render_sheet.py's turntable.
     """
 
+    # Which age's dress it wears past the Stone Age (`age_dress`).
+    COSTUME = "soldier"
+
     def __init__(self, root_name, tunic="player", dress="tunic", helmet=None,
                  helmet_mat="bronze", hair=True):
         self.root = empty(root_name)
@@ -462,6 +470,8 @@ class Humanoid:
         self.weapon_hand = "right"
         self.weapon_lean = 0.0
         self.shield = None
+        if STYLE_AGE:
+            age_dress(self, STYLE_AGE, self.COSTUME)
 
     def _add(self, key, obj):
         obj.parent = self.body
@@ -736,6 +746,8 @@ class Building:
         return obj
 
     def finish(self):
+        if STYLE_AGE:
+            style_building(self, STYLE_AGE)
         scene = bpy.context.scene
         scene.frame_start, scene.frame_end = 1, self.frames
         for obj, frames in self.shown:
@@ -982,6 +994,115 @@ def gate_orientation(o):
 
 
 # --------------------------------------------------------------------------
+# The ages. A settlement and its people change as their owner advances
+# (`docs/02` section 4): the same buildings in the materials of each age,
+# the same figures in each age's dress. `STYLE_AGE` is the age being built,
+# 0 to 3 for Stone to Iron; slice.py sets it for an aged subject
+# (`house_bronze`), and Building.finish and Humanoid apply it.
+
+STYLE_AGE = 0
+
+# What each age builds in, by the Stone Age material it replaces.
+AGE_MATERIALS = {
+    1: {"thatch": "shingle"},
+    2: {"thatch": "clay_roof", "mudbrick": "plaster"},
+    3: {"thatch": "slate", "clay_roof": "slate", "mudbrick": "stone_light",
+        "plaster": "stone_light"},
+}
+
+
+def style_building(b, age):
+    """Rebuilds `b`'s materials and adds its age's work to every walled
+    block in it: a timber frame in the Tool Age, a stone base course in the
+    Bronze, a cornice and pilasters of dressed stone in the Iron."""
+    swaps = AGE_MATERIALS.get(age, {})
+    for obj in b.root.children_recursive:
+        if obj.type != "MESH" or not obj.data.materials:
+            continue
+        name = obj.data.materials[0].name
+        if name in swaps:
+            obj.data.materials[0] = material(swaps[name])
+    walls = [(obj, frames) for obj, frames in b.shown
+             if obj.name.endswith("_walls") and obj.type == "MESH"]
+    for obj, frames in walls:
+        xs = [v.co for v in obj.data.vertices]
+        w = max(c.x for c in xs) - min(c.x for c in xs)
+        d = max(c.y for c in xs) - min(c.y for c in xs)
+        h = max(c.z for c in xs) - min(c.z for c in xs)
+        cx, cy, z0 = obj.location.x, obj.location.y, obj.location.z
+        name = obj.name
+        shown = tuple(frames)
+        if age == 1:
+            timber_frame(b, name, (cx, cy, z0), w, d, h, shown)
+        elif age == 2:
+            b.add(box(name + "_course", (w + 0.03, d + 0.03, h * 0.22), "stone_light",
+                      (cx, cy, z0)), shown)
+        elif age == 3:
+            b.add(box(name + "_cornice", (w + 0.07, d + 0.07, 0.05), "white",
+                      (cx, cy, z0 + h - 0.03)), shown)
+            for sx in (-1.0, 1.0):
+                for sy in (-1.0, 1.0):
+                    b.add(box("%s_pilaster_%d%d" % (name, sx > 0, sy > 0), (0.07, 0.07, h),
+                              "white", (cx + sx * w / 2, cy + sy * d / 2, z0)), shown)
+
+
+def timber_frame(b, name, at, w, d, h, frames):
+    """Posts and rails of dark timber standing proud of the two wall faces
+    the camera sees, clear of the door and the windows."""
+    cx, cy, z0 = at
+    beam = 0.035
+    for i, t in enumerate([-0.5, -0.17, 0.17, 0.5]):
+        b.add(box("%s_post_y%d" % (name, i), (beam, 0.02, h), "wood_dark",
+                  (cx + t * w, cy + d / 2 + 0.008, z0)), frames)
+    for i, t in enumerate([-0.5, 0.0, 0.5]):
+        b.add(box("%s_post_x%d" % (name, i), (0.02, beam, h), "wood_dark",
+                  (cx + w / 2 + 0.008, cy + t * d, z0)), frames)
+    for i, z in enumerate([h * 0.62, h - beam]):
+        b.add(box("%s_rail_y%d" % (name, i), (w, 0.02, beam), "wood_dark",
+                  (cx, cy + d / 2 + 0.01, z0 + z)), frames)
+        b.add(box("%s_rail_x%d" % (name, i), (0.02, d, beam), "wood_dark",
+                  (cx + w / 2 + 0.01, cy, z0 + z)), frames)
+
+
+def age_dress(h, age, costume):
+    """A figure's dress for its age. Soldiers: a belt, a cap and shoulder
+    wraps of hide in the Tool Age; a bronze cap, pads and greaves in the
+    Bronze; iron ones and a cape in the Iron, where a bronze helmet turns
+    iron too. Villagers: a belt, then a cap of linen, a hat of straw, a dark
+    hood and a cape. The head carries most of it: on a sprite 34 px tall the
+    head is what reads. What it wears keeps its owner's tunic in view, where
+    the colour that says whose it is lies."""
+    body = h.parts
+    def on(part, key, size, mat, at=(0.0, 0.0, 0.0)):
+        piece = box("%s_%s" % (h.root.name, key), size, mat, at)
+        piece.parent = body[part] if part else h.body
+        return piece
+    on(None, "belt", (0.285, 0.185, 0.045), "hide", (0.0, 0.0, HIP_Z))
+    if costume == "villager":
+        head = {1: "linen", 2: "straw", 3: "wood_dark"}[age]
+        on(None, "hat", (0.215, 0.205, 0.075), head, (0.0, 0.01, 0.79))
+        if age == 2:
+            on(None, "brim", (0.29, 0.28, 0.02), "straw", (0.0, 0.01, 0.79))
+    else:
+        metal = {1: "hide", 2: "bronze", 3: "iron"}[age]
+        if "helmet" not in body:
+            on(None, "cap", (0.215, 0.205, 0.085), metal, (0.0, 0.01, 0.785))
+        elif age == 3:
+            for key in ("helmet", "helmet_top"):
+                part = body.get(key)
+                if part is not None and part.data.materials[0].name == "bronze":
+                    part.data.materials[0] = material("iron")
+        for side in ("l", "r"):
+            on("arm_" + side, "pad_" + side, (0.1, 0.11, 0.08), metal, (0.0, 0.0, -0.08))
+            if age >= 2:
+                on("leg_" + side, "greave_" + side, (0.115, 0.125, 0.15), metal,
+                   (0.0, 0.0, -HIP_Z + 0.02))
+    if age == 3:
+        on(None, "cape", (0.25, 0.03, 0.34), "hide" if costume == "villager" else "wood_dark",
+           (0.0, -0.1, HIP_Z - 0.02))
+
+
+# --------------------------------------------------------------------------
 # The villager: the figure, a tool for each job, and the loads it carries
 # home. Its five animations are every unit's; the tasks and the carry walks
 # come after them (docs/05 section 2.2), and the game picks one by what the
@@ -1118,6 +1239,8 @@ class Villager(Humanoid):
     """The villager: the soldiers' figure in the owner's tunic, hatchet in
     hand, with a tool for each job and the loads it carries home. Each tool
     and load is shown only on the frames of its own animation."""
+
+    COSTUME = "villager"
 
     def __init__(self, root_name):
         super().__init__(root_name)

@@ -904,16 +904,56 @@ SUBJECTS = {
 SUBJECTS.update({"ground_" + g: (globals()["ground_" + g], "Terrain", "ground") for g in GROUNDS})
 
 
+# The ages a subject has its own look in, past its own (kit.STYLE_AGE): a
+# subject that can stand in the Stone Age is drawn anew for the three after
+# it, one that comes with the Tool Age likewise (its own model is never seen
+# before then), one that comes with the Bronze Age for the Iron. The set is
+# named for its age: `house_tool`, `temple_iron`. The farm, the walls and the
+# gate look the same in every age; the ranged soldiers and the riders keep
+# theirs (`docs/02` section 4 dresses the villager and the infantry).
+AGE_NAMES = {1: "tool", 2: "bronze", 3: "iron"}
+AGED = {
+    "town_center": (1, 2, 3), "house": (1, 2, 3), "storehouse": (1, 2, 3),
+    "barracks": (1, 2, 3), "archery_range": (1, 2, 3), "stable": (1, 2, 3),
+    "market": (1, 2, 3), "watch_tower": (1, 2, 3),
+    "temple": (3,), "academy": (3,), "siege_workshop": (3,), "government_centre": (3,),
+    "villager": (1, 2, 3), "clubman": (1, 2, 3), "axeman": (1, 2, 3), "spearman": (1, 2, 3),
+}
+
+
+def subject(name):
+    """The builder, class, kind and age for a subject's name."""
+    if name in SUBJECTS:
+        build, cls, what = SUBJECTS[name]
+        return build, cls, what, 0
+    base, _, suffix = name.rpartition("_")
+    for age, label in AGE_NAMES.items():
+        if suffix == label and age in AGED.get(base, ()):
+            build, cls, what = SUBJECTS[base]
+            return build, cls, what, age
+    return None
+
+
+def all_subjects():
+    names = list(SUBJECTS)
+    for base, ages in AGED.items():
+        names += ["%s_%s" % (base, AGE_NAMES[a]) for a in ages]
+    return sorted(names)
+
+
 def main():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     if "--list" in argv:
-        for name, (_, cls, what) in sorted(SUBJECTS.items()):
+        for name in all_subjects():
+            _, cls, what, _ = subject(name)
             print("%s %s %s" % (name, cls, what))
         return
     name = argv[argv.index("--subject") + 1]
-    if name not in SUBJECTS:
-        raise SystemExit("no subject %r; the slice has %s" % (name, sorted(SUBJECTS)))
-    build, _, _ = SUBJECTS[name]
+    found = subject(name)
+    if found is None:
+        raise SystemExit("no subject %r; the slice has %s" % (name, all_subjects()))
+    build, _, _, age = found
+    kit.STYLE_AGE = age
     kit.clear()
     root = build()
     bpy.context.view_layer.update()

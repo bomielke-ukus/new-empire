@@ -101,7 +101,8 @@ Work has run as three streams that merge into this branch:
   and composes sheets against the one palette (`docs/07` D19). Every
   unit, building and map node the simulation has is modelled by code in
   `tools/render/` and rendered through it, and the ground carries a grain
-  rendered from modelled patches (`docs/07` D28).
+  rendered from modelled patches (`docs/07` D28). Buildings, villagers and
+  infantry change their look with their owner's age (`docs/07` D29).
 - **Test and automation** (`docs/09`): CI runs the unit and behaviour tests,
   the replay corpus, the golden images, requirement traceability, the perf
   budget, generated-file drift, CLI-caller and workflow checks, and the art
@@ -1631,6 +1632,57 @@ Every sprite set and the ground's grain are re-rendered.
   legs most of all. It is skipped now; every set is recomposed.
 - **Goldens:** every one rebaked.
 
+### Work record: the icon, the title theme and the collapse (2026-10-04)
+
+- **The Mac app's icon** is the Town Center, rendered through the rig in
+  the first player's blue on a rounded tile of grass greens on the macOS
+  grid (`tools/render/icon.py`). It writes `packaging/macos/icon.png` and
+  `AppIcon.icns`, the .icns in plain Python so no Mac is needed;
+  `scripts/bundle-mac.sh` puts it in the app and `Info.plist` names it.
+- **Music on the title screen.** The score has a title layer
+  (`audio::Layer::Title`, the `stem-title` cue): it plays under the title
+  and the other screens outside a match and cross-fades with the age's
+  stem when a match starts or ends. It is a placeholder like every sound.
+- **A building falls.** When a building is destroyed its standing frame
+  sinks into its rubble over `scene::COLLAPSE_TICKS` (16 ticks, 0.8 s),
+  cut off at the ground and lowered row by row, under the dust cloud that
+  was already there. A site that is destroyed unbuilt does not sink.
+
+### Work record: the art, the ages (2026-10-04)
+
+`docs/05` §2.5 asks for a building to look different in each age it
+stands in, and for infantry to change costume (`docs/07` D29). The
+rendered sets had one look; only the placeholders changed with the age.
+
+- **Buildings.** `kit.STYLE_AGE` rebuilds a building in its age's
+  materials (`kit.AGE_MATERIALS`) and adds the age's work to each walled
+  block (`kit.style_building`). Tool Age: shingle roofs and a timber
+  frame of posts and rails on the mudbrick. Bronze Age: terracotta roofs,
+  plastered walls and a stone base course. Iron Age: slate roofs, walls of
+  dressed stone, white cornices and corner pilasters. The roof is what
+  reads from the camera's height, so each age has its own roof colour:
+  straw, wood brown, terracotta, slate grey.
+- **Figures.** `kit.age_dress` dresses the villager and the infantry.
+  Villagers: a belt, then a linen cap, a straw hat with a brim, a dark
+  hood and a cape. Soldiers: a hide cap, belt and shoulder wraps in the
+  Tool Age, a bronze cap, pads and greaves in the Bronze, iron ones and a
+  cape in the Iron; a bronze helmet turns iron. Most of it is on the head,
+  the part of a 34 px figure that reads. The tunic stays in view, since
+  its colour says whose the figure is.
+- **Which sets.** `slice.AGED`: the eight Stone Age buildings in all
+  three later ages, the four that come with the Bronze Age in the Iron;
+  the villager, clubman, axeman and spearman in all three. The farm, the
+  walls and the gate look the same in every age; the ranged soldiers and
+  the riders keep one look (`docs/02` §4 dresses the villager and the
+  infantry). That is 40 sets, named for the age: `house_tool`,
+  `temple_iron`.
+- **In the game.** `view::sprites::set_target` reads the age from the
+  set's name and files the frames under the kind's variant id, as the
+  placeholders' are. `Atlas::variant` answers with the variant drawn for
+  the latest age up to the owner's, so a temple keeps its own look in the
+  Bronze Age. The atlas is 4096 wide now, to stay inside the GPU's 8192
+  limit with every set loaded.
+
 ### Resume here next session
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
@@ -1843,9 +1895,8 @@ Stated so they are not rediscovered.
   tiles (`docs/07` D28). A falling building sinks into its rubble
   under a dust cloud (`scene::COLLAPSE_TICKS`) rather than breaking apart,
   nobody fishes (the
-  simulation has no boats), and no rendered set has its later ages' look
-  or a second civilisation's. A modeller's work can replace any set by
-  name.
+  simulation has no boats), and no rendered set has a second
+  civilisation's look. A modeller's work can replace any set by name.
 - **One notification row stays open**: no Wonder to announce.
 - **The Mac build is not notarised and is Apple Silicon only.**
   Notarising needs an Apple Developer account and a signing identity in
@@ -1853,10 +1904,10 @@ Stated so they are not rediscovered.
   (the owner has no Intel Mac, so none is planned). The icon is the
   rendered Town Center (`tools/render/icon.py`, 2026-10-04).
 - The age-up **fanfare** waits for audio (M7). The sweep and banner exist.
-- **Age variants exist for placeholders only.** Rendered sets carry no
-  variants yet; `Atlas::variant` answers with the base kind for them. The
-  sprite manifest needs a per-age entry when the art stream models the
-  slice (`docs/08` §9 step 3).
+- **The ages restyle, they do not rebuild** (`docs/07` D29): a
+  building keeps its shape through the four ages and changes its
+  materials and trim; a figure keeps its body and changes its dress. The
+  ranged soldiers and the riders have one look in every age.
 - **No resource-conservation invariant, no fuzzing, no nightly job**
   (`docs/09` §11): the parallel track in §4b.
 

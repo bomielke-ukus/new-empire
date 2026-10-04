@@ -406,7 +406,9 @@ proves a fresh clone can produce what the game loads.
    engine; the other infantry, the riders, every building, and the map's
    nodes and herd followed, then the walls and the gate, which join from
    tile to tile (`crates/view/src/walls.rs`), the villager's tasks and
-   loads, and the ground's grain (`docs/07` D28). Being code-authored, these
+   loads, the ground's grain (`docs/07` D28), and the later ages' looks of
+   the buildings, the villager and the infantry, by material and dress
+   (`docs/07` D29). Being code-authored, these
    models carry no copyright of their own (§5.1); that matters only for a
    sale, and a modeller's work can replace any of them by name.
 4. **Commission the icons and UI panel set** (§4.3) in parallel — they are off

@@ -333,6 +333,24 @@ layer per type repeats on every tile, softened by the per-tile colour
 variation; there are no variants and no transition tiles. Tile sets can
 still replace it: the sheet is one file, and the colours under it stay.
 
+### D29 — The ages restyle the buildings and dress the figures; they do not remodel them
+**Date:** 2026-10-04 · **Decided by:** the owner
+
+`docs/05` §2.5 asks for "a visibly different structure" in each age, not
+a recolour, and walks the materials from thatch and timber to monumental
+stone. The rendered Stone Age buildings were already mudbrick under
+thatch. The owner approved the proposal to age them by material and trim
+rather than by new models: each building keeps its shape through the four
+ages; its roofs go from thatch to shingle, terracotta and slate, its walls
+from mudbrick (with a timber frame in the Tool Age) to plaster and to
+dressed stone, and it gains a stone base course, then cornices and
+pilasters (`kit.style_building`). The villager and the infantry keep their
+bodies and change their dress, mostly on the head (`kit.age_dress`). It
+costs one re-render per age, not a model per age, and a modeller can
+still replace any age's set by name (`house_bronze`). The roof colour is
+what reads at the camera's height, so it is the one change every
+building makes.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after?

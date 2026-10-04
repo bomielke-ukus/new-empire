@@ -616,10 +616,11 @@ anticipate:
   the replay path stay permissive because tests and the soak deliberately
   run caps of 0, 6 and 12.
 - **Age variants are atlas lookups, not sprite state.** `Atlas::variant`
-  maps `(kind, age)` to the id the age-styled frames are filed under;
+  maps `(kind, age)` to the id the age-styled frames are filed under,
+  falling back to the latest earlier age that has a look of its own;
   placeholders draw four material sets (timber, mudbrick, limestone,
-  granite), and rendered sets answer with themselves until their manifests
-  carry variants. The sweep and banner are app-side timers passed into
+  granite), and a rendered set is named for its age (`house_bronze`,
+  `view::sprites::set_target`). The sweep and banner are app-side timers passed into
   `Scene::build_full` and `HudInput`, so a frame is still a pure function of
   its inputs and `mapview --sweep` can render any moment of it.
 - **The HUD owns the hotkey table.** Each button carries its key; the app

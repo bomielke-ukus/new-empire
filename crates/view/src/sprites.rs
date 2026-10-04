@@ -277,11 +277,16 @@ impl Atlas {
     }
 
     /// The id to look a kind up under for an owner in age `age` (by
-    /// [`sim::Age::index`]): its age-styled variant if one is drawn, else the
-    /// kind itself. Rendered sprite sets carry no variants yet, so a kind
-    /// with a set always answers with itself.
+    /// [`sim::Age::index`]): the variant drawn for the latest age up to
+    /// `age` that has one, else the kind itself. A rendered set is drawn
+    /// anew only for the ages that change it (`house_tool`, `temple_iron`;
+    /// see [`set_target`]), so a temple keeps its own look in the Bronze Age
+    /// and a slinger in every age.
     pub fn variant(&self, kind: KindId, age: u8) -> KindId {
-        self.variants.get(&(kind, age)).copied().unwrap_or(kind)
+        (1..=age)
+            .rev()
+            .find_map(|a| self.variants.get(&(kind, a)).copied())
+            .unwrap_or(kind)
     }
 
     /// Timing of an animation, if the kind has it.
@@ -311,8 +316,9 @@ impl Atlas {
     }
 
     /// The placeholder atlas, with every kind that has a rendered sprite set
-    /// in `sheets` drawn from that set instead. Sets whose name matches no
-    /// kind are ignored.
+    /// in `sheets` drawn from that set instead, and its looks in later ages
+    /// from the sets named for them. Sets whose name matches no kind are
+    /// ignored.
     pub fn with_sheets(sheets: &[crate::sheets::Sheet]) -> Atlas {
         let mut canvases: Vec<Entry> = Vec::new();
         let mut anims: HashMap<(KindId, Anim), AnimInfo> = HashMap::new();
@@ -320,10 +326,19 @@ impl Atlas {
         let mut loaded_sets = Vec::new();
         let mut covered: Vec<KindId> = Vec::new();
         for sheet in sheets {
-            let Some(kind) = kind_for_set(&sheet.name) else {
+            let Some((base, age)) = set_target(&sheet.name) else {
                 continue;
             };
-            covered.push(kind);
+            // The Stone Age set is the kind itself; a later age's is filed
+            // under its variant id, as the placeholders' are.
+            let kind = if age == 0 {
+                covered.push(base);
+                base
+            } else {
+                let id = variant_id(base, age);
+                variants.insert((base, age), id);
+                id
+            };
             loaded_sets.push(sheet.name.clone());
             for (ai, animation) in sheet.animations.iter().enumerate() {
                 let Some(anim) = Anim::from_name(&animation.name) else {
@@ -458,6 +473,10 @@ impl Atlas {
             // The Stone Age look is the kind itself; the three later ages
             // are drawn in their materials and filed under variant ids.
             for age in 1..=3u8 {
+                if variants.contains_key(&(k.id, age)) {
+                    // Drawn by a rendered set.
+                    continue;
+                }
                 let id = variant_id(k.id, age);
                 if k.mobile {
                     for f in AUTHORED {
@@ -692,8 +711,10 @@ fn glyph(ch: char, idx: u8) -> Canvas {
     c
 }
 
-/// Atlas texture width. Height grows to fit, up to the GPU's limit.
-pub const ATLAS_WIDTH: u32 = 2048;
+/// Atlas texture width. Height grows to fit, up to the GPU's limit (8192 a
+/// side by default): with every rendered set and its age looks loaded, a
+/// narrower atlas would run past it.
+pub const ATLAS_WIDTH: u32 = 4096;
 
 /// A frame waiting to be packed.
 struct Entry {
@@ -789,6 +810,23 @@ fn pack(mut canvases: Vec<Entry>, width: u32) -> Atlas {
         variants: HashMap::new(),
         loaded_sets: Vec::new(),
     }
+}
+
+/// The suffix of a set that draws a kind in a later age, and the age (by
+/// [`sim::Age::index`]).
+const AGE_SUFFIXES: [(&str, u8); 3] = [("_tool", 1), ("_bronze", 2), ("_iron", 3)];
+
+/// The kind a rendered sprite set draws and the age it draws it in, by the
+/// set's name: `house` is the house as built in the Stone Age, and in any
+/// later age without a set of its own; `house_tool`, `house_bronze` and
+/// `house_iron` are the house in the three ages after it.
+pub fn set_target(name: &str) -> Option<(KindId, u8)> {
+    for (suffix, age) in AGE_SUFFIXES {
+        if let Some(kind) = name.strip_suffix(suffix).and_then(kind_for_set) {
+            return Some((kind, age));
+        }
+    }
+    kind_for_set(name).map(|kind| (kind, 0))
 }
 
 /// Which kind a rendered sprite set draws, by the set's name.
@@ -1970,7 +2008,7 @@ mod tests {
         let a = Atlas::with_sheets(&sheets);
         assert!(a.loaded_sets.contains(&"villager".to_string()));
         for set in &a.loaded_sets {
-            assert!(kind_for_set(set).is_some(), "{set} draws no kind");
+            assert!(set_target(set).is_some(), "{set} draws no kind");
         }
         assert!(
             a.width == ATLAS_WIDTH && a.height <= 8192,
@@ -2029,6 +2067,21 @@ mod tests {
         // The herd has its own walk now.
         let (g, _) = a.frame_at(kinds::GAZELLE, 1, Anim::Walk, 500).unwrap();
         assert_eq!(g.anim, Anim::Walk);
+    }
+
+    #[test]
+    fn a_set_named_for_an_age_draws_its_kind_in_that_age() {
+        assert_eq!(set_target("house"), Some((kinds::HOUSE, 0)));
+        assert_eq!(set_target("house_tool"), Some((kinds::HOUSE, 1)));
+        assert_eq!(
+            set_target("town_center_bronze"),
+            Some((kinds::TOWN_CENTER, 2))
+        );
+        assert_eq!(set_target("temple_iron"), Some((kinds::TEMPLE, 3)));
+        // Not every name with an age's word in it is an age's set.
+        assert_eq!(set_target("stone_wall"), Some((kinds::STONE_WALL, 0)));
+        assert_eq!(set_target("palace_iron"), None);
+        assert_eq!(set_target("iron"), None);
     }
 
     #[test]

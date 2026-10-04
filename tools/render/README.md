@@ -162,6 +162,15 @@ class follows its footprint: one tile SmallBuilding, two MediumBuilding, three
 LargeBuilding. The camera sees the +X and +Y faces and the top, so doors and
 player colour go there.
 
+**The ages.** A subject in `slice.AGED` has a set for each later age it
+changes in, named for the age: `house_tool`, `house_bronze`, `house_iron`,
+`temple_iron`. `slice.py` sets `kit.STYLE_AGE` from the name before
+building it; `Building.finish` then swaps its materials and adds the age's
+trim (`kit.style_building`), and `Humanoid` dresses the figure for the age
+(`kit.age_dress`). The game reads the age back from the set's name
+(`view::sprites::set_target`). `--list` names every set, the aged ones
+included.
+
 Colours in `kit.COLOURS` are linear, as Blender's base colour is; `srgb()`
 converts the colour you want on screen, since a linear 0.5 renders as a pale
 0.73.
