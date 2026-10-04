@@ -873,6 +873,18 @@ pub fn kind_for_set(name: &str) -> Option<KindId> {
         "gold_mine" => kinds::GOLD_MINE,
         "stone_mine" => kinds::STONE_MINE,
         "gazelle" => kinds::GAZELLE,
+        "swordsman" => kinds::SWORDSMAN,
+        "hoplite" => kinds::HOPLITE,
+        "legionary" => kinds::LEGIONARY,
+        "chariot_archer" => kinds::CHARIOT_ARCHER,
+        "horse_archer" => kinds::HORSE_ARCHER,
+        "heavy_cavalry" => kinds::HEAVY_CAVALRY,
+        "war_elephant" => kinds::WAR_ELEPHANT,
+        "stone_thrower" => kinds::STONE_THROWER,
+        "catapult" => kinds::CATAPULT,
+        "ballista" => kinds::BALLISTA,
+        "priest" => kinds::PRIEST,
+        "relic" => kinds::RELIC,
         _ => return None,
     })
 }

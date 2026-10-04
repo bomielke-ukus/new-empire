@@ -2156,8 +2156,8 @@ Stated so they are not rediscovered.
   need a second atlas page or a texture array, not a wider texture.
 - **The opponent researches no technology but ages and line upgrades**:
   no Toolworking, Leather Armour, Fletching, gathering or farming
-  technology. It reaches the Iron Age in some long matches, not all.
-- **One notification row stays open**: no Wonder to announce.
+  technology. It reaches the Iron Age in some long matches, not all, so
+  its Temple and priests come late; it never builds a Wonder.
 - **The Mac build is not notarised and is Apple Silicon only.**
   Notarising needs an Apple Developer account and a signing identity in
   the workflow's secrets; an Intel slice needs a second target and `lipo`
