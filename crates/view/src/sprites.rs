@@ -887,6 +887,14 @@ pub fn kind_for_set(name: &str) -> Option<KindId> {
         "priest" => kinds::PRIEST,
         "relic" => kinds::RELIC,
         "wonder" => kinds::WONDER,
+        "dock" => kinds::DOCK,
+        "fishing_boat" => kinds::FISHING_BOAT,
+        "transport" => kinds::TRANSPORT,
+        "trade_boat" => kinds::TRADE_BOAT,
+        "archer_ship" => kinds::ARCHER_SHIP,
+        "war_galley" => kinds::WAR_GALLEY,
+        "catapult_ship" => kinds::CATAPULT_SHIP,
+        "fish" => kinds::FISH,
         _ => return None,
     })
 }
@@ -2479,10 +2487,8 @@ mod tests {
     /// their models are rendered (`docs/10` §5). The list only shrinks.
     /// Kinds still drawn as placeholders. A new kind goes here until its
     /// set is rendered.
-    const AWAITING_ART: [KindId; 8] = [
-        kinds::DOCK,
+    const AWAITING_ART: [KindId; 6] = [
         kinds::FISHING_BOAT,
-        kinds::FISH,
         kinds::ARCHER_SHIP,
         kinds::WAR_GALLEY,
         kinds::CATAPULT_SHIP,

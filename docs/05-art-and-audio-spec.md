@@ -71,6 +71,7 @@ line of the wall it stands in.
 | Villager, infantry | 40 × 48 px |
 | Cavalry, chariot | 56 × 56 px |
 | Elephant, siege | 72 × 72 px |
+| Boat | 80 × 80 px, anchored 24 px above the bottom: a hull reaches as far toward the camera as away from it, so a boat is drawn by its middle |
 | Small building (House, Farm) | 64 × 64 px (1×1 or 2×2 tiles) |
 | Medium building (Barracks, Storehouse) | 128 × 96 px (2×2 tiles) |
 | Large building (Town Center, Temple) | 192 × 144 px (3×3 tiles) |

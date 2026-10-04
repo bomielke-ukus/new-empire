@@ -125,13 +125,14 @@ pub fn validate(manifest_path: &Path, palette: &Palette) -> Result<Report, Strin
 /// nodes, the herd animals and the relic (nature's until a priest takes it
 /// up). They wear no player colour, and a node, being neither built nor
 /// knocked down, needs only its standing frame.
-pub const NEUTRAL_SETS: [&str; 6] = [
+pub const NEUTRAL_SETS: [&str; 7] = [
     "tree",
     "berry_bush",
     "gold_mine",
     "stone_mine",
     "gazelle",
     "relic",
+    "fish",
 ];
 
 /// A neutral node's one animation.

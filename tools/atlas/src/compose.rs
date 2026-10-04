@@ -239,6 +239,7 @@ fn class_key(class: Class) -> &'static str {
         Class::Foot => "Foot",
         Class::Mounted => "Mounted",
         Class::Heavy => "Heavy",
+        Class::Ship => "Ship",
         Class::SmallBuilding => "SmallBuilding",
         Class::MediumBuilding => "MediumBuilding",
         Class::LargeBuilding => "LargeBuilding",
@@ -252,6 +253,7 @@ pub fn parse_class(name: &str) -> Result<Class, String> {
         "Foot" => Ok(Class::Foot),
         "Mounted" => Ok(Class::Mounted),
         "Heavy" => Ok(Class::Heavy),
+        "Ship" => Ok(Class::Ship),
         "SmallBuilding" => Ok(Class::SmallBuilding),
         "MediumBuilding" => Ok(Class::MediumBuilding),
         "LargeBuilding" => Ok(Class::LargeBuilding),
@@ -259,7 +261,7 @@ pub fn parse_class(name: &str) -> Result<Class, String> {
         "Terrain" => Ok(Class::Terrain),
         other => Err(format!(
             "unknown size class '{other}'; docs/05 §2.3 has Foot, Mounted, Heavy, \
-             SmallBuilding, MediumBuilding, LargeBuilding, Wonder, Terrain"
+             Ship, SmallBuilding, MediumBuilding, LargeBuilding, Wonder, Terrain"
         )),
     }
 }

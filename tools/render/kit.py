@@ -98,6 +98,12 @@ COLOURS = {
     "elephant": srgb(0.5, 0.48, 0.46),
     "elephant_toe": srgb(0.66, 0.63, 0.58),
     "ivory": srgb(0.93, 0.9, 0.82),
+    # Boats: the tarred hull below the strakes; fish, and the foam they
+    # break the water with.
+    "pitch": srgb(0.20, 0.15, 0.11),
+    "fish": srgb(0.64, 0.68, 0.72),
+    "fish_dark": srgb(0.32, 0.38, 0.44),
+    "foam": srgb(0.86, 0.90, 0.92),
     # Split-wood shingles, the Tool Age's roofs; slate, the Iron Age's.
     "shingle": srgb(0.46, 0.37, 0.27),
     "slate": srgb(0.36, 0.39, 0.44),
@@ -523,6 +529,24 @@ def oval(name, bottom, top, height, mat, location=(0.0, 0.0, 0.0), lean=0.0, sid
     return _recalc(_mesh(name, verts, faces, mat, location))
 
 
+def oval_ring(name, outer, inner, height, mat, location=(0.0, 0.0, 0.0), sides=16):
+    """A band of oval section `height` tall, open in the middle: half-sizes
+    `outer` = (x, y) outside and `inner` inside. A boat's rail."""
+    (ox, oy), (ix, iy) = outer, inner
+    verts = []
+    for rx, ry, z in ((ox, oy, 0.0), (ox, oy, height), (ix, iy, height), (ix, iy, 0.0)):
+        for k in range(sides):
+            a = 2.0 * math.pi * k / sides
+            verts.append((rx * math.cos(a), ry * math.sin(a), z))
+    faces = []
+    for ring in range(4):
+        nxt = (ring + 1) % 4
+        for k in range(sides):
+            j = (k + 1) % sides
+            faces.append((ring * sides + k, ring * sides + j, nxt * sides + j, nxt * sides + k))
+    return _recalc(_mesh(name, verts, faces, mat, location))
+
+
 def limb(name, length, r_top, r_bottom, mat, location=(0.0, 0.0, 0.0),
          rotation=(0.0, 0.0, 0.0)):
     """A limb hung from its joint at `location`: a tapered round length."""
@@ -911,6 +935,16 @@ def rod(name, a, b, radius, mat, sides=6, top_radius=None):
     angle = math.atan2(-dy, dz)
     return cylinder(name, radius, length, mat, a, sides=sides,
                     rotation=(angle, 0.0, 0.0), top_radius=top_radius)
+
+
+def beam(name, a, b, radius, mat, sides=6):
+    """A round rod from `a` to `b`, pointing any way: what `rod` is for
+    rods across x as well as y and z."""
+    dx, dy, dz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+    length = math.sqrt(dx * dx + dy * dy + dz * dz)
+    tilt = math.acos(max(-1.0, min(1.0, dz / length)))
+    turn = math.atan2(dy, dx)
+    return cylinder(name, radius, length, mat, a, sides=sides, rotation=(0.0, tilt, turn))
 
 
 def bow(name):
@@ -2317,6 +2351,300 @@ def engine_pose(kind, anim, i, count):
             k = (i + 1) / float(count)
             body["scale_z"] = 1.0 - 0.2 * k
     return body, s, loaded
+
+
+# --------------------------------------------------------------------------
+# Boats (`docs/07` D33): a hull facing +Y on the water line at z = 0.
+
+# Each boat's hull: length, beam, height of the sides, and what it carries.
+BOATS = {
+    "fishing": (0.78, 0.30, 0.13),
+    "transport": (1.25, 0.52, 0.17),
+    "trade": (1.15, 0.48, 0.19),
+    "archer": (1.20, 0.38, 0.16),
+    "galley": (1.30, 0.42, 0.18),
+    "catapult": (1.35, 0.50, 0.20),
+}
+
+
+def water_line(name, parent, z=0.002):
+    """A holdout at the water line: whatever lies below it does not render,
+    as if under the water the sprite is drawn over. It hides the shadow
+    there too."""
+    h = 4.0
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata([(-h, -h, 0.0), (h, -h, 0.0), (h, h, 0.0), (-h, h, 0.0)], [],
+                     [(0, 1, 2, 3)])
+    water = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(water)
+    water.is_holdout = True
+    water.location = (0.0, 0.0, z)
+    water.parent = parent
+    return water
+
+
+class Boat:
+    """A boat facing +Y, its keel on the water line: a planked hull tarred
+    below, a deck, a mast and a sail of the owner's colour, and what its
+    kind carries. "fishing": a net over the stern and one fisher; "transport":
+    benches and a wide hull for passengers; "trade": bales and jars;
+    "archer": archers along the rail; "galley": two banks of oars, shields
+    of the owner's colour along the rail, a bronze ram and archers;
+    "catapult": a catapult on deck. It rocks at rest, pulls its oars at the
+    walk, looses (or throws) at the attack, and heels over and sinks."""
+
+    def __init__(self, root_name, kind):
+        self.root = empty(root_name)
+        self.body = empty(root_name + "_body", parent=self.root)
+        self.parts = {}
+        self.oars = []
+        self.kind = kind
+        n = root_name
+        add = self._add
+        L, B, H = BOATS[kind]
+        hl, hb = L / 2.0, B / 2.0
+        # The hull: tarred at the water, planked above, a stem curling up at
+        # the bow and a stern post; foam where it meets the water.
+        add("foam", oval(n + "_foam", (hb * 0.88, hl * 0.95), (hb * 0.88, hl * 0.95), 0.006,
+                         "foam"))
+        add("keel", oval(n + "_keel", (hb * 0.72, hl * 0.84), (hb * 0.9, hl * 0.95), H * 0.45,
+                         "pitch"))
+        # The deck lies a little below the rail: its own top, nothing on it.
+        add("strakes", oval(n + "_strakes", (hb * 0.9, hl * 0.95), (hb * 0.97, hl * 0.985),
+                            H * 0.55 - 0.035, "wood", (0.0, 0.0, H * 0.45)))
+        add("deck", oval(n + "_deck", (hb * 0.97, hl * 0.985), (hb * 0.97, hl * 0.985), 0.015,
+                         "wood_dark", (0.0, 0.0, H - 0.035)))
+        add("wale", oval_ring(n + "_wale", (hb * 1.02, hl * 1.01), (hb * 0.9, hl * 0.93), 0.05,
+                              "wood_dark", (0.0, 0.0, H - 0.04)))
+        add("stem", rod(n + "_stem", (0.0, hl * 0.92, H * 0.6), (0.0, hl * 1.08, H + 0.12),
+                        0.025, "wood_dark", sides=6))
+        add("stern", rod(n + "_sternpost", (0.0, -hl * 0.9, H * 0.6), (0.0, -hl * 1.02, H + 0.16),
+                         0.025, "wood_dark", sides=6))
+        # The mast, a yard and the sail, furled for the catapult's arm.
+        mast_h = {"fishing": 0.5, "catapult": 0.62}.get(kind, 0.72)
+        mast_y = {"catapult": hl * 0.35, "fishing": hl * 0.15}.get(kind, 0.0)
+        add("mast", cylinder(n + "_mast", 0.018, mast_h, "wood", (0.0, mast_y, H), sides=6))
+        sail_w = B * (1.3 if kind in ("transport", "trade") else 1.05)
+        add("yard", beam(n + "_yard", (-sail_w / 2, mast_y + 0.02, H + mast_h * 0.92),
+                         (sail_w / 2, mast_y + 0.02, H + mast_h * 0.92), 0.014, "wood_dark",
+                         sides=6))
+        sail_h = mast_h * (0.62 if kind != "catapult" else 0.3)
+        sail = "linen" if kind in ("fishing", "trade") else "player"
+        sail_z = H + mast_h * 0.92 - sail_h
+        add("sail", box(n + "_sail", (sail_w, 0.012, sail_h), sail, (0.0, mast_y + 0.03, sail_z)))
+        if kind != "catapult":
+            # Reef bands across it, a rope at its foot.
+            for k, f in enumerate((0.0, 0.36, 0.68)):
+                add("reef%d" % k, box("%s_reef%d" % (n, k), (sail_w + 0.004, 0.018, 0.012), "rope",
+                                      (0.0, mast_y + 0.03, sail_z + sail_h * f)))
+        if sail == "linen":
+            add("sail_band", box(n + "_sail_band", (sail_w + 0.004, 0.016, sail_h * 0.18), "player",
+                                 (0.0, mast_y + 0.03, H + mast_h * 0.92 - sail_h * 0.55)))
+        add("pennant", box(n + "_pennant", (0.012, 0.12, 0.05), "player",
+                           (0.0, mast_y - 0.06, H + mast_h + 0.0)))
+        if kind in ("transport", "galley", "archer"):
+            # Oars, pivoting on the wale; two banks for the galley.
+            banks = (0, 1) if kind == "galley" else (0,)
+            count = {"transport": 4, "archer": 4, "galley": 5}[kind]
+            for side in (-1.0, 1.0):
+                for bank in banks:
+                    for k in range(count):
+                        y = -hl * 0.55 + (hl * 1.1) * k / max(count - 1, 1)
+                        z = H - 0.02 - bank * 0.06
+                        pivot = empty("%s_oarlock_%d_%d_%d" % (n, int(side), bank, k), parent=self.body,
+                                      location=(side * hb * 0.98, y, z))
+                        # Out from the rail and down to the water line,
+                        # where the blade dips.
+                        reach = side * (0.3 + bank * 0.06)
+                        oar = beam("%s_oar_%d_%d_%d" % (n, int(side), bank, k), (0.0, 0.0, 0.0),
+                                   (reach, 0.0, 0.01 - z), 0.013, "wood", sides=5)
+                        oar.parent = pivot
+                        blade_ = box("%s_blade_%d_%d_%d" % (n, int(side), bank, k),
+                                     (0.09, 0.035, 0.008), "wood", (reach, 0.0, 0.006 - z),
+                                     rotation=(0.0, side * math.atan2(z - 0.01, abs(reach)), 0.0))
+                        blade_.parent = pivot
+                        self.oars.append((pivot, side))
+        if kind == "fishing":
+            add("net", box(n + "_net", (B * 0.7, 0.16, 0.05), "rope", (0.0, -hl * 0.55, H)))
+            self._crew(n + "_fisher", (0.0, -hl * 0.15, H), "linen")
+        elif kind == "transport":
+            for k, y in enumerate((-hl * 0.45, -hl * 0.1, hl * 0.25, hl * 0.6)):
+                add("bench%d" % k, box("%s_bench%d" % (n, k), (B * 0.82, 0.05, 0.025), "wood",
+                                       (0.0, y, H - 0.02)))
+            self._crew(n + "_helm", (0.0, -hl * 0.8, H), "linen")
+        elif kind == "trade":
+            for k, (x, y) in enumerate(((-0.1, -0.3), (0.1, -0.25), (0.0, 0.25), (-0.1, 0.32))):
+                add("bale%d" % k, box("%s_bale%d" % (n, k), (0.14, 0.14, 0.11), "linen" if k % 2 else "hide",
+                                      (x, y * hl / 0.6, H - 0.02)))
+            for k, y in enumerate((-0.05, 0.08)):
+                add("jar%d" % k, ellipsoid("%s_jar%d" % (n, k), (0.05, 0.05, 0.08), "clay_roof",
+                                           (0.12, y, H + 0.06)))
+            self._crew(n + "_helm", (0.0, -hl * 0.8, H), "linen")
+        elif kind in ("archer", "galley"):
+            n_arch = 3 if kind == "archer" else 4
+            for k in range(n_arch):
+                y = -hl * 0.5 + hl * 1.0 * k / max(n_arch - 1, 1)
+                side = -1.0 if k % 2 else 1.0
+                self._crew("%s_archer%d" % (n, k), (side * hb * 0.5, y, H), "linen", archer=True)
+            if kind == "galley":
+                add("ram", cone(n + "_ram", 0.05, 0.16, "bronze", (0.0, hl * 1.02, H * 0.3)))
+                self.parts["ram"].rotation_euler = (_deg(-90.0), 0.0, 0.0)
+                for side in (-1.0, 1.0):
+                    for k in range(5):
+                        y = -hl * 0.6 + hl * 1.2 * k / 4
+                        sh = round_shield("%s_shield_%d_%d" % (n, int(side), k), radius=0.06)
+                        sh.parent = self.body
+                        sh.location = (side * (hb + 0.01), y, H + 0.03)
+                        sh.rotation_euler = (0.0, 0.0, _deg(90.0 * side))
+        elif kind == "catapult":
+            add("frame_l", box(n + "_frame_l", (0.05, 0.36, 0.2), "wood", (-0.12, 0.0, H)))
+            add("frame_r", box(n + "_frame_r", (0.05, 0.36, 0.2), "wood", (0.12, 0.0, H)))
+            add("skein", cylinder(n + "_skein", 0.06, 0.3, "rope", (0.0, -0.1, H + 0.1),
+                                  sides=10, pivot="centre", rotation=(0.0, _deg(90.0), 0.0)))
+            arm = add("throw_arm", limb(n + "_arm", 0.45, 0.035, 0.028, "wood",
+                                        (0.0, -0.1, H + 0.1), rotation=(_deg(-100.0), 0.0, 0.0)))
+            cup = ellipsoid(n + "_bucket", (0.07, 0.07, 0.04), "iron", (0.0, 0.0, -0.45), upper=True)
+            cup.parent = arm
+            stone = ellipsoid(n + "_stone", (0.045, 0.045, 0.045), "stone", (0.0, 0.0, -0.47))
+            stone.parent = arm
+            self.stone = stone
+            self._crew(n + "_loader", (0.15, -hl * 0.3, H), "linen")
+            self._crew(n + "_helm", (0.0, -hl * 0.85, H), "linen")
+
+    def _add(self, key, obj, parent=None):
+        obj.parent = parent if parent is not None else self.body
+        self.parts[key] = obj
+        return obj
+
+    def _crew(self, name, at, coat, archer=False):
+        """A sailor or an archer standing on the deck: legs, a tunic
+        belted in the owner's colour, a head, and a bow if an archer."""
+        x, y, z = at
+        self._add(name + "_legs", oval(name + "_legs", (0.03, 0.025), (0.035, 0.03), 0.07, "skin",
+                                       (x, y, z)))
+        self._add(name + "_body", oval(name + "_coat", (0.045, 0.04), (0.05, 0.045), 0.11, coat,
+                                       (x, y, z + 0.06)))
+        self._add(name + "_belt", oval(name + "_belt", (0.049, 0.044), (0.049, 0.044), 0.025,
+                                       "player", (x, y, z + 0.1)))
+        self._add(name + "_head", ellipsoid(name + "_head", (0.035, 0.035, 0.04), "skin",
+                                            (x, y, z + 0.2)))
+        self._add(name + "_cap", ellipsoid(name + "_cap", (0.037, 0.037, 0.02), "bronze" if archer
+                                           else "hair", (x, y, z + 0.225), upper=True))
+        if archer:
+            b = bow("%s_bow" % name)
+            b.parent = self.body
+            b.scale = (0.7, 0.7, 0.7)
+            b.location = (x + 0.06, y + 0.04, z + 0.1)
+            self.parts[name + "_bow"] = b
+
+    def animate(self):
+        scene = bpy.context.scene
+        scene.frame_start, scene.frame_end = 1, 30
+        rest = {k: (tuple(o.location), tuple(o.rotation_euler)) for k, o in self.parts.items()}
+        stone = getattr(self, "stone", None)
+        # The water, for a boat going down: it hides whatever has sunk.
+        water = water_line(self.root.name + "_water", self.root)
+        # What floats once it has gone: planks, a cask, the foam over it.
+        self.wreck = []
+        L, B, H = BOATS[self.kind]
+        for k, (x, y, turn) in enumerate(((-0.12, 0.2, 0.4), (0.15, -0.05, -0.7),
+                                          (-0.05, -0.28, 1.3), (0.2, 0.25, 2.0))):
+            plank = box("%s_drift%d" % (self.root.name, k), (0.05, L * 0.28, 0.02), "wood",
+                        (x, y, 0.002), rotation=(0.0, 0.0, turn))
+            plank.parent = self.root
+            self.wreck.append(plank)
+        cask = cylinder(self.root.name + "_cask", 0.04, 0.05, "wood_dark", (0.05, 0.08, 0.002),
+                        sides=10)
+        cask.parent = self.root
+        self.wreck.append(cask)
+        for j in range(12):
+            a = 2.0 * math.pi * j / 12
+            r = 0.22
+            bubble = ellipsoid("%s_swirl%d" % (self.root.name, j), (0.03, 0.03, 0.006), "foam",
+                               (r * math.cos(a), r * math.sin(a), 0.002))
+            bubble.parent = self.root
+            self.wreck.append(bubble)
+        for anim, (first, last) in MOBILE_SPANS.items():
+            count = last - first + 1
+            for i in range(count):
+                frame = first + i
+                body, sweep, swings, loaded = boat_pose(self.kind, anim, i, count)
+                self.body.location = (0.0, 0.0, body["dz"])
+                self.body.rotation_euler = (body["pitch"], body["roll"], 0.0)
+                self.body.scale = (1.0, 1.0, body["scale_z"])
+                for path in ("location", "rotation_euler", "scale"):
+                    self.body.keyframe_insert(path, frame=frame)
+                for key, obj in self.parts.items():
+                    loc, rot = rest[key]
+                    obj.location = loc
+                    obj.rotation_euler = (rot[0] + swings.get(key, 0.0), rot[1], rot[2])
+                    obj.keyframe_insert("location", frame=frame)
+                    obj.keyframe_insert("rotation_euler", frame=frame)
+                for pivot, side in self.oars:
+                    # Trailing aft at rest, swept about that in the stroke.
+                    pivot.rotation_euler = (0.0, 0.0, (sweep - OAR_RAKE) * side)
+                    pivot.keyframe_insert("rotation_euler", frame=frame)
+                water.hide_render = not body["under"]
+                water.keyframe_insert("hide_render", frame=frame)
+                for piece in self.wreck:
+                    # Breaking up as it goes down, left on the water after.
+                    piece.hide_render = not (anim == "decay"
+                                             or (anim == "death" and i >= count // 2))
+                    piece.keyframe_insert("hide_render", frame=frame)
+                if stone is not None:
+                    stone.hide_render = not loaded
+                    stone.keyframe_insert("hide_render", frame=frame)
+        hold_frames([self.body, water] + [p for p, _ in self.oars] + list(self.parts.values())
+                    + self.wreck + ([stone] if stone is not None else []))
+
+
+def boat_pose(kind, anim, i, count):
+    """One frame of a boat: the hull's rise, roll and pitch, the oars'
+    sweep, each part's swing about x (the catapult's arm), and whether the
+    stone is in the bucket."""
+    body = {"dz": 0.0, "roll": 0.0, "pitch": 0.0, "scale_z": 1.0, "under": False}
+    s = {}
+    sweep = 0.0
+    loaded = True
+    t = 2.0 * math.pi * i / count
+    if anim == "idle":
+        body["dz"] = 0.008 * math.sin(t)
+        body["roll"] = _deg(2.0) * math.sin(t)
+    elif anim == "walk":
+        body["dz"] = 0.01 * math.sin(2.0 * t)
+        body["pitch"] = _deg(2.5) * math.sin(t)
+        sweep = _deg(28.0) * math.sin(t)
+    elif anim == "attack":
+        body["roll"] = _deg(1.5) * math.sin(t)
+        if kind == "catapult":
+            arm = [-8.0, -14.0, -16.0, 95.0, 80.0, 30.0]
+            s["throw_arm"] = _deg(arm[i])
+            loaded = i < 3
+        else:
+            body["dz"] = 0.006 * math.sin(t)
+    elif anim == "death":
+        # Heels over, the bow lifting, and goes down until the masthead and
+        # the head of the sail are all that stand out of the water.
+        k = i / float(count - 1)
+        ease = k * k
+        body["roll"] = _deg(30.0) * k
+        body["pitch"] = _deg(12.0) * ease
+        body["dz"] = -0.62 * ease
+        body["under"] = True
+        sweep = _deg(10.0)
+        loaded = False
+    elif anim == "decay":
+        # Gone under: what floated off is left on the water.
+        body["roll"] = _deg(30.0)
+        body["pitch"] = _deg(12.0)
+        body["dz"] = -2.0
+        body["under"] = True
+        loaded = False
+    return body, sweep, s, loaded
+
+
+# How far a boat's oars trail aft when it is not pulling them.
+OAR_RAKE = _deg(22.0)
 
 
 # --------------------------------------------------------------------------

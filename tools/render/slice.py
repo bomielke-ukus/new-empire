@@ -266,6 +266,189 @@ def wonder():
 # --------------------------------------------------------------------------
 # Buildings.
 
+def fishing_boat():
+    """A small open boat with a linen sail banded in the owner's colour, a
+    net heaped over the stern and its fisher."""
+    b = kit.Boat("FishingBoat", "fishing")
+    b.animate()
+    return b.root
+
+
+def transport():
+    """A broad, deep hull with benches for its passengers, a square sail of
+    the owner's colour and four oars a side."""
+    b = kit.Boat("Transport", "transport")
+    b.animate()
+    return b.root
+
+
+def trade_boat():
+    """A merchantman: a deep hull laden with bales and jars under a linen
+    sail banded in the owner's colour."""
+    b = kit.Boat("TradeBoat", "trade")
+    b.animate()
+    return b.root
+
+
+def archer_ship():
+    """A light ship of archers, the Tool Age's: a sail of the owner's
+    colour, four oars a side, three archers at the rail."""
+    b = kit.Boat("ArcherShip", "archer")
+    b.animate()
+    return b.root
+
+
+def war_galley():
+    """The Bronze Age's warship: a longer hull, two banks of oars, shields
+    of the owner's colour along the rail, a bronze ram and four archers."""
+    b = kit.Boat("WarGalley", "galley")
+    b.animate()
+    return b.root
+
+
+def catapult_ship():
+    """The Iron Age's warship: a heavy hull with a catapult on its deck, the
+    sail furled to the yard to clear the arm."""
+    b = kit.Boat("CatapultShip", "catapult")
+    b.animate()
+    return b.root
+
+
+def fish():
+    """A shoal breaking the water: three backs with their fins and tails out,
+    one fish leaping clear, and rings of ripples round them, silver over
+    dark."""
+    import math as _m
+    root = kit.empty("Fish")
+    kit.water_line("fish_water", root)
+    parts = []
+
+    def one(k, x, y, turn, scale, z, nose_up):
+        body = kit.ellipsoid("fish_body_%d" % k, (0.055 * scale, 0.17 * scale, 0.05 * scale),
+                             "fish", (0.0, 0.0, 0.0))
+        back = kit.ellipsoid("fish_back_%d" % k, (0.035 * scale, 0.14 * scale, 0.03 * scale),
+                             "fish_dark", (0.0, 0.0, 0.03 * scale))
+        fin = kit.blade("fish_fin_%d" % k, 0.07 * scale, 0.07 * scale, 0.008, "fish_dark",
+                        (0.0, 0.0, 0.04 * scale))
+        fin.rotation_euler = (0.0, 0.0, _m.pi / 2)
+        holder = kit.empty("fish_%d" % k, parent=root, location=(x, y, z))
+        holder.rotation_euler = (nose_up, 0.0, turn)
+        for p in (body, back, fin):
+            p.parent = holder
+        for side in (-1.0, 1.0):
+            lobe = kit.blade("fish_tail_%d_%d" % (k, int(side)), 0.06 * scale, 0.1 * scale, 0.008,
+                             "fish_dark", (0.0, -0.15 * scale, 0.0))
+            lobe.rotation_euler = (_m.radians(-90.0 - 35.0 * side), 0.0, _m.pi / 2)
+            lobe.parent = holder
+
+    def ripples(k, x, y, radii):
+        for j, r in enumerate(radii):
+            ring = kit.oval_ring("fish_ripple_%d_%d" % (k, j), (r, r * 0.92), (r - 0.014, r * 0.92 - 0.014),
+                                 0.004, "foam", (x, y, 0.002), sides=24)
+            ring.parent = root
+
+    # Backs awash: their middles at the water line.
+    for k, (x, y, turn, scale) in enumerate([(-0.16, 0.06, 0.5, 1.0), (0.14, -0.1, -1.0, 0.9),
+                                             (0.04, 0.2, 2.3, 0.8)]):
+        one(k, x, y, turn, scale, 0.0, 0.0)
+        ripples(k, x, y, (0.2 * scale, 0.27 * scale))
+    # And one in the air over its splash.
+    one(3, 0.02, -0.12, -2.4, 0.85, 0.16, _m.radians(-30.0))
+    ripples(3, 0.0, -0.06, (0.08, 0.13))
+    for j in range(8):
+        a = 2 * _m.pi * j / 8
+        drop = kit.ellipsoid("fish_splash_%d" % j, (0.012, 0.012, 0.02), "foam",
+                             (0.1 * _m.cos(a), -0.06 + 0.09 * _m.sin(a), 0.03))
+        drop.parent = root
+    return root
+
+
+def dock():
+    """A Dock on its piles in the water: a deck of planks, mooring posts
+    along its edges, a shed with a slate roof, a crane over the water, nets
+    and coiled rope, and the owner's flag."""
+    b = kit.Building("Dock", 3)
+    half = 1.35
+    deck_z = 0.22
+    # Piles first, standing in the water.
+    for k, x in enumerate((-half + 0.1, 0.0, half - 0.1)):
+        for j, y in enumerate((-half + 0.1, 0.0, half - 0.1)):
+            b.add(kit.cylinder("dock_pile_%d_%d" % (k, j), 0.06, deck_z + 0.02, "wood_dark",
+                               (x, y, 0.0), sides=8), kit.FOUNDATION)
+    # The deck: half laid in the second stage, whole from the third.
+    b.add(kit.box("dock_deck_half", (2 * half, half, 0.06), "wood_dark", (0.0, -half / 2, deck_z)),
+          kit.HALF_WALLS)
+    b.add(kit.box("dock_deck", (2 * half, 2 * half, 0.06), "wood_dark", (0.0, 0.0, deck_z)),
+          kit.FULL_WALLS)
+    for k in range(13):
+        x = -half + 0.1 + k * (2 * half - 0.2) / 12
+        b.add(kit.box("dock_plank_%d" % k, (0.13, 2 * half - 0.04, 0.008), "wood",
+                      (x, 0.0, deck_z + 0.06)), kit.FULL_WALLS)
+    # Mooring posts along the two edges the camera sees.
+    for k in range(4):
+        t = -half + 0.2 + k * (2 * half - 0.4) / 3
+        b.add(kit.cylinder("dock_bollard_x%d" % k, 0.04, 0.16, "wood_dark",
+                           (half - 0.08, t, deck_z + 0.06), sides=8), kit.FINISHED)
+        b.add(kit.cylinder("dock_bollard_y%d" % k, 0.04, 0.16, "wood_dark",
+                           (t, half - 0.08, deck_z + 0.06), sides=8), kit.FINISHED)
+    # A shed at the back corner.
+    sx, sy = -half + 0.5, -half + 0.5
+    b.add(kit.box("dock_shed", (0.8, 0.8, 0.5), "wood", (sx, sy, deck_z + 0.06)), kit.FINISHED)
+    b.add(kit.gable("dock_shed_roof", (0.9, 0.9, 0.3), "slate", (sx, sy, deck_z + 0.56)),
+          kit.FINISHED)
+    b.add(kit.box("dock_shed_door", (0.2, 0.02, 0.32), "opening",
+                  (sx + 0.1, sy + 0.41, deck_z + 0.06)), kit.FINISHED)
+    b.add(kit.box("dock_shed_cloth", (0.7, 0.03, 0.09), "player", (sx, sy + 0.42, deck_z + 0.44)),
+          kit.FINISHED)
+    b.add(kit.box("dock_shed_cloth_side", (0.03, 0.7, 0.09), "player",
+                  (sx + 0.42, sy, deck_z + 0.44)), kit.FINISHED)
+    # A crane out over the water, a rope and a bale hanging from it.
+    cx, cy = half - 0.35, -0.2
+    b.add(kit.cylinder("dock_crane_post", 0.05, 0.9, "wood", (cx, cy, deck_z + 0.06), sides=8),
+          kit.FINISHED)
+    b.add(kit.beam("dock_crane_jib", (cx, cy, deck_z + 0.9), (cx + 0.5, cy + 0.2, deck_z + 1.0),
+                   0.03, "wood", sides=6), kit.FINISHED)
+    b.add(kit.rod("dock_crane_rope", (cx + 0.5, cy + 0.2, deck_z + 1.0),
+                  (cx + 0.5, cy + 0.2, deck_z + 0.45), 0.008, "rope", sides=4), kit.FINISHED)
+    b.add(kit.box("dock_crane_bale", (0.14, 0.14, 0.12), "hide",
+                  (cx + 0.5, cy + 0.2, deck_z + 0.33)), kit.FINISHED)
+    # Nets, rope, jars.
+    b.add(kit.box("dock_net", (0.5, 0.35, 0.05), "rope", (0.3, 0.6, deck_z + 0.06)), kit.FINISHED)
+    b.add(kit.cylinder("dock_coil", 0.1, 0.05, "rope", (-0.4, 0.75, deck_z + 0.06), sides=12),
+          kit.FINISHED)
+    for k in range(3):
+        b.add(kit.cylinder("dock_jar%d" % k, 0.06, 0.2, "clay_roof",
+                           (0.75 + 0.15 * k, 0.9, deck_z + 0.06), sides=10, top_radius=0.045),
+              kit.FINISHED)
+    # Crates and casks by the crane, and nets hung to dry along the front.
+    for k, (x, y) in enumerate([(0.55, -0.75), (0.75, -0.6), (0.62, -0.62)]):
+        b.add(kit.box("dock_crate_%d" % k, (0.18, 0.18, 0.16), "wood",
+                      (x, y, deck_z + 0.06 + (0.16 if k == 2 else 0.0))), kit.FINISHED)
+    for k, (x, y) in enumerate([(0.2, -0.95), (0.05, -0.85)]):
+        b.add(kit.cylinder("dock_cask_%d" % k, 0.08, 0.18, "wood_dark", (x, y, deck_z + 0.06),
+                           sides=12), kit.FINISHED)
+    for k, x in enumerate((-1.0, -0.25)):
+        b.add(kit.cylinder("dock_rack_%d" % k, 0.025, 0.45, "wood", (x, half - 0.3, deck_z + 0.06),
+                           sides=6), kit.FINISHED)
+    b.add(kit.box("dock_rack_bar", (0.8, 0.03, 0.03), "wood", (-0.625, half - 0.3, deck_z + 0.48)),
+          kit.FINISHED)
+    b.add(kit.box("dock_rack_net", (0.72, 0.015, 0.3), "rope", (-0.625, half - 0.3, deck_z + 0.18)),
+          kit.FINISHED)
+    kit.flag(b, "dock_flag", half - 0.2, half - 0.2, deck_z + 0.06, height=0.9)
+    kit.scaffold(b, "dock", 2.4, 2.4, 0.9)
+    # Rubble: stumps of piles and planks adrift.
+    for k, (x, y) in enumerate([(-0.9, -0.8), (0.6, -0.9), (-0.7, 0.7), (0.8, 0.6), (0.0, 0.1)]):
+        b.add(kit.cylinder("dock_stump_%d" % k, 0.06, 0.1, "wood_dark", (x, y, 0.0), sides=8),
+              kit.RUBBLE)
+    for k in range(7):
+        plank = kit.box("dock_drift_%d" % k, (0.5, 0.08, 0.03), "wood",
+                        (-0.9 + 0.3 * k, -0.6 + 0.2 * (k % 4), 0.02))
+        plank.rotation_euler = (0.0, 0.0, 0.5 * k)
+        b.add(plank, kit.RUBBLE)
+    b.finish()
+    return b.root
+
+
 def house():
     """A Stone Age house on two tiles: mudbrick walls, a thatched roof, a
     cloth of the owner's colour over the door."""
@@ -1097,6 +1280,14 @@ SUBJECTS = {
     "priest": (priest, "Foot", "unit"),
     "relic": (relic, "SmallBuilding", "node"),
     "wonder": (wonder, "Wonder", "building"),
+    "dock": (dock, "LargeBuilding", "building"),
+    "fishing_boat": (fishing_boat, "Ship", "unit"),
+    "transport": (transport, "Ship", "unit"),
+    "trade_boat": (trade_boat, "Ship", "unit"),
+    "archer_ship": (archer_ship, "Ship", "unit"),
+    "war_galley": (war_galley, "Ship", "unit"),
+    "catapult_ship": (catapult_ship, "Ship", "unit"),
+    "fish": (fish, "SmallBuilding", "node"),
 }
 SUBJECTS.update({"ground_" + g: (globals()["ground_" + g], "Terrain", "ground") for g in GROUNDS})
 

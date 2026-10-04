@@ -18,6 +18,9 @@ pub enum Class {
     Mounted,
     /// Elephant, siege.
     Heavy,
+    /// Boats: anchored at the middle of the hull, which reaches as far
+    /// toward the camera as away from it.
+    Ship,
     /// House, Farm — 1×1 or 2×2 tiles.
     SmallBuilding,
     /// Barracks, Storehouse — 2×2 tiles.
@@ -45,6 +48,7 @@ impl Class {
             Class::Foot => (40, 48),
             Class::Mounted => (56, 56),
             Class::Heavy => (72, 72),
+            Class::Ship => (80, 80),
             Class::SmallBuilding => (64, 64),
             Class::MediumBuilding => (128, 96),
             Class::LargeBuilding => (192, 144),
@@ -54,10 +58,11 @@ impl Class {
     }
 
     /// Tiles on a side of the footprint the class is drawn for: a building
-    /// stands on its whole footprint, a unit on one tile.
+    /// stands on its whole footprint, a unit on one tile, and a boat's hull
+    /// reaches two tiles end to end.
     pub fn footprint(self) -> u32 {
         match self {
-            Class::MediumBuilding => 2,
+            Class::MediumBuilding | Class::Ship => 2,
             Class::LargeBuilding => 3,
             Class::Wonder => 5,
             _ => 1,
@@ -66,7 +71,7 @@ impl Class {
 
     pub fn kind(self) -> Kind {
         match self {
-            Class::Foot | Class::Mounted | Class::Heavy => Kind::Mobile,
+            Class::Foot | Class::Mounted | Class::Heavy | Class::Ship => Kind::Mobile,
             Class::SmallBuilding | Class::MediumBuilding | Class::LargeBuilding | Class::Wonder => {
                 Kind::Building
             }
@@ -299,6 +304,7 @@ mod tests {
         assert_eq!(Class::Foot.size(), (40, 48));
         assert_eq!(Class::Mounted.size(), (56, 56));
         assert_eq!(Class::Heavy.size(), (72, 72));
+        assert_eq!(Class::Ship.size(), (80, 80));
         assert_eq!(Class::SmallBuilding.size(), (64, 64));
         assert_eq!(Class::MediumBuilding.size(), (128, 96));
         assert_eq!(Class::LargeBuilding.size(), (192, 144));
