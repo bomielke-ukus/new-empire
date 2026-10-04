@@ -1872,8 +1872,8 @@ relics the second needs (`docs/07` D31, answering Q2).
   rewritten.
 - **Its own Wonder.** Hard, in the Iron Age, with the Wonder's cost in
   hand and 600 food and 300 wood over, raises one by the Town Center with
-  five builders. A rich Hard opponent alone has one standing inside half
-  an hour; no recorded Hard-against-Easy match gets that rich, and the
+  five builders. A rich Hard opponent alone (20,000 of each to start) has
+  one standing within 40,000 ticks; no recorded Hard-against-Easy match gets that rich, and the
   record is unchanged.
 
 ### Work record: M8 chunk 6 — the map types (2026-10-04)
