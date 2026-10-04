@@ -160,3 +160,28 @@ fn opponents_keep_to_their_civilizations() {
     );
     sim.replay().verify().expect("replays");
 }
+
+/// A rich Hard opponent reaches the Iron Age and raises a Wonder, its
+/// clock running once it stands.
+///
+/// REQ: GD-WIN-02
+#[test]
+fn a_rich_hard_opponent_raises_a_wonder() {
+    let seed = 3;
+    let mut sim = inland(seed, 20_000);
+    let mut bots = [Opponent::new(1, Difficulty::Hard, seed)];
+    let mut site_at = None;
+    while sim.tick() < 40_000 && sim.wonder_clocks().is_empty() {
+        let until = sim.tick() + 200;
+        play(&mut sim, &mut bots, until);
+        let w = sim.world();
+        if site_at.is_none() && w.slots().any(|s| w.kind[s.index()] == kinds::WONDER) {
+            site_at = Some(sim.tick());
+        }
+    }
+    assert!(site_at.is_some(), "a Wonder was begun");
+    let clocks = sim.wonder_clocks();
+    assert_eq!(clocks.len(), 1, "and finished");
+    assert_eq!(clocks[0].1, 1);
+    sim.replay().verify().expect("replays");
+}

@@ -1869,7 +1869,12 @@ relics the second needs (`docs/07` D31, answering Q2).
   late (around half an hour in), so its priests do too; a rich Hard
   opponent alone has relics in its Temple inside 25 minutes. Hard still
   beats Easy 20 of 20; the six records long enough for a Temple are
-  rewritten. It still builds no Wonder of its own.
+  rewritten.
+- **Its own Wonder.** Hard, in the Iron Age, with the Wonder's cost in
+  hand and 600 food and 300 wood over, raises one by the Town Center with
+  five builders. A rich Hard opponent alone has one standing inside half
+  an hour; no recorded Hard-against-Easy match gets that rich, and the
+  record is unchanged.
 
 ### Work record: M8 chunk 6 — the map types (2026-10-04)
 
@@ -2157,7 +2162,7 @@ Stated so they are not rediscovered.
 - **The opponent researches no technology but ages and line upgrades**:
   no Toolworking, Leather Armour, Fletching, gathering or farming
   technology. It reaches the Iron Age in some long matches, not all, so
-  its Temple and priests come late; it never builds a Wonder.
+  its Temple, priests and Wonder come late or not at all.
 - **The Mac build is not notarised and is Apple Silicon only.**
   Notarising needs an Apple Developer account and a signing identity in
   the workflow's secrets; an Intel slice needs a second target and `lipo`

@@ -58,6 +58,10 @@ pub struct BuildOrder {
     /// from before priests reads none.
     #[serde(default)]
     pub priests: u32,
+    /// Whether it raises a Wonder in the Iron Age once it can pay for one
+    /// with plenty over (`GD-WIN-02`). A save from before reads no.
+    #[serde(default)]
+    pub wonder: bool,
 }
 
 fn standard_hunters() -> u32 {
@@ -121,6 +125,7 @@ impl BuildOrder {
                 barracks: 1,
                 hunters: 1,
                 priests: 0,
+                wonder: false,
             },
             Difficulty::Standard => BuildOrder {
                 villagers: [8, 16, 22, 26],
@@ -143,6 +148,7 @@ impl BuildOrder {
                 barracks: 1,
                 hunters: 2,
                 priests: 2,
+                wonder: false,
             },
             Difficulty::Hard | Difficulty::Hardest => BuildOrder {
                 villagers: [10, 20, 28, 32],
@@ -164,6 +170,7 @@ impl BuildOrder {
                 barracks: 2,
                 hunters: 3,
                 priests: 3,
+                wonder: true,
             },
         }
     }
@@ -672,6 +679,47 @@ impl Economy {
                     }
                 }
                 break;
+            }
+        }
+
+        // ----- A Wonder (`GD-WIN-02`), for the orders that raise one: in
+        // the Iron Age, with its cost in hand and as much again of food and
+        // wood besides, by the Town Center, and the most builders a site
+        // takes.
+        if order.wonder
+            && age == Age::Iron.index()
+            && !owned(kinds::WONDER)
+            && !pending(&self.ordered, kinds::WONDER)
+            && view.can_build(kinds::WONDER).is_ok()
+        {
+            let cost = view.cost_of(kinds::WONDER);
+            let mut with_reserve = cost;
+            with_reserve[Resource::Food.index()] += 600;
+            with_reserve[Resource::Wood.index()] += 300;
+            if afford(stock, &with_reserve) {
+                if let Some((x, y)) = place(view, kinds::WONDER, tc_tile, 6, 18, rng) {
+                    let to = fogged::nav::centre((x, y));
+                    let mut ids = Vec::new();
+                    while ids.len() < kinds::MAX_BUILDERS {
+                        let mut busy = taken.clone();
+                        busy.extend(&ids);
+                        match builder(&villagers, to, None, &busy) {
+                            Some(b) => ids.push(b),
+                            None => break,
+                        }
+                    }
+                    if !ids.is_empty() {
+                        taken.extend(&ids);
+                        out.push(CommandKind::Build {
+                            kind: kinds::WONDER,
+                            x,
+                            y,
+                            ids,
+                        });
+                        spend(stock, &cost);
+                        self.ordered.push((kinds::WONDER, tick));
+                    }
+                }
             }
         }
 

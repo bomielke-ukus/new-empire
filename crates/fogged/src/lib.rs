@@ -293,6 +293,12 @@ impl<'a> FoggedView<'a> {
         })
     }
 
+    /// What a `kind` costs the player, its civilization's price
+    /// (`docs/02` §11).
+    pub fn cost_of(&self, kind: KindId) -> kinds::Cost {
+        self.sim.cost_of(self.player, kind)
+    }
+
     /// The player's civilization, if the match named one (`docs/02` §11).
     pub fn civ(&self) -> Option<sim::Civ> {
         self.sim.civ(self.player)
