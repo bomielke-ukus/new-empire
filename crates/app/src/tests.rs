@@ -67,6 +67,70 @@ fn camera_keys_pan_without_building_or_spending_and_release_stops_panning() {
     }
 }
 
+/// Enter opens the line, the code is typed, Enter gives 1000 of what it
+/// names; the letters typed are text, not orders, and the camera stays.
+///
+/// REQ: GD-CHEAT-01
+#[test]
+fn a_typed_cheat_code_gives_a_thousand_and_its_letters_are_not_orders() {
+    let mut app = app();
+    let unit = spawn(&mut app, kinds::VILLAGER, 8, 8);
+    app.selection.set(vec![unit]);
+    draw(&mut app);
+    let tap = |app: &mut App, code: KeyCode| {
+        app.keyboard_input(code, ElementState::Pressed, false);
+        app.keyboard_input(code, ElementState::Released, false);
+    };
+    let type_line = |app: &mut App, text: &str| {
+        for c in text.chars() {
+            let code = if c == ' ' {
+                KeyCode::Space
+            } else {
+                keys::code(&format!("Key{c}")).unwrap()
+            };
+            tap(app, code);
+        }
+    };
+    let gold = app.sim.player(ME).unwrap().stockpile[3];
+    let commands = app.sim.replay().commands.len();
+    let focus = app.camera.focus;
+    tap(&mut app, KeyCode::Enter);
+    assert_eq!(app.cheat.as_deref(), Some(""));
+    // H is the House, A attack-move, S and W pan once bound: none of them
+    // while a code is typed.
+    type_line(&mut app, "MIDAS TOUCH HAWS");
+    for _ in 0..5 {
+        tap(&mut app, KeyCode::Backspace);
+    }
+    assert_eq!(app.cheat.as_deref(), Some("MIDAS TOUCH"));
+    assert_eq!(app.build_mode, None);
+    assert_eq!(app.targeting, None);
+    app.input.update_camera(&mut app.camera, 0.1);
+    assert_eq!(app.camera.focus, focus);
+    assert_eq!(app.sim.replay().commands.len(), commands);
+    tap(&mut app, KeyCode::Enter);
+    assert!(app.cheat.is_none());
+    step(&mut app, 3);
+    assert_eq!(app.sim.player(ME).unwrap().stockpile[3], gold + 1000);
+    assert!(app
+        .notices
+        .shown()
+        .iter()
+        .any(|n| n.kind == NoticeKind::Cheat));
+    // A line that is no code orders nothing; Escape closes one unsent.
+    let commands = app.sim.replay().commands.len();
+    tap(&mut app, KeyCode::Enter);
+    type_line(&mut app, "GIVE ME GOLD");
+    tap(&mut app, KeyCode::Enter);
+    tap(&mut app, KeyCode::Enter);
+    type_line(&mut app, "MIDAS TOUCH");
+    tap(&mut app, KeyCode::Escape);
+    assert!(app.cheat.is_none());
+    step(&mut app, 3);
+    assert_eq!(app.sim.replay().commands.len(), commands);
+    assert_eq!(app.sim.player(ME).unwrap().stockpile[3], gold + 1000);
+}
+
 #[test]
 fn replacement_shortcuts_work_without_panning_or_key_repeat_orders() {
     let mut app = app();

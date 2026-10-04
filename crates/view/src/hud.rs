@@ -380,6 +380,7 @@ pub fn controls(settings: &Settings) -> [Vec<(String, String)>; 2] {
     orders.push(s("R", "AUTO-RESEED ON, OFF"));
     orders.push(s("X", "UNQUEUE, OR CANCEL PLACING"));
     orders.push(s("SHIFT", "KEEP PLACING"));
+    orders.push(s("ENTER", "TYPE A CHEAT CODE, ENTER AGAIN"));
     let orders = orders.into_iter().map(|(k, a)| (lk(&k), a)).collect();
     [general, orders]
 }
@@ -516,6 +517,27 @@ impl<'a> Painter<'a> {
             self.rect(b.x + b.w - 3.0, b.y + 1.0, 2.0, b.h - 2.0, GOLD_LIGHT, 0);
         }
     }
+}
+
+/// The line a cheat code is typed into (`GD-CHEAT-01`): a dark box under
+/// the resource bar, centred, with the text so far and a cursor.
+pub fn cheat_line(
+    atlas: &Atlas,
+    viewport: (f32, f32),
+    scale: f32,
+    typed: &str,
+) -> Vec<SpriteInstance> {
+    let mut p = Painter::new(atlas);
+    let text = format!("CODE: {typed}_");
+    let pad = 6.0 * scale;
+    let w = (6 + 24 + 1) as f32 * font::ADVANCE as f32 * scale + 2.0 * pad;
+    let h = font::GLYPH_H as f32 * scale + 2.0 * pad;
+    let x = ((viewport.0 - w) * 0.5).round();
+    let y = (40.0 * scale).round();
+    p.rect(x, y, w, h, BLACK, 0);
+    p.outline(x, y, w, h, GOLD);
+    p.text(x + pad, y + pad, &text, false, scale);
+    p.out
 }
 
 /// Truncates text to what fits in `width` px at 1×.
@@ -1890,6 +1912,7 @@ impl Hud {
                 NoticeKind::Loss => GREY,
                 NoticeKind::Research => GOLD,
                 NoticeKind::Age => GOLD_LIGHT,
+                NoticeKind::Cheat => GREEN_LIGHT,
             };
             p.rect(8.0, y, NOTICE_W, NOTICE_H - 2.0, BLACK, 0);
             p.rect(9.0, y + 1.0, NOTICE_W - 2.0, NOTICE_H - 4.0, BROWN_DARK, 0);

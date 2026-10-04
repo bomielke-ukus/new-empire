@@ -1727,6 +1727,19 @@ had stood empty for (`docs/02` §5.2-§5.4).
 - **Goldens:** `army-hud` and `tooltip-hud` rebaked: the Barracks panel
   shows the Swordsman, greyed until the Bronze Age.
 
+### Work record: cheat codes for resources (2026-10-04)
+
+The owner, playing, asked for resource cheats for the player and never
+for a computer opponent (`docs/02` `GD-CHEAT-01`). Enter in a match opens a
+line under the resource bar; `BOUNTIFUL HARVEST`, `MIGHTY OAK`, `SOLID
+ROCK` or `MIDAS TOUCH` and Enter again gives 1000 food, wood, stone or gold,
+with a green notice. While the line is open its letters are text: no
+hotkey fires and no held key pans. A code is `CommandKind::Cheat`, so the
+replay holds it with who gave it; the simulation skips one whose source is
+a computer opponent, and a replay being watched takes no orders at all.
+The view's own replay of the feedback now issues each recorded command as
+whoever gave it. The joke units the spec also asks for are not built.
+
 ### Resume here next session
 
 **M8 is under way** (`docs/06`): the later ages' soldiers are in the

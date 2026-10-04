@@ -383,6 +383,13 @@ its own fog state.
 - **Cheat codes** — anachronistic joke units and resource grants, disabled in
   multiplayer and flagged in the replay. Non-negotiable; they are part of the
   memory of this game.
+  **[GD-CHEAT-01]** Resource grants: in a match, Enter opens a line, a code
+  and Enter again gives the player 1000 of a resource. Each code is an order
+  like any other, so the replay holds it and who gave it; the simulation
+  ignores one a computer opponent issues, and a replay being watched takes
+  none. The codes: `BOUNTIFUL HARVEST` (food), `MIGHTY OAK` (wood),
+  `SOLID ROCK` (stone), `MIDAS TOUCH` (gold); case and spacing do not
+  matter. The joke units are still to come.
 
 ---
 

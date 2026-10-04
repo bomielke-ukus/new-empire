@@ -48,8 +48,8 @@ pub use battle::{
 };
 pub use combat::{Armour, Elevation};
 pub use command::{
-    Command, CommandError, CommandKind, CommandQueue, PlayerId, Source, COMMAND_DELAY,
-    MAX_COMMAND_IDS, MAX_PLAYERS,
+    Command, CommandError, CommandKind, CommandQueue, PlayerId, Source, CHEAT_AMOUNT,
+    COMMAND_DELAY, MAX_COMMAND_IDS, MAX_PLAYERS,
 };
 pub use entity::{EntityId, KindId, Slot, World, WorldViolation};
 pub use fog::{Fog, Memory, Visibility, MAX_SIGHT};

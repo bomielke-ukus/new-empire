@@ -1533,6 +1533,11 @@ impl Simulation {
 
     fn apply_commands(&mut self) {
         for (cmd, via) in self.queue.drain_due_from(self.tick) {
+            // A cheat code is the player's: a computer opponent's does
+            // nothing (`GD-CHEAT-01`).
+            if via == Source::Ai && matches!(cmd.kind, CommandKind::Cheat { .. }) {
+                continue;
+            }
             // A command that places or clears a building leaves the grid
             // dirty; the next one may ask it what is connected. Relabel
             // between them (free when nothing changed), so a move ordered
@@ -1568,6 +1573,11 @@ impl Simulation {
             CommandKind::Resign => {
                 if let Some(pl) = self.players.get_mut(p as usize) {
                     pl.resigned = true;
+                }
+            }
+            CommandKind::Cheat { resource } => {
+                if let Some(pl) = self.players.get_mut(p as usize) {
+                    pl.stockpile[resource.index()] += crate::command::CHEAT_AMOUNT;
                 }
             }
             CommandKind::Spawn { kind, pos } => {

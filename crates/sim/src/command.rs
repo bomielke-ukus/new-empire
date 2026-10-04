@@ -13,6 +13,7 @@
 
 use crate::entity::{EntityId, KindId};
 use crate::hash::{HashState, StateHasher};
+use crate::kinds::Resource;
 use crate::orders::{Formation, Rally, Stance};
 use crate::tech::TechId;
 use crate::vec2::Vec2Fx;
@@ -192,7 +193,17 @@ pub enum CommandKind {
     /// Give up: the side is out of the match and gives no more orders
     /// (`docs/02` §10). Always available.
     Resign,
+    /// A cheat code: [`CHEAT_AMOUNT`] of a resource into the stockpile
+    /// (`GD-CHEAT-01`). The player's alone: the simulation ignores one a
+    /// computer opponent issues.
+    Cheat {
+        /// Which resource.
+        resource: Resource,
+    },
 }
+
+/// What one cheat code gives (`GD-CHEAT-01`).
+pub const CHEAT_AMOUNT: i32 = 1000;
 
 /// Who issued a command: the player at the keyboard, or a computer
 /// opponent. The simulation treats both alike except where `docs/04`
@@ -340,7 +351,8 @@ impl Command {
             | CommandKind::SetRally { .. }
             | CommandKind::Research { .. }
             | CommandKind::SetAutoReseed { .. }
-            | CommandKind::Resign => 0,
+            | CommandKind::Resign
+            | CommandKind::Cheat { .. } => 0,
         };
         if named > MAX_COMMAND_IDS {
             return Err(CommandError::TooManyIds { len: named });
@@ -462,6 +474,10 @@ impl HashState for CommandKind {
                 h.write_u8(*enabled as u8);
             }
             CommandKind::Resign => h.write_u8(19),
+            CommandKind::Cheat { resource } => {
+                h.write_u8(20);
+                h.write_u8(*resource as u8);
+            }
         }
     }
 }

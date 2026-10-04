@@ -66,3 +66,4 @@ A letter works while the building or villager that has the button is selected.
 | `R` | AUTO-RESEED ON, OFF |
 | `X` | UNQUEUE, OR CANCEL PLACING |
 | `SHIFT` | KEEP PLACING |
+| `ENTER` | TYPE A CHEAT CODE, ENTER AGAIN |

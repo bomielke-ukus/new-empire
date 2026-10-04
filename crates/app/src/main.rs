@@ -8,6 +8,7 @@
 //! villagers and the selection; Escape opens the pause menu, and the
 //! results come up when the match is decided.
 
+mod cheats;
 mod clock;
 mod input;
 mod keys;
@@ -233,6 +234,8 @@ struct App {
     replays: Vec<save::Entry>,
     /// The recording being watched, if the match is a replay.
     playback: Option<Playback>,
+    /// A cheat code being typed (`GD-CHEAT-01`), while the line is open.
+    cheat: Option<String>,
     /// Whose eyes the world is seen through: a player's, or nobody's for
     /// the whole map, which only a replay allows.
     viewer: Option<u8>,
@@ -469,6 +472,7 @@ impl App {
             replays_dir: data_dir("NEW_EMPIRE_REPLAYS", "replays"),
             replays: Vec::new(),
             playback: None,
+            cheat: None,
             viewer: Some(ME),
             match_started: 0,
             recording: None,
@@ -621,6 +625,28 @@ impl App {
 
     fn map_size(&self) -> (i32, i32) {
         (self.sim.map().width(), self.sim.map().height())
+    }
+
+    /// A typed line: the resource if it is a code, else the refusal.
+    fn enter_cheat(&mut self, line: &str) {
+        let Some(resource) = cheats::lookup(line) else {
+            if !line.trim().is_empty() {
+                self.cue(Cue::Invalid, None);
+            }
+            return;
+        };
+        self.issue(CommandKind::Cheat { resource });
+        self.cue(Cue::Deposited, None);
+        self.notices.push(Notice {
+            kind: NoticeKind::Cheat,
+            text: format!(
+                "CHEAT: {} {}",
+                sim::CHEAT_AMOUNT,
+                resource.name().to_uppercase()
+            ),
+            tile: None,
+            tick: self.sim.tick(),
+        });
     }
 
     fn issue(&mut self, kind: CommandKind) {
@@ -1141,6 +1167,14 @@ impl App {
             self.viewer,
             self.ui_scale(),
         ));
+        if let Some(line) = &self.cheat {
+            scene.ui.extend(view::hud::cheat_line(
+                &self.atlas,
+                self.camera.viewport,
+                self.ui_scale(),
+                line,
+            ));
+        }
         // Band-box outline.
         if let (Some(from), Some(to)) = (self.selection.drag_from, self.input.cursor) {
             let thr = DRAG_THRESHOLD * self.camera.dpi;
@@ -1684,6 +1718,7 @@ impl App {
         self.wall_from = None;
         self.alarm_at = None;
         self.show_help = false;
+        self.cheat = None;
         // A loaded match is in the age it was left in: no celebration.
         self.last_age = self.sim.player(ME).map_or(Age::Stone, |p| p.age);
         self.age_up = None;
@@ -2221,6 +2256,13 @@ impl App {
     /// Returns true only when the caller should close the window.
     fn keyboard_input(&mut self, code: KeyCode, state: ElementState, repeat: bool) -> bool {
         match state {
+            // While a code is typed its letters are text, not keys held
+            // to pan the camera.
+            ElementState::Pressed if self.cheat.is_some() => {
+                if !repeat || code == KeyCode::Backspace {
+                    return self.key(code);
+                }
+            }
             ElementState::Pressed => {
                 self.input.held.insert(code);
                 if !repeat {
@@ -2296,6 +2338,34 @@ impl App {
             if code == KeyCode::Escape {
                 self.results = ResultsState::Dismissed;
             }
+            return false;
+        }
+        // A cheat code (`GD-CHEAT-01`): Enter opens the line, Enter again
+        // gives what the code names, Escape closes it. Not in a replay:
+        // a replay takes no orders.
+        if let Some(line) = &mut self.cheat {
+            match code {
+                KeyCode::Enter | KeyCode::NumpadEnter => {
+                    let line = self.cheat.take().unwrap_or_default();
+                    self.enter_cheat(&line);
+                }
+                KeyCode::Escape => self.cheat = None,
+                KeyCode::Backspace => {
+                    line.pop();
+                }
+                code => {
+                    if let Some(c) = cheats::typed(code) {
+                        if line.len() < cheats::MAX_LEN {
+                            line.push(c);
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+        if matches!(code, KeyCode::Enter | KeyCode::NumpadEnter) && self.playback.is_none() {
+            self.cheat = Some(String::new());
+            self.input.held.clear();
             return false;
         }
         // Camera movement is handled through held keys, regardless of the

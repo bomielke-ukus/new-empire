@@ -228,10 +228,17 @@ impl CombatFeedback {
         replay.validate()?;
         *self = Self::default();
         let mut sim = Simulation::new(replay.seed, replay.config.clone());
-        let mut commands = replay.commands.iter().peekable();
+        let mut commands = replay.commands.iter().enumerate().peekable();
         while sim.tick() < replay.ticks {
-            while commands.peek().is_some_and(|(tick, _)| *tick == sim.tick()) {
-                sim.issue(commands.next().unwrap().1.clone());
+            while commands
+                .peek()
+                .is_some_and(|(_, (tick, _))| *tick == sim.tick())
+            {
+                // Each as the one who gave it: a computer opponent's is
+                // treated as one (`TA-PATH-06`, `GD-CHEAT-01`).
+                let (n, (_, command)) = commands.next().unwrap();
+                let via = replay.sources.get(n).copied().unwrap_or_default();
+                sim.issue_from(command.clone(), via);
             }
             sim.step();
             self.observe(&sim);

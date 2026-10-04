@@ -15,6 +15,8 @@ pub enum NoticeKind {
     Research,
     /// An age was reached.
     Age,
+    /// A cheat code gave the side something (`GD-CHEAT-01`).
+    Cheat,
 }
 
 /// One line on the stack.
