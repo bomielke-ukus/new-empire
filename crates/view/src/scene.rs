@@ -942,6 +942,55 @@ mod tests {
     /// REQ: GD-AGE-02
     /// REQ: RM-M3-01
     #[test]
+    fn buildings_are_drawn_in_their_owners_architecture() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
+        let (sheets, _) = crate::sheets::load_all(&dir);
+        let atlas = Atlas::with_sheets(&sheets);
+        let drawn = |civs: Vec<sim::Civ>| {
+            let sim = Simulation::new(
+                5,
+                SimConfig {
+                    civs,
+                    ..SimConfig::default()
+                },
+            );
+            let scene = Scene::build(&sim, &atlas, None, 0.0);
+            (0..2u8)
+                .map(|p| {
+                    scene
+                        .sprites
+                        .iter()
+                        .find(|s| {
+                            s.slot != u32::MAX
+                                && sim.world().kind[s.slot as usize] == kinds::TOWN_CENTER
+                                && sim.world().owner[s.slot as usize] == p
+                        })
+                        .map(|s| (s.page, s.u, s.v))
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+        let frame_of = |look| {
+            let f = atlas.frame(look, 0).unwrap().0;
+            (f.page, f.x, f.y)
+        };
+        // The Egyptians' Town Center and the Shang's, each its own.
+        let looks = drawn(vec![sim::Civ::Egyptians, sim::Civ::Shang]);
+        assert_eq!(
+            looks[0],
+            frame_of(sprites::look_id(kinds::TOWN_CENTER, 0, 1))
+        );
+        assert_eq!(
+            looks[1],
+            frame_of(sprites::look_id(kinds::TOWN_CENTER, 0, 3))
+        );
+        // The Greeks', and a match that names no civilization, the first set.
+        let greek = drawn(vec![sim::Civ::Greeks, sim::Civ::Phoenicians]);
+        assert_eq!(greek[0], frame_of(kinds::TOWN_CENTER));
+        assert_eq!(drawn(vec![]), greek);
+    }
+
+    #[test]
     fn buildings_wear_their_owners_age_and_the_sweep_lights_them() {
         let mut sim = Simulation::new(
             5,

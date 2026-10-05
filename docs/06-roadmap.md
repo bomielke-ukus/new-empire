@@ -273,14 +273,15 @@ people.
 
 ## M8 — Breadth
 
-Under way (2026-10-04): the Bronze and Iron Ages' soldiers are in the
+Every item below is built (2026-10-05), and waits on the owner's
+playtest: the Bronze and Iron Ages' soldiers are in the
 simulation and the opponent fields them, drawn as detailed figures with
 the rest of the units; priests, relics and the Wonder and Relic victories
 are in, rendered; cheat codes are in; the six other map types are in;
-the eight civilizations are in, in one architecture set; naval is in
+the eight civilizations are in; naval is in
 the simulation: the Dock, fishing, warships, transports, trade boats and
-Islands, rendered, and the opponent uses them (`docs/10`). Still to
-come: the other three architecture sets.
+Islands, rendered, and the opponent uses them; the four architecture
+sets are drawn (`docs/10`, `docs/07` D34).
 
 - Iron Age and its full unit and tech roster
 - All 8 civilizations with bonuses and tech-tree denials

@@ -2186,9 +2186,45 @@ the trade boat, Islands and the opponent's use of all of it follow.
   view test that checked the list of kinds awaiting art checks that none
   is.
 
+### Work record: the other three architectures (2026-10-05)
+
+- **Atlas pages** (`view::sprites`, `render`). The sprite atlas is a
+  texture array; a page is at most 8192 rows, and what does not fit goes
+  on the next. Each frame and sprite instance carries its page, which
+  rides to the shader above the flip bit; the software rasterizer, picking
+  and `mapview --atlas` read it. One page is still as tall as it needs.
+- **Looks by architecture** (`view::sprites`, `view::scene`). A set named
+  `house_egyptian`, `house_mesopotamian_bronze` or `house_asian_iron`
+  draws the kind in that architecture and age; the plainly named sets are
+  the Greek (`docs/07` D34). A building is drawn in its owner's
+  civilization's architecture, the latest age it has a set for, and the
+  Greek set's where it has none; a match that names no civilization draws
+  the Greek. Variant ids leave room for four architectures below the UI's.
+- **The models** (`tools/render/kit.py`, `style_architecture`): each
+  building restyled after it is built, as the ages restyle the Greek —
+  each architecture's materials age by age, its roofs in place of the
+  thatch and gables (flat with a parapet, cavetto cornice and a
+  wind-catcher; flat and crenellated; hipped with turned-up corners and,
+  in tile, a ridge with horns), its wall work (painted bands and a
+  battered foot; buttresses and blue glaze with gold rosettes; a podium
+  and lacquered posts with brackets), and Egyptian papyrus capitals. What
+  stood on the old roof is set on the new. Three Wonders of their own: a
+  cased pyramid with obelisks, a ziggurat with a glazed shrine, a
+  double-eaved hall on terraces with gate towers.
+- **On the way**, two traps in the kit: a turned object's `bound_box` is
+  its own axes' box turned, far larger than the mesh (bounds come from
+  the vertices now), and a solid band flush with a wall's top shades
+  black (bands are open rims, short of the top).
+- **Sets**: 123 new (40 buildings by age and a Wonder in each
+  architecture), 240 in all, every one validated. The Dock, the farm, the
+  walls and the gate are everyone's.
+- **Tests**: set names with an architecture and an age; the lookup's
+  fallbacks (the architecture's latest age, then the Greek); frames that
+  overflow a page.
+
 ### Resume here next session
 
-**M8 is under way** (`docs/06`): the later ages' soldiers are in the
+**M8's items are all built** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the
 detailed soldiers and the new roster are rendered (chunk 3);
 priests, relics and the Wonder are in (chunk 4) and the opponent uses
@@ -2197,8 +2233,8 @@ civilizations (chunk 7); the opponent researches its technologies and
 builds Storehouses by its work; naval is in the simulation — the water,
 the Dock, fishing, warships, transports, trade and Islands (above).
 The opponent goes to sea, and the boats, the Dock and the fish are
-rendered (above). Next: the other three architecture sets, which need a
-second atlas page first (§5).
+rendered; the four architecture sets are drawn (above, `docs/07` D34).
+Next: the owner's playtest of M8, then `docs/06` M9.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded
@@ -2412,10 +2448,11 @@ Stated so they are not rediscovered.
   nobody fishes (the
   simulation has no boats), and no rendered set has a second
   civilisation's look. A modeller's work can replace any set by name.
-- **The sprite atlas is 74% full** (6025 of 8192 rows at 8192 wide, a
-  64 MB texture; 92 sets). 8192 is the widest texture the GPU limits
-  allow, so a second civilisation's sets will need a second atlas page or
-  a texture array.
+- **The sprite atlas fills a page and a sliver** (8170 rows of the first
+  8192-row page and 164 of the second; 215 sets): two layers of a texture
+  array, 128 MB, of which the second is nearly empty. Packing tighter than
+  shelves sorted by height (a skyline packer) would likely bring it back to
+  one page until the next sets come.
 - **The opponent's Wonder comes late**: after ten minutes in the Iron
   Age, which Hard reaches thirty-five to forty-five minutes in. Standard
   never goes past the Bronze Age, by its order.

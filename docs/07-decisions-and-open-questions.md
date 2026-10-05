@@ -407,8 +407,7 @@ unit plays changes. A match names a civilization per side in its
 configuration; one that names none (every test and corpus match before
 this) plays as before and hashes as before. On the setup screen the
 player picks theirs and the opponents' are dealt from the seed. The four
-architecture sets are named per civilization but not drawn: every side's
-buildings look the same until the other three sets are made.
+architecture sets are named per civilization; D34 draws them.
 
 ### D33 — Boats move on a grid of their own; the Dock stands in the water at the shore
 **Date:** 2026-10-04 · **Decided by:** Claude, on the owner's instruction to build naval next; Q1's recommendation (hold naval until M8)
@@ -465,6 +464,50 @@ nearest neighbour, then cuts a channel of deep water along the line
 halfway between every two, no nearer a start than twelve tiles; a map
 where any start can still walk to another is thrown away and the next
 seed tried. Relics go on any island.
+
+### D34 — The first architecture set is the Greek; the other three restyle it
+**Date:** 2026-10-05 · **Decided by:** Claude, on the owner's instruction to make the other three building styles
+
+`docs/02` §11 gives eight civilizations four architecture sets, and D32
+named each civilization's. The set drawn first, mudbrick and thatch
+turning to plaster, terracotta, dressed stone and slate, with porticoes
+and a podium Wonder under a columned shrine, is the **Greek**: the
+plainly named sets (`house`, `house_bronze`) are the Greek, and a
+civilization without a set of its own (and every match that names no
+civilization) draws them. The other three are the same buildings, the
+same footprints and the same stages, restyled after they are built, as
+the ages restyle the Greek (D29), so that a building is the same shape
+to the eye in every architecture and a new kind costs one model, not
+four:
+
+- **Egyptian**: mudbrick, then whitewash, sandstone, and white
+  limestone in the Iron Age; flat roofs behind a low parapet under a
+  flared cavetto cornice, painted bands of blue and red ochre from the
+  Tool Age, battered wall feet from the Bronze, a wind-catcher on a roof
+  big enough to live on, papyrus capitals on columns. Its Wonder is a
+  pyramid cased in white limestone with a gilt capstone and two
+  obelisks.
+- **Mesopotamian**: mudbrick, then baked brick from the Bronze Age;
+  flat roofs crenellated, the merlons stepped from the Bronze; buttressed
+  walls; a band of blue glaze from the Bronze and walls glazed to the
+  top with gold rosettes in the Iron. Its Wonder is a three-tiered
+  ziggurat with a blue-glazed shrine.
+- **East Asian**: rammed earth on an earthen podium, then white plaster
+  on a stone one from the Bronze Age; hipped roofs with turned-up
+  corners, thatch and then dark tile with a ridge and, in the Iron Age,
+  gilt horns; posts of dark timber, lacquered red from the Bronze, with
+  brackets under the eaves. Its Wonder is a hall under two tiers of roof
+  on two terraces, with gate towers by its stair.
+
+What stood on a roof (a flag) is set on the new roof. The Dock, the
+farm, the walls and the gate are everyone's. The sets are named for
+their architecture before their age (`house_egyptian_bronze`); a
+building draws its owner's architecture in the latest age that
+architecture has a set for, and the Greek set where it has none.
+
+The four sets do not fit one 8192 × 8192 atlas, the widest texture the
+GPU's default limits allow: the atlas is a texture array, a page a
+layer, and each frame says which page it is on.
 
 ## Open questions
 

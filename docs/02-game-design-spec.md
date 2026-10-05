@@ -413,7 +413,10 @@ civ, enough to prove asymmetry is working.
 technologies the game has (`docs/07` D32, which gives the table as built);
 what names something not yet in the game waits for it. The player picks a
 civilization on the setup screen; the opponents' are dealt from the seed.
-All eight build in the one architecture set there is.
+Each builds in its architecture (`docs/07` D34): the Greeks and
+the Phoenicians in the Greek set, the Egyptians and the Sumerians in the
+Egyptian, the Assyrians, the Babylonians and the Persians in the
+Mesopotamian, and the Shang in the East Asian.
 
 ---
 

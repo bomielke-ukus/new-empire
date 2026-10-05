@@ -36,8 +36,7 @@ pub enum Civ {
 }
 
 /// The building set a civilization raises (`docs/02` §11, `docs/05`
-/// §2.5): how its buildings look, and nothing else. Every civilization is
-/// drawn in the one set there is until the others are made.
+/// §2.5, `docs/07` D34): how its buildings look, and nothing else.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Architecture {
     /// Egyptian.
