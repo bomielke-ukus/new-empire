@@ -28,7 +28,7 @@ Six milestones landed; the vertical slice wants only the feel pass, M7.
 | M6 — Game shell | **Landed 2026-09-19** | Configure, play, save, reload and watch a replay without a terminal: the run in `crates/app/src/tests.rs`; the owner played the Mac build 2026-09-20 |
 | M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest is the owner's (§4d); the sprite art is code-built (`docs/08` §9) for every unit, building and node, and the ground has a rendered grain |
 | M8 — Breadth | **Built 2026-10-05** | Every item in `docs/06` M8; the owner's playtest is to come |
-| M9 — Content | **Started 2026-10-05** | Campaigns, the learning campaign, the editor, two historical campaigns (`docs/07` D35) |
+| M9 — Content | **Built 2026-10-05**, awaiting the owner's play | Campaigns, the learning campaign, the editor, two historical campaigns (`docs/07` D35) |
 | M10 — Multiplayer | Not started | Moved out of M9 (D35) |
 
 The Mac checks of 2026-09-12 exercised the economy and age progression
@@ -2321,11 +2321,42 @@ the trade boat, Islands and the opponent's use of all of it follow.
   parts of `Any` and `Not` in the editor (they are shown and deleted).
   Closing the window with changes unsaved loses them.
 
+### Work record: M9, fifth chunk — the historical campaigns (2026-10-05)
+
+- **The Persian Wars and Sargon of Akkad**, four scenarios each
+  (`docs/02` §13 as built), on drawn maps of Attica, Thermopylae, the
+  straits of Salamis, Boeotia and southern Mesopotamia. Two are full
+  matches against the computer (Plataea, Uruk); the others are battles
+  and sieges driven by triggers.
+- **`Condition::Since`**: so long after a trigger first happened. The
+  Marathon fleet sails twenty seconds after the battle, Kish raids four
+  minutes into the Cupbearer; the editor offers it.
+- **`Side::start`**: where a side starts, so a battle opens on the army,
+  not on the town behind it.
+- **The shipped-campaign check** now also holds every building to land
+  and every ship to water, and keeps sides other than the player's out
+  of each other's sight (there are no alliances; "Spears Against Horses"
+  had its waves entering by Avaris's tower, now fixed).
+- **Played through**: the bot of `crates/sim/tests/common/bot.rs`, shared
+  with the learning campaign, plays each battle as a player would: holds
+  posts, takes on what comes near, turns to the Immortals, attacks
+  soldiers, then towers, then the target, keeps Sargon sheltered.
+  Marathon's plain falls with 11 hoplites standing and Athens is reached
+  with the fleet 18 tiles short; Thermopylae is held with 27 of 32 (and
+  lost by standing still); Salamis is won with 11 ships of 20; the gulf
+  with 17 of 30; the four quarters held and their camps destroyed. The
+  Plataea and Uruk computers are seen to gather and give orders.
+- **Found on the way, and left for the owner** (§6): soldiers on their
+  default stance do not answer archers shooting from beyond their sight;
+  a first Town Center needs a Government Centre, though D22 speaks of a
+  second; a Spearman loses to a Light Cavalry one on one.
+
 ### Resume here next session
 
-**M9 is under way** (`docs/07` D35): scenarios and campaigns are in the
-game, the learning campaign is shipped and the scenario editor is in
-(above). Next: the Persian Wars and Sargon of Akkad.
+**M9 is built** (`docs/07` D35): scenarios and campaigns, the learning
+campaign, the scenario editor, and the two historical campaigns. Next:
+the owner plays them, and answers the three questions in §6; then M10,
+multiplayer.
 
 **M8's items are all built** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the
@@ -2585,6 +2616,9 @@ in the order they bite:
 | Q1 — Naval in the vertical slice? | M4 scope | Leave it out of the slice; the map generator has water but nothing sails |
 | Q8 — Four ages or five? | Content tables | Four, as `docs/02` stands; M3 shipped the four-age structure |
 | Q5 — The game's name | M6 (menus), M9 | Answered: *Brenden's Empires* (`docs/07` D27) |
+| Should soldiers answer archers shooting from beyond their sight? Today a Defensive unit (the default) does not: hoplites stand and are shot from five tiles away | Feel of every fight; the campaigns are balanced for it | Yes, on Aggressive and Defensive: the unit hit turns on its attacker within a leash. It changes every fight, so the replay corpus and the balance harness are re-recorded |
+| Does a *first* Town Center need a Government Centre? The code says yes (any Town Center), D22 says "a second one" | Rebuilding a lost town; scenarios without a town | Follow D22: only a second. The Cupbearer was redesigned around it |
+| A Spearman loses to a Light Cavalry one on one (nine hits to seven); the counter wins only in numbers | Counter clarity (`GD-COMBAT-02`) | Raise the Spearman's bonus against cavalry from +6 to +12 (six hits to the rider's seven), and check the balance harness |
 
 ---
 

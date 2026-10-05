@@ -3222,3 +3222,43 @@ fn shot(app: &mut App, path: &std::path::Path) {
     }
     std::fs::write(path.with_extension("rgba"), img.to_bytes()).unwrap();
 }
+
+/// The shipped scenarios a computer plays are played: Mardonius at Plataea
+/// and Lugal-zage-si at Uruk gather and give orders from the first
+/// minutes, on the maps they are given.
+///
+/// REQ: GD-CAMP-01
+#[test]
+fn the_computer_plays_its_side_of_a_shipped_scenario() {
+    for id in ["persian-wars/plataea", "sargon/uruk"] {
+        let mut app = App::new();
+        app.camera.viewport = (1280.0, 720.0);
+        app.progress_path = scratch("computer-progress").join("campaigns.ron");
+        app.replays_dir = scratch("computer-replays");
+        app.speaker = Speaker::Recorder(Default::default());
+        let at = save::campaigns::locate(&app.campaigns, id).expect("a shipped scenario");
+        app.briefing = Some(at);
+        app.start_scenario();
+        assert_eq!(app.opponents.len(), 1, "{id}");
+        assert_eq!(app.opponents[0].player(), 1);
+        let start = app.sim.player(1).unwrap().stockpile;
+        let now = Instant::now();
+        for _ in 0..3 * 60 * sim::TICKS_PER_SECOND {
+            app.tick_once(now);
+        }
+        let orders = app
+            .sim
+            .replay()
+            .commands
+            .iter()
+            .filter(|(_, c)| c.player == 1)
+            .count();
+        assert!(orders > 10, "{id}: {orders} orders from the computer");
+        assert_ne!(
+            app.sim.player(1).unwrap().stockpile,
+            start,
+            "{id}: it gathers and spends"
+        );
+        assert!(app.sim.outcome().is_none(), "{id}");
+    }
+}

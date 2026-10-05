@@ -299,9 +299,38 @@ mod tests {
                         }
                     }
                 }
-                // And it starts: a match can be made of it.
+                // And it starts: a match can be made of it, with every
+                // building on land and every ship on water.
                 let sim = sim::Simulation::new(sc.match_seed(), sc.config());
                 assert!(sim.scenario().is_some());
+                let (w, map) = (sim.world(), sim.map());
+                for slot in w.slots() {
+                    let i = slot.index();
+                    let info = sim::kinds::info(w.kind[i]);
+                    let (x, y) = (w.pos[i].x.floor(), w.pos[i].y.floor());
+                    if info.naval {
+                        assert!(
+                            map.terrain(x, y).is_water(),
+                            "{}: a {} on land at {x},{y}",
+                            sc.id,
+                            info.name
+                        );
+                    } else if info.class == sim::Class::Building {
+                        let fp = info.footprint.max(1) as i32;
+                        let (ax, ay) = sim::nav::anchor_tile(w.pos[i], fp);
+                        for ty in ay..ay + fp {
+                            for tx in ax..ax + fp {
+                                assert!(
+                                    map.walkable(tx, ty),
+                                    "{}: a {} at {ax},{ay} stands on {:?}",
+                                    sc.id,
+                                    info.name,
+                                    map.terrain(tx, ty)
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
     }

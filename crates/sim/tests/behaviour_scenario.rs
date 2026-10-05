@@ -31,6 +31,7 @@ fn side(name: &str, control: Control) -> Side {
         age: Age::Stone,
         stockpile: [0; 4],
         techs: Vec::new(),
+        start: None,
     }
 }
 
@@ -434,6 +435,64 @@ fn a_trigger_waits_on_any_of_several_or_on_one_not_holding() {
         100,
         "the raid came on time"
     );
+}
+
+/// A trigger may wait so long after another first happened, however
+/// late that was.
+///
+/// REQ: GD-CAMP-03
+#[test]
+fn a_trigger_waits_so_long_after_another() {
+    let mut sc = base();
+    sc.triggers = vec![
+        Trigger {
+            id: Some("founded".into()),
+            ..trigger(
+                vec![Condition::Has {
+                    owner: 0,
+                    kind: Some("Clubman".into()),
+                    count: 1,
+                }],
+                Vec::new(),
+            )
+        },
+        trigger(
+            vec![Condition::Since {
+                trigger: "founded".into(),
+                seconds: 5,
+            }],
+            vec![Action::Give {
+                owner: 0,
+                resource: kinds::Resource::Gold,
+                amount: 100,
+            }],
+        ),
+    ];
+    let mut sim = start(&sc);
+    seconds(&mut sim, 10);
+    assert_eq!(
+        sim.player(0).unwrap().stockpile[3],
+        0,
+        "nothing founded yet"
+    );
+    sim.issue(spawn(0, kinds::CLUBMAN, sim::Vec2Fx::from_int(8, 8)));
+    seconds(&mut sim, 5);
+    assert_eq!(
+        sim.player(0).unwrap().stockpile[3],
+        0,
+        "not five seconds on"
+    );
+    seconds(&mut sim, 2);
+    assert_eq!(sim.player(0).unwrap().stockpile[3], 100);
+    let mut bad = base();
+    bad.triggers.push(trigger(
+        vec![Condition::Since {
+            trigger: "nowhere".into(),
+            seconds: 1,
+        }],
+        vec![Action::Win],
+    ));
+    assert!(bad.problems().join("\n").contains("no trigger \"nowhere\""));
 }
 
 /// REQ: GD-CAMP-04

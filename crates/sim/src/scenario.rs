@@ -133,6 +133,10 @@ pub struct Side {
     /// Technologies it starts with, by name.
     #[serde(default)]
     pub techs: Vec<String>,
+    /// Where it starts, which the camera opens on: its Town Center's
+    /// place, or its first placement's, unless the scenario says.
+    #[serde(default)]
+    pub start: Option<(i32, i32)>,
 }
 
 fn default_stockpile() -> Cost {
@@ -340,6 +344,14 @@ pub enum Condition {
     },
     /// A tagged unit or building is gone (or was never placed).
     Gone(String),
+    /// So many seconds have passed since a trigger first happened: a raid
+    /// four minutes after the town is founded.
+    Since {
+        /// The trigger, by id.
+        trigger: String,
+        /// How long after.
+        seconds: u32,
+    },
     /// Any one of these holds: a raid that comes when the army is ready
     /// or at five minutes, whichever is first.
     Any(Vec<Condition>),
@@ -434,6 +446,9 @@ pub struct ScenarioState {
     pub(crate) objectives: Vec<ObjectiveStatus>,
     /// How often each trigger has happened.
     pub(crate) fired: Vec<u32>,
+    /// The tick each trigger first happened at.
+    #[serde(default)]
+    pub(crate) fired_at: Vec<Option<u64>>,
     /// The tagged units and buildings.
     pub(crate) tags: BTreeMap<String, EntityId>,
     /// How it ended.
@@ -449,6 +464,9 @@ impl HashState for ScenarioState {
         h.write_u32(self.fired.len() as u32);
         for &n in &self.fired {
             h.write_u32(n);
+        }
+        for at in &self.fired_at {
+            h.write_u64(at.map_or(u64::MAX, |t| t));
         }
         h.write_u32(self.tags.len() as u32);
         for (tag, id) in &self.tags {
@@ -579,6 +597,11 @@ impl Scenario {
         let side_ok = |p: PlayerId| (p as usize) < sides;
         let owner_ok = |p: PlayerId| side_ok(p) || p == kinds::GAIA;
         let kind_ok = |k: &str| kinds::by_name(k).is_some();
+        for (i, s) in self.sides.iter().enumerate() {
+            if let Some(at) = s.start.filter(|&at| !on_map(at)) {
+                out.push(format!("side {i}: its start {at:?} is off the map"));
+            }
+        }
         let mut tags = Vec::new();
         let mut placement = |pl: &Placement, out: &mut Vec<String>, place: &str| {
             if !kind_ok(&pl.kind) {
@@ -648,7 +671,7 @@ impl Scenario {
                     Condition::Done(o) | Condition::Failed(o) => {
                         (!ids.contains(&o.as_str())).then(|| format!("no objective {o:?}"))
                     }
-                    Condition::Fired(f) => {
+                    Condition::Fired(f) | Condition::Since { trigger: f, .. } => {
                         (!triggers.contains(&f.as_str())).then(|| format!("no trigger {f:?}"))
                     }
                     Condition::Gone(tag) => {
@@ -896,6 +919,7 @@ impl Simulation {
                 })
                 .collect(),
             fired: vec![0; sc.triggers.len()],
+            fired_at: vec![None; sc.triggers.len()],
             tags: BTreeMap::new(),
             outcome: None,
         };
@@ -984,6 +1008,9 @@ impl Simulation {
                 continue;
             }
             self.scenario_state.fired[ti] += 1;
+            if let Some(at) = self.scenario_state.fired_at.get_mut(ti) {
+                at.get_or_insert(self.tick);
+            }
             for (ai, a) in t.then.iter().enumerate() {
                 self.act(&sc, ti, ai, a);
             }
@@ -1094,6 +1121,12 @@ impl Simulation {
                 .iter()
                 .position(|t| t.id.as_deref() == Some(f.as_str()))
                 .is_some_and(|i| self.scenario_state.fired[i] > 0),
+            Condition::Since { trigger, seconds } => sc
+                .triggers
+                .iter()
+                .position(|t| t.id.as_deref() == Some(trigger.as_str()))
+                .and_then(|i| self.scenario_state.fired_at.get(i).copied().flatten())
+                .is_some_and(|at| self.tick >= at + *seconds as u64 * TICKS_PER_SECOND as u64),
             Condition::Has { owner, kind, count } => {
                 self.count_standing(*owner, named(kind)) >= *count as u32
             }

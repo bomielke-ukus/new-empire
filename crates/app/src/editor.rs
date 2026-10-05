@@ -177,6 +177,7 @@ fn side(name: &str, control: Control) -> Side {
         age: Age::Stone,
         stockpile: sim::DEFAULT_STOCKPILE,
         techs: Vec::new(),
+        start: None,
     }
 }
 
@@ -754,6 +755,10 @@ impl Editor {
             Condition::After(s) => vec![b(format!("AT {}", clock(*s)), 0)],
             Condition::Done(o) | Condition::Failed(o) => vec![b(self.objective_label(o), 0)],
             Condition::Fired(f) => vec![b(self.trigger_label(f), 0)],
+            Condition::Since { trigger, seconds } => vec![
+                b(self.trigger_label(trigger), 0),
+                b(format!("{} AFTER", clock(*seconds)), 1),
+            ],
             Condition::Has { owner, kind, count } => vec![
                 b(self.side_label(*owner), 0),
                 b(Editor::kind_label(kind, "ANYTHING"), 1),
@@ -1249,6 +1254,7 @@ impl Editor {
                     "OBJECTIVE DONE",
                     "OBJECTIVE FAILED",
                     "TRIGGER FIRED",
+                    "SINCE A TRIGGER",
                     "HAS",
                     "HAS AT MOST",
                     "STOCKPILE",
@@ -1265,6 +1271,10 @@ impl Editor {
                     "OBJECTIVE DONE" => Condition::Done(first_obj),
                     "OBJECTIVE FAILED" => Condition::Failed(first_obj),
                     "TRIGGER FIRED" => Condition::Fired(other),
+                    "SINCE A TRIGGER" => Condition::Since {
+                        trigger: other,
+                        seconds: 60,
+                    },
                     "HAS" => Condition::Has {
                         owner: 0,
                         kind: None,
@@ -1308,6 +1318,10 @@ impl Editor {
                 Condition::After(s) => *s = step(*s as i32, 10, 0, 36_000) as u32,
                 Condition::Done(o) | Condition::Failed(o) => *o = id_step(o, &obj_ids),
                 Condition::Fired(f) => *f = id_step(f, &trig_ids),
+                Condition::Since { trigger, seconds } => match n {
+                    0 => *trigger = id_step(trigger, &trig_ids),
+                    _ => *seconds = step(*seconds as i32, 10, 0, 36_000) as u32,
+                },
                 Condition::Has { owner, kind, count } => match n {
                     0 => *owner = owner_step(*owner, false),
                     1 => *kind = kind_step(kind, &own_kinds()),
@@ -1686,6 +1700,7 @@ fn condition_name(c: &Condition) -> &'static str {
         Condition::Done(_) => "OBJECTIVE DONE",
         Condition::Failed(_) => "OBJECTIVE FAILED",
         Condition::Fired(_) => "TRIGGER FIRED",
+        Condition::Since { .. } => "SINCE A TRIGGER",
         Condition::Has { .. } => "HAS",
         Condition::HasAtMost { .. } => "HAS AT MOST",
         Condition::Stockpile { .. } => "STOCKPILE",
@@ -1911,7 +1926,7 @@ mod tests {
         e.kind = kinds::VILLAGER;
         e.tag((13, 13)).expect("a villager stands there");
         // Each condition type and each action type, each field stepped.
-        for _ in 0..11 {
+        for _ in 0..12 {
             e.act(Act::WhenType(0, 0), 1, false);
             for n in 0..4 {
                 e.act(Act::WhenParam(0, 0, n), 1, false);

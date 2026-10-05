@@ -306,6 +306,9 @@ In this order (`docs/07` D35):
 
 **Size:** Very large. This is where the game gets its long tail.
 
+**As built** (2026-10-05): all four, in that order; `docs/10` has the work
+records and `docs/02` §13 what each campaign holds.
+
 ---
 
 ## M10 — Multiplayer

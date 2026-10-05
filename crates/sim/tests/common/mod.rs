@@ -6,6 +6,8 @@
 
 #![allow(dead_code)] // Each test file uses a different subset.
 
+pub mod bot;
+
 use sim::{Command, CommandKind, EntityId, KindId, PlayerId, SimConfig, Simulation, Vec2Fx};
 
 /// The default map: an Inland generation with the standard start kit.

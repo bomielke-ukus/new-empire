@@ -107,12 +107,14 @@ fn scenario_ground(seed: u64, config: &SimConfig) -> mapgen::Generated {
             let starts = (0..sc.sides.len() as PlayerId)
                 .map(|p| {
                     let mine = |pl: &&crate::scenario::Placement| pl.owner == p;
-                    sc.placements
-                        .iter()
-                        .filter(mine)
-                        .find(|pl| kinds::by_name(&pl.kind) == Some(kinds::TOWN_CENTER))
-                        .or_else(|| sc.placements.iter().find(mine))
-                        .map_or(middle, |pl| pl.at)
+                    sc.sides[p as usize].start.unwrap_or_else(|| {
+                        sc.placements
+                            .iter()
+                            .filter(mine)
+                            .find(|pl| kinds::by_name(&pl.kind) == Some(kinds::TOWN_CENTER))
+                            .or_else(|| sc.placements.iter().find(mine))
+                            .map_or(middle, |pl| pl.at)
+                    })
                 })
                 .collect();
             mapgen::Generated {

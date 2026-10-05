@@ -480,8 +480,9 @@ be walked to, and land it on the shore nearest the enemy's Town Center.
     the scenario says so.
   - **[GD-CAMP-03]** Triggers, checked once a second in order, wait on
     time, objectives, other triggers, counts, stockpiles, ages,
-    technologies, units in an area or a named unit gone, or any one of
-    several such things, or one not holding; they narrate,
+    technologies, units in an area or a named unit gone, so long after
+    another trigger, or any one of several such things, or one not
+    holding; they narrate,
     show, complete or fail objectives, set units down, give resources,
     reveal ground, send a side to attack, and win or lose the scenario.
   - **[GD-CAMP-04]** A scenario is checked when it is loaded, and refused
@@ -528,8 +529,50 @@ be walked to, and land it on the shore nearest the enemy's Town Center.
      army asked for, so the counter is seen to win.
 
   Each scenario is played to a win by a plain bot in the tests
-  (`crates/sim/tests/campaign_learning.rs`), in about nine to eleven
+  (`crates/sim/tests/campaign_learning.rs`), in about nine to twelve
   minutes for the first, second and fourth.
+
+  **The historical campaigns** (2026-10-05, `assets/campaigns/persian-wars`
+  and `assets/campaigns/sargon`), told from the history (D35):
+
+  *The Persian Wars*, as the Greeks, 490 to 479 BC:
+  1. *Marathon*: beat the Persian army on the plain, then march 8 hoplites
+     home to Athens before the fleet, which sails twenty seconds after the
+     battle, rounds the cape to Phaleron.
+  2. *Thermopylae*: hold the pass for ten minutes against six waves; the
+     archers shoot from beyond a hoplite's sight, so they must be charged,
+     and at 6:30 Ephialtes' path brings the Immortals down behind, onto the
+     road south, forty seconds after the warning. Leonidas living is
+     optional.
+  3. *Salamis*: three Persian squadrons come up the straits, the last round
+     the island from the west; sink them all. The ships of Aegina join.
+  4. *Plataea*: a full match against Mardonius, played by the computer;
+     burn his tent (a Government Centre) and keep the Greek camp.
+
+  *Sargon of Akkad*, as the Akkadians (the Assyrians' civilization, for
+  its Mesopotamian look), about 2334 to 2280 BC; Sargon is a named unit
+  who must live, and may shelter in a Town Center or a tower:
+  1. *The Cupbearer*: grow Agade to 15 villagers, build a barracks and
+     reach the Tool Age while Kish raids at four and eight minutes.
+  2. *Lugal-zage-si*: a full match against Uruk, walled, played by the
+     computer; take its Town Center. Bringing five soldiers to Nippur is
+     optional.
+  3. *Washing Weapons in the Sea*: take Ur (its old walls breached) and
+     Lagash, then bring five soldiers to the shore of the Lower Sea; Umma
+     raids the camp at five minutes.
+  4. *King of the Four Quarters*: hold walled Agade for ten minutes against
+     seven waves from Kish, Uruk, Ur and Elam, then destroy their camps.
+
+  The bot wins every battle by playing it as asked
+  (`crates/sim/tests/campaign_history.rs`); standing still loses at
+  Thermopylae, and dawdling after Marathon loses the race. The app's
+  tests have the computer play Mardonius and Uruk.
+
+  A side may name where it starts, which the camera opens on (`start`).
+  There are no alliances: every side other than the player's is at war
+  with every other, so the shipped scenarios set no two of them within
+  twelve tiles of each other, and the shipped-campaign check holds them to
+  it. The check also holds every building to land and every ship to water.
 - **Scenario editor** — terrain painting, unit placement, triggers, save/load,
   playtest. Post-slice, but the data formats are designed for it from the start.
   - **[GD-CAMP-06]** The editor opens a new map of a chosen size, or a
