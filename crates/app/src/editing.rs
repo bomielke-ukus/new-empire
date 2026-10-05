@@ -472,7 +472,8 @@ impl App {
                 self.editor_stroke(px, py, false);
             }
             Tool::Units => {
-                if e.erase(tile) {
+                let erased = e.erase(tile);
+                if erased {
                     self.refresh_editor();
                 }
             }

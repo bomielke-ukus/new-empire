@@ -466,7 +466,7 @@ impl HashState for ScenarioState {
             h.write_u32(n);
         }
         for at in &self.fired_at {
-            h.write_u64(at.map_or(u64::MAX, |t| t));
+            h.write_u64(at.unwrap_or(u64::MAX));
         }
         h.write_u32(self.tags.len() as u32);
         for (tag, id) in &self.tags {
