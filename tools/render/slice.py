@@ -266,6 +266,179 @@ def wonder():
 # --------------------------------------------------------------------------
 # Buildings.
 
+def _wonder_banners(b, mats=("wood",)):
+    """The owner's banners on poles at three corners of a Wonder's court,
+    as the Greek's (`wonder`)."""
+    for i, (x, y) in enumerate([(2.1, 2.1), (2.1, -2.1), (-2.1, 2.1)]):
+        b.add(kit.cylinder("wonder_pole_%d" % i, 0.02, 1.1, mats[0], (x, y, 0.1), sides=6),
+              kit.FINISHED)
+        b.add(kit.box("wonder_banner_%d" % i, (0.03, 0.32, 0.42), "player",
+                      (x, y - 0.17, 0.72)), kit.FINISHED)
+
+
+def wonder_egyptian():
+    """The Egyptian's monument: a pyramid cased in white limestone on a
+    sandstone court, its capstone gilt, two obelisks before it, and the
+    owner's colour on banners and along the court's edge. It rises in
+    courses of sandstone, cased only when finished."""
+    import math as _m
+    kit.STYLE_AGE = 3
+    b = kit.Building("WonderEgyptian", 5)
+    b.restyle = False
+    kit.foundation(b, "wonder", 4.7, 4.7, "sandstone")
+    b.add(kit.box("wonder_court", (4.5, 4.5, 0.1), "sandstone"), kit.WALLS)
+    px, py, base, height, z0 = -0.35, -0.35, 3.2, 2.5, 0.1
+    steps = 6
+    for k in range(steps):
+        t = k / steps
+        frames = (2, 3) if k < 2 else (3,)
+        b.add(kit.box("wonder_core%d" % k, (base * (1 - t), base * (1 - t), height / steps),
+                      "sandstone", (px, py, z0 + height * t)), frames)
+    b.add(kit.pyramid("wonder_pyramid", (base, base, height), "limestone", (px, py, z0)),
+          kit.FINISHED)
+    # A touch proud of the casing, so the two faces do not fight.
+    cap = 0.13
+    b.add(kit.pyramid("wonder_capstone", (base * cap, base * cap, height * cap), "gold",
+                      (px, py, z0 + height * (1 - cap) - 0.004)), kit.FINISHED)
+    for i, (x, y) in enumerate([(1.8, 0.75), (0.75, 1.8)]):
+        b.add(kit.box("wonder_obelisk_base%d" % i, (0.34, 0.34, 0.14), "sandstone",
+                      (x, y, z0)), kit.FINISHED)
+        b.add(kit.frustum("wonder_obelisk%d" % i, (0.17, 0.17), (0.11, 0.11), 1.25, "stone",
+                          (x, y, z0 + 0.14)), kit.FINISHED)
+        b.add(kit.pyramid("wonder_obelisk_tip%d" % i, (0.115, 0.115, 0.1), "gold",
+                          (x, y, z0 + 1.39)), kit.FINISHED)
+    for i, (size, at) in enumerate([((0.03, 4.4, 0.05), (2.26, 0.0, 0.03)),
+                                    ((4.4, 0.03, 0.05), (0.0, 2.26, 0.03))]):
+        b.add(kit.box("wonder_band%d" % i, size, "player", at), kit.FINISHED)
+    _wonder_banners(b)
+    kit.scaffold(b, "wonder", 3.4, 3.4, 1.4)
+    kit.rubble(b, "wonder", 3.6, 0.7, mats=("sandstone", "limestone", "stone"), count=16)
+    b.finish()
+    return b.root
+
+
+def wonder_mesopotamian():
+    """The Mesopotamian's monument: a ziggurat of baked brick in three
+    buttressed, crenellated tiers, a stair up its face, and a shrine
+    glazed blue with gold rosettes on its top; the owner's colour on
+    banners and along the lowest tier."""
+    kit.STYLE_AGE = 3
+    b = kit.Building("WonderMesopotamian", 5)
+    b.restyle = False
+    kit.foundation(b, "wonder", 4.7, 4.7, "baked_brick")
+    z = 0.0
+    tiers = [(4.2, 0.55, kit.WALLS), (3.1, 0.5, kit.FULL_WALLS), (2.1, 0.45, kit.FINISHED)]
+    for k, (w, h, frames) in enumerate(tiers):
+        b.add(kit.box("wonder_tier%d" % k, (w, w, h), "baked_brick", (0.0, 0.0, z)), frames)
+        n = max(2, int(w / 0.35))
+        for i in range(n + 1):
+            t = -w / 2 + w * i / n
+            b.add(kit.box("wonder_buttress_y%d_%d" % (k, i), (0.1, 0.05, h), "baked_brick",
+                          (t, w / 2 + 0.02, z)), frames)
+            b.add(kit.box("wonder_buttress_x%d_%d" % (k, i), (0.05, 0.1, h), "baked_brick",
+                          (w / 2 + 0.02, t, z)), frames)
+        kit._merlons(b, "wonder_crenel%d" % k, (0.0, 0.0, z + h), w, w, "baked_brick",
+                     tuple(f for f in frames if f >= 3) or frames, stepped=True, size=0.09)
+        z += h
+    for k in range(10):
+        b.add(kit.box("wonder_stair%d" % k, (0.6, 0.16, 0.13 * (k + 1)), "baked_brick",
+                      (0.0, 2.2 - k * 0.14, 0.0)), kit.FULL_WALLS)
+    top = z
+    b.add(kit.box("wonder_shrine", (1.1, 1.1, 0.6), "glaze", (0.0, 0.0, top)), kit.FINISHED)
+    b.add(kit.box("wonder_shrine_door", (0.26, 0.02, 0.38), "opening", (0.0, 0.555, top)),
+          kit.FINISHED)
+    for i, t in enumerate([-0.35, 0.0, 0.35]):
+        b.add(kit.cylinder("wonder_rosette_y%d" % i, 0.05, 0.02, "gold", (t, 0.56, top + 0.48),
+                           sides=10, pivot="centre", rotation=(kit._deg(90.0), 0.0, 0.0)),
+              kit.FINISHED)
+        b.add(kit.cylinder("wonder_rosette_x%d" % i, 0.05, 0.02, "gold", (0.56, t, top + 0.48),
+                           sides=10, pivot="centre", rotation=(0.0, kit._deg(90.0), 0.0)),
+              kit.FINISHED)
+    kit._merlons(b, "wonder_shrine_crenel", (0.0, 0.0, top + 0.6), 1.1, 1.1, "glaze",
+                 kit.FINISHED, stepped=True, size=0.08)
+    for i, (size, at) in enumerate([((0.03, 4.0, 0.06), (2.13, 0.0, 0.2)),
+                                    ((4.0, 0.03, 0.06), (0.0, 2.13, 0.2))]):
+        b.add(kit.box("wonder_band%d" % i, size, "player", at), kit.FINISHED)
+    _wonder_banners(b)
+    kit.scaffold(b, "wonder", 3.4, 3.4, 1.4)
+    kit.rubble(b, "wonder", 3.6, 0.7, mats=("baked_brick", "glaze", "mudbrick"), count=16)
+    b.finish()
+    return b.root
+
+
+def wonder_asian():
+    """The East Asian's monument: a great hall of red-lacquered posts and
+    white walls on two terraces of rammed earth, under two tiers of dark
+    tiled roof with gilt horns, gate towers either side of its stair, and
+    the owner's colour on banners and along the hall's frieze."""
+    kit.STYLE_AGE = 3
+    b = kit.Building("WonderAsian", 5)
+    b.restyle = False
+    kit.foundation(b, "wonder", 4.7, 4.7, "stone")
+    b.add(kit.box("wonder_terrace0", (4.3, 4.3, 0.35), "rammed"), kit.WALLS)
+    b.add(kit.box("wonder_terrace0_lip", (4.36, 4.36, 0.05), "stone", (0.0, 0.0, 0.32)),
+          kit.WALLS)
+    b.add(kit.box("wonder_terrace1", (3.2, 3.2, 0.35), "rammed", (0.0, 0.0, 0.35)),
+          kit.FULL_WALLS)
+    b.add(kit.box("wonder_terrace1_lip", (3.26, 3.26, 0.05), "stone", (0.0, 0.0, 0.67)),
+          kit.FULL_WALLS)
+    for k in range(8):
+        b.add(kit.box("wonder_stair%d" % k, (0.7, 0.16, 0.09 * (k + 1)), "stone",
+                      (0.0, 2.15 - k * 0.14, 0.0)), kit.FULL_WALLS)
+    hz, hw, hd, hh = 0.72, 2.3, 1.7, 0.75
+    b.add(kit.box("wonder_hall", (hw, hd, hh), "plaster", (0.0, 0.0, hz)), kit.FINISHED)
+    for i in range(7):
+        x = -hw / 2 + hw * i / 6
+        b.add(kit.box("wonder_post_y%d" % i, (0.08, 0.05, hh), "lacquer", (x, hd / 2 + 0.02, hz)),
+              kit.FINISHED)
+        b.add(kit.box("wonder_bracket_y%d" % i, (0.14, 0.08, 0.06), "wood_dark",
+                      (x, hd / 2 + 0.04, hz + hh - 0.06)), kit.FINISHED)
+    for i in range(5):
+        y = -hd / 2 + hd * i / 4
+        b.add(kit.box("wonder_post_x%d" % i, (0.05, 0.08, hh), "lacquer", (hw / 2 + 0.02, y, hz)),
+              kit.FINISHED)
+        b.add(kit.box("wonder_bracket_x%d" % i, (0.08, 0.14, 0.06), "wood_dark",
+                      (hw / 2 + 0.04, y, hz + hh - 0.06)), kit.FINISHED)
+    b.add(kit.box("wonder_door", (0.36, 0.02, 0.5), "lacquer", (0.0, hd / 2 + 0.01, hz)),
+          kit.FINISHED)
+    b.add(kit.box("wonder_frieze_y", (hw - 0.1, 0.03, 0.08), "player",
+                  (0.0, hd / 2 + 0.05, hz + hh - 0.18)), kit.FINISHED)
+    b.add(kit.box("wonder_frieze_x", (0.03, hd - 0.1, 0.08), "player",
+                  (hw / 2 + 0.05, 0.0, hz + hh - 0.18)), kit.FINISHED)
+    lower, _ = kit.hip_roof("wonder_eave", 3.1, 2.5, 0.4, "tile_dark", (0.0, 0.0, hz + hh),
+                            flare=0.14)
+    b.add(lower, kit.FINISHED)
+    uz = hz + hh + 0.18
+    b.add(kit.box("wonder_upper", (1.5, 1.05, 0.42), "plaster", (0.0, 0.0, uz)), kit.FINISHED)
+    for i in range(4):
+        x = -0.75 + 1.5 * i / 3
+        b.add(kit.box("wonder_upper_post%d" % i, (0.06, 0.04, 0.42), "lacquer",
+                      (x, 0.535, uz)), kit.FINISHED)
+    upper, _ = kit.hip_roof("wonder_roof", 2.3, 1.75, 0.6, "tile_dark", (0.0, 0.0, uz + 0.42),
+                            flare=0.16)
+    b.add(upper, kit.FINISHED)
+    r = (2.3 - 1.75) / 2
+    b.add(kit.box("wonder_ridge", (2 * r + 0.12, 0.08, 0.07), "tile_dark",
+                  (0.0, 0.0, uz + 0.42 + 0.57)), kit.FINISHED)
+    for i, x in enumerate((-r, r)):
+        b.add(kit.cone("wonder_horn%d" % i, 0.06, 0.2, "gold", (x, 0.0, uz + 0.42 + 0.62),
+                       sides=6), kit.FINISHED)
+    for i, x in enumerate((-0.75, 0.75)):
+        b.add(kit.box("wonder_que%d" % i, (0.34, 0.34, 1.0), "rammed", (x, 1.95, 0.0)),
+              kit.FINISHED)
+        b.add(kit.box("wonder_que_band%d" % i, (0.36, 0.36, 0.08), "lacquer", (x, 1.95, 0.85)),
+              kit.FINISHED)
+        cap, _ = kit.hip_roof("wonder_que_roof%d" % i, 0.5, 0.5, 0.22, "tile_dark",
+                              (x, 1.95, 1.0), flare=0.06)
+        b.add(cap, kit.FINISHED)
+    _wonder_banners(b)
+    kit.scaffold(b, "wonder", 3.4, 3.4, 1.6)
+    kit.rubble(b, "wonder", 3.6, 0.7, mats=("rammed", "plaster", "tile_dark", "lacquer"),
+               count=16)
+    b.finish()
+    return b.root
+
+
 def fishing_boat():
     """A small open boat with a linen sail banded in the owner's colour, a
     net heaped over the stern and its fisher."""
@@ -647,7 +820,9 @@ def market():
     its square shows the age: beaten earth in the Tool Age, stone in the
     Bronze, white paving round a stone obelisk in the Iron."""
     b = kit.Building("Market", 2)
-    square = {1: "earth", 3: "white"}.get(kit.STYLE_AGE, "stone_light")
+    # Another architecture paves it in its own stone (kit.ARCH_MATERIALS).
+    iron = "white" if kit.STYLE_ARCH == "greek" else "stone_light"
+    square = {1: "earth", 3: iron}.get(kit.STYLE_AGE, "stone_light")
     kit.foundation(b, "market", 1.8, 1.8, square)
     if kit.STYLE_AGE == 3:
         b.add(kit.box("market_plinth", (0.2, 0.2, 0.06), "stone_light", (0.42, -0.05, 0.0)),
@@ -1280,6 +1455,9 @@ SUBJECTS = {
     "priest": (priest, "Foot", "unit"),
     "relic": (relic, "SmallBuilding", "node"),
     "wonder": (wonder, "Wonder", "building"),
+    "wonder_egyptian": (wonder_egyptian, "Wonder", "building"),
+    "wonder_mesopotamian": (wonder_mesopotamian, "Wonder", "building"),
+    "wonder_asian": (wonder_asian, "Wonder", "building"),
     "dock": (dock, "LargeBuilding", "building"),
     "fishing_boat": (fishing_boat, "Ship", "unit"),
     "transport": (transport, "Ship", "unit"),
@@ -1310,23 +1488,52 @@ AGED = {
 }
 
 
+# The architectures besides the Greek (kit.STYLE_ARCH, docs/07 D34): each
+# building below drawn again in each, in each of its ages, the set named
+# for its architecture before its age (`house_egyptian_bronze`). Each
+# architecture's Wonder is its own model (`wonder_egyptian`); the Dock, the
+# farm, the walls and the gate are everyone's.
+ARCHES = ("egyptian", "mesopotamian", "asian")
+ARCHED = ("town_center", "house", "storehouse", "barracks", "archery_range", "stable",
+          "market", "watch_tower", "temple", "academy", "siege_workshop", "government_centre")
+# What comes with the Bronze Age is built in the Bronze Age's materials in
+# an architecture's first look of it.
+FIRST_AGE = {"temple": 2, "academy": 2, "siege_workshop": 2, "government_centre": 2}
+
+
 def subject(name):
-    """The builder, class, kind and age for a subject's name."""
+    """The builder, class, kind, age and architecture for a subject's
+    name."""
     if name in SUBJECTS:
         build, cls, what = SUBJECTS[name]
-        return build, cls, what, 0
+        return build, cls, what, 0, "greek"
+    rest, age = name, 0
     base, _, suffix = name.rpartition("_")
-    for age, label in AGE_NAMES.items():
-        if suffix == label and age in AGED.get(base, ()):
-            build, cls, what = SUBJECTS[base]
-            return build, cls, what, age
-    return None
+    for a, label in AGE_NAMES.items():
+        if suffix == label:
+            rest, age = base, a
+    arch = "greek"
+    for candidate in ARCHES:
+        if rest.endswith("_" + candidate):
+            rest, arch = rest[:-len(candidate) - 1], candidate
+    if rest not in SUBJECTS or (age and age not in AGED.get(rest, ())):
+        return None
+    if arch != "greek":
+        if rest not in ARCHED:
+            return None
+        age = max(age, FIRST_AGE.get(rest, 0))
+    build, cls, what = SUBJECTS[rest]
+    return build, cls, what, age, arch
 
 
 def all_subjects():
     names = list(SUBJECTS)
     for base, ages in AGED.items():
         names += ["%s_%s" % (base, AGE_NAMES[a]) for a in ages]
+    for base in ARCHED:
+        for arch in ARCHES:
+            names.append("%s_%s" % (base, arch))
+            names += ["%s_%s_%s" % (base, arch, AGE_NAMES[a]) for a in AGED.get(base, ())]
     return sorted(names)
 
 
@@ -1334,15 +1541,16 @@ def main():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     if "--list" in argv:
         for name in all_subjects():
-            _, cls, what, _ = subject(name)
+            _, cls, what, _, _ = subject(name)
             print("%s %s %s" % (name, cls, what))
         return
     name = argv[argv.index("--subject") + 1]
     found = subject(name)
     if found is None:
         raise SystemExit("no subject %r; the slice has %s" % (name, all_subjects()))
-    build, _, _, age = found
+    build, _, _, age, arch = found
     kit.STYLE_AGE = age
+    kit.STYLE_ARCH = arch
     kit.clear()
     root = build()
     bpy.context.view_layer.update()

@@ -107,6 +107,18 @@ COLOURS = {
     # Split-wood shingles, the Tool Age's roofs; slate, the Iron Age's.
     "shingle": srgb(0.46, 0.37, 0.27),
     "slate": srgb(0.36, 0.39, 0.44),
+    # The other architectures (docs/07 D34). Egyptian: sandstone, white
+    # limestone, and paint of blue and red ochre. Mesopotamian: baked brick
+    # and blue glaze. East Asian: rammed earth, red lacquer, dark tile.
+    "sandstone": srgb(0.80, 0.70, 0.52),
+    "limestone": srgb(0.90, 0.86, 0.76),
+    "paint_blue": srgb(0.24, 0.40, 0.60),
+    "paint_red": srgb(0.64, 0.27, 0.17),
+    "baked_brick": srgb(0.52, 0.36, 0.26),
+    "glaze": srgb(0.20, 0.36, 0.60),
+    "rammed": srgb(0.68, 0.56, 0.38),
+    "lacquer": srgb(0.58, 0.20, 0.13),
+    "tile_dark": srgb(0.26, 0.28, 0.32),
 }
 
 
@@ -141,6 +153,15 @@ SURFACES = {
     "clay_roof": ("courses", 40.0, 0.14, 0.3),
     "shingle": ("courses", 45.0, 0.16, 0.35),
     "slate": ("courses", 40.0, 0.12, 0.3),
+    "sandstone": ("brick", 2.5, 0.08, 0.3),
+    "limestone": ("brick", 2.0, 0.05, 0.2),
+    "paint_blue": ("noise", 30.0, 0.04, 0.05),
+    "paint_red": ("noise", 30.0, 0.04, 0.05),
+    "baked_brick": ("brick", 5.0, 0.12, 0.3),
+    "glaze": ("brick", 5.0, 0.08, 0.2),
+    "rammed": ("courses", 14.0, 0.10, 0.2),
+    "lacquer": ("noise", 30.0, 0.05, 0.1),
+    "tile_dark": ("courses", 45.0, 0.14, 0.35),
     "earth": ("noise", 25.0, 0.12, 0.3),
     "crop": ("noise", 30.0, 0.20, 0.5),
     "leaf": ("noise", 30.0, 0.20, 0.6),
@@ -1053,8 +1074,15 @@ class Building:
         self.shown.append((obj, set(frames)))
         return obj
 
+    # Whether Building.finish restyles it for its architecture: a Wonder of
+    # another architecture is its own model.
+    restyle = True
+
     def finish(self):
-        if STYLE_AGE:
+        if STYLE_ARCH != "greek":
+            if self.restyle:
+                style_architecture(self, STYLE_ARCH, STYLE_AGE)
+        elif STYLE_AGE:
             style_building(self, STYLE_AGE)
         scene = bpy.context.scene
         scene.frame_start, scene.frame_end = 1, self.frames
@@ -1370,6 +1398,371 @@ def timber_frame(b, name, at, w, d, h, frames):
                   (cx, cy + d / 2 + 0.01, z0 + z)), frames)
         b.add(box("%s_rail_x%d" % (name, i), (0.02, d, beam), "wood_dark",
                   (cx + w / 2 + 0.01, cy, z0 + z)), frames)
+
+
+# --------------------------------------------------------------------------
+# The architectures (`docs/02` section 11, `docs/07` D34). The sets as first
+# built are the Greek; the Egyptian, the Mesopotamian and the East Asian are
+# the same buildings restyled in Building.finish, as the ages restyle the
+# Greek: each its own materials in each age, its own roofs in place of the
+# thatch and the gables, and its own work on the walls. What stood on a
+# roof is set on the new one. `STYLE_ARCH` is the architecture being built;
+# slice.py sets it for `house_egyptian_bronze`.
+
+STYLE_ARCH = "greek"
+
+# What each architecture builds in, age by age, by the Greek Stone Age
+# material it replaces.
+ARCH_MATERIALS = {
+    "egyptian": {
+        0: {"thatch": "straw"},
+        1: {"thatch": "straw", "mudbrick": "plaster"},
+        2: {"thatch": "straw", "mudbrick": "sandstone", "plaster": "sandstone",
+            "stone_light": "sandstone", "white": "limestone", "clay_roof": "sandstone"},
+        3: {"thatch": "straw", "mudbrick": "limestone", "plaster": "limestone",
+            "stone_light": "sandstone", "white": "limestone", "clay_roof": "sandstone",
+            "slate": "sandstone"},
+    },
+    "mesopotamian": {
+        0: {"thatch": "straw"},
+        1: {"thatch": "straw", "plaster": "mudbrick"},
+        2: {"thatch": "straw", "mudbrick": "baked_brick", "plaster": "baked_brick",
+            "stone_light": "baked_brick", "white": "glaze", "clay_roof": "baked_brick"},
+        3: {"thatch": "straw", "mudbrick": "baked_brick", "plaster": "baked_brick",
+            "stone_light": "baked_brick", "white": "glaze", "clay_roof": "baked_brick",
+            "slate": "baked_brick"},
+    },
+    "asian": {
+        0: {"mudbrick": "rammed"},
+        1: {"mudbrick": "rammed", "plaster": "rammed"},
+        2: {"mudbrick": "plaster", "stone_light": "stone", "white": "lacquer",
+            "clay_roof": "tile_dark"},
+        3: {"mudbrick": "plaster", "stone_light": "stone", "white": "lacquer",
+            "clay_roof": "tile_dark", "slate": "tile_dark"},
+    },
+}
+
+# The walled blocks an architecture dresses, by the end of their names.
+BLOCKS = ("_walls", "_upper", "_cella", "_hut", "tower_body")
+
+
+def frustum(name, bottom, top, height, mat, location=(0.0, 0.0, 0.0)):
+    """A box narrowing (or flaring) from `bottom` = (w, d) at its foot to
+    `top` at its head, `height` tall: a battered wall, a cornice."""
+    (bw, bd), (tw, td) = bottom, top
+    verts = [(-bw / 2, -bd / 2, 0.0), (bw / 2, -bd / 2, 0.0), (bw / 2, bd / 2, 0.0),
+             (-bw / 2, bd / 2, 0.0), (-tw / 2, -td / 2, height), (tw / 2, -td / 2, height),
+             (tw / 2, td / 2, height), (-tw / 2, td / 2, height)]
+    faces = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
+    return _mesh(name, verts, faces, mat, location)
+
+
+def rim(name, inner, outer_bottom, outer_top, height, mat, location=(0.0, 0.0, 0.0)):
+    """A rectangular band round an opening `inner` = (w, d), its outside
+    `outer_bottom` at its foot and `outer_top` at its head: a cornice that
+    flares out over a wall, open over the roof inside it."""
+    loops = [(outer_bottom, 0.0), (outer_top, height), (inner, height), (inner, 0.0)]
+    verts = []
+    for (w, d), z in loops:
+        verts += [(-w / 2, -d / 2, z), (w / 2, -d / 2, z), (w / 2, d / 2, z), (-w / 2, d / 2, z)]
+    faces = []
+    for ring in range(4):
+        nxt = (ring + 1) % 4
+        for k in range(4):
+            j = (k + 1) % 4
+            faces.append((ring * 4 + k, ring * 4 + j, nxt * 4 + j, nxt * 4 + k))
+    return _recalc(_mesh(name, verts, faces, mat, location))
+
+
+def hip_roof(name, w, d, h, mat, location, flare=0.05):
+    """A hipped roof over `w` by `d`, `h` high, its ridge along the longer
+    side and its corners turned up by `flare` over eaves that sag between
+    them. Returns the roof and its height above its foot at a point."""
+    x, y, z = location
+    long_x = w >= d
+    half_long, half_short = (w, d) if long_x else (d, w)
+    half_long, half_short = half_long / 2.0, half_short / 2.0
+    r = max(half_long - half_short, 0.002)
+    # The eaves round from the -x -y corner, a corner then a middle.
+    ring = [(-w / 2, -d / 2, flare), (0.0, -d / 2, 0.0), (w / 2, -d / 2, flare), (w / 2, 0.0, 0.0),
+            (w / 2, d / 2, flare), (0.0, d / 2, 0.0), (-w / 2, d / 2, flare), (-w / 2, 0.0, 0.0)]
+    ridge = [(-r, 0.0, h), (r, 0.0, h)] if long_x else [(0.0, -r, h), (0.0, r, h)]
+    verts = ring + ridge
+    a, b2 = 8, 9
+    if long_x:
+        faces = [(0, 1, a), (1, 2, b2), (1, b2, a),        # -y slope
+                 (4, 5, b2), (5, 6, a), (5, a, b2),        # +y slope
+                 (2, 3, b2), (3, 4, b2),                   # +x hip
+                 (6, 7, a), (7, 0, a)]                     # -x hip
+    else:
+        faces = [(2, 3, a), (3, 4, b2), (3, b2, a),        # +x slope
+                 (6, 7, b2), (7, 0, a), (7, a, b2),        # -x slope
+                 (4, 5, b2), (5, 6, b2),                   # +y hip
+                 (0, 1, a), (1, 2, a)]                     # -y hip
+    faces.append(tuple(reversed(range(8))))
+    roof = _recalc(_mesh(name, verts, faces, mat, location))
+
+    def height_at(px, py):
+        u, v = abs(px - x), abs(py - y)
+        along, across = (u, v) if long_x else (v, u)
+        t = min(1.0 - across / half_short, 1.0 - max(0.0, along - r) / max(half_long - r, 1e-6))
+        return z + h * max(0.0, min(1.0, t))
+    return roof, height_at
+
+
+def _bounds(objs):
+    """World-space bounds of `objs`, by their vertices: (x0, x1, y0, y1, z0,
+    z1). (A turned object's bound_box is its own axes' box, turned.)"""
+    pts = [o.matrix_world @ v.co for o in objs for v in o.data.vertices]
+    return (min(p.x for p in pts), max(p.x for p in pts), min(p.y for p in pts),
+            max(p.y for p in pts), min(p.z for p in pts), max(p.z for p in pts))
+
+
+def style_architecture(b, arch, age):
+    """Rebuilds `b` in `arch` as of `age`: its materials, its roofs and the
+    work on its walls and columns."""
+    swaps = ARCH_MATERIALS[arch].get(age, {})
+    for obj in b.root.children_recursive:
+        if obj.type != "MESH" or not obj.data.materials:
+            continue
+        name = obj.data.materials[0].name
+        if name in swaps:
+            obj.data.materials[0] = material(swaps[name])
+    bpy.context.view_layer.update()
+    _restyle_roofs(b, arch, age)
+    for obj, frames in list(b.shown):
+        if obj.type == "MESH" and obj.name.endswith(BLOCKS):
+            _dress_block(b, obj, tuple(frames), arch, age)
+        elif obj.type == "MESH" and "_col_" in obj.name:
+            _dress_column(b, obj, tuple(frames), arch, age)
+
+
+def _restyle_roofs(b, arch, age):
+    """Takes every roof off `b` (a part named for a roof, a ridge, an East
+    Asian building's parapet) and builds the architecture's in its place;
+    what stood on the old roof stands on the new."""
+    groups = {}
+    for obj, frames in b.shown:
+        n = obj.name
+        if "_roof" in n:
+            key = n.split("_roof")[0]
+        elif n.endswith("_ridge"):
+            key = n[:-len("_ridge")]
+        else:
+            continue
+        groups.setdefault(key, []).append((obj, frames))
+    for key, parts in groups.items():
+        objs = [o for o, _ in parts]
+        frames = set().union(*[f for _, f in parts])
+        x0, x1, y0, y1, z0, z1 = _bounds(objs)
+        names = {o.name for o in objs}
+        b.shown = [(o, f) for o, f in b.shown if o.name not in names]
+        for o in objs:
+            bpy.data.objects.remove(o, do_unlink=True)
+        if arch == "asian":
+            # A hipped roof comes down over the walls' tops.
+            for o, f in list(b.shown):
+                if "parapet" in o.name:
+                    b.shown.remove((o, f))
+                    bpy.data.objects.remove(o, do_unlink=True)
+        # What stood on it: wholly above its foot and within its eaves.
+        riders = []
+        for o, f in b.shown:
+            if o.type not in ("MESH",) or not (set(f) & frames):
+                continue
+            ox0, ox1, oy0, oy1, oz0, _ = _bounds([o])
+            cx, cy = (ox0 + ox1) / 2, (oy0 + oy1) / 2
+            if (oz0 >= z0 + 0.05 and x0 <= cx <= x1 and y0 <= cy <= y1
+                    and "parapet" not in o.name):
+                riders.append((o, cx, cy, oz0))
+        height_at = _arch_roof(b, key, (x0, x1, y0, y1, z0, z1), tuple(sorted(frames)), arch,
+                               age, [(cx, cy) for _, cx, cy, _ in riders])
+        # Riders move together by the name they share (a flag's pole and
+        # its cloth), set on the roof under the lowest of them.
+        by_name = {}
+        for o, cx, cy, oz0 in riders:
+            by_name.setdefault(o.name.rsplit("_", 1)[0], []).append((o, cx, cy, oz0))
+        for group in by_name.values():
+            _, cx, cy, low = min(group, key=lambda g: g[3])
+            dz = height_at(cx, cy) - low
+            for o, _, _, _ in group:
+                o.location.z += dz
+    bpy.context.view_layer.update()
+
+
+def _arch_roof(b, key, bounds, frames, arch, age, keep_clear=()):
+    """`arch`'s roof over `bounds`, the old roof's, with nothing of its own
+    on the points `keep_clear` (where a flag will stand); returns its
+    height at a point."""
+    x0, x1, y0, y1, z0, z1 = bounds
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    w, d = x1 - x0, y1 - y0
+    if arch == "asian":
+        mat = "thatch" if age < 2 else "tile_dark"
+        h = max(0.18, min(0.55, 0.32 * min(w, d)))
+        roof, height_at = hip_roof(key + "_hip", w + 0.06, d + 0.06, h, mat, (cx, cy, z0),
+                                   flare=0.06 if age < 2 else 0.09)
+        b.add(roof, frames)
+        if age >= 2:
+            # A ridge of tile with its ends turned up, gilt in the Iron Age.
+            long_x = w >= d
+            r = max(abs(w - d) / 2.0, 0.04)
+            size = (2 * r + 0.08, 0.06, 0.05) if long_x else (0.06, 2 * r + 0.08, 0.05)
+            b.add(box(key + "_hip_ridge", size, "tile_dark", (cx, cy, z0 + h - 0.02)), frames)
+            ends = [(-r, 0.0), (r, 0.0)] if long_x else [(0.0, -r), (0.0, r)]
+            for i, (ex, ey) in enumerate(ends):
+                b.add(cone(key + "_hip_horn%d" % i, 0.035, 0.12,
+                           "gold" if age >= 3 else "tile_dark",
+                           (cx + ex, cy + ey, z0 + h + 0.02), sides=6), frames)
+        return height_at
+    # Egyptian and Mesopotamian: a flat earthen or brick roof on the walls.
+    slab = {"egyptian": {0: "mudbrick", 1: "plaster", 2: "sandstone", 3: "sandstone"},
+            "mesopotamian": {0: "mudbrick", 1: "mudbrick", 2: "baked_brick",
+                             3: "baked_brick"}}[arch][age]
+    sw, sd = max(w - 0.18, 0.3), max(d - 0.18, 0.3)
+    top = z0 + 0.1
+    b.add(box(key + "_flat", (sw, sd, 0.1), slab, (cx, cy, z0)), frames)
+    if arch == "egyptian":
+        # A low parapet under a cavetto cornice, painted from the Tool Age,
+        # and on a roof big enough to live on, a wind-catcher turned to the
+        # north wind.
+        lip = "limestone" if age >= 2 else "plaster"
+        wall = {0: "mudbrick", 1: "plaster", 2: "sandstone", 3: "limestone"}[age]
+        t = 0.05
+        for k, (px, py, pw, pd) in enumerate(((0.0, -sd / 2 + t / 2, sw, t),
+                                              (0.0, sd / 2 - t / 2, sw, t),
+                                              (-sw / 2 + t / 2, 0.0, t, sd),
+                                              (sw / 2 - t / 2, 0.0, t, sd))):
+            b.add(box("%s_parapet%d" % (key, k), (pw, pd, 0.08), wall, (cx + px, cy + py, top)),
+                  frames)
+        b.add(rim(key + "_cornice", (sw - 2 * t, sd - 2 * t), (sw, sd), (sw + 0.1, sd + 0.1),
+                  0.06, lip, (cx, cy, top + 0.06)), frames)
+        if age >= 1:
+            b.add(rim(key + "_band", (sw - 2 * t, sd - 2 * t), (sw + 0.02, sd + 0.02),
+                      (sw + 0.02, sd + 0.02), 0.03, "paint_blue", (cx, cy, top + 0.025)), frames)
+        corners = [(cx - sw / 2 + 0.25, cy - sd / 2 + 0.25), (cx + sw / 2 - 0.25, cy - sd / 2 + 0.25),
+                   (cx - sw / 2 + 0.25, cy + sd / 2 - 0.25)]
+        clear = [c for c in corners
+                 if all(math.hypot(c[0] - px, c[1] - py) > 0.35 for px, py in keep_clear)]
+        if min(sw, sd) >= 1.0 and clear:
+            mx, my = clear[0]
+            b.add(box(key + "_malqaf", (0.24, 0.2, 0.3), wall, (mx, my, top)), frames)
+            b.add(frustum(key + "_malqaf_hood", (0.24, 0.2), (0.26, 0.06), 0.12, wall,
+                          (mx, my + 0.0, top + 0.3)), frames)
+            b.add(box(key + "_malqaf_mouth", (0.16, 0.02, 0.16), "opening",
+                      (mx, my + 0.1, top + 0.12)), frames)
+        return lambda px, py: top
+    # Mesopotamian: crenellated, the merlons stepped from the Bronze Age.
+    mat = "mudbrick" if age < 2 else "baked_brick"
+    _merlons(b, key + "_crenel", (cx, cy, top), sw, sd, mat, frames, stepped=age >= 2)
+    return lambda px, py: top
+
+
+def _merlons(b, name, at, w, d, mat, frames, stepped=False, size=0.07):
+    """Merlons round the edge of a `w` by `d` top at `at`."""
+    cx, cy, z = at
+    step = size * 2.0
+    k = 0
+    for along, fixed, axis in ((w, d, "x"), (d, w, "y")):
+        n = max(2, int(along / step))
+        # The corners once, with the first edges.
+        for i in range(n + 1) if axis == "x" else range(1, n):
+            t = -along / 2 + along * i / n
+            for side in (-1.0, 1.0):
+                x, y = (t, side * fixed / 2) if axis == "x" else (side * fixed / 2, t)
+                b.add(box("%s_%d" % (name, k), (size, size, size), mat,
+                          (cx + x, cy + y, z)), frames)
+                if stepped:
+                    b.add(box("%s_%d_top" % (name, k), (size * 0.55, size * 0.55, size * 0.5),
+                              mat, (cx + x, cy + y, z + size)), frames)
+                k += 1
+
+
+def _dress_block(b, obj, shown, arch, age):
+    """`arch`'s work on a walled block: Egyptian, a cornice, painted bands
+    and, from the Bronze Age, a battered foot; Mesopotamian, buttresses and,
+    from the Bronze Age, a band of blue glaze, glazed above it in the Iron;
+    East Asian, a podium and posts, lacquered from the Bronze Age, with
+    brackets under the eaves."""
+    xs = [v.co for v in obj.data.vertices]
+    w = max(c.x for c in xs) - min(c.x for c in xs)
+    d = max(c.y for c in xs) - min(c.y for c in xs)
+    h = max(c.z for c in xs) - min(c.z for c in xs)
+    cx, cy, z0 = obj.location.x, obj.location.y, obj.location.z
+    name = obj.name
+    wall = obj.data.materials[0].name
+    if arch == "egyptian":
+        lip = "limestone" if age >= 2 else "plaster"
+        b.add(rim(name + "_cavetto", (w - 0.1, d - 0.1), (w, d), (w + 0.1, d + 0.1), 0.07, lip,
+                  (cx, cy, z0 + h - 0.06)), shown)
+        if age >= 1:
+            for k, (mat, z) in enumerate((("paint_blue", h - 0.1), ("paint_red", h - 0.14))):
+                b.add(box("%s_paint%d" % (name, k), (w + 0.012, d + 0.012, 0.03), mat,
+                          (cx, cy, z0 + z)), shown)
+        if age >= 2:
+            b.add(frustum(name + "_batter", (w + 0.12, d + 0.12), (w + 0.01, d + 0.01),
+                          h * 0.3, wall, (cx, cy, z0)), shown)
+    elif arch == "mesopotamian":
+        n_x, n_y = max(2, int(w / 0.3)), max(2, int(d / 0.3))
+        for i in range(n_x + 1):
+            x = -w / 2 + w * i / n_x
+            b.add(box("%s_buttress_y%d" % (name, i), (0.07, 0.04, h), wall,
+                      (cx + x, cy + d / 2 + 0.01, z0)), shown)
+        for i in range(n_y + 1):
+            y = -d / 2 + d * i / n_y
+            b.add(box("%s_buttress_x%d" % (name, i), (0.04, 0.07, h), wall,
+                      (cx + w / 2 + 0.01, cy + y, z0)), shown)
+        if age >= 2:
+            b.add(box(name + "_glaze", (w + 0.05, d + 0.05, 0.08), "glaze",
+                      (cx, cy, z0 + h * 0.72)), shown)
+        if age >= 3:
+            # Glazed to the top: a band round the wall, short of its top face.
+            b.add(rim(name + "_glaze_top", (w - 0.04, d - 0.04), (w + 0.03, d + 0.03),
+                      (w + 0.03, d + 0.03), h * 0.18 - 0.01, "glaze", (cx, cy, z0 + h * 0.82)),
+                  shown)
+            for i in range(n_x):
+                x = -w / 2 + w * (i + 0.5) / n_x
+                b.add(cylinder("%s_rosette_y%d" % (name, i), 0.025, 0.02, "gold",
+                               (cx + x, cy + d / 2 + 0.03, z0 + h * 0.76), sides=8,
+                               pivot="centre", rotation=(math.radians(90.0), 0.0, 0.0)), shown)
+    elif arch == "asian":
+        b.add(box(name + "_podium", (w + 0.16, d + 0.16, 0.07), "stone" if age >= 2 else "earth",
+                  (cx, cy, z0)), shown)
+        post = "lacquer" if age >= 2 else "wood_dark"
+        n_x, n_y = (2, 2) if age == 0 else (max(2, int(w / 0.4)), max(2, int(d / 0.4)))
+        for i in range(n_x + 1):
+            x = -w / 2 + w * i / n_x
+            b.add(box("%s_post_y%d" % (name, i), (0.05, 0.03, h), post,
+                      (cx + x, cy + d / 2 + 0.01, z0)), shown)
+            if age >= 2:
+                b.add(box("%s_bracket_y%d" % (name, i), (0.1, 0.06, 0.05), "wood_dark",
+                          (cx + x, cy + d / 2 + 0.03, z0 + h - 0.05)), shown)
+        for i in range(n_y + 1):
+            y = -d / 2 + d * i / n_y
+            b.add(box("%s_post_x%d" % (name, i), (0.03, 0.05, h), post,
+                      (cx + w / 2 + 0.01, cy + y, z0)), shown)
+            if age >= 2:
+                b.add(box("%s_bracket_x%d" % (name, i), (0.06, 0.1, 0.05), "wood_dark",
+                          (cx + w / 2 + 0.03, cy + y, z0 + h - 0.05)), shown)
+        if age >= 1:
+            b.add(box(name + "_beam_y", (w, 0.03, 0.04), post, (cx, cy + d / 2 + 0.012, z0 + h - 0.04)),
+                  shown)
+            b.add(box(name + "_beam_x", (0.03, d, 0.04), post, (cx + w / 2 + 0.012, cy, z0 + h - 0.04)),
+                  shown)
+
+
+def _dress_column(b, obj, shown, arch, age):
+    """An Egyptian column's flared papyrus capital, painted; the others'
+    columns take their materials from the swaps."""
+    if arch != "egyptian":
+        return
+    xs = [v.co for v in obj.data.vertices]
+    r = (max(c.x for c in xs) - min(c.x for c in xs)) / 2
+    h = max(c.z for c in xs) - min(c.z for c in xs)
+    x, y, z = obj.location
+    b.add(cylinder(obj.name + "_capital", r, 0.08, "paint_blue" if age >= 2 else "leaf",
+                   (x, y, z + h - 0.08), sides=8, top_radius=r * 1.9), shown)
+    b.add(cylinder(obj.name + "_foot", r * 1.3, 0.04, "sandstone", (x, y, z), sides=8), shown)
 
 
 def age_dress(h, age, costume):
