@@ -486,6 +486,12 @@ be walked to, and land it on the shore nearest the enemy's Town Center.
   - **[GD-CAMP-04]** A scenario is checked when it is loaded, and refused
     with what is wrong: a name that names nothing, an id defined twice or
     never, a map whose rows disagree, a place off the map.
+  - **[GD-CAMP-05]** The campaigns are listed from the title, each with
+    its scenarios in order; a scenario opens once the one before it is won,
+    and a win is kept between sessions. A briefing gives the story and the
+    objectives before play. In the match the objectives stand at the top
+    right and the narrator's lines at the top, and the results offer the
+    scenario again, the campaigns, or the next scenario once it is won.
 
   **As built** (2026-10-05, `sim::scenario`): a scenario is a RON file —
   the map, the sides, the placements, the objectives and the triggers —
@@ -493,7 +499,11 @@ be walked to, and land it on the shore nearest the enemy's Town Center.
   A drawn map is rows of letters, one a tile (`g` grass, `d` dirt, `a`
   desert, `s` sand, `w` and `W` shallow and deep water, `f` forest, `n`
   snow), with optional corner heights; kinds and technologies are named as
-  they are shown (`"Town Center"` or `"town_center"`).
+  they are shown (`"Town Center"` or `"town_center"`). The campaigns are
+  directories under `assets/campaigns`, each a `campaign.ron` naming its
+  scenarios in order (`save::campaigns`); the scenarios won are kept in
+  `campaigns.ron` beside the settings. Narration is text only (D35): a
+  line stays up at least eight seconds, longer the longer it is.
 - **Scenario editor** — terrain painting, unit placement, triggers, save/load,
   playtest. Post-slice, but the data formats are designed for it from the start.
 - **Cheat codes** — anachronistic joke units and resource grants, disabled in

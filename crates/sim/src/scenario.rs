@@ -32,6 +32,21 @@ use std::collections::BTreeMap;
 /// A scenario: everything needed to set a match up and play it out.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Scenario {
+    /// What the player is told it is called.
+    #[serde(default)]
+    pub title: String,
+    /// The narrator's briefing, read before it starts: a paragraph a line.
+    #[serde(default)]
+    pub briefing: Vec<String>,
+    /// Which file it is, `campaign/scenario`: set when it is loaded, and
+    /// how a won scenario is remembered.
+    #[serde(default)]
+    pub id: String,
+    /// The match seed: a generated map's, and the opponents'. Without one
+    /// it is drawn from the id, so a scenario plays out on the same ground
+    /// each time.
+    #[serde(default)]
+    pub seed: Option<u64>,
     /// The ground.
     pub map: ScenarioMap,
     /// Each side, the player's first; at most eight.
@@ -460,9 +475,30 @@ impl Scenario {
             } else {
                 Vec::new()
             },
+            // The Hardest opponent's declared bonus (`docs/02` §12).
+            gather_bonus_pct: self
+                .sides
+                .iter()
+                .map(|s| {
+                    if s.control == Control::Computer(3) {
+                        crate::simulation::HARDEST_GATHER_BONUS_PCT
+                    } else {
+                        0
+                    }
+                })
+                .collect(),
             scenario: Some(Box::new(self.clone())),
             ..crate::SimConfig::default()
         }
+    }
+
+    /// The match seed: the scenario's own, or one drawn from its id.
+    pub fn match_seed(&self) -> u64 {
+        self.seed.unwrap_or_else(|| {
+            let mut h = StateHasher::new();
+            h.write_str(&self.id);
+            h.finish() % 1_000_000 + 1
+        })
     }
 
     /// Everything wrong with the scenario, so it can be refused when it is
@@ -494,9 +530,14 @@ impl Scenario {
             }
         }
         let (w, h) = match &self.map {
-            ScenarioMap::Generated { size, .. } => {
+            ScenarioMap::Generated { kind, size } => {
                 if !(48..=256).contains(size) {
                     out.push(format!("a generated map is 48 to 256 tiles, not {size}"));
+                }
+                if self.standard_start && *kind == MapKind::Flat {
+                    out.push(
+                        "a Flat map has no standard start to give: place what each side has".into(),
+                    );
                 }
                 (*size as i32, *size as i32)
             }
@@ -927,8 +968,12 @@ impl Simulation {
         } else if needed().count() > 0 && needed().all(|(_, s)| *s == ObjectiveStatus::Done) {
             self.scenario_state.outcome = Some(Outcome::Won);
         } else if !self.standing(0) {
-            self.scenario_state.outcome =
-                Some(Outcome::Lost("Nothing is left to fight with".into()));
+            let why = if self.players.first().is_some_and(|p| p.resigned) {
+                "You resigned"
+            } else {
+                "Nothing is left to fight with"
+            };
+            self.scenario_state.outcome = Some(Outcome::Lost(why.into()));
         }
     }
 

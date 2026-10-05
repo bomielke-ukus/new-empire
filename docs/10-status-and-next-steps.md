@@ -2224,7 +2224,53 @@ the trade boat, Islands and the opponent's use of all of it follow.
   fallbacks (the architecture's latest age, then the Greek); frames that
   overflow a page.
 
+### Work record: M9, first and second chunks — scenarios and campaigns (2026-10-05)
+
+- **Scenarios in the simulation** (`sim::scenario`, `GD-CAMP-01` to
+  `04`). A scenario is a RON file carried in the match's configuration,
+  so a save and a replay carry it: a generated or drawn map, its sides
+  (name, who plays it, civilization, age, stockpile, technologies), what
+  stands where (a placement may be tagged, for a trigger to name), the
+  player's objectives and the triggers. Triggers are checked once a
+  second, in order; objectives decide the match, and the skirmish
+  victories hold only when the scenario says so. The scenario's state is
+  hashed only when there is one, so the corpus did not move. A scenario
+  is checked when it is read, and refused with every problem found; a
+  `standard_start` on the empty Flat map is one.
+- **Campaigns** (`save::campaigns`, `GD-CAMP-05`). A campaign is a
+  directory under `assets/campaigns` with a `campaign.ron` naming its
+  scenarios in order; a scenario that does not read is left out and said,
+  rather than the menu lost. The scenarios won are kept in
+  `campaigns.ron` beside the settings; each opens the one after it.
+- **In the game.** CAMPAIGNS is first on the title. The campaigns screen
+  lists each campaign and its scenarios, won, open or locked (a locked
+  one says why); a briefing gives the story and the objectives the
+  player is told, and PLAY (or Enter) starts it, with the computer's
+  sides played by the AI at the difficulty the scenario names. In the
+  match the objectives stand at the top right, marked as they go (a done
+  one in gold, a failed one marked red), and the narrator's line at the
+  top, for at least eight seconds; an objective shown, done or failed is
+  also a notice and a cue. The results say how the scenario ended —
+  every objective done, the failed objective, or the scenario's own
+  reason — and offer CAMPAIGNS, PLAY AGAIN and NEXT. A resignation in a
+  scenario is said as one.
+- **Tools.** `mapview --campaign <file>` plays a scenario for a number
+  of ticks and draws it with the HUD and the last line said;
+  `--screen campaigns` and `--screen briefing` draw the two screens. The
+  Mac bundle copies `assets/campaigns`.
+- **Tests**: the scenario behaviours (setup from a drawn map, objectives
+  and their outcomes, the triggers, the checks, a save's round trip);
+  every shipped campaign reads, checks and uses only the font's
+  characters; progress unlocks the next and survives a restart; the app
+  plays a campaign from the title through a win, a kept unlock, the next
+  briefing, a loss with its reason, a retry and a resignation. The title
+  screen's golden image is re-recorded for the CAMPAIGNS button.
+
 ### Resume here next session
+
+**M9 is under way** (`docs/07` D35): scenarios and campaigns are in the
+game (above). Next: the learning campaign (four Egyptian scenarios),
+then the scenario editor, then the Persian Wars and Sargon of Akkad.
 
 **M8's items are all built** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the
@@ -2236,7 +2282,7 @@ builds Storehouses by its work; naval is in the simulation — the water,
 the Dock, fishing, warships, transports, trade and Islands (above).
 The opponent goes to sea, and the boats, the Dock and the fish are
 rendered; the four architecture sets are drawn (above, `docs/07` D34).
-Next: the owner's playtest of M8, then `docs/06` M9.
+Next: the owner's playtest of M8.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded

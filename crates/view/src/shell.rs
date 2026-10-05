@@ -305,6 +305,16 @@ pub enum ShellAction {
     Volume(Bus, i32),
     /// Settings: the first-time hints on or off.
     ToggleHints,
+    /// Title and briefing: the campaigns screen.
+    Campaigns,
+    /// Campaigns: the briefing of a campaign's scenario.
+    Brief(usize, usize),
+    /// Briefing: play the scenario.
+    Play,
+    /// Results of a scenario: play it again.
+    Retry,
+    /// Results of a scenario won: the next one's briefing.
+    NextScenario,
 }
 
 /// A clickable region on a shell screen.
@@ -366,6 +376,52 @@ pub struct Results {
     pub why: String,
     /// Every side, in player order.
     pub sides: Vec<Side>,
+    /// A campaign scenario's end: whether there is a next one to go on to.
+    pub scenario: Option<ScenarioEnd>,
+}
+
+/// The end of a campaign scenario, for the results screen's buttons.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ScenarioEnd {
+    /// Whether the player won it.
+    pub won: bool,
+    /// Whether the campaign has a scenario after it.
+    pub next: bool,
+}
+
+/// One campaign on the campaigns screen.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CampaignEntry {
+    /// Its name.
+    pub title: String,
+    /// A line about it.
+    pub about: String,
+    /// Its scenarios, in order.
+    pub scenarios: Vec<ScenarioEntry>,
+}
+
+/// One scenario on the campaigns screen.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ScenarioEntry {
+    /// Its name.
+    pub title: String,
+    /// Won before.
+    pub won: bool,
+    /// May be played: the first, or the one after a won one.
+    pub open: bool,
+}
+
+/// What the briefing screen reads out.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Briefing {
+    /// The campaign's name.
+    pub campaign: String,
+    /// The scenario's.
+    pub title: String,
+    /// The narrator's briefing, a paragraph each.
+    pub paragraphs: Vec<String>,
+    /// The objectives shown from the start.
+    pub objectives: Vec<String>,
 }
 
 /// One side on the results screen.
@@ -537,6 +593,7 @@ pub fn title(atlas: &Atlas, input: &ShellInput) -> Screen {
     s.centred(cx, ty, TITLE, Ink::Gold, 4.0);
     s.centred(cx, ty + 40.0, TAGLINE, Ink::White, 1.0);
     let entries = [
+        (ShellAction::Campaigns, "CAMPAIGNS", true, ""),
         (ShellAction::NewGame, "NEW GAME", true, ""),
         (ShellAction::LoadGame, "LOAD GAME", true, ""),
         (ShellAction::WatchReplay, "WATCH REPLAY", true, ""),
@@ -1271,17 +1328,218 @@ pub fn results(atlas: &Atlas, input: &ShellInput, r: &Results) -> Screen {
         );
     }
     let by = y + ph - 16.0 - MENU_H;
+    match r.scenario {
+        // A campaign's scenario: on to the next, again, or back to the
+        // campaigns.
+        Some(end) => {
+            let bw = (pw - 16.0 * 4.0) / 3.0;
+            s.button(
+                (x + 16.0, by, bw, MENU_H),
+                ShellAction::Campaigns,
+                "CAMPAIGNS",
+                true,
+                "",
+            );
+            s.button(
+                (x + 32.0 + bw, by, bw, MENU_H),
+                ShellAction::Retry,
+                "PLAY AGAIN",
+                true,
+                "",
+            );
+            if end.won && end.next {
+                s.button(
+                    (x + 48.0 + 2.0 * bw, by, bw, MENU_H),
+                    ShellAction::NextScenario,
+                    "NEXT",
+                    true,
+                    "",
+                );
+            } else {
+                s.button(
+                    (x + 48.0 + 2.0 * bw, by, bw, MENU_H),
+                    ShellAction::KeepWatching,
+                    "KEEP WATCHING",
+                    true,
+                    "",
+                );
+            }
+        }
+        None => {
+            s.button(
+                (x + 16.0, by, 200.0, MENU_H),
+                ShellAction::KeepWatching,
+                "KEEP WATCHING",
+                true,
+                "",
+            );
+            s.button(
+                (x + pw - 16.0 - 200.0, by, 200.0, MENU_H),
+                ShellAction::QuitToTitle,
+                "BACK TO TITLE",
+                true,
+                "",
+            );
+        }
+    }
+    s.finish(None)
+}
+
+/// A campaign scenario's row height on the campaigns screen.
+const SCENARIO_H: f32 = 22.0;
+
+/// The campaigns: each with its scenarios, won, open or locked; a
+/// scenario's button opens its briefing. `error` is what could not be
+/// read, if anything.
+pub fn campaigns_screen(
+    atlas: &Atlas,
+    input: &ShellInput,
+    campaigns: &[CampaignEntry],
+    error: Option<&str>,
+) -> Screen {
+    let mut s = Sheet::new(atlas, input);
+    s.backdrop();
+    let pw = 560.0_f32.min(s.vw - 16.0);
+    let rows: f32 = campaigns
+        .iter()
+        .map(|c| 34.0 + c.scenarios.len() as f32 * (SCENARIO_H + 4.0) + 10.0)
+        .sum();
+    let ph = (60.0 + rows.max(30.0) + MENU_H + 24.0).min(s.vh - 8.0);
+    let x = ((s.vw - pw) / 2.0).round();
+    let y = ((s.vh - ph) / 2.0).max(4.0).round();
+    s.panel(x, y, pw, ph);
+    let cx = x + pw / 2.0;
+    s.centred(cx, y + 12.0, "CAMPAIGNS", Ink::Gold, 2.0);
+    let mut ly = y + 44.0;
+    if campaigns.is_empty() {
+        s.centred(cx, ly, "NO CAMPAIGNS FOUND", Ink::White, 1.0);
+        ly += 20.0;
+    }
+    let bw = pw - 64.0;
+    for (ci, c) in campaigns.iter().enumerate() {
+        s.p.text_in(
+            x + 24.0,
+            ly,
+            &fit(&c.title.to_uppercase(), pw - 48.0),
+            Ink::Gold,
+            1.0,
+        );
+        s.p.text(x + 24.0, ly + 12.0, &fit(&c.about, pw - 48.0), false, 1.0);
+        ly += 30.0;
+        for (si, sc) in c.scenarios.iter().enumerate() {
+            let label = format!(
+                "{}. {}{}",
+                si + 1,
+                sc.title.to_uppercase(),
+                if sc.won { "   (WON)" } else { "" }
+            );
+            s.button(
+                (x + 32.0, ly, bw, SCENARIO_H),
+                ShellAction::Brief(ci, si),
+                &label,
+                sc.open,
+                "WIN THE SCENARIO BEFORE IT FIRST",
+            );
+            ly += SCENARIO_H + 4.0;
+        }
+        ly += 10.0;
+    }
+    if let Some(e) = error {
+        s.centred(
+            cx,
+            y + ph - MENU_H - 22.0,
+            &fit(e, pw - 16.0),
+            Ink::Gold,
+            1.0,
+        );
+    }
     s.button(
-        (x + 16.0, by, 200.0, MENU_H),
-        ShellAction::KeepWatching,
-        "KEEP WATCHING",
+        ((cx - 100.0).round(), y + ph - MENU_H - 8.0, 200.0, MENU_H),
+        ShellAction::Back,
+        "BACK",
+        true,
+        "",
+    );
+    s.finish(None)
+}
+
+/// A scenario's briefing: the narrator's paragraphs and the objectives,
+/// then PLAY or back to the campaigns.
+pub fn briefing_screen(atlas: &Atlas, input: &ShellInput, b: &Briefing) -> Screen {
+    let mut s = Sheet::new(atlas, input);
+    s.backdrop();
+    let pw = 620.0_f32.min(s.vw - 16.0);
+    let tw = pw - 64.0;
+    let paragraphs: Vec<Vec<String>> = b
+        .paragraphs
+        .iter()
+        .map(|p| font::wrap(&p.to_uppercase(), tw))
+        .collect();
+    let objectives: Vec<Vec<String>> = b
+        .objectives
+        .iter()
+        .map(|o| font::wrap(&o.to_uppercase(), tw - 12.0))
+        .collect();
+    let line = 11.0;
+    let text_h: f32 = paragraphs
+        .iter()
+        .map(|p| p.len() as f32 * line + 6.0)
+        .sum::<f32>()
+        + 24.0
+        + objectives
+            .iter()
+            .map(|o| o.len() as f32 * line + 2.0)
+            .sum::<f32>();
+    let ph = (80.0 + text_h + MENU_H + 28.0).min(s.vh - 8.0);
+    let x = ((s.vw - pw) / 2.0).round();
+    let y = ((s.vh - ph) / 2.0).max(4.0).round();
+    s.panel(x, y, pw, ph);
+    let cx = x + pw / 2.0;
+    s.centred(
+        cx,
+        y + 12.0,
+        &fit(&b.campaign.to_uppercase(), pw - 16.0),
+        Ink::White,
+        1.0,
+    );
+    s.centred(
+        cx,
+        y + 26.0,
+        &fit(&b.title.to_uppercase(), pw / 2.0),
+        Ink::Gold,
+        2.0,
+    );
+    let mut ly = y + 58.0;
+    for p in &paragraphs {
+        for l in p {
+            s.p.text(x + 32.0, ly, l, false, 1.0);
+            ly += line;
+        }
+        ly += 6.0;
+    }
+    ly += 4.0;
+    s.p.text_in(x + 32.0, ly, "OBJECTIVES", Ink::Gold, 1.0);
+    ly += 14.0;
+    for o in &objectives {
+        s.p.rect(x + 34.0, ly + 1.0, 5.0, 5.0, GOLD_DARK, 0);
+        for l in o {
+            s.p.text(x + 44.0, ly, l, false, 1.0);
+            ly += line;
+        }
+        ly += 2.0;
+    }
+    let by = y + ph - MENU_H - 12.0;
+    s.button(
+        (x + 24.0, by, 200.0, MENU_H),
+        ShellAction::Campaigns,
+        "BACK",
         true,
         "",
     );
     s.button(
-        (x + pw - 16.0 - 200.0, by, 200.0, MENU_H),
-        ShellAction::QuitToTitle,
-        "BACK TO TITLE",
+        (x + pw - 224.0, by, 200.0, MENU_H),
+        ShellAction::Play,
+        "PLAY",
         true,
         "",
     );
@@ -1523,6 +1781,7 @@ mod tests {
                     standing: true,
                 },
             ],
+            scenario: None,
         };
         let screen = results(&atlas, &input(), &r);
         assert!(find(&screen, ShellAction::KeepWatching).enabled);

@@ -2741,3 +2741,193 @@ fn a_right_click_on_land_unloads_a_full_transport() {
         CommandKind::Ungarrison { building } if building == boat
     ));
 }
+
+/// Two scenarios of a campaign written to a scratch directory: the first
+/// is won by a trigger, the second lost by one.
+fn scratch_campaign(name: &str) -> Vec<save::campaigns::Campaign> {
+    let dir = scratch(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    let camp = dir.join("tale");
+    std::fs::create_dir_all(&camp).unwrap();
+    std::fs::write(
+        camp.join("campaign.ron"),
+        r#"(title: "A Tale", about: "Two parts.", scenarios: ["one", "two"])"#,
+    )
+    .unwrap();
+    std::fs::write(
+        camp.join("one.ron"),
+        r#"(title: "The First", briefing: ["It begins."], seed: Some(7),
+            map: Generated(kind: Flat, size: 48),
+            sides: [(name: "Thebes", control: Player), (name: "Raiders", control: Computer(1))],
+            placements: [(kind: "Villager", owner: 0, at: (10, 10)),
+                         (kind: "Villager", owner: 1, at: (38, 38))],
+            objectives: [(id: "hold", text: "Hold the river", goal: Scripted),
+                         (id: "late", text: "Count the grain", goal: Scripted, hidden: true)],
+            triggers: [(then: [Say("The river is yours to hold.")]),
+                       (when: [After(1)], then: [Show("late")]),
+                       (when: [After(2)], then: [Complete("hold"), Complete("late")])])"#,
+    )
+    .unwrap();
+    std::fs::write(
+        camp.join("two.ron"),
+        r#"(title: "The Second", map: Generated(kind: Flat, size: 48),
+            sides: [(name: "Thebes", control: Player)],
+            placements: [(kind: "Villager", owner: 0, at: (10, 10))],
+            objectives: [(id: "x", text: "Survive", goal: Scripted)],
+            triggers: [(when: [After(1)], then: [Lose("The walls fell")])])"#,
+    )
+    .unwrap();
+    let (campaigns, errors) = save::campaigns::load_all(&dir);
+    assert!(errors.is_empty(), "{errors:?}");
+    campaigns
+}
+
+/// A campaign is played from the title: its scenarios are listed, the
+/// second locked until the first is won; the briefing gives the story
+/// and the objectives; the match is the scenario, with the computer's
+/// side played by the AI; the narrator speaks and objectives come and
+/// are done on the HUD; the win is kept on disk and opens the next,
+/// whose loss says why and can be tried again.
+///
+/// REQ: GD-CAMP-05
+#[test]
+fn a_campaign_is_briefed_played_won_kept_and_the_next_one_opens() {
+    let mut app = App::new();
+    app.camera.viewport = (1280.0, 720.0);
+    app.input.edge_scroll = false;
+    app.settings_path = scratch("campaign-settings").join("settings.ron");
+    app.progress_path = scratch("campaign-progress").join("campaigns.ron");
+    let _ = std::fs::remove_file(&app.progress_path);
+    app.saves_dir = scratch("campaign-saves");
+    app.replays_dir = scratch("campaign-replays");
+    app.speaker = Speaker::Recorder(Default::default());
+    app.campaigns = scratch_campaign("campaign-dir");
+    app.campaign_error = None;
+    app.load_progress();
+    assert_eq!(app.shell, Shell::Title);
+
+    press(&mut app, ShellAction::Campaigns);
+    assert_eq!(app.shell, Shell::Campaigns);
+    draw(&mut app);
+    assert!(shell_button(&app, ShellAction::Brief(0, 0)).enabled);
+    let locked = shell_button(&app, ShellAction::Brief(0, 1));
+    assert!(!locked.enabled && !locked.reason.is_empty());
+    // A locked scenario's briefing is not opened, even when asked for.
+    app.shell_action(ShellAction::Brief(0, 1));
+    assert_eq!(app.shell, Shell::Campaigns);
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    assert_eq!(app.shell, Shell::Title, "Esc goes back");
+    press(&mut app, ShellAction::Campaigns);
+
+    press(&mut app, ShellAction::Brief(0, 0));
+    assert_eq!(app.shell, Shell::Briefing);
+    let b = app.briefing_now().unwrap();
+    assert_eq!(b.paragraphs, vec!["It begins.".to_string()]);
+    assert_eq!(
+        b.objectives,
+        vec!["Hold the river".to_string()],
+        "a hidden objective is not told"
+    );
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    assert_eq!(app.shell, Shell::Campaigns);
+    press(&mut app, ShellAction::Brief(0, 0));
+    press(&mut app, ShellAction::Play);
+    assert_eq!(app.shell, Shell::Match);
+    assert_eq!(app.sim.seed(), 7);
+    assert_eq!(app.sim.scenario().unwrap().id, "tale/one");
+    assert_eq!(app.opponents.len(), 1);
+    assert_eq!(app.opponents[0].player(), 1);
+    assert_eq!(app.opponents[0].difficulty(), Difficulty::Standard);
+    assert_eq!(app.results, ResultsState::Pending);
+
+    // The narrator's first line, at the start.
+    let now = Instant::now();
+    app.tick_once(now);
+    assert_eq!(
+        app.narration.as_ref().map(|(l, _)| l.as_str()),
+        Some("The river is yours to hold.")
+    );
+    draw(&mut app);
+    // The hidden objective is shown a second in, and both are done at two.
+    for _ in 0..(2 * sim::simulation::TICKS_PER_SECOND + 2) {
+        app.tick_once(now);
+    }
+    let said: Vec<String> = app.notices.shown().iter().map(|n| n.text.clone()).collect();
+    assert!(
+        said.iter().any(|t| t == "NEW OBJECTIVE: COUNT THE GRAIN"),
+        "{said:?}"
+    );
+    assert!(said.iter().any(|t| t == "DONE: HOLD THE RIVER"), "{said:?}");
+    assert_eq!(app.sim.outcome(), Some(&sim::Outcome::Won));
+    draw(&mut app);
+    assert_eq!(app.results, ResultsState::Shown);
+    let r = app.results_now();
+    assert_eq!(
+        (r.heading.as_str(), r.why.as_str()),
+        ("VICTORY", "EVERY OBJECTIVE IS DONE")
+    );
+    assert_eq!(r.sides[0].name, "THEBES");
+    assert_eq!(r.sides[1].name, "RAIDERS");
+    assert_eq!(
+        r.scenario,
+        Some(shell::ScenarioEnd {
+            won: true,
+            next: true
+        })
+    );
+    // The win is kept, so a restart still has the second open.
+    let kept = save::campaigns::Progress::read(&app.progress_path);
+    assert!(kept.won.contains("tale/one"), "{kept:?}");
+
+    press(&mut app, ShellAction::NextScenario);
+    assert_eq!(app.shell, Shell::Briefing);
+    assert_eq!(app.briefing, Some((0, 1)));
+    app.keyboard_input(KeyCode::Enter, ElementState::Pressed, false);
+    assert_eq!(app.shell, Shell::Match);
+    assert_eq!(app.sim.scenario().unwrap().id, "tale/two");
+    assert!(app.opponents.is_empty());
+    assert!(app.narration.is_none(), "the last scenario's line is gone");
+    for _ in 0..(sim::simulation::TICKS_PER_SECOND + 2) {
+        app.tick_once(now);
+    }
+    draw(&mut app);
+    assert_eq!(app.results, ResultsState::Shown);
+    let r = app.results_now();
+    assert_eq!(
+        (r.heading.as_str(), r.why.as_str()),
+        ("DEFEAT", "THE WALLS FELL")
+    );
+    assert_eq!(
+        r.scenario,
+        Some(shell::ScenarioEnd {
+            won: false,
+            next: false
+        })
+    );
+    assert!(!save::campaigns::Progress::read(&app.progress_path)
+        .won
+        .contains("tale/two"));
+
+    // Tried again: the same scenario from its start.
+    press(&mut app, ShellAction::Retry);
+    assert_eq!(app.shell, Shell::Match);
+    assert_eq!(app.sim.tick(), 0);
+    assert_eq!(app.sim.scenario().unwrap().id, "tale/two");
+    assert_eq!(app.results, ResultsState::Pending);
+    app.clock.set_paused(false);
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    press(&mut app, ShellAction::Resign);
+    press(&mut app, ShellAction::Resign);
+    step(&mut app, 3);
+    draw(&mut app);
+    assert_eq!(app.results, ResultsState::Shown);
+    let r = app.results_now();
+    assert_eq!(
+        (r.heading.as_str(), r.why.as_str()),
+        ("DEFEAT", "YOU RESIGNED")
+    );
+    press(&mut app, ShellAction::Campaigns);
+    assert_eq!(app.shell, Shell::Campaigns);
+    draw(&mut app);
+    assert!(shell_button(&app, ShellAction::Brief(0, 1)).enabled);
+}

@@ -37,6 +37,10 @@ cp target/release/new-empire "$app/Contents/MacOS/new-empire"
 cp -R assets/sprites "$app/Contents/Resources/assets/sprites"
 # The ground's grain (view::detail), found beside the sprites.
 cp -R assets/terrain "$app/Contents/Resources/assets/terrain"
+# The campaigns (save::campaigns), found beside the sprites too.
+if [ -d assets/campaigns ]; then
+  cp -R assets/campaigns "$app/Contents/Resources/assets/campaigns"
+fi
 # The icon (tools/render/icon.py renders it), named in Info.plist.
 cp packaging/macos/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 # Recordings, once there are any; the placeholders are in the binary.
@@ -52,6 +56,9 @@ printf 'APPL????' > "$app/Contents/PkgInfo"
 # fallback to placeholders. Check it copied.
 test -f "$app/Contents/Resources/assets/sprites/villager/"*.ron
 test -f "$app/Contents/Resources/assets/terrain/detail.png"
+if [ -d assets/campaigns ]; then
+  test -n "$(ls "$app/Contents/Resources/assets/campaigns/"*/campaign.ron)"
+fi
 test -f "$app/Contents/Resources/AppIcon.icns"
 
 if command -v plutil >/dev/null 2>&1; then

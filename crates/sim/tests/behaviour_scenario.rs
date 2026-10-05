@@ -67,6 +67,10 @@ fn trigger(when: Vec<Condition>, then: Vec<Action>) -> Trigger {
 /// with a clubman far off.
 fn base() -> Scenario {
     Scenario {
+        title: "The Two Lands".into(),
+        briefing: Vec::new(),
+        id: "test/base".into(),
+        seed: None,
         map: drawn(),
         sides: vec![
             side("Thinis", Control::Player),

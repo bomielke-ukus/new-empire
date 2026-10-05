@@ -287,7 +287,23 @@ struct App {
     /// What the last refused click was short of, and when: the resource
     /// bar flashes it (`docs/03` §6.3).
     flash: Option<(Instant, [bool; 4])>,
+    /// The campaigns on disk (`docs/02` §13).
+    campaigns: Vec<save::campaigns::Campaign>,
+    /// What of them could not be read, shown on the campaigns screen.
+    campaign_error: Option<String>,
+    /// The scenarios won, which unlock the ones after them.
+    progress: save::campaigns::Progress,
+    /// Where that is kept.
+    progress_path: PathBuf,
+    /// The scenario being briefed: (campaign, scenario).
+    briefing: Option<(usize, usize)>,
+    /// The narrator's last line and the tick it was said at.
+    narration: Option<(String, u64)>,
 }
+
+/// A narrator's line stays up at least this many ticks, and longer the
+/// longer it is.
+const NARRATION_TICKS: u64 = 8 * sim::simulation::TICKS_PER_SECOND as u64;
 
 /// The bar flashes what a refused click was short of for this long.
 const FLASH_MS: u128 = 1500;
@@ -324,6 +340,10 @@ enum Shell {
     Replays,
     /// The settings.
     Settings,
+    /// The campaigns and their scenarios (`docs/02` §13).
+    Campaigns,
+    /// A campaign scenario's briefing.
+    Briefing,
     /// A match, with the pause menu or the results over it or not.
     Match,
 }
@@ -422,6 +442,14 @@ impl App {
         if !recorded.is_empty() {
             eprintln!("recorded sounds: {}", recorded.join(", "));
         }
+        // The campaigns ship beside the art.
+        let (campaigns, campaign_errors) = view::sheets::default_dir()
+            .and_then(|d| d.parent().map(|p| p.join("campaigns")))
+            .map(|dir| save::campaigns::load_all(&dir))
+            .unwrap_or_default();
+        for e in &campaign_errors {
+            eprintln!("warning: {e}");
+        }
         App {
             window: None,
             gpu: None,
@@ -495,7 +523,91 @@ impl App {
             hints: Hints::new(true, &std::collections::BTreeMap::new()),
             attacked_at: None,
             flash: None,
+            campaigns,
+            campaign_error: campaign_errors.first().cloned(),
+            progress: save::campaigns::Progress::default(),
+            progress_path: data_dir("NEW_EMPIRE_PROGRESS", "campaigns.ron"),
+            briefing: None,
+            narration: None,
         }
+    }
+
+    /// Reads which scenarios the player has won.
+    fn load_progress(&mut self) {
+        self.progress = save::campaigns::Progress::read(&self.progress_path);
+    }
+
+    /// Where the scenario being played is among the campaigns.
+    fn current_scenario(&self) -> Option<(usize, usize)> {
+        let sc = self.sim.scenario()?;
+        save::campaigns::locate(&self.campaigns, &sc.id)
+    }
+
+    /// The campaigns screen's rows: each scenario won, open or locked.
+    fn campaign_entries(&self) -> Vec<shell::CampaignEntry> {
+        self.campaigns
+            .iter()
+            .map(|c| shell::CampaignEntry {
+                title: c.title.clone(),
+                about: c.about.clone(),
+                scenarios: c
+                    .scenarios
+                    .iter()
+                    .enumerate()
+                    .map(|(i, sc)| shell::ScenarioEntry {
+                        title: sc.title.clone(),
+                        won: self.progress.has_won(sc),
+                        open: self.progress.unlocked(c, i),
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    /// The briefing of the scenario picked.
+    fn briefing_now(&self) -> Option<shell::Briefing> {
+        let (c, s) = self.briefing?;
+        let camp = self.campaigns.get(c)?;
+        let sc = camp.scenarios.get(s)?;
+        Some(shell::Briefing {
+            campaign: camp.title.clone(),
+            title: sc.title.clone(),
+            paragraphs: sc.briefing.clone(),
+            objectives: sc
+                .objectives
+                .iter()
+                .filter(|o| !o.hidden)
+                .map(|o| o.text.clone())
+                .collect(),
+        })
+    }
+
+    /// Starts the scenario briefed: its match, an opponent for each side
+    /// the computer plays, and the camera on the player's start.
+    fn start_scenario(&mut self) {
+        let Some((c, s)) = self.briefing else {
+            return;
+        };
+        let Some(sc) = self.campaigns.get(c).and_then(|camp| camp.scenarios.get(s)) else {
+            return;
+        };
+        let seed = sc.match_seed();
+        self.sim = Simulation::new(seed, sc.config());
+        self.opponents = sc
+            .sides
+            .iter()
+            .enumerate()
+            .filter_map(|(p, side)| match side.control {
+                sim::scenario::Control::Computer(d) => Some(Opponent::new(
+                    p as u8,
+                    ai::Difficulty::ALL[d.min(3) as usize],
+                    seed,
+                )),
+                _ => None,
+            })
+            .collect();
+        self.playback = None;
+        self.enter_match();
     }
 
     /// Reads the settings file, if there is one, and applies it. A file
@@ -921,6 +1033,8 @@ impl App {
                 Shell::Load => "load".to_string(),
                 Shell::Settings => "settings".to_string(),
                 Shell::Replays => "replays".to_string(),
+                Shell::Campaigns => "campaigns".to_string(),
+                Shell::Briefing => "briefing".to_string(),
                 Shell::Setup => format!("setup — seed {}", self.setup.seed),
                 Shell::Match => {
                     let paused = if self.clock.paused() { " [paused]" } else { "" };
@@ -953,9 +1067,7 @@ impl App {
         self.last_frame = now;
         match self.shell {
             Shell::Match => self.frame_match(now, dt),
-            Shell::Title | Shell::Setup | Shell::Load | Shell::Replays | Shell::Settings => {
-                self.frame_shell(now)
-            }
+            _ => self.frame_shell(now),
         }
     }
 
@@ -1006,6 +1118,35 @@ impl App {
         let tick = self.sim.tick();
         for e in self.sim.events() {
             match *e {
+                // A scenario's narrator and objectives (`docs/02` §13).
+                sim::Event::Said { trigger, action } => {
+                    if let Some(line) = self.sim.line(trigger, action) {
+                        self.narration = Some((line.to_string(), tick));
+                    }
+                }
+                sim::Event::Objective { index, status } => {
+                    use sim::scenario::ObjectiveStatus as S;
+                    let Some(o) = self
+                        .sim
+                        .scenario()
+                        .and_then(|sc| sc.objectives.get(index as usize))
+                    else {
+                        continue;
+                    };
+                    let text = o.text.to_uppercase();
+                    let (kind, text) = match status {
+                        S::Done => (NoticeKind::Research, format!("DONE: {text}")),
+                        S::Failed => (NoticeKind::Loss, format!("FAILED: {text}")),
+                        S::Open => (NoticeKind::Age, format!("NEW OBJECTIVE: {text}")),
+                        S::Hidden => continue,
+                    };
+                    self.notices.push(Notice {
+                        kind,
+                        text,
+                        tile: None,
+                        tick,
+                    });
+                }
                 sim::Event::Alarm { player, pos } if player == me => {
                     self.alarm_at = Some(now);
                     self.attacked_at = Some(tick);
@@ -1301,6 +1442,13 @@ impl App {
                 settings: &self.settings,
                 notices: self.notices.shown(),
                 hint: hint.as_deref(),
+                narration: self
+                    .narration
+                    .as_ref()
+                    .filter(|(line, at)| {
+                        self.sim.tick() < at + NARRATION_TICKS.max(line.len() as u64 * 2)
+                    })
+                    .map(|(line, _)| line.as_str()),
                 flash: self
                     .flash
                     .filter(|(at, _)| at.elapsed().as_millis() < FLASH_MS)
@@ -1324,6 +1472,16 @@ impl App {
         if self.results == ResultsState::Pending && ended {
             self.results = ResultsState::Shown;
             self.record_replay();
+            // A campaign scenario won unlocks the next.
+            if self.playback.is_none() && self.sim.outcome() == Some(&sim::Outcome::Won) {
+                if let Some(sc) = self.sim.scenario() {
+                    if self.progress.won.insert(sc.id.clone()) {
+                        if let Err(e) = self.progress.write(&self.progress_path) {
+                            eprintln!("warning: progress not saved: {e}");
+                        }
+                    }
+                }
+            }
         }
         let input = self.shell_input();
         let overlay = if self.menu {
@@ -1406,6 +1564,18 @@ impl App {
                 self.capturing,
                 self.settings_error.as_deref(),
             ),
+            Shell::Campaigns => shell::campaigns_screen(
+                &self.atlas,
+                &input,
+                &self.campaign_entries(),
+                self.campaign_error.as_deref(),
+            ),
+            Shell::Briefing => match self.briefing_now() {
+                Some(b) => shell::briefing_screen(&self.atlas, &input, &b),
+                None => {
+                    shell::campaigns_screen(&self.atlas, &input, &self.campaign_entries(), None)
+                }
+            },
             _ => shell::setup(
                 &self.atlas,
                 &input,
@@ -1560,6 +1730,11 @@ impl App {
 
     /// The match is decided for the player: won, lost, or resigned.
     fn decided(&self) -> bool {
+        // A scenario's verdict is its own, given once a second
+        // (`GD-CAMP-02`); a resignation is taken at once.
+        if self.sim.scenario().is_some() {
+            return self.sim.over() || self.sim.player(ME).is_some_and(|p| p.resigned);
+        }
         self.sim.over() || !self.sim.standing(ME)
     }
 
@@ -1576,11 +1751,19 @@ impl App {
     fn results_now(&self) -> Results {
         let won = self.sim.winner() == Some(ME);
         let resigned = self.sim.player(ME).is_some_and(|p| p.resigned);
+        let scenario = self.sim.scenario().filter(|_| self.playback.is_none());
         let (heading, why) = match &self.playback {
             Some(p) => (
                 "REPLAY OVER",
                 format!("THE RECORDING ENDS AT {}", save::clock(p.replay.ticks)),
             ),
+            // A scenario says how it ended (`GD-CAMP-02`).
+            None if scenario.is_some() => match self.sim.outcome() {
+                Some(sim::Outcome::Won) => ("VICTORY", "EVERY OBJECTIVE IS DONE".to_string()),
+                Some(sim::Outcome::Lost(why)) => ("DEFEAT", why.to_uppercase()),
+                None if resigned => ("DEFEAT", "YOU RESIGNED".to_string()),
+                None => ("UNDECIDED", "THE SCENARIO GOES ON".to_string()),
+            },
             None if won => (
                 "VICTORY",
                 match self.sim.victory() {
@@ -1607,6 +1790,8 @@ impl App {
                 player: p,
                 name: if self.playback.is_some() {
                     format!("PLAYER {}", p + 1)
+                } else if let Some(side) = scenario.and_then(|sc| sc.sides.get(p as usize)) {
+                    side.name.to_uppercase()
                 } else if p == ME {
                     "YOU".to_string()
                 } else {
@@ -1621,10 +1806,19 @@ impl App {
                 standing: self.sim.standing(p),
             })
             .collect();
+        let at = self.current_scenario();
         Results {
             heading: heading.to_string(),
             why,
             sides,
+            scenario: scenario.map(|_| shell::ScenarioEnd {
+                won: self.sim.outcome() == Some(&sim::Outcome::Won),
+                next: at.is_some_and(|(c, s)| {
+                    self.campaigns
+                        .get(c)
+                        .is_some_and(|camp| s + 1 < camp.scenarios.len())
+                }),
+            }),
         }
     }
 
@@ -1734,6 +1928,42 @@ impl App {
                 }
             }
             ShellAction::KeepWatching => self.results = ResultsState::Dismissed,
+            ShellAction::Campaigns => {
+                if self.shell == Shell::Match {
+                    self.quit_to_title();
+                }
+                self.shell = Shell::Campaigns;
+            }
+            ShellAction::Brief(c, s) => {
+                let open = self.campaigns.get(c).is_some_and(|camp| {
+                    s < camp.scenarios.len() && self.progress.unlocked(camp, s)
+                });
+                if open {
+                    self.briefing = Some((c, s));
+                    self.shell = Shell::Briefing;
+                }
+            }
+            ShellAction::Play => self.start_scenario(),
+            ShellAction::Retry => {
+                if let Some(at) = self.current_scenario() {
+                    self.quit_to_title();
+                    self.briefing = Some(at);
+                    self.start_scenario();
+                }
+            }
+            ShellAction::NextScenario => {
+                if let Some((c, s)) = self.current_scenario() {
+                    let next = self
+                        .campaigns
+                        .get(c)
+                        .is_some_and(|camp| s + 1 < camp.scenarios.len());
+                    if next {
+                        self.quit_to_title();
+                        self.briefing = Some((c, s + 1));
+                        self.shell = Shell::Briefing;
+                    }
+                }
+            }
         }
     }
 
@@ -1772,6 +2002,7 @@ impl App {
     /// match cleared.
     fn enter_match(&mut self) {
         self.hints.reset();
+        self.narration = None;
         self.attacked_at = None;
         self.flash = None;
         let (viewport, dpi) = (self.camera.viewport, self.camera.dpi);
@@ -2470,6 +2701,20 @@ impl App {
                 }
                 return false;
             }
+            Shell::Campaigns => {
+                if code == KeyCode::Escape {
+                    self.shell_action(ShellAction::Back);
+                }
+                return false;
+            }
+            Shell::Briefing => {
+                match code {
+                    KeyCode::Enter | KeyCode::NumpadEnter => self.shell_action(ShellAction::Play),
+                    KeyCode::Escape => self.shell_action(ShellAction::Campaigns),
+                    _ => {}
+                }
+                return false;
+            }
             Shell::Settings => {
                 match (self.capturing, code) {
                     (Some(_), KeyCode::Escape) => self.capturing = None,
@@ -2884,6 +3129,7 @@ fn main() {
     let event_loop = EventLoop::new().expect("event loop");
     let mut app = App::new();
     app.load_settings();
+    app.load_progress();
     app.open_speaker();
     event_loop.run_app(&mut app).expect("event loop failed");
 }

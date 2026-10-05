@@ -393,6 +393,8 @@ pub fn clock(tick: u64) -> String {
 /// one replay file per match, named like a save for when the match
 /// started, its seed, how far it got and its players, so the WATCH
 /// REPLAY screen lists a directory without reading a file.
+pub mod campaigns;
+
 pub mod replays {
     use super::{compact_stamp, io, Entry, SaveError};
     use sim::Replay;
