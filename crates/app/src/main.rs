@@ -10,6 +10,8 @@
 
 mod cheats;
 mod clock;
+mod editing;
+mod editor;
 mod input;
 mod keys;
 mod selection;
@@ -299,6 +301,29 @@ struct App {
     briefing: Option<(usize, usize)>,
     /// The narrator's last line and the tick it was said at.
     narration: Option<(String, u64)>,
+    /// The scenario being edited, while the editor is open (`GD-CAMP-06`).
+    editor: Option<editor::Editor>,
+    /// What the editor's check says of it, as of the last rebuild.
+    editor_problems: Vec<String>,
+    /// Where the player's own scenarios are kept.
+    scenarios_dir: PathBuf,
+    /// What the editor's front door offers to open.
+    editor_files: Vec<(LoadRow, editing::Source)>,
+    /// What the front door could not open.
+    editor_error: Option<String>,
+    /// The match is a playtest from the editor, which it goes back to.
+    playtest: bool,
+    /// The editor's camera, kept over a playtest.
+    editor_camera: Option<Camera>,
+    /// When the editor's world was last made from the scenario.
+    editor_built: Instant,
+    /// A brush held down: true for the left button.
+    painting: Option<bool>,
+    /// The tile or corner the brush last worked, so a held brush works
+    /// each once.
+    last_stroke: Option<(i32, i32)>,
+    /// An area being dragged out for a field: where it started.
+    edit_drag: Option<(i32, i32)>,
 }
 
 /// A narrator's line stays up at least this many ticks, and longer the
@@ -344,6 +369,10 @@ enum Shell {
     Campaigns,
     /// A campaign scenario's briefing.
     Briefing,
+    /// The scenario editor's front door (`GD-CAMP-06`).
+    EditorStart,
+    /// The scenario editor.
+    Editor,
     /// A match, with the pause menu or the results over it or not.
     Match,
 }
@@ -529,6 +558,17 @@ impl App {
             progress_path: data_dir("NEW_EMPIRE_PROGRESS", "campaigns.ron"),
             briefing: None,
             narration: None,
+            editor: None,
+            editor_problems: Vec::new(),
+            scenarios_dir: data_dir("NEW_EMPIRE_SCENARIOS", "scenarios"),
+            editor_files: Vec::new(),
+            editor_error: None,
+            playtest: false,
+            editor_camera: None,
+            editor_built: Instant::now(),
+            painting: None,
+            last_stroke: None,
+            edit_drag: None,
         }
     }
 
@@ -593,19 +633,7 @@ impl App {
         };
         let seed = sc.match_seed();
         self.sim = Simulation::new(seed, sc.config());
-        self.opponents = sc
-            .sides
-            .iter()
-            .enumerate()
-            .filter_map(|(p, side)| match side.control {
-                sim::scenario::Control::Computer(d) => Some(Opponent::new(
-                    p as u8,
-                    ai::Difficulty::ALL[d.min(3) as usize],
-                    seed,
-                )),
-                _ => None,
-            })
-            .collect();
+        self.opponents = App::opponents_for(sc, seed);
         self.playback = None;
         self.enter_match();
     }
@@ -720,6 +748,13 @@ impl App {
 
     /// Zooms by whole wheel steps about the cursor, or the centre without one.
     fn wheel(&mut self, lines: Option<f32>, pixels: Option<f32>) {
+        if self.shell == Shell::Editor {
+            let steps = self.input.wheel_steps(lines, pixels);
+            if steps != 0 {
+                self.editor_wheel(steps);
+            }
+            return;
+        }
         if self.shell != Shell::Match || self.overlay() {
             return;
         }
@@ -1035,6 +1070,13 @@ impl App {
                 Shell::Replays => "replays".to_string(),
                 Shell::Campaigns => "campaigns".to_string(),
                 Shell::Briefing => "briefing".to_string(),
+                Shell::EditorStart => "scenario editor".to_string(),
+                Shell::Editor => format!(
+                    "scenario editor — {}",
+                    self.editor
+                        .as_ref()
+                        .map_or(String::new(), |e| e.scenario.title.clone())
+                ),
                 Shell::Setup => format!("setup — seed {}", self.setup.seed),
                 Shell::Match => {
                     let paused = if self.clock.paused() { " [paused]" } else { "" };
@@ -1067,6 +1109,7 @@ impl App {
         self.last_frame = now;
         match self.shell {
             Shell::Match => self.frame_match(now, dt),
+            Shell::Editor => self.frame_editor(now, dt),
             _ => self.frame_shell(now),
         }
     }
@@ -1473,7 +1516,10 @@ impl App {
             self.results = ResultsState::Shown;
             self.record_replay();
             // A campaign scenario won unlocks the next.
-            if self.playback.is_none() && self.sim.outcome() == Some(&sim::Outcome::Won) {
+            if self.playback.is_none()
+                && !self.playtest
+                && self.sim.outcome() == Some(&sim::Outcome::Won)
+            {
                 if let Some(sc) = self.sim.scenario() {
                     if self.progress.won.insert(sc.id.clone()) {
                         if let Err(e) = self.progress.write(&self.progress_path) {
@@ -1492,6 +1538,7 @@ impl App {
                 self.confirm,
                 self.saved_note().as_deref(),
                 self.playback.is_some(),
+                self.playtest,
             ))
         } else if self.results == ResultsState::Shown {
             Some(shell::results(&self.atlas, &input, &self.results_now()))
@@ -1570,6 +1617,10 @@ impl App {
                 &self.campaign_entries(),
                 self.campaign_error.as_deref(),
             ),
+            Shell::EditorStart => {
+                let rows: Vec<LoadRow> = self.editor_files.iter().map(|(r, _)| r.clone()).collect();
+                view::editor::editor_start(&self.atlas, &input, &rows, self.editor_error.as_deref())
+            }
             Shell::Briefing => match self.briefing_now() {
                 Some(b) => shell::briefing_screen(&self.atlas, &input, &b),
                 None => {
@@ -1706,7 +1757,7 @@ impl App {
     /// got, replacing this match's earlier recording. A replay being
     /// watched is not recorded again.
     fn record_replay(&mut self) {
-        if self.playback.is_some() || self.sim.tick() == 0 {
+        if self.playback.is_some() || self.playtest || self.sim.tick() == 0 {
             return;
         }
         let replay = self.sim.replay();
@@ -1813,11 +1864,13 @@ impl App {
             sides,
             scenario: scenario.map(|_| shell::ScenarioEnd {
                 won: self.sim.outcome() == Some(&sim::Outcome::Won),
-                next: at.is_some_and(|(c, s)| {
-                    self.campaigns
-                        .get(c)
-                        .is_some_and(|camp| s + 1 < camp.scenarios.len())
-                }),
+                playtest: self.playtest,
+                next: !self.playtest
+                    && at.is_some_and(|(c, s)| {
+                        self.campaigns
+                            .get(c)
+                            .is_some_and(|camp| s + 1 < camp.scenarios.len())
+                    }),
             }),
         }
     }
@@ -1944,6 +1997,15 @@ impl App {
                 }
             }
             ShellAction::Play => self.start_scenario(),
+            ShellAction::Editor => {
+                if self.playtest {
+                    self.back_to_editor();
+                } else {
+                    self.open_editor_start();
+                }
+            }
+            ShellAction::Edit(a) => self.editor_action(a, 1),
+            ShellAction::Retry if self.playtest => self.start_playtest(),
             ShellAction::Retry => {
                 if let Some(at) = self.current_scenario() {
                     self.quit_to_title();
@@ -2051,6 +2113,11 @@ impl App {
     /// Leaves the match for the title. The world stays until the next
     /// setup replaces it.
     fn quit_to_title(&mut self) {
+        // A playtest goes back to the editor it came from.
+        if self.playtest {
+            self.back_to_editor();
+            return;
+        }
         self.record_replay();
         self.shell = Shell::Title;
         self.opponents.clear();
@@ -2215,6 +2282,10 @@ impl App {
     }
 
     fn left_press(&mut self, px: f32, py: f32) {
+        if self.shell == Shell::Editor {
+            self.editor_press(px, py);
+            return;
+        }
         // A shell screen or overlay takes the click; the world gets none.
         if self.shell != Shell::Match || self.overlay() {
             self.shell_click(px, py);
@@ -2296,6 +2367,10 @@ impl App {
 
     fn left_release(&mut self, px: f32, py: f32) {
         self.input.scrubbing = false;
+        if self.shell == Shell::Editor {
+            self.editor_release(px, py);
+            return;
+        }
         if self.shell != Shell::Match || self.overlay() {
             self.selection.drag_from = None;
             return;
@@ -2357,6 +2432,10 @@ impl App {
     }
 
     fn right_press(&mut self, px: f32, py: f32) {
+        if self.shell == Shell::Editor {
+            self.editor_right(px, py);
+            return;
+        }
         if self.shell != Shell::Match || self.overlay() || self.playback.is_some() {
             return;
         }
@@ -2642,7 +2721,7 @@ impl App {
         match state {
             // While a code is typed its letters are text, not keys held
             // to pan the camera.
-            ElementState::Pressed if self.cheat.is_some() => {
+            ElementState::Pressed if self.cheat.is_some() || self.editor_typing() => {
                 if !repeat || code == KeyCode::Backspace {
                     return self.key(code);
                 }
@@ -2701,10 +2780,14 @@ impl App {
                 }
                 return false;
             }
-            Shell::Campaigns => {
+            Shell::Campaigns | Shell::EditorStart => {
                 if code == KeyCode::Escape {
                     self.shell_action(ShellAction::Back);
                 }
+                return false;
+            }
+            Shell::Editor => {
+                self.editor_key(code);
                 return false;
             }
             Shell::Briefing => {
@@ -3083,6 +3166,9 @@ impl ApplicationHandler for App {
                     (MouseButton::Left, ElementState::Pressed) => self.left_press(px, py),
                     (MouseButton::Left, ElementState::Released) => self.left_release(px, py),
                     (MouseButton::Right, ElementState::Pressed) => self.right_press(px, py),
+                    (MouseButton::Right, ElementState::Released) if self.shell == Shell::Editor => {
+                        self.editor_right_release()
+                    }
                     _ => {}
                 }
             }
@@ -3130,6 +3216,7 @@ fn main() {
     let mut app = App::new();
     app.load_settings();
     app.load_progress();
+    app.reload_user_campaign();
     app.open_speaker();
     event_loop.run_app(&mut app).expect("event loop failed");
 }

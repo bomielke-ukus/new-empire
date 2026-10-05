@@ -2291,11 +2291,41 @@ the trade boat, Islands and the opponent's use of all of it follow.
 - **Scenario 4 is set in 1550 BC**, not early Egypt (`docs/02` §13 as
   built): horses came with the Hyksos.
 
+### Work record: M9, fourth chunk — the scenario editor (2026-10-05)
+
+- **The editor** (`GD-CAMP-06`, `docs/02` §13 as built): SCENARIO EDITOR
+  on the title opens new maps (48 to 128 tiles) or a scenario, the
+  player's own or a campaign's as a copy. Terrain, height and units on
+  the map with a brush or a click; the title, the briefing, the sides,
+  the objectives and the triggers as lists of chips; a check tab; SAVE,
+  PLAYTEST and EXIT. The model (`app::editor`) holds the scenario and
+  nothing else; the world on screen is a match made from it.
+- **The player's own scenarios** (`save::campaigns::load_user`) are a
+  campaign on the campaigns screen with every scenario open; the editor
+  saves into it and lists it again.
+- **Simulation**: `site_clear` says whether a kind could stand on a
+  tile whoever's it is; `view::scene::tile_marks` draws the brush.
+- **Typing**: the editor's lines take letters, digits, space and the
+  punctuation the font has (`cheats::text_char`), as a US keyboard lays
+  them out.
+- **Tests**: the model (a new map plays at once; painting and heights
+  that stay valid; placing, naming and erasing; every field of every
+  objective, condition and action stepped both ways without leaving a
+  problem the check does not name; saving by title without overwriting;
+  a generated map baked to the same ground and the same things); the
+  screens fit at 1024 by 640; the app plays the whole flow from the
+  title through a playtest and back and opens the file again. An opt-in
+  test (`NE_SHOT_DIR`) draws the editor in each tool with the software
+  rasterizer for looking at; it was looked at.
+- **Not done**: undo; resizing a map; copying and pasting; editing the
+  parts of `Any` and `Not` in the editor (they are shown and deleted).
+  Closing the window with changes unsaved loses them.
+
 ### Resume here next session
 
 **M9 is under way** (`docs/07` D35): scenarios and campaigns are in the
-game, and the learning campaign is shipped (above). Next: the scenario
-editor, then the Persian Wars and Sargon of Akkad.
+game, the learning campaign is shipped and the scenario editor is in
+(above). Next: the Persian Wars and Sargon of Akkad.
 
 **M8's items are all built** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the

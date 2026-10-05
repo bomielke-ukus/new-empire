@@ -838,6 +838,30 @@ fn push_arms(
 }
 
 /// A world-space overlay sprite anchored on a ground point.
+/// Marks over the tiles given, hatched green or red, as the scenario
+/// editor's brush shows the ground it will paint (`GD-CAMP-06`). They are
+/// world sprites, to be sorted in with the rest.
+pub fn tile_marks(
+    sim: &Simulation,
+    atlas: &Atlas,
+    tiles: &[(i32, i32)],
+    ok: bool,
+) -> Vec<SpriteInstance> {
+    let map = sim.map();
+    let Some(frame) = atlas.footprint(1, ok) else {
+        return Vec::new();
+    };
+    tiles
+        .iter()
+        .map(|&(x, y)| {
+            let (cx, cy) = (x as f32 + 0.5, y as f32 + 0.5);
+            let h = iso::ground_height(map, cx, cy);
+            let (gx, gy) = iso::project(cx, cy, h);
+            overlay(frame, gx, gy, 0, cx + cy + 0.51, u32::MAX)
+        })
+        .collect()
+}
+
 pub(crate) fn overlay(
     frame: &crate::sprites::Frame,
     gx: f32,

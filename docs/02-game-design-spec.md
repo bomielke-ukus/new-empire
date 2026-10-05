@@ -532,6 +532,34 @@ be walked to, and land it on the shore nearest the enemy's Town Center.
   minutes for the first, second and fourth.
 - **Scenario editor** — terrain painting, unit placement, triggers, save/load,
   playtest. Post-slice, but the data formats are designed for it from the start.
+  - **[GD-CAMP-06]** The editor opens a new map of a chosen size, or a
+    scenario (the player's own, or a campaign's as a copy). It paints the
+    ground, raises and lowers it, sets units, buildings and nature down
+    for any side and takes them up, and edits the title, the briefing,
+    the sides, the objectives and the triggers, every field of them. It
+    shows what the check says is wrong, saves the scenario as the file a
+    campaign reads, and plays it from where it stands and back. The
+    player's saved scenarios are a campaign of their own, all open.
+
+  **As built** (2026-10-05, `app::editor`, `app::editing`,
+  `view::editor`): SCENARIO EDITOR on the title. The world on screen is
+  a match made from the scenario and never stepped, so what is drawn is
+  what will be played, without fog. A strip of tools along the top
+  (terrain, height, units, scenario, objectives, triggers, check) and
+  SAVE, PLAYTEST, EXIT; a palette beside the minimap; for the scenario,
+  objectives and triggers, a list whose every field is a chip: a left
+  click steps it on, a right click back, shift for big steps, a quoted
+  line opens a line to type, and an area or a tile is dragged or clicked
+  on the map. On the map a left click paints (right picks the letter
+  up), raises (right lowers), or sets down, takes up or names a unit for
+  a trigger to wait on (right takes up). A unit or building goes only
+  where the ground is clear for it. A scenario on a generated map opens
+  baked onto a drawn one. Saves go to `scenarios/` beside the settings,
+  named after the title; PLAYTEST refuses while anything is wrong and
+  shows the check; a playtest is not recorded and does not count as a
+  win. Leaving with changes unsaved takes a second EXIT or Escape.
+  Conditions made of others (`Any`, `Not`) are shown and deleted in the
+  editor but edited in the file.
 - **Cheat codes** — anachronistic joke units and resource grants, disabled in
   multiplayer and flagged in the replay. Non-negotiable; they are part of the
   memory of this game.

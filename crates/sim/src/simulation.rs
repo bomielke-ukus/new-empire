@@ -1086,6 +1086,20 @@ impl Simulation {
         Ok(())
     }
 
+    /// Whether `kind` could stand at `(x, y)` on the ground as it is,
+    /// whoever's it is and whatever it costs: a building's footprint clear
+    /// (on open water by a shore, for one of the water), a unit's tile open
+    /// to it. For the scenario editor (`GD-CAMP-06`).
+    pub fn site_clear(&self, kind: KindId, x: i32, y: i32) -> bool {
+        let info = kinds::info(kind);
+        match (info.mobile, info.naval) {
+            (true, true) => self.water.passable(x, y),
+            (true, false) => self.nav.passable(x, y),
+            (false, true) => self.shore_clear(x, y, info.footprint as i32).is_ok(),
+            (false, false) => self.nav.footprint_clear(x, y, info.footprint.max(1) as i32),
+        }
+    }
+
     /// Whether a building of the water may stand anchored at `(x, y)`:
     /// every tile of it open water, with open land beside it to build it
     /// from and open water beside it for its boats (`docs/07` D33).

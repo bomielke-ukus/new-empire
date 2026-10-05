@@ -63,9 +63,91 @@ pub fn typed(code: KeyCode) -> Option<char> {
     })
 }
 
+/// The character a key types into one of the scenario editor's lines,
+/// if the font has it: letters (capitals with shift), digits, space and
+/// the punctuation the font draws, as a US keyboard lays them out.
+pub fn text_char(code: KeyCode, shift: bool) -> Option<char> {
+    use KeyCode::*;
+    if let Some(c) = typed(code) {
+        return Some(if shift || c == ' ' {
+            c
+        } else {
+            c.to_ascii_lowercase()
+        });
+    }
+    let digit = |d: char, shifted: Option<char>| match (shift, shifted) {
+        (true, Some(s)) => Some(s),
+        (true, None) => None,
+        (false, _) => Some(d),
+    };
+    match code {
+        Digit0 => digit('0', Some(')')),
+        Digit1 => digit('1', Some('!')),
+        Digit2 => digit('2', None),
+        Digit3 => digit('3', None),
+        Digit4 => digit('4', None),
+        Digit5 => digit('5', Some('%')),
+        Digit6 => digit('6', None),
+        Digit7 => digit('7', None),
+        Digit8 => digit('8', None),
+        Digit9 => digit('9', Some('(')),
+        Minus if !shift => Some('-'),
+        Equal => Some(if shift { '+' } else { '=' }),
+        Comma if !shift => Some(','),
+        Period if !shift => Some('.'),
+        Slash => Some(if shift { '?' } else { '/' }),
+        Semicolon => Some(if shift { ':' } else { ';' }),
+        Quote if !shift => Some('\''),
+        BracketLeft if !shift => Some('['),
+        BracketRight if !shift => Some(']'),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Everything the editor's lines take is in the font.
+    #[test]
+    fn the_editors_lines_take_only_what_the_font_draws() {
+        use KeyCode::*;
+        let font = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :/-.%+()?,![]=;'";
+        let keys = [
+            KeyA,
+            KeyZ,
+            Digit0,
+            Digit1,
+            Digit2,
+            Digit5,
+            Digit9,
+            Minus,
+            Equal,
+            Comma,
+            Period,
+            Slash,
+            Semicolon,
+            Quote,
+            BracketLeft,
+            BracketRight,
+            Space,
+            Backquote,
+        ];
+        for shift in [false, true] {
+            for k in keys {
+                if let Some(c) = text_char(k, shift) {
+                    assert!(
+                        font.contains(c.to_ascii_uppercase()),
+                        "{k:?} {shift}: {c:?}"
+                    );
+                }
+            }
+        }
+        assert_eq!(text_char(KeyA, false), Some('a'));
+        assert_eq!(text_char(KeyA, true), Some('A'));
+        assert_eq!(text_char(Slash, true), Some('?'));
+        assert_eq!(text_char(Digit2, true), None, "@ is not in the font");
+    }
 
     /// REQ: GD-CHEAT-01
     #[test]

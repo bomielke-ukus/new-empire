@@ -42,7 +42,12 @@ pub struct Campaign {
     /// Its scenarios, in the order played; each one's id is
     /// `campaign/file`.
     pub scenarios: Vec<Scenario>,
+    /// Every scenario open from the start: the player's own.
+    pub free: bool,
 }
+
+/// The id of the player's own scenarios, as a campaign.
+pub const USER: &str = "user";
 
 /// Reads every campaign under `dir`, in their order, and says what was
 /// left out and why.
@@ -99,9 +104,53 @@ pub fn load(dir: &Path) -> Result<(Campaign, Vec<String>), String> {
             about: file.about,
             order: file.order,
             scenarios,
+            free: false,
         },
         errors,
     ))
+}
+
+/// The scenarios the player has made in the editor, under `dir`, as a
+/// campaign of their own with every one open, in the order of their file
+/// names; none if there are none. A file that does not read or check is
+/// left out and said.
+pub fn load_user(dir: &Path) -> (Option<Campaign>, Vec<String>) {
+    let mut errors = Vec::new();
+    let mut scenarios = Vec::new();
+    for path in user_files(dir) {
+        match read_scenario(&path) {
+            Ok(mut sc) => {
+                let stem = path
+                    .file_stem()
+                    .map_or(String::new(), |s| s.to_string_lossy().to_string());
+                sc.id = format!("{USER}/{stem}");
+                scenarios.push(sc);
+            }
+            Err(e) => errors.push(e),
+        }
+    }
+    let campaign = (!scenarios.is_empty()).then(|| Campaign {
+        id: USER.into(),
+        title: "Your scenarios".into(),
+        about: "Made in the scenario editor. Every one is open.".into(),
+        order: u32::MAX,
+        scenarios,
+        free: true,
+    });
+    (campaign, errors)
+}
+
+/// The scenario files under `dir`, by name.
+pub fn user_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "ron"))
+        .collect();
+    files.sort();
+    files
 }
 
 /// Reads and checks one scenario file.
@@ -114,6 +163,13 @@ pub fn read_scenario(path: &Path) -> Result<Scenario, String> {
     } else {
         Err(format!("{}: {}", path.display(), problems.join("; ")))
     }
+}
+
+/// Reads a scenario without checking it, for the editor to open and put
+/// right.
+pub fn parse_scenario(path: &Path) -> Result<Scenario, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    ron::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Writes a scenario as a file the campaigns and the editor read.
@@ -154,7 +210,8 @@ impl Progress {
     /// Whether a campaign's scenario may be played: the first always, and
     /// each after one won.
     pub fn unlocked(&self, campaign: &Campaign, index: usize) -> bool {
-        index == 0
+        campaign.free
+            || index == 0
             || campaign
                 .scenarios
                 .get(index - 1)
@@ -262,6 +319,17 @@ mod tests {
         write_scenario(&out, &c.scenarios[0]).unwrap();
         let back = read_scenario(&out).unwrap();
         assert_eq!(&back, &c.scenarios[0]);
+        // The player's own: every one open.
+        let mine = dir.join("mine");
+        write_scenario(&mine.join("b-second.ron"), &c.scenarios[1]).unwrap();
+        write_scenario(&mine.join("a-first.ron"), &c.scenarios[0]).unwrap();
+        std::fs::write(mine.join("broken.ron"), "(title: ").unwrap();
+        let (user, errors) = load_user(&mine);
+        let user = user.expect("the player's scenarios");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(user.scenarios[0].id, "user/a-first");
+        assert!(user.free && p.unlocked(&user, 1));
+        assert!(load_user(&dir.join("none")).0.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
