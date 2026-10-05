@@ -305,6 +305,20 @@ pub enum ShellAction {
     Volume(Bus, i32),
     /// Settings: the first-time hints on or off.
     ToggleHints,
+    /// Title and briefing: the campaigns screen.
+    Campaigns,
+    /// Campaigns: the briefing of a campaign's scenario.
+    Brief(usize, usize),
+    /// Briefing: play the scenario.
+    Play,
+    /// Results of a scenario: play it again.
+    Retry,
+    /// Results of a scenario won: the next one's briefing.
+    NextScenario,
+    /// Title: the scenario editor. Results of a playtest: back to it.
+    Editor,
+    /// A click in the scenario editor.
+    Edit(crate::editor::EditorAction),
 }
 
 /// A clickable region on a shell screen.
@@ -366,6 +380,54 @@ pub struct Results {
     pub why: String,
     /// Every side, in player order.
     pub sides: Vec<Side>,
+    /// A campaign scenario's end: whether there is a next one to go on to.
+    pub scenario: Option<ScenarioEnd>,
+}
+
+/// The end of a campaign scenario, for the results screen's buttons.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ScenarioEnd {
+    /// Whether the player won it.
+    pub won: bool,
+    /// Whether the campaign has a scenario after it.
+    pub next: bool,
+    /// A playtest from the scenario editor: back to it, not the campaigns.
+    pub playtest: bool,
+}
+
+/// One campaign on the campaigns screen.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CampaignEntry {
+    /// Its name.
+    pub title: String,
+    /// A line about it.
+    pub about: String,
+    /// Its scenarios, in order.
+    pub scenarios: Vec<ScenarioEntry>,
+}
+
+/// One scenario on the campaigns screen.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ScenarioEntry {
+    /// Its name.
+    pub title: String,
+    /// Won before.
+    pub won: bool,
+    /// May be played: the first, or the one after a won one.
+    pub open: bool,
+}
+
+/// What the briefing screen reads out.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Briefing {
+    /// The campaign's name.
+    pub campaign: String,
+    /// The scenario's.
+    pub title: String,
+    /// The narrator's briefing, a paragraph each.
+    pub paragraphs: Vec<String>,
+    /// The objectives shown from the start.
+    pub objectives: Vec<String>,
 }
 
 /// One side on the results screen.
@@ -393,17 +455,17 @@ const STEP_W: f32 = 20.0;
 const STEP_H: f32 = 16.0;
 
 /// A screen under construction, in HUD pixels.
-struct Sheet<'a> {
-    p: Painter<'a>,
-    buttons: Vec<ShellButton>,
-    vw: f32,
-    vh: f32,
-    hover: Option<(f32, f32)>,
+pub(crate) struct Sheet<'a> {
+    pub(crate) p: Painter<'a>,
+    pub(crate) buttons: Vec<ShellButton>,
+    pub(crate) vw: f32,
+    pub(crate) vh: f32,
+    pub(crate) hover: Option<(f32, f32)>,
     scale: f32,
 }
 
 impl<'a> Sheet<'a> {
-    fn new(atlas: &'a Atlas, input: &ShellInput) -> Sheet<'a> {
+    pub(crate) fn new(atlas: &'a Atlas, input: &ShellInput) -> Sheet<'a> {
         let s = input.ui_scale.max(0.5);
         Sheet {
             p: Painter::new(atlas),
@@ -416,12 +478,12 @@ impl<'a> Sheet<'a> {
     }
 
     /// Covers the whole window: the shell screens stand on nothing.
-    fn backdrop(&mut self) {
+    pub(crate) fn backdrop(&mut self) {
         self.p.rect(0.0, 0.0, self.vw, self.vh, BLACK, 0);
     }
 
     /// The framed panel the HUD's overlays use.
-    fn panel(&mut self, x: f32, y: f32, w: f32, h: f32) {
+    pub(crate) fn panel(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.p.rect(x, y, w, h, BLACK, 0);
         self.p
             .rect(x + 2.0, y + 2.0, w - 4.0, h - 4.0, BROWN_DARK, 0);
@@ -430,14 +492,14 @@ impl<'a> Sheet<'a> {
     }
 
     /// Text centred on a vertical line.
-    fn centred(&mut self, cx: f32, y: f32, text: &str, ink: Ink, scale: f32) {
+    pub(crate) fn centred(&mut self, cx: f32, y: f32, text: &str, ink: Ink, scale: f32) {
         let w = font::width(text) as f32 * scale;
         self.p.text_in((cx - w / 2.0).round(), y, text, ink, scale);
     }
 
     /// A button with its label centred, in the `(x, y, w, h)` rectangle.
     /// A disabled one is greyed and says why beside it.
-    fn button(
+    pub(crate) fn button(
         &mut self,
         rect: (f32, f32, f32, f32),
         action: ShellAction,
@@ -484,7 +546,12 @@ impl<'a> Sheet<'a> {
     }
 
     /// A stack of menu buttons centred on `cx`, from `y` down.
-    fn menu(&mut self, cx: f32, y: f32, entries: &[(ShellAction, &str, bool, &str)]) -> f32 {
+    pub(crate) fn menu(
+        &mut self,
+        cx: f32,
+        y: f32,
+        entries: &[(ShellAction, &str, bool, &str)],
+    ) -> f32 {
         let x = (cx - MENU_W / 2.0).round();
         let mut by = y;
         for (action, label, enabled, reason) in entries {
@@ -495,7 +562,7 @@ impl<'a> Sheet<'a> {
     }
 
     /// Everything above is in HUD pixels; the window wants device pixels.
-    fn finish(self, preview: Option<MinimapRect>) -> Screen {
+    pub(crate) fn finish(self, preview: Option<MinimapRect>) -> Screen {
         let s = self.scale;
         let mut sprites = self.p.out;
         let mut buttons = self.buttons;
@@ -537,13 +604,15 @@ pub fn title(atlas: &Atlas, input: &ShellInput) -> Screen {
     s.centred(cx, ty, TITLE, Ink::Gold, 4.0);
     s.centred(cx, ty + 40.0, TAGLINE, Ink::White, 1.0);
     let entries = [
+        (ShellAction::Campaigns, "CAMPAIGNS", true, ""),
         (ShellAction::NewGame, "NEW GAME", true, ""),
         (ShellAction::LoadGame, "LOAD GAME", true, ""),
         (ShellAction::WatchReplay, "WATCH REPLAY", true, ""),
+        (ShellAction::Editor, "SCENARIO EDITOR", true, ""),
         (ShellAction::Settings, "SETTINGS", true, ""),
         (ShellAction::Quit, "QUIT", true, ""),
     ];
-    let my = (s.vh * 0.42).round().max(ty + 64.0);
+    let my = (s.vh * 0.38).round().max(ty + 64.0);
     s.menu(cx, my, &entries);
     s.centred(
         cx,
@@ -1086,6 +1155,7 @@ pub fn pause_menu(
     confirm: Option<ShellAction>,
     saved: Option<&str>,
     replay: bool,
+    playtest: bool,
 ) -> Screen {
     let mut s = Sheet::new(atlas, input);
     let (pw, ph) = (300.0, 40.0 + 4.0 * (MENU_H + 8.0) + 40.0);
@@ -1105,10 +1175,10 @@ pub fn pause_menu(
     } else {
         "RESIGN"
     };
-    let quit = if confirm == Some(ShellAction::QuitToTitle) {
-        "CONFIRM QUIT"
-    } else {
-        "QUIT TO TITLE"
+    let quit = match (confirm == Some(ShellAction::QuitToTitle), playtest) {
+        (true, _) => "CONFIRM QUIT",
+        (false, true) => "BACK TO EDITOR",
+        (false, false) => "QUIT TO TITLE",
     };
     // A replay is watched, not played: nothing to save or give up.
     let entries = [
@@ -1271,17 +1341,217 @@ pub fn results(atlas: &Atlas, input: &ShellInput, r: &Results) -> Screen {
         );
     }
     let by = y + ph - 16.0 - MENU_H;
+    match r.scenario {
+        // A campaign's scenario: on to the next, again, or back to the
+        // campaigns.
+        Some(end) => {
+            let bw = (pw - 16.0 * 4.0) / 3.0;
+            let (back, label) = if end.playtest {
+                (ShellAction::Editor, "EDITOR")
+            } else {
+                (ShellAction::Campaigns, "CAMPAIGNS")
+            };
+            s.button((x + 16.0, by, bw, MENU_H), back, label, true, "");
+            s.button(
+                (x + 32.0 + bw, by, bw, MENU_H),
+                ShellAction::Retry,
+                "PLAY AGAIN",
+                true,
+                "",
+            );
+            if end.won && end.next {
+                s.button(
+                    (x + 48.0 + 2.0 * bw, by, bw, MENU_H),
+                    ShellAction::NextScenario,
+                    "NEXT",
+                    true,
+                    "",
+                );
+            } else {
+                s.button(
+                    (x + 48.0 + 2.0 * bw, by, bw, MENU_H),
+                    ShellAction::KeepWatching,
+                    "KEEP WATCHING",
+                    true,
+                    "",
+                );
+            }
+        }
+        None => {
+            s.button(
+                (x + 16.0, by, 200.0, MENU_H),
+                ShellAction::KeepWatching,
+                "KEEP WATCHING",
+                true,
+                "",
+            );
+            s.button(
+                (x + pw - 16.0 - 200.0, by, 200.0, MENU_H),
+                ShellAction::QuitToTitle,
+                "BACK TO TITLE",
+                true,
+                "",
+            );
+        }
+    }
+    s.finish(None)
+}
+
+/// A campaign scenario's row height on the campaigns screen.
+const SCENARIO_H: f32 = 22.0;
+
+/// The campaigns: each with its scenarios, won, open or locked; a
+/// scenario's button opens its briefing. `error` is what could not be
+/// read, if anything.
+pub fn campaigns_screen(
+    atlas: &Atlas,
+    input: &ShellInput,
+    campaigns: &[CampaignEntry],
+    error: Option<&str>,
+) -> Screen {
+    let mut s = Sheet::new(atlas, input);
+    s.backdrop();
+    let pw = 560.0_f32.min(s.vw - 16.0);
+    let rows: f32 = campaigns
+        .iter()
+        .map(|c| 34.0 + c.scenarios.len() as f32 * (SCENARIO_H + 4.0) + 10.0)
+        .sum();
+    let ph = (60.0 + rows.max(30.0) + MENU_H + 24.0).min(s.vh - 8.0);
+    let x = ((s.vw - pw) / 2.0).round();
+    let y = ((s.vh - ph) / 2.0).max(4.0).round();
+    s.panel(x, y, pw, ph);
+    let cx = x + pw / 2.0;
+    s.centred(cx, y + 12.0, "CAMPAIGNS", Ink::Gold, 2.0);
+    let mut ly = y + 44.0;
+    if campaigns.is_empty() {
+        s.centred(cx, ly, "NO CAMPAIGNS FOUND", Ink::White, 1.0);
+        ly += 20.0;
+    }
+    let bw = pw - 64.0;
+    for (ci, c) in campaigns.iter().enumerate() {
+        s.p.text_in(
+            x + 24.0,
+            ly,
+            &fit(&c.title.to_uppercase(), pw - 48.0),
+            Ink::Gold,
+            1.0,
+        );
+        s.p.text(x + 24.0, ly + 12.0, &fit(&c.about, pw - 48.0), false, 1.0);
+        ly += 30.0;
+        for (si, sc) in c.scenarios.iter().enumerate() {
+            let label = format!(
+                "{}. {}{}",
+                si + 1,
+                sc.title.to_uppercase(),
+                if sc.won { "   (WON)" } else { "" }
+            );
+            s.button(
+                (x + 32.0, ly, bw, SCENARIO_H),
+                ShellAction::Brief(ci, si),
+                &label,
+                sc.open,
+                "WIN THE SCENARIO BEFORE IT FIRST",
+            );
+            ly += SCENARIO_H + 4.0;
+        }
+        ly += 10.0;
+    }
+    if let Some(e) = error {
+        s.centred(
+            cx,
+            y + ph - MENU_H - 22.0,
+            &fit(e, pw - 16.0),
+            Ink::Gold,
+            1.0,
+        );
+    }
     s.button(
-        (x + 16.0, by, 200.0, MENU_H),
-        ShellAction::KeepWatching,
-        "KEEP WATCHING",
+        ((cx - 100.0).round(), y + ph - MENU_H - 8.0, 200.0, MENU_H),
+        ShellAction::Back,
+        "BACK",
+        true,
+        "",
+    );
+    s.finish(None)
+}
+
+/// A scenario's briefing: the narrator's paragraphs and the objectives,
+/// then PLAY or back to the campaigns.
+pub fn briefing_screen(atlas: &Atlas, input: &ShellInput, b: &Briefing) -> Screen {
+    let mut s = Sheet::new(atlas, input);
+    s.backdrop();
+    let pw = 620.0_f32.min(s.vw - 16.0);
+    let tw = pw - 64.0;
+    let paragraphs: Vec<Vec<String>> = b
+        .paragraphs
+        .iter()
+        .map(|p| font::wrap(&p.to_uppercase(), tw))
+        .collect();
+    let objectives: Vec<Vec<String>> = b
+        .objectives
+        .iter()
+        .map(|o| font::wrap(&o.to_uppercase(), tw - 12.0))
+        .collect();
+    let line = 11.0;
+    let text_h: f32 = paragraphs
+        .iter()
+        .map(|p| p.len() as f32 * line + 6.0)
+        .sum::<f32>()
+        + 24.0
+        + objectives
+            .iter()
+            .map(|o| o.len() as f32 * line + 2.0)
+            .sum::<f32>();
+    let ph = (80.0 + text_h + MENU_H + 28.0).min(s.vh - 8.0);
+    let x = ((s.vw - pw) / 2.0).round();
+    let y = ((s.vh - ph) / 2.0).max(4.0).round();
+    s.panel(x, y, pw, ph);
+    let cx = x + pw / 2.0;
+    s.centred(
+        cx,
+        y + 12.0,
+        &fit(&b.campaign.to_uppercase(), pw - 16.0),
+        Ink::White,
+        1.0,
+    );
+    s.centred(
+        cx,
+        y + 26.0,
+        &fit(&b.title.to_uppercase(), pw / 2.0),
+        Ink::Gold,
+        2.0,
+    );
+    let mut ly = y + 58.0;
+    for p in &paragraphs {
+        for l in p {
+            s.p.text(x + 32.0, ly, l, false, 1.0);
+            ly += line;
+        }
+        ly += 6.0;
+    }
+    ly += 4.0;
+    s.p.text_in(x + 32.0, ly, "OBJECTIVES", Ink::Gold, 1.0);
+    ly += 14.0;
+    for o in &objectives {
+        s.p.rect(x + 34.0, ly + 1.0, 5.0, 5.0, GOLD_DARK, 0);
+        for l in o {
+            s.p.text(x + 44.0, ly, l, false, 1.0);
+            ly += line;
+        }
+        ly += 2.0;
+    }
+    let by = y + ph - MENU_H - 12.0;
+    s.button(
+        (x + 24.0, by, 200.0, MENU_H),
+        ShellAction::Campaigns,
+        "BACK",
         true,
         "",
     );
     s.button(
-        (x + pw - 16.0 - 200.0, by, 200.0, MENU_H),
-        ShellAction::QuitToTitle,
-        "BACK TO TITLE",
+        (x + pw - 224.0, by, 200.0, MENU_H),
+        ShellAction::Play,
+        "PLAY",
         true,
         "",
     );
@@ -1306,6 +1576,59 @@ mod tests {
             .iter()
             .find(|b| b.action == action)
             .unwrap_or_else(|| panic!("no button for {action:?}"))
+    }
+
+    /// The campaigns are listed with their scenarios; a locked one is a
+    /// greyed button that says why, and everything fits on a small
+    /// window. The briefing has the way back and the way in.
+    ///
+    /// REQ: GD-CAMP-05
+    #[test]
+    fn the_campaigns_list_their_scenarios_and_a_briefing_leads_into_one() {
+        let small = ShellInput {
+            viewport: (1024.0, 640.0),
+            ..input()
+        };
+        let entry = |title: &str, won, open| ScenarioEntry {
+            title: title.into(),
+            won,
+            open,
+        };
+        let campaigns = [
+            CampaignEntry {
+                title: "The Gift of the River".into(),
+                about: "Learn the game along the Nile.".into(),
+                scenarios: vec![
+                    entry("Hunters on the Bank", true, true),
+                    entry("The Black Land", false, true),
+                    entry("Raiders from the West", false, false),
+                    entry("Spears Against Horses", false, false),
+                ],
+            },
+            CampaignEntry {
+                title: "Sargon of Akkad".into(),
+                about: "The first empire.".into(),
+                scenarios: vec![entry("The Cupbearer", false, true)],
+            },
+        ];
+        let screen = campaigns_screen(&Atlas::placeholder(), &small, &campaigns, None);
+        assert_eq!(screen.buttons.len(), 6, "five scenarios and BACK");
+        assert!(find(&screen, ShellAction::Brief(0, 1)).enabled);
+        let locked = find(&screen, ShellAction::Brief(0, 2));
+        assert!(!locked.enabled && !locked.reason.is_empty());
+        assert!(find(&screen, ShellAction::Brief(1, 0)).enabled);
+        assert!(find(&screen, ShellAction::Back).enabled);
+        assert!(inside(&screen, &small));
+        let briefing = Briefing {
+            campaign: "The Gift of the River".into(),
+            title: "The Black Land".into(),
+            paragraphs: vec!["Nekhen, about 3300 BC. ".repeat(12), "Grow.".into()],
+            objectives: vec!["Build a storehouse".into(), "Build a barracks".into()],
+        };
+        let screen = briefing_screen(&Atlas::placeholder(), &small, &briefing);
+        assert!(find(&screen, ShellAction::Play).enabled);
+        assert!(find(&screen, ShellAction::Campaigns).enabled);
+        assert!(inside(&screen, &small));
     }
 
     fn inside(screen: &Screen, input: &ShellInput) -> bool {
@@ -1387,13 +1710,15 @@ mod tests {
         assert_eq!(MapSize::from_tiles(100), None);
     }
 
-    /// The title lists the shell's five entries, with the ones that do
+    /// The title lists the shell's seven entries, with the ones that do
     /// not exist yet greyed and saying so, and every button on screen.
     #[test]
     fn the_title_offers_a_new_game_and_says_what_is_not_there_yet() {
         let input = input();
         let screen = title(&Atlas::placeholder(), &input);
-        assert_eq!(screen.buttons.len(), 5);
+        assert_eq!(screen.buttons.len(), 7);
+        assert_eq!(screen.buttons[0].action, ShellAction::Campaigns);
+        assert!(find(&screen, ShellAction::Editor).enabled);
         assert!(find(&screen, ShellAction::NewGame).enabled);
         assert!(find(&screen, ShellAction::LoadGame).enabled);
         assert!(find(&screen, ShellAction::WatchReplay).enabled);
@@ -1464,7 +1789,7 @@ mod tests {
     #[test]
     fn the_overlays_scale_with_the_hud_and_the_results_list_every_side() {
         let atlas = Atlas::placeholder();
-        let one = pause_menu(&atlas, &input(), false, None, None, false);
+        let one = pause_menu(&atlas, &input(), false, None, None, false, false);
         let two = pause_menu(
             &atlas,
             &ShellInput {
@@ -1474,6 +1799,7 @@ mod tests {
             false,
             None,
             None,
+            false,
             false,
         );
         let (a, b) = (
@@ -1490,9 +1816,15 @@ mod tests {
             Some(ShellAction::QuitToTitle),
             Some("SAVED 20260919-190512-SEED3-TICK4321-P2"),
             false,
+            false,
         );
         assert!(find(&decided, ShellAction::Save).enabled);
-        let watching = pause_menu(&atlas, &input(), false, None, None, true);
+        let watching = pause_menu(&atlas, &input(), false, None, None, true, false);
+        let testing = pause_menu(&atlas, &input(), false, None, None, false, true);
+        assert_eq!(
+            find(&testing, ShellAction::QuitToTitle).label,
+            "BACK TO EDITOR"
+        );
         assert!(!find(&watching, ShellAction::Save).enabled);
         assert!(!find(&watching, ShellAction::Resign).enabled);
         assert!(find(&watching, ShellAction::QuitToTitle).enabled);
@@ -1523,6 +1855,7 @@ mod tests {
                     standing: true,
                 },
             ],
+            scenario: None,
         };
         let screen = results(&atlas, &input(), &r);
         assert!(find(&screen, ShellAction::KeepWatching).enabled);

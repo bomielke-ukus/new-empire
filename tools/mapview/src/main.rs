@@ -48,6 +48,8 @@ struct Args {
     minimap: Option<String>,
     atlas: Option<String>,
     scenario: Option<String>,
+    /// A campaign scenario file to play instead of a generated match.
+    campaign: Option<String>,
     select: usize,
     hud: bool,
     ghost: Option<String>,
@@ -93,6 +95,7 @@ fn parse() -> Result<Args, String> {
         minimap: None,
         atlas: None,
         scenario: None,
+        campaign: None,
         select: 0,
         hud: false,
         ghost: None,
@@ -157,6 +160,7 @@ fn parse() -> Result<Args, String> {
             "--minimap" => a.minimap = Some(val.clone()),
             "--atlas" => a.atlas = Some(val.clone()),
             "--scenario" => a.scenario = Some(val.clone()),
+            "--campaign" => a.campaign = Some(val.clone()),
             "--select" => a.select = val.parse().map_err(|e| format!("{key}: {e}"))?,
             "--hud" => a.hud = val == "1" || val == "true",
             "--ghost" => a.ghost = Some(val.clone()),
@@ -261,7 +265,54 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
             ),
             None,
         ),
-        other => return Err(format!("--screen {other}: title, setup, load or settings")),
+        "campaigns" => {
+            let scenario = |title: &str, won, open| shell::ScenarioEntry {
+                title: title.into(),
+                won,
+                open,
+            };
+            let entries = [
+                shell::CampaignEntry {
+                    title: "The Gift of the River".into(),
+                    about: "Learn to build, grow and fight along the Nile.".into(),
+                    scenarios: vec![
+                        scenario("Hunters on the Bank", true, true),
+                        scenario("The Granary", false, true),
+                        scenario("Bronze", false, false),
+                    ],
+                },
+                shell::CampaignEntry {
+                    title: "Sargon of Akkad".into(),
+                    about: "From cupbearer to king of the four quarters.".into(),
+                    scenarios: vec![scenario("The Cupbearer", false, true)],
+                },
+            ];
+            (
+                shell::campaigns_screen(&atlas, &input, &entries, None),
+                None,
+            )
+        }
+        "briefing" => {
+            let b = shell::Briefing {
+                campaign: "The Gift of the River".into(),
+                title: "The Granary".into(),
+                paragraphs: vec![
+                    "The river has flooded and gone back. The fields are black and wet, and the people are hungry.".into(),
+                    "Build a granary near the fields and farms around it. A full store will carry us through the dry months.".into(),
+                ],
+                objectives: vec![
+                    "Build a Granary".into(),
+                    "Have six farms".into(),
+                    "Gather 400 food".into(),
+                ],
+            };
+            (shell::briefing_screen(&atlas, &input, &b), None)
+        }
+        other => {
+            return Err(format!(
+                "--screen {other}: title, setup, load, settings, campaigns or briefing"
+            ))
+        }
     };
     let mut img = raster::Image::new(a.width, a.height, [12, 10, 14, 255]);
     let cam = Camera::new(1, 1, (a.width as f32, a.height as f32));
@@ -303,6 +354,8 @@ fn run() -> Result<(), String> {
     // setup screen's check.
     config.validate().map_err(|e| format!("match setup: {e}"))?;
     let mut feedback = view::feedback::CombatFeedback::default();
+    // The narrator's last line, in a campaign scenario.
+    let mut narration: Option<String> = None;
     let (sim, seed) = if let Some(path) = &a.replay {
         if a.scenario.is_some() {
             return Err("--replay and --scenario are mutually exclusive".into());
@@ -323,6 +376,25 @@ fn run() -> Result<(), String> {
         }
         let seed = replay.seed;
         (feedback.replay(&replay).map_err(|e| e.to_string())?, seed)
+    } else if let Some(path) = &a.campaign {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+        let sc: sim::Scenario = ron::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
+        let problems = sc.problems();
+        if !problems.is_empty() {
+            return Err(format!("{path}: {}", problems.join("; ")));
+        }
+        let seed = sc.match_seed();
+        let mut sim = sim::Simulation::new(seed, sc.config());
+        for _ in 0..a.ticks {
+            sim.step();
+            feedback.observe(&sim);
+            for e in sim.events() {
+                if let sim::Event::Said { trigger, action } = *e {
+                    narration = sim.line(trigger, action).map(str::to_string);
+                }
+            }
+        }
+        (sim, seed)
     } else {
         let mut sim = sim::Simulation::new(a.seed, config);
         if let Some(name) = &a.scenario {
@@ -531,6 +603,7 @@ fn run() -> Result<(), String> {
             settings: &settings,
             notices: &[],
             hint: hint.as_deref(),
+            narration: narration.as_deref(),
             flash: [false; 4],
             perf: perf.as_ref(),
             fresh: &fresh,

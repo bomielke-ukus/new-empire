@@ -227,6 +227,131 @@ fn stances_decide_who_picks_a_fight_and_how_far_they_chase() {
     assert!(alive(&sim, cav), "it got away");
 }
 
+/// REQ: GD-STANCE-03
+#[test]
+fn a_soldier_shot_from_beyond_its_sight_answers_the_shooter() {
+    let mut sim = arena();
+    // A Hoplite sees four tiles; a Bowman shoots five. Each pair stands
+    // five apart in its own row, out of everyone else's sight.
+    let rows = [10, 25, 40];
+    for y in rows {
+        sim.issue(spawn(0, kinds::HOPLITE, at(10, y)));
+        sim.issue(spawn(1, kinds::BOWMAN, at(15, y)));
+    }
+    // And one more Hoplite, five tiles from an enemy Watch Tower.
+    sim.issue(spawn(0, kinds::HOPLITE, at(10, 55)));
+    sim.issue(spawn(1, kinds::WATCH_TOWER, at(15, 55)));
+    run(&mut sim, 3);
+    let hoplites = owned(&sim, 0, kinds::HOPLITE);
+    let bows = owned(&sim, 1, kinds::BOWMAN);
+    // Defensive is the default; the second is Aggressive, the third
+    // stands its ground.
+    stance(&mut sim, 0, vec![hoplites[1]], Stance::Aggressive);
+    stance(&mut sim, 0, vec![hoplites[2]], Stance::StandGround);
+    for (h, b) in hoplites.iter().zip(&bows) {
+        sim.issue(cmd(
+            1,
+            CommandKind::Attack {
+                ids: vec![*b],
+                target: *h,
+            },
+        ));
+    }
+    run(&mut sim, 3);
+    let order = |sim: &Simulation, id| sim.world().order[index_of(sim, id)];
+    for _ in 0..kinds::RELOAD_TICKS * 3 {
+        sim.step();
+        assert!(
+            !matches!(order(&sim, hoplites[0]), Order::Attack { .. })
+                || health(&sim, hoplites[0]) < Fx::from_int(120),
+            "nothing to answer before the first arrow lands"
+        );
+    }
+    for k in 0..2 {
+        assert!(
+            health(&sim, hoplites[k]) < Fx::from_int(120),
+            "{k} was shot"
+        );
+        assert!(
+            matches!(order(&sim, hoplites[k]), Order::Attack { target, .. } if target == bows[k]),
+            "{k} turned on the archer it cannot see: {:?}",
+            order(&sim, hoplites[k])
+        );
+    }
+    assert!(health(&sim, hoplites[2]) < Fx::from_int(120));
+    assert_eq!(order(&sim, hoplites[2]), Order::Idle, "stand ground holds");
+    assert!(
+        health(&sim, hoplites[3]) < Fx::from_int(120),
+        "the tower shot"
+    );
+    assert_eq!(
+        order(&sim, hoplites[3]),
+        Order::Idle,
+        "a tower's arrows are not answered"
+    );
+    // Twelve a blow kill a Bowman in four; then home to where they stood.
+    run(&mut sim, 20 * 20);
+    for k in 0..2 {
+        assert!(!alive(&sim, bows[k]), "{k} caught its archer");
+        assert_eq!(order(&sim, hoplites[k]), Order::Idle, "{k} stood down");
+        assert!(
+            pos_of(&sim, hoplites[k]).distance(at(10, rows[k])) < Fx::from_int(1),
+            "{k} came home: {:?}",
+            pos_of(&sim, hoplites[k])
+        );
+    }
+    assert!(alive(&sim, bows[2]), "nobody went for the third archer");
+}
+
+/// A soldier that answers lets go of a shooter that falls back out of
+/// reach, rather than following it home.
+/// REQ: GD-STANCE-03
+#[test]
+fn a_soldier_lets_a_retreating_shooter_go() {
+    let mut sim = arena();
+    sim.issue(spawn(0, kinds::HOPLITE, at(10, 10)));
+    sim.issue(spawn(1, kinds::LIGHT_CAVALRY, at(15, 10)));
+    run(&mut sim, 3);
+    let hop = owned(&sim, 0, kinds::HOPLITE)[0];
+    let cav = owned(&sim, 1, kinds::LIGHT_CAVALRY)[0];
+    // The rider rides in, strikes once, and rides away fast.
+    sim.issue(cmd(
+        1,
+        CommandKind::Attack {
+            ids: vec![cav],
+            target: hop,
+        },
+    ));
+    for _ in 0..20 * 10 {
+        sim.step();
+        if health(&sim, hop) < Fx::from_int(120) {
+            break;
+        }
+    }
+    assert!(health(&sim, hop) < Fx::from_int(120), "struck");
+    run(&mut sim, 2);
+    assert!(matches!(
+        sim.world().order[index_of(&sim, hop)],
+        Order::Attack { target, .. } if target == cav
+    ));
+    stance(&mut sim, 1, vec![cav], Stance::Passive);
+    sim.issue(cmd(
+        1,
+        CommandKind::Move {
+            ids: vec![cav],
+            target: at(50, 10),
+        },
+    ));
+    run(&mut sim, 20 * 30);
+    assert!(alive(&sim, cav), "it got away");
+    assert_eq!(sim.world().order[index_of(&sim, hop)], Order::Idle);
+    assert!(
+        pos_of(&sim, hop).distance(at(10, 10)) < Fx::from_int(2),
+        "and the Hoplite went back: {:?}",
+        pos_of(&sim, hop)
+    );
+}
+
 /// REQ: GD-STANCE-02
 #[test]
 fn a_villager_hit_runs_for_the_town_center_and_raises_the_alarm_once() {

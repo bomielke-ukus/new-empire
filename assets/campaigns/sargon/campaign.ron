@@ -1,0 +1,6 @@
+(
+    title: "Sargon of Akkad",
+    about: "The first empire: Akkad, from a basket on the river to the four quarters.",
+    order: 2,
+    scenarios: ["cupbearer", "uruk", "gulf", "four-quarters"],
+)

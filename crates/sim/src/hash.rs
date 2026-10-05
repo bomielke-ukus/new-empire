@@ -37,6 +37,12 @@ impl StateHasher {
         }
     }
 
+    /// Feeds a string: its length, then its bytes.
+    pub fn write_str(&mut self, s: &str) {
+        self.write_u32(s.len() as u32);
+        self.write_bytes(s.as_bytes());
+    }
+
     /// Feeds a `u8`.
     pub fn write_u8(&mut self, v: u8) {
         self.write_bytes(&[v]);

@@ -71,6 +71,62 @@ const REPLACEMENT_RADIUS: Fx = Fx::from_int(10);
 /// How far a builder looks for the next site once one is finished.
 const NEXT_SITE_RADIUS: Fx = Fx::from_int(6);
 
+/// The ground a match is set on: a scenario's drawn map, or the
+/// generator's, keeping only Gaia's spawns when a scenario has no standard
+/// start; a drawn forest has a tree on each of its tiles. A drawn map's
+/// starts are each side's first Town Center placed, else its first
+/// placement, else the middle.
+fn scenario_ground(seed: u64, config: &SimConfig) -> mapgen::Generated {
+    use crate::scenario::ScenarioMap;
+    let Some(sc) = &config.scenario else {
+        return mapgen::generate(seed, &config.map);
+    };
+    match &sc.map {
+        ScenarioMap::Generated { .. } => {
+            let mut g = mapgen::generate(seed, &config.map);
+            if !sc.standard_start {
+                g.spawns.retain(|s| s.owner == kinds::GAIA);
+            }
+            g
+        }
+        ScenarioMap::Drawn(d) => {
+            let tiles = d.tiles().unwrap_or_else(|_| TileMap::new(64, 64));
+            let mut spawns = Vec::new();
+            for y in 0..tiles.height() {
+                for x in 0..tiles.width() {
+                    if tiles.terrain(x, y) == crate::map::Terrain::ForestFloor {
+                        spawns.push(mapgen::Spawn {
+                            kind: kinds::TREE,
+                            owner: kinds::GAIA,
+                            pos: nav::centre((x, y)),
+                        });
+                    }
+                }
+            }
+            let middle = (tiles.width() / 2, tiles.height() / 2);
+            let starts = (0..sc.sides.len() as PlayerId)
+                .map(|p| {
+                    let mine = |pl: &&crate::scenario::Placement| pl.owner == p;
+                    sc.sides[p as usize].start.unwrap_or_else(|| {
+                        sc.placements
+                            .iter()
+                            .filter(mine)
+                            .find(|pl| kinds::by_name(&pl.kind) == Some(kinds::TOWN_CENTER))
+                            .or_else(|| sc.placements.iter().find(mine))
+                            .map_or(middle, |pl| pl.at)
+                    })
+                })
+                .collect();
+            mapgen::Generated {
+                tiles,
+                spawns,
+                starts,
+                attempts: 0,
+            }
+        }
+    }
+}
+
 /// Match parameters that are fixed for the whole match.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct SimConfig {
@@ -95,6 +151,10 @@ pub struct SimConfig {
     /// every side played before there were civilizations.
     #[serde(default)]
     pub civs: Vec<crate::civs::Civ>,
+    /// The scenario this match plays (`docs/02` §13), if it is one: its
+    /// map, sides, placements, objectives and triggers.
+    #[serde(default)]
+    pub scenario: Option<Box<crate::scenario::Scenario>>,
 }
 
 /// The serialised shape of [`Simulation`], for a save file (`docs/04`
@@ -128,6 +188,7 @@ impl Default for SimConfig {
             starting_stockpile: DEFAULT_STOCKPILE,
             gather_bonus_pct: Vec::new(),
             civs: Vec::new(),
+            scenario: None,
         }
     }
 }
@@ -227,6 +288,11 @@ impl HashState for SimConfig {
             for &c in &self.civs {
                 h.write_u8(c as u8);
             }
+        }
+        // Likewise a scenario.
+        if let Some(sc) = &self.scenario {
+            h.write_u8(0x5C);
+            h.write(sc.as_ref());
         }
     }
 }
@@ -736,6 +802,9 @@ pub struct Simulation {
     /// (`GD-WIN-02`, `GD-WIN-03`).
     #[serde(default)]
     pub(crate) clocks: crate::victory::Clocks,
+    /// A scenario's objectives, triggers and outcome; empty outside one.
+    #[serde(default)]
+    pub(crate) scenario_state: crate::scenario::ScenarioState,
     /// What happened this tick that the presentation may care about.
     #[serde(skip)]
     pub(crate) events: Vec<Event>,
@@ -746,7 +815,7 @@ pub struct Simulation {
 impl Simulation {
     /// A fresh match at tick 0, with its map generated and populated.
     pub fn new(seed: u64, config: SimConfig) -> Simulation {
-        let generated = mapgen::generate(seed, &config.map);
+        let generated = scenario_ground(seed, &config);
         let mut map_hasher = StateHasher::new();
         generated.tiles.hash_state(&mut map_hasher);
         let players = (0..config.map.players.clamp(1, 8))
@@ -774,6 +843,7 @@ impl Simulation {
             projectiles: Vec::new(),
             last_alarm: Vec::new(),
             clocks: crate::victory::Clocks::default(),
+            scenario_state: crate::scenario::ScenarioState::default(),
             events: Vec::new(),
             scratch: Scratch::default(),
             config,
@@ -792,6 +862,8 @@ impl Simulation {
             sim.spawn(s.kind, s.owner, s.pos);
         }
         sim.nav.refresh();
+        sim.water.refresh();
+        sim.scenario_setup();
         sim.recount_population();
         sim.fog_of_war_update();
         sim
@@ -971,14 +1043,28 @@ impl Simulation {
             return Err(PlaceError::AgeLocked { needs: info.age });
         }
         // As in the original, a second Town Center needs the Government
-        // Centre (`docs/07` D22).
-        if kind == kinds::TOWN_CENTER && !self.has_standing(p, kinds::GOVERNMENT_CENTRE) {
+        // Centre (`docs/07` D22). A player with none, its town lost or a
+        // scenario begun without one, may raise its first freely; a
+        // foundation already laid counts as the first.
+        if kind == kinds::TOWN_CENTER
+            && self.owns_any(p, kinds::TOWN_CENTER)
+            && !self.has_standing(p, kinds::GOVERNMENT_CENTRE)
+        {
             return Err(PlaceError::NeedsGovernmentCentre);
         }
         if !pl.can_afford(&self.cost_of(p, kind)) {
             return Err(PlaceError::Unaffordable);
         }
         Ok(())
+    }
+
+    /// True if `p` has a building of `kind`, finished or a foundation,
+    /// that is not falling.
+    fn owns_any(&self, p: PlayerId, kind: KindId) -> bool {
+        self.world.slots().any(|s| {
+            let i = s.index();
+            self.world.owner[i] == p && self.world.kind[i] == kind && self.world.dying[i] == 0
+        })
     }
 
     /// True if `p` has a finished, standing building of `kind`.
@@ -1014,6 +1100,20 @@ impl Simulation {
             return Err(PlaceError::Blocked);
         }
         Ok(())
+    }
+
+    /// Whether `kind` could stand at `(x, y)` on the ground as it is,
+    /// whoever's it is and whatever it costs: a building's footprint clear
+    /// (on open water by a shore, for one of the water), a unit's tile open
+    /// to it. For the scenario editor (`GD-CAMP-06`).
+    pub fn site_clear(&self, kind: KindId, x: i32, y: i32) -> bool {
+        let info = kinds::info(kind);
+        match (info.mobile, info.naval) {
+            (true, true) => self.water.passable(x, y),
+            (true, false) => self.nav.passable(x, y),
+            (false, true) => self.shore_clear(x, y, info.footprint as i32).is_ok(),
+            (false, false) => self.nav.footprint_clear(x, y, info.footprint.max(1) as i32),
+        }
     }
 
     /// Whether a building of the water may stand anchored at `(x, y)`:
@@ -1305,6 +1405,11 @@ impl Simulation {
 
     /// True once the match is decided: a winner, or nobody left.
     pub fn over(&self) -> bool {
+        if let Some(sc) = self.scenario() {
+            if self.scenario_state.outcome.is_some() || !sc.skirmish_victories {
+                return self.scenario_state.outcome.is_some();
+            }
+        }
         self.clocks.won.is_some()
             || self.players.len() >= 2
                 && (0..self.players.len() as PlayerId)
@@ -1415,6 +1520,7 @@ impl Simulation {
         self.production();
         self.relic_gold();
         self.victory_clocks();
+        self.scenario_tick();
         self.recount_population();
         lap.mark(&mut t.economy);
         self.fog_of_war_update();
@@ -1453,7 +1559,26 @@ impl Simulation {
         if !self.clocks.is_quiet() {
             h.write(&self.clocks);
         }
+        if self.config.scenario.is_some() {
+            h.write(&self.scenario_state);
+        }
         h.finish()
+    }
+
+    /// Orders `units` to attack-move to `target`. The order keeps the point
+    /// asked for; the trip goes to each unit's slot in the formation, or as
+    /// near as it can get.
+    pub(crate) fn order_attack_move(&mut self, units: Vec<Slot>, target: Vec2Fx) {
+        let wanted = self.clamp_to_map(target);
+        for units in self.by_element(units) {
+            let (goals, pace, field) = self.group_goals(&units, target);
+            for (slot, goal) in units.iter().zip(goals) {
+                let i = slot.index();
+                self.world.order[i] = Order::AttackMove { target: wanted };
+                self.world.nav[i] =
+                    Some(Nav::along(goal, Fx::from_ratio(15, 100), field).paced(pace));
+            }
+        }
     }
 
     /// Verifies every invariant the simulation is supposed to maintain.
@@ -1722,7 +1847,7 @@ impl Simulation {
         &self.water
     }
 
-    fn spawn(&mut self, kind: KindId, owner: PlayerId, pos: Vec2Fx) -> Option<EntityId> {
+    pub(crate) fn spawn(&mut self, kind: KindId, owner: PlayerId, pos: Vec2Fx) -> Option<EntityId> {
         if self.world.len() as u32 >= self.config.max_entities {
             return None;
         }
@@ -1959,18 +2084,7 @@ impl Simulation {
                     .iter()
                     .filter_map(|&id| self.owned_mobile(id, p))
                     .collect();
-                // The order keeps the point asked for; the trip goes to the
-                // unit's slot in the formation, or as near as it can get.
-                let wanted = self.clamp_to_map(target);
-                for units in self.by_element(units) {
-                    let (goals, pace, field) = self.group_goals(&units, target);
-                    for (slot, goal) in units.iter().zip(goals) {
-                        let i = slot.index();
-                        self.world.order[i] = Order::AttackMove { target: wanted };
-                        self.world.nav[i] =
-                            Some(Nav::along(goal, Fx::from_ratio(15, 100), field).paced(pace));
-                    }
-                }
+                self.order_attack_move(units, target);
             }
             CommandKind::Patrol { ids, target } => {
                 let units: Vec<Slot> = ids
@@ -3675,7 +3789,7 @@ impl Simulation {
 
     /// A technology completes: record it and fold its effects into the
     /// player's modifiers. An age advance is just another effect.
-    fn apply_tech(&mut self, owner: PlayerId, id: TechId) {
+    pub(crate) fn apply_tech(&mut self, owner: PlayerId, id: TechId) {
         let Some(t) = tech::info(id) else {
             return;
         };
@@ -4086,7 +4200,7 @@ impl Simulation {
         }
     }
 
-    fn recount_population(&mut self) {
+    pub(crate) fn recount_population(&mut self) {
         for p in &mut self.players {
             p.pop = 0;
             p.pop_cap = 0;
@@ -4885,32 +4999,54 @@ mod tests {
     }
 
     /// A second Town Center needs a finished Government Centre standing
-    /// (`docs/07` D22); rubble does not count.
+    /// (`docs/07` D22); a first does not, a foundation counts as the first,
+    /// and another player's buildings count for nothing.
     #[test]
-    fn a_town_center_needs_a_government_centre() {
+    fn a_second_town_center_needs_a_government_centre() {
         let mut sim = Simulation::new(4, flat(48, 2));
         sim.issue(spawn_cmd(0, kinds::VILLAGER, 10, 10));
         run(&mut sim, 3);
         assert_eq!(
-            sim.can_build(0, kinds::TOWN_CENTER),
-            Err(PlaceError::NeedsGovernmentCentre)
-        );
-        assert_eq!(
             sim.can_place(0, kinds::TOWN_CENTER, 30, 30),
-            Err(PlaceError::NeedsGovernmentCentre)
+            Ok(()),
+            "a player without a Town Center may raise one"
         );
-        sim.issue(spawn_cmd(0, kinds::GOVERNMENT_CENTRE, 20, 20));
+        let mine = owned(&sim, 0, kinds::VILLAGER);
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Build {
+                kind: kinds::TOWN_CENTER,
+                x: 30,
+                y: 30,
+                ids: mine,
+            },
+        });
         run(&mut sim, 3);
-        assert_eq!(sim.can_place(0, kinds::TOWN_CENTER, 30, 30), Ok(()));
+        assert_eq!(owned(&sim, 0, kinds::TOWN_CENTER).len(), 1, "laid");
         assert_eq!(
-            sim.can_place(0, kinds::TOWN_CENTER, 20, 20),
-            Err(PlaceError::Blocked),
-            "the ground is still checked"
+            sim.can_build(0, kinds::TOWN_CENTER),
+            Err(PlaceError::NeedsGovernmentCentre),
+            "the foundation is the first"
         );
-        // Another player's Government Centre is no help.
         assert_eq!(
             sim.can_build(1, kinds::TOWN_CENTER),
-            Err(PlaceError::NeedsGovernmentCentre)
+            Ok(()),
+            "player 0's Town Center does not count against player 1"
+        );
+        sim.issue(spawn_cmd(1, kinds::TOWN_CENTER, 10, 30));
+        sim.issue(spawn_cmd(0, kinds::GOVERNMENT_CENTRE, 20, 20));
+        run(&mut sim, 3);
+        assert_eq!(
+            sim.can_build(1, kinds::TOWN_CENTER),
+            Err(PlaceError::NeedsGovernmentCentre),
+            "another player's Government Centre is no help"
+        );
+        // The first foundation spent the wood; only the price stands in
+        // the way now.
+        assert_eq!(
+            sim.can_build(0, kinds::TOWN_CENTER),
+            Err(PlaceError::Unaffordable),
+            "with the Government Centre standing, a second may go up"
         );
     }
 

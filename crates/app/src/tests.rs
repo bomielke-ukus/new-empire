@@ -531,7 +531,7 @@ fn a_skirmish_is_set_up_on_the_screens_and_the_opponents_play_as_the_ai() {
     assert_eq!(app.shell, Shell::Title);
     draw(&mut app);
     assert!(app.hud.buttons.is_empty(), "no HUD on the title");
-    assert_eq!(app.screen.buttons.len(), 5);
+    assert_eq!(app.screen.buttons.len(), 7);
     // Letters and clicks on the title reach no match.
     let commands = app.sim.replay().commands.len();
     assert!(!app.keyboard_input(KeyCode::KeyV, ElementState::Pressed, false));
@@ -2740,4 +2740,525 @@ fn a_right_click_on_land_unloads_a_full_transport() {
         app.sim.replay().commands.last().unwrap().1.kind,
         CommandKind::Ungarrison { building } if building == boat
     ));
+}
+
+/// Two scenarios of a campaign written to a scratch directory: the first
+/// is won by a trigger, the second lost by one.
+fn scratch_campaign(name: &str) -> Vec<save::campaigns::Campaign> {
+    let dir = scratch(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    let camp = dir.join("tale");
+    std::fs::create_dir_all(&camp).unwrap();
+    std::fs::write(
+        camp.join("campaign.ron"),
+        r#"(title: "A Tale", about: "Two parts.", scenarios: ["one", "two"])"#,
+    )
+    .unwrap();
+    std::fs::write(
+        camp.join("one.ron"),
+        r#"(title: "The First", briefing: ["It begins."], seed: Some(7),
+            map: Generated(kind: Flat, size: 48),
+            sides: [(name: "Thebes", control: Player), (name: "Raiders", control: Computer(1))],
+            placements: [(kind: "Villager", owner: 0, at: (10, 10)),
+                         (kind: "Villager", owner: 1, at: (38, 38))],
+            objectives: [(id: "hold", text: "Hold the river", goal: Scripted),
+                         (id: "late", text: "Count the grain", goal: Scripted, hidden: true)],
+            triggers: [(then: [Say("The river is yours to hold.")]),
+                       (when: [After(1)], then: [Show("late")]),
+                       (when: [After(2)], then: [Complete("hold"), Complete("late")])])"#,
+    )
+    .unwrap();
+    std::fs::write(
+        camp.join("two.ron"),
+        r#"(title: "The Second", map: Generated(kind: Flat, size: 48),
+            sides: [(name: "Thebes", control: Player)],
+            placements: [(kind: "Villager", owner: 0, at: (10, 10))],
+            objectives: [(id: "x", text: "Survive", goal: Scripted)],
+            triggers: [(when: [After(1)], then: [Lose("The walls fell")])])"#,
+    )
+    .unwrap();
+    let (campaigns, errors) = save::campaigns::load_all(&dir);
+    assert!(errors.is_empty(), "{errors:?}");
+    campaigns
+}
+
+/// A campaign is played from the title: its scenarios are listed, the
+/// second locked until the first is won; the briefing gives the story
+/// and the objectives; the match is the scenario, with the computer's
+/// side played by the AI; the narrator speaks and objectives come and
+/// are done on the HUD; the win is kept on disk and opens the next,
+/// whose loss says why and can be tried again.
+///
+/// REQ: GD-CAMP-05
+#[test]
+fn a_campaign_is_briefed_played_won_kept_and_the_next_one_opens() {
+    let mut app = App::new();
+    app.camera.viewport = (1280.0, 720.0);
+    app.input.edge_scroll = false;
+    app.settings_path = scratch("campaign-settings").join("settings.ron");
+    app.progress_path = scratch("campaign-progress").join("campaigns.ron");
+    let _ = std::fs::remove_file(&app.progress_path);
+    app.saves_dir = scratch("campaign-saves");
+    app.replays_dir = scratch("campaign-replays");
+    app.speaker = Speaker::Recorder(Default::default());
+    app.campaigns = scratch_campaign("campaign-dir");
+    app.campaign_error = None;
+    app.load_progress();
+    assert_eq!(app.shell, Shell::Title);
+
+    press(&mut app, ShellAction::Campaigns);
+    assert_eq!(app.shell, Shell::Campaigns);
+    draw(&mut app);
+    assert!(shell_button(&app, ShellAction::Brief(0, 0)).enabled);
+    let locked = shell_button(&app, ShellAction::Brief(0, 1));
+    assert!(!locked.enabled && !locked.reason.is_empty());
+    // A locked scenario's briefing is not opened, even when asked for.
+    app.shell_action(ShellAction::Brief(0, 1));
+    assert_eq!(app.shell, Shell::Campaigns);
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    assert_eq!(app.shell, Shell::Title, "Esc goes back");
+    press(&mut app, ShellAction::Campaigns);
+
+    press(&mut app, ShellAction::Brief(0, 0));
+    assert_eq!(app.shell, Shell::Briefing);
+    let b = app.briefing_now().unwrap();
+    assert_eq!(b.paragraphs, vec!["It begins.".to_string()]);
+    assert_eq!(
+        b.objectives,
+        vec!["Hold the river".to_string()],
+        "a hidden objective is not told"
+    );
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    assert_eq!(app.shell, Shell::Campaigns);
+    press(&mut app, ShellAction::Brief(0, 0));
+    press(&mut app, ShellAction::Play);
+    assert_eq!(app.shell, Shell::Match);
+    assert_eq!(app.sim.seed(), 7);
+    assert_eq!(app.sim.scenario().unwrap().id, "tale/one");
+    assert_eq!(app.opponents.len(), 1);
+    assert_eq!(app.opponents[0].player(), 1);
+    assert_eq!(app.opponents[0].difficulty(), Difficulty::Standard);
+    assert_eq!(app.results, ResultsState::Pending);
+
+    // The narrator's first line, at the start.
+    let now = Instant::now();
+    app.tick_once(now);
+    assert_eq!(
+        app.narration.as_ref().map(|(l, _)| l.as_str()),
+        Some("The river is yours to hold.")
+    );
+    draw(&mut app);
+    // The hidden objective is shown a second in, and both are done at two.
+    for _ in 0..(2 * sim::simulation::TICKS_PER_SECOND + 2) {
+        app.tick_once(now);
+    }
+    let said: Vec<String> = app.notices.shown().iter().map(|n| n.text.clone()).collect();
+    assert!(
+        said.iter().any(|t| t == "NEW OBJECTIVE: COUNT THE GRAIN"),
+        "{said:?}"
+    );
+    assert!(said.iter().any(|t| t == "DONE: HOLD THE RIVER"), "{said:?}");
+    assert_eq!(app.sim.outcome(), Some(&sim::Outcome::Won));
+    draw(&mut app);
+    assert_eq!(app.results, ResultsState::Shown);
+    let r = app.results_now();
+    assert_eq!(
+        (r.heading.as_str(), r.why.as_str()),
+        ("VICTORY", "EVERY OBJECTIVE IS DONE")
+    );
+    assert_eq!(r.sides[0].name, "THEBES");
+    assert_eq!(r.sides[1].name, "RAIDERS");
+    assert_eq!(
+        r.scenario,
+        Some(shell::ScenarioEnd {
+            won: true,
+            next: true,
+            playtest: false,
+        })
+    );
+    // The win is kept, so a restart still has the second open.
+    let kept = save::campaigns::Progress::read(&app.progress_path);
+    assert!(kept.won.contains("tale/one"), "{kept:?}");
+
+    press(&mut app, ShellAction::NextScenario);
+    assert_eq!(app.shell, Shell::Briefing);
+    assert_eq!(app.briefing, Some((0, 1)));
+    app.keyboard_input(KeyCode::Enter, ElementState::Pressed, false);
+    assert_eq!(app.shell, Shell::Match);
+    assert_eq!(app.sim.scenario().unwrap().id, "tale/two");
+    assert!(app.opponents.is_empty());
+    assert!(app.narration.is_none(), "the last scenario's line is gone");
+    for _ in 0..(sim::simulation::TICKS_PER_SECOND + 2) {
+        app.tick_once(now);
+    }
+    draw(&mut app);
+    assert_eq!(app.results, ResultsState::Shown);
+    let r = app.results_now();
+    assert_eq!(
+        (r.heading.as_str(), r.why.as_str()),
+        ("DEFEAT", "THE WALLS FELL")
+    );
+    assert_eq!(
+        r.scenario,
+        Some(shell::ScenarioEnd {
+            won: false,
+            next: false,
+            playtest: false,
+        })
+    );
+    assert!(!save::campaigns::Progress::read(&app.progress_path)
+        .won
+        .contains("tale/two"));
+
+    // Tried again: the same scenario from its start.
+    press(&mut app, ShellAction::Retry);
+    assert_eq!(app.shell, Shell::Match);
+    assert_eq!(app.sim.tick(), 0);
+    assert_eq!(app.sim.scenario().unwrap().id, "tale/two");
+    assert_eq!(app.results, ResultsState::Pending);
+    app.clock.set_paused(false);
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    press(&mut app, ShellAction::Resign);
+    press(&mut app, ShellAction::Resign);
+    step(&mut app, 3);
+    draw(&mut app);
+    assert_eq!(app.results, ResultsState::Shown);
+    let r = app.results_now();
+    assert_eq!(
+        (r.heading.as_str(), r.why.as_str()),
+        ("DEFEAT", "YOU RESIGNED")
+    );
+    press(&mut app, ShellAction::Campaigns);
+    assert_eq!(app.shell, Shell::Campaigns);
+    draw(&mut app);
+    assert!(shell_button(&app, ShellAction::Brief(0, 1)).enabled);
+}
+
+/// The editor's button for `action` on the screen as last drawn, clicked
+/// with the left button or the right.
+fn edit(app: &mut App, action: view::editor::EditorAction, left: bool) {
+    draw(app);
+    let b = shell_button(app, ShellAction::Edit(action));
+    let (x, y) = (b.x + b.w * 0.5, b.y + b.h * 0.5);
+    if left {
+        app.left_press(x, y);
+        app.left_release(x, y);
+    } else {
+        app.right_press(x, y);
+    }
+}
+
+/// The chip of the editor's list whose label is `label`.
+fn chip(app: &mut App, label: &str) -> view::editor::EditorAction {
+    draw(app);
+    app.screen
+        .buttons
+        .iter()
+        .find(|b| b.label == label)
+        .map(|b| match b.action {
+            ShellAction::Edit(a) => a,
+            other => panic!("{label} is {other:?}"),
+        })
+        .unwrap_or_else(|| {
+            let labels: Vec<&str> = app
+                .screen
+                .buttons
+                .iter()
+                .map(|b| b.label.as_str())
+                .collect();
+            panic!("no chip {label:?} in {labels:?}")
+        })
+}
+
+fn type_keys(app: &mut App, keys: &[KeyCode]) {
+    for &k in keys {
+        app.keyboard_input(k, ElementState::Pressed, false);
+        app.keyboard_input(k, ElementState::Released, false);
+    }
+}
+
+/// The scenario editor from the title: a new map painted and built on,
+/// the scenario named by typing, saved where the player's own are kept
+/// and listed with the campaigns, played as a playtest and back, and
+/// opened again from the front door. Leaving with changes unsaved takes a
+/// second Escape.
+///
+/// REQ: GD-CAMP-06
+#[test]
+fn a_scenario_is_made_in_the_editor_saved_played_and_opened_again() {
+    use view::editor::{EditorAction as E, Tool};
+    let mut app = App::new();
+    app.camera.viewport = (1280.0, 720.0);
+    app.input.edge_scroll = false;
+    app.settings_path = scratch("editor-settings").join("settings.ron");
+    app.scenarios_dir = scratch("editor-scenarios");
+    let _ = std::fs::remove_dir_all(&app.scenarios_dir);
+    app.saves_dir = scratch("editor-saves");
+    app.replays_dir = scratch("editor-replays");
+    app.speaker = Speaker::Recorder(Default::default());
+    app.campaigns.clear();
+
+    press(&mut app, ShellAction::Editor);
+    assert_eq!(app.shell, Shell::EditorStart);
+    edit(&mut app, E::New(48), true);
+    assert_eq!(app.shell, Shell::Editor);
+    assert_eq!(app.sim.map().width(), 48);
+    assert!(app.viewer.is_none(), "the editor sees everything");
+
+    // Deep water painted where the cursor is.
+    edit(&mut app, E::Letter('W'), true);
+    edit(&mut app, E::Brush(1), true);
+    // Points on open map, clear of the panels and the towns.
+    let (px, py) = (1000.0, 330.0);
+    let water = app.editor_tile(px, py).expect("the map is there");
+    app.input.cursor = Some((px, py));
+    app.left_press(px, py);
+    app.left_release(px, py);
+    assert_eq!(app.sim.map().terrain(water.0, water.1), Terrain::DeepWater);
+    // Right click picks a letter up off the ground.
+    edit(&mut app, E::Letter('g'), true);
+    app.right_press(px, py);
+    assert_eq!(app.editor.as_ref().unwrap().letter, 'W');
+
+    // A barracks for the enemy, and none on the water.
+    edit(&mut app, E::Tool(Tool::Units), true);
+    edit(&mut app, E::Page(1), true);
+    edit(&mut app, E::Kind(kinds::BARRACKS), true);
+    edit(&mut app, E::Owner(1), true);
+    let (bx, by) = (850.0, 200.0);
+    assert!(app.editor_tile(bx, by).is_some());
+    app.input.cursor = Some((bx, by));
+    app.left_press(bx, by);
+    app.left_release(bx, by);
+    let barracks = |app: &App| {
+        let w = app.sim.world();
+        w.slots()
+            .filter(|s| w.kind[s.index()] == kinds::BARRACKS && w.owner[s.index()] == 1)
+            .count()
+    };
+    assert_eq!(barracks(&app), 1);
+    app.left_press(px, py);
+    app.left_release(px, py);
+    assert_eq!(barracks(&app), 1, "not on deep water");
+
+    // The scenario named by typing into its title.
+    edit(&mut app, E::Tool(Tool::Scenario), true);
+    let title = chip(&mut app, "A NEW SCENARIO");
+    edit(&mut app, title, true);
+    assert!(app.editor_typing());
+    type_keys(&mut app, &[KeyCode::Backspace; 20]);
+    app.modifiers = ModifiersState::SHIFT;
+    type_keys(
+        &mut app,
+        &[KeyCode::KeyN, KeyCode::KeyI, KeyCode::KeyL, KeyCode::KeyE],
+    );
+    app.modifiers = ModifiersState::empty();
+    // Letters typed are not the camera's.
+    let focus = app.camera.focus;
+    app.input.update_camera(&mut app.camera, 0.1);
+    assert_eq!(app.camera.focus, focus);
+    type_keys(&mut app, &[KeyCode::Enter]);
+    assert_eq!(app.editor.as_ref().unwrap().scenario.title, "NILE");
+    // A field stepped on and back.
+    let seed = chip(&mut app, "1");
+    edit(&mut app, seed, true);
+    assert_eq!(app.editor.as_ref().unwrap().scenario.seed, Some(2));
+    edit(&mut app, seed, false);
+    assert_eq!(app.editor.as_ref().unwrap().scenario.seed, Some(1));
+
+    // Saved, and listed with the player's own.
+    edit(&mut app, E::Save, true);
+    let file = app.scenarios_dir.join("nile.ron");
+    assert!(file.is_file());
+    assert!(!app.editor.as_ref().unwrap().dirty);
+    let mine = app
+        .campaigns
+        .iter()
+        .find(|c| c.free)
+        .expect("the player's own");
+    assert_eq!(mine.scenarios[0].title, "NILE");
+
+    // Played from where it stands, and back.
+    let camera = app.camera.focus;
+    edit(&mut app, E::Playtest, true);
+    assert_eq!(app.shell, Shell::Match);
+    assert!(app.playtest);
+    assert_eq!(app.opponents.len(), 1);
+    let now = Instant::now();
+    for _ in 0..40 {
+        app.tick_once(now);
+    }
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    draw(&mut app);
+    assert_eq!(
+        shell_button(&app, ShellAction::QuitToTitle).label,
+        "BACK TO EDITOR"
+    );
+    press(&mut app, ShellAction::QuitToTitle);
+    press(&mut app, ShellAction::QuitToTitle);
+    assert_eq!(app.shell, Shell::Editor);
+    assert!(!app.playtest);
+    assert_eq!(app.camera.focus, camera, "the editor's view kept");
+    assert_eq!(app.sim.tick(), 0, "the world is the scenario again");
+    assert_eq!(
+        std::fs::read_dir(&app.replays_dir).map_or(0, |d| d.count()),
+        0,
+        "a playtest is not recorded"
+    );
+
+    // A change, then Escape twice to leave it.
+    edit(&mut app, E::Tool(Tool::Terrain), true);
+    let (qx, qy) = (700.0, 250.0);
+    app.input.cursor = Some((qx, qy));
+    app.left_press(qx, qy);
+    app.left_release(qx, qy);
+    assert!(app.editor.as_ref().unwrap().dirty);
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    assert_eq!(app.shell, Shell::Editor, "unsaved: the first Escape warns");
+    app.keyboard_input(KeyCode::Escape, ElementState::Pressed, false);
+    assert_eq!(app.shell, Shell::Title);
+
+    // Opened again from the front door, as it was saved.
+    press(&mut app, ShellAction::Editor);
+    draw(&mut app);
+    assert!(app.screen.buttons.iter().any(|b| b.label == "NILE"));
+    edit(&mut app, E::Open(0), true);
+    assert_eq!(app.shell, Shell::Editor);
+    let e = app.editor.as_ref().unwrap();
+    assert_eq!(e.scenario.title, "NILE");
+    assert_eq!(e.path.as_deref(), Some(file.as_path()));
+    assert_eq!(app.sim.map().terrain(water.0, water.1), Terrain::DeepWater);
+    assert_eq!(barracks(&app), 1);
+    let _ = std::fs::remove_dir_all(&app.scenarios_dir);
+}
+
+/// Pictures of the editor in each tool, drawn by the software rasterizer
+/// from the frame the app built, for looking at: written to the folder
+/// `NE_SHOT_DIR` names as raw RGBA (`<name>.rgba`, 1280 by 720), and
+/// skipped when it names none.
+#[test]
+fn editor_pictures_for_looking_at() {
+    use view::editor::{EditorAction as E, Tool};
+    let Some(dir) = std::env::var_os("NE_SHOT_DIR").map(std::path::PathBuf::from) else {
+        return;
+    };
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut app = App::new();
+    app.camera.viewport = (1280.0, 720.0);
+    app.input.edge_scroll = false;
+    app.scenarios_dir = scratch("editor-pictures");
+    app.speaker = Speaker::Recorder(Default::default());
+    // The learning campaign's third, opened as a copy.
+    press(&mut app, ShellAction::Editor);
+    shot(&mut app, &dir.join("editor-start"));
+    let raiders = app
+        .editor_files
+        .iter()
+        .position(|(r, _)| r.title == "RAIDERS FROM THE WEST")
+        .expect("the shipped scenario is offered");
+    edit(&mut app, E::Open(raiders), true);
+    app.input.cursor = Some((900.0, 330.0));
+    for (tool, name) in [
+        (Tool::Terrain, "editor-terrain"),
+        (Tool::Units, "editor-units"),
+        (Tool::Scenario, "editor-scenario"),
+        (Tool::Objectives, "editor-objectives"),
+        (Tool::Triggers, "editor-triggers"),
+        (Tool::Check, "editor-check"),
+    ] {
+        edit(&mut app, E::Tool(tool), true);
+        if tool == Tool::Units {
+            edit(&mut app, E::Page(1), true);
+            edit(&mut app, E::Kind(kinds::BARRACKS), true);
+        }
+        shot(&mut app, &dir.join(name));
+    }
+    edit(&mut app, E::Tool(Tool::Triggers), true);
+    let (r, c) = app
+        .editor
+        .as_ref()
+        .unwrap()
+        .panel(&[])
+        .rows
+        .iter()
+        .enumerate()
+        .find_map(|(r, row)| {
+            row.iter()
+                .position(|ch| ch.label.starts_with("'CHOOSE"))
+                .map(|c| (r, c))
+        })
+        .unwrap();
+    edit(&mut app, E::Chip(r as u16, c as u8), true);
+    shot(&mut app, &dir.join("editor-typing"));
+    let _ = std::fs::remove_dir_all(&app.scenarios_dir);
+}
+
+/// The frame as last drawn, rasterized and written as raw RGBA.
+fn shot(app: &mut App, path: &std::path::Path) {
+    draw(app);
+    let (w, h) = (1280, 720);
+    let mut img = view::raster::Image::new(w, h, [12, 10, 14, 255]);
+    if app.shell == Shell::Editor {
+        let chunks = view::terrain::build_all(app.sim.map());
+        let detail = view::detail::Detail::flat();
+        view::raster::draw_terrain(&mut img, &app.camera, &chunks, None, &detail);
+    }
+    let palette = view::palette::texture();
+    view::raster::draw_sprites(
+        &mut img,
+        &app.camera,
+        &app.atlas,
+        &palette,
+        &app.scene.sprites,
+    );
+    let ui: Vec<_> = if app.shell == Shell::Editor {
+        app.scene.ui.clone()
+    } else {
+        app.screen.sprites.clone()
+    };
+    view::raster::draw_sprites(&mut img, &app.camera, &app.atlas, &palette, &ui);
+    if app.shell == Shell::Editor {
+        view::raster::draw_minimap(&mut img, &Minimap::render(&app.sim), app.minimap_rect());
+    }
+    std::fs::write(path.with_extension("rgba"), img.to_bytes()).unwrap();
+}
+
+/// The shipped scenarios a computer plays are played: Mardonius at Plataea
+/// and Lugal-zage-si at Uruk gather and give orders from the first
+/// minutes, on the maps they are given.
+///
+/// REQ: GD-CAMP-01
+#[test]
+fn the_computer_plays_its_side_of_a_shipped_scenario() {
+    for id in ["persian-wars/plataea", "sargon/uruk"] {
+        let mut app = App::new();
+        app.camera.viewport = (1280.0, 720.0);
+        app.progress_path = scratch("computer-progress").join("campaigns.ron");
+        app.replays_dir = scratch("computer-replays");
+        app.speaker = Speaker::Recorder(Default::default());
+        let at = save::campaigns::locate(&app.campaigns, id).expect("a shipped scenario");
+        app.briefing = Some(at);
+        app.start_scenario();
+        assert_eq!(app.opponents.len(), 1, "{id}");
+        assert_eq!(app.opponents[0].player(), 1);
+        let start = app.sim.player(1).unwrap().stockpile;
+        let now = Instant::now();
+        for _ in 0..3 * 60 * sim::TICKS_PER_SECOND {
+            app.tick_once(now);
+        }
+        let orders = app
+            .sim
+            .replay()
+            .commands
+            .iter()
+            .filter(|(_, c)| c.player == 1)
+            .count();
+        assert!(orders > 10, "{id}: {orders} orders from the computer");
+        assert_ne!(
+            app.sim.player(1).unwrap().stockpile,
+            start,
+            "{id}: it gathers and spends"
+        );
+        assert!(app.sim.outcome().is_none(), "{id}");
+    }
 }

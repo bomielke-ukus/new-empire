@@ -21,6 +21,16 @@ pub fn cues(sim: &Simulation, viewer: Option<u8>) -> Vec<Placed> {
     let mut out = Vec::new();
     for e in sim.events() {
         match *e {
+            // A scenario's narrator and objectives: news for the player.
+            Event::Said { .. } => out.push((Cue::Click, None)),
+            Event::Objective { status, .. } => out.push((
+                match status {
+                    sim::scenario::ObjectiveStatus::Done => Cue::Research,
+                    sim::scenario::ObjectiveStatus::Failed => Cue::Loss,
+                    _ => Cue::Click,
+                },
+                None,
+            )),
             Event::Alarm { player, .. } => {
                 if mine(player) {
                     out.push((Cue::Alarm, None));

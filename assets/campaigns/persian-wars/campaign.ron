@@ -1,0 +1,6 @@
+(
+    title: "The Persian Wars",
+    about: "Athens and Sparta against the King of Kings, 490 to 479 BC.",
+    order: 1,
+    scenarios: ["marathon", "thermopylae", "salamis", "plataea"],
+)

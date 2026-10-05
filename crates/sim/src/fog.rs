@@ -105,6 +105,14 @@ impl Fog {
         self.idx(x, y).is_some_and(|i| self.visibility[i] > 0)
     }
 
+    /// Marks the tile explored without anyone seeing it: a scenario
+    /// showing the player the ground ahead. Nothing is remembered there.
+    pub fn explore(&mut self, x: i32, y: i32) {
+        if let Some(i) = self.idx(x, y) {
+            self.explored[i / 64] |= 1u64 << (i % 64);
+        }
+    }
+
     /// True if the player has ever seen the tile.
     pub fn explored(&self, x: i32, y: i32) -> bool {
         self.idx(x, y)

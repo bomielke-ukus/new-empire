@@ -257,6 +257,9 @@ reload and kills, with the corpse lingering and then going; a bowman
 shoots from range and the arrow takes time to land; the four stances
 decide who engages and how far they chase (`GD-STANCE-01`); a villager hit
 runs for the Town Center and the side is told once (`GD-STANCE-02`);
+a Hoplite shot by a Bowman it cannot see turns on it on Defensive and
+Aggressive, holds on Stand ground, ignores a tower, and lets a rider that
+falls back go (`GD-STANCE-03`, added 2026-10-05);
 attack-move engages on the way and carries on (`UX-CMD-02`); a patrol
 turns round at each end (`UX-CMD-03`); a formation forms a line across the
 way at the slowest member's pace, and no formation is a clump

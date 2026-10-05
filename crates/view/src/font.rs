@@ -187,6 +187,29 @@ pub fn width(text: &str) -> u32 {
     text.chars().count() as u32 * ADVANCE
 }
 
+/// `text` broken into lines no wider than `max` pixels, at spaces; a word
+/// longer than a line is cut.
+pub fn wrap(text: &str, max: f32) -> Vec<String> {
+    let per_line = ((max / ADVANCE as f32).floor() as usize).max(1);
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let word: String = word.chars().take(per_line).collect();
+        let len = line.chars().count();
+        if len > 0 && len + 1 + word.chars().count() > per_line {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(&word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

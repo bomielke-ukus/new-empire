@@ -325,10 +325,21 @@ mod tests {
         let cav = kinds::info(kinds::LIGHT_CAVALRY);
         let club = kinds::info(kinds::CLUBMAN);
         let m = Modifiers::default();
-        assert_eq!(bonus_vs(&spear.combat, Class::Cavalry), 6);
+        assert_eq!(bonus_vs(&spear.combat, Class::Cavalry), 12);
         assert_eq!(bonus_vs(&spear.combat, Class::Infantry), 0);
-        // Spearman: 4 + 6 against cavalry; 4 against infantry.
-        assert_eq!(between(spear, &m, cav, &m, Elevation::Level), Some(10));
+        // Spearman: 4 + 12 against cavalry; 4 against infantry.
+        assert_eq!(between(spear, &m, cav, &m, Elevation::Level), Some(16));
+        // One on one the counter wins: six of its hits fell the rider,
+        // seven of the rider's fell it.
+        let hits = |hp: i32, d: i32| (hp + d - 1) / d;
+        assert_eq!(hits(cav.max_health, 16), 6);
+        assert_eq!(
+            hits(
+                spear.max_health,
+                between(cav, &m, spear, &m, Elevation::Level).unwrap()
+            ),
+            7
+        );
         assert_eq!(between(spear, &m, club, &m, Elevation::Level), Some(4));
         // Slinger: 4 + 4 against infantry.
         assert_eq!(between(sling, &m, club, &m, Elevation::Level), Some(8));

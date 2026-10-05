@@ -49,6 +49,10 @@ pub const ALARM_TICKS: u64 = 200;
 const ACQUIRE_EVERY: u64 = 4;
 /// How far a fleeing villager runs when there is no Town Center to run to.
 const FLEE_TILES: i32 = 8;
+/// How much further than the shooter stood a soldier that answers it will
+/// follow before letting it go (`GD-STANCE-03`): an archer that holds its
+/// ground is reached, one that falls back two tiles is not chased home.
+const ANSWER_SLACK: Fx = Fx::from_int(2);
 
 /// How far a hunted animal bolts when hit: far enough to be a chase, near
 /// enough that the kill lies close to where the hunt began
@@ -142,6 +146,21 @@ pub const WORK_PERIOD: u64 = 16;
 /// tick; not state, so not hashed or saved.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Event {
+    /// A scenario's narrator speaks: the line is
+    /// [`Simulation::line`](crate::Simulation::line)`(trigger, action)`.
+    Said {
+        /// Which trigger.
+        trigger: u16,
+        /// Which of its actions.
+        action: u16,
+    },
+    /// A scenario's objective was shown, done or failed.
+    Objective {
+        /// Which, in the scenario's order.
+        index: u16,
+        /// How it stands now.
+        status: crate::scenario::ObjectiveStatus,
+    },
     /// A player's unit was hit and their side had not been told lately.
     Alarm {
         /// Whose unit.
@@ -899,7 +918,7 @@ impl Simulation {
                     });
                 }
             } else {
-                self.hit(ts, damage, from, self.world.owner[i]);
+                self.hit(ts, damage, from, self.world.owner[i], Some(attacker));
             }
         }
     }
@@ -928,7 +947,7 @@ impl Simulation {
             if !p.blast.is_zero() {
                 self.blast(&p);
             } else if let Some(ts) = self.target_slot(p.target) {
-                self.hit(ts, p.damage, p.pos, p.owner);
+                self.hit(ts, p.damage, p.pos, p.owner, p.by);
             }
         }
     }
@@ -969,13 +988,21 @@ impl Simulation {
             blast: p.blast,
         });
         for s in caught {
-            self.hit(s, p.damage, p.pos, p.owner);
+            self.hit(s, p.damage, p.pos, p.owner, p.by);
         }
     }
 
     /// A hit lands on `target`: health comes off, the victim's side is
-    /// told, and a passive unit runs for it (`GD-STANCE-02`).
-    fn hit(&mut self, target: Slot, damage: i32, from: Vec2Fx, by: PlayerId) {
+    /// told, a passive unit runs for it (`GD-STANCE-02`), and a soldier
+    /// turns on the unit that struck it (`GD-STANCE-03`).
+    fn hit(
+        &mut self,
+        target: Slot,
+        damage: i32,
+        from: Vec2Fx,
+        by: PlayerId,
+        attacker: Option<EntityId>,
+    ) {
         let t = target.index();
         let before = self.world.health[t];
         self.world.health[t] = (before - Fx::from_int(damage)).max(Fx::ZERO);
@@ -1036,6 +1063,58 @@ impl Simulation {
             };
             self.world.nav[t] = None;
         }
+        if let Some(a) = attacker {
+            self.answer(t, a);
+        }
+    }
+
+    /// A soldier hit by an enemy unit turns on it, though it stands beyond
+    /// the soldier's sight (`GD-STANCE-03`, `docs/07` D36): an archer
+    /// cannot stand off and shoot hoplites that wait to see it. Only an
+    /// Aggressive or Defensive unit answers, only when it is free to (idle,
+    /// or on an attack-move or patrol, as [`Simulation::acquire`] takes
+    /// them), only a unit it could ever hit, and only so far: past the
+    /// stance's own leash if the shooter stood further off, by
+    /// [`ANSWER_SLACK`]. A tower's arrows are not answered; walking under
+    /// a tower to hack at stone is an order for a player to give.
+    fn answer(&mut self, i: usize, attacker: EntityId) {
+        if self.world.health[i] <= Fx::ZERO
+            || !kinds::info(self.world.kind[i]).mobile
+            || !self.can_fight(i)
+        {
+            return;
+        }
+        let then = match self.world.order[i] {
+            Order::Idle => Then::Return(self.world.pos[i]),
+            Order::AttackMove { target } => Then::AttackMove(target),
+            Order::Patrol { from, to, leg } => Then::Patrol(from, to, leg),
+            _ => return,
+        };
+        let sight = self.sight_of(i);
+        let stance_leash = match (self.world.stance[i], then) {
+            (Stance::StandGround | Stance::Passive, _) => return,
+            (Stance::Aggressive, _) | (_, Then::AttackMove(_) | Then::Patrol(..)) => sight * 2,
+            (Stance::Defensive, _) => sight,
+        };
+        let Some(a) = self.target_slot(attacker) else {
+            return;
+        };
+        let j = a.index();
+        let owner = self.world.owner[j];
+        if owner == self.world.owner[i]
+            || owner == GAIA
+            || !kinds::info(self.world.kind[j]).mobile
+            || !self.reaches(i, j)
+        {
+            return;
+        }
+        let me = self.world.id_at(Slot::new(i));
+        if self.damage_between(me, attacker).is_none() {
+            return;
+        }
+        let here = self.world.pos[i];
+        let leash = stance_leash.max(here.distance(self.world.pos[j]) + ANSWER_SLACK);
+        self.engage(i, attacker, then, Some((here, leash)));
     }
 
     /// Where a frightened unit runs: the nearest standing, finished Town

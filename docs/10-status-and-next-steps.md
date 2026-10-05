@@ -27,7 +27,9 @@ Six milestones landed; the vertical slice wants only the feel pass, M7.
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
 | M6 — Game shell | **Landed 2026-09-19** | Configure, play, save, reload and watch a replay without a terminal: the run in `crates/app/src/tests.rs`; the owner played the Mac build 2026-09-20 |
 | M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest is the owner's (§4d); the sprite art is code-built (`docs/08` §9) for every unit, building and node, and the ground has a rendered grain |
-| M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
+| M8 — Breadth | **Built 2026-10-05** | Every item in `docs/06` M8; the owner's playtest is to come |
+| M9 — Content | **Built 2026-10-05**, awaiting the owner's play | Campaigns, the learning campaign, the editor, two historical campaigns (`docs/07` D35) |
+| M10 — Multiplayer | Not started | Moved out of M9 (D35) |
 
 The Mac checks of 2026-09-12 exercised the economy and age progression
 (§3, row 4), then the native combat/siege window (work record below).
@@ -2222,7 +2224,171 @@ the trade boat, Islands and the opponent's use of all of it follow.
   fallbacks (the architecture's latest age, then the Greek); frames that
   overflow a page.
 
+### Work record: M9, first and second chunks — scenarios and campaigns (2026-10-05)
+
+- **Scenarios in the simulation** (`sim::scenario`, `GD-CAMP-01` to
+  `04`). A scenario is a RON file carried in the match's configuration,
+  so a save and a replay carry it: a generated or drawn map, its sides
+  (name, who plays it, civilization, age, stockpile, technologies), what
+  stands where (a placement may be tagged, for a trigger to name), the
+  player's objectives and the triggers. Triggers are checked once a
+  second, in order; objectives decide the match, and the skirmish
+  victories hold only when the scenario says so. The scenario's state is
+  hashed only when there is one, so the corpus did not move. A scenario
+  is checked when it is read, and refused with every problem found; a
+  `standard_start` on the empty Flat map is one.
+- **Campaigns** (`save::campaigns`, `GD-CAMP-05`). A campaign is a
+  directory under `assets/campaigns` with a `campaign.ron` naming its
+  scenarios in order; a scenario that does not read is left out and said,
+  rather than the menu lost. The scenarios won are kept in
+  `campaigns.ron` beside the settings; each opens the one after it.
+- **In the game.** CAMPAIGNS is first on the title. The campaigns screen
+  lists each campaign and its scenarios, won, open or locked (a locked
+  one says why); a briefing gives the story and the objectives the
+  player is told, and PLAY (or Enter) starts it, with the computer's
+  sides played by the AI at the difficulty the scenario names. In the
+  match the objectives stand at the top right, marked as they go (a done
+  one in gold, a failed one marked red), and the narrator's line at the
+  top, for at least eight seconds; an objective shown, done or failed is
+  also a notice and a cue. The results say how the scenario ended —
+  every objective done, the failed objective, or the scenario's own
+  reason — and offer CAMPAIGNS, PLAY AGAIN and NEXT. A resignation in a
+  scenario is said as one.
+- **Tools.** `mapview --campaign <file>` plays a scenario for a number
+  of ticks and draws it with the HUD and the last line said;
+  `--screen campaigns` and `--screen briefing` draw the two screens. The
+  Mac bundle copies `assets/campaigns`.
+- **Tests**: the scenario behaviours (setup from a drawn map, objectives
+  and their outcomes, the triggers, the checks, a save's round trip);
+  every shipped campaign reads, checks and uses only the font's
+  characters; progress unlocks the next and survives a restart; the app
+  plays a campaign from the title through a win, a kept unlock, the next
+  briefing, a loss with its reason, a retry and a resignation. The title
+  screen's golden image is re-recorded for the CAMPAIGNS button.
+
+### Work record: M9, third chunk — the learning campaign (2026-10-05)
+
+- **Four scenarios** in `assets/campaigns/learning`, as `docs/02` §13
+  lists them: gathering and building, advancing an age, combat, counters.
+  Drawn 64-tile maps of the Nile (desert, black land, sand bank, river)
+  with low dunes in the desert. Their text is checked against the font.
+- **Triggers can wait on any of several things, or on one not holding**
+  (`Condition::Any`, `Condition::Not`, `GD-CAMP-03`), so a raid comes
+  when the army is ready or at five minutes, whichever is first, without
+  marking the army objective done for a player who has not trained it.
+  Their parts are checked like any other condition.
+- **`Simulation::objective(id)`** says how an objective stands.
+- **Played through in the tests**: a plain bot (villagers kept at work,
+  buildings put near where they are wanted, soldiers sent at what comes)
+  wins each scenario: in 9.4, 9.3, 4.8 and 10.5 game minutes. A slow
+  player is raided on time and the objective stays open.
+- **Balance found on the way, not changed:** one Spearman loses to one
+  Light Cavalry (it needs nine hits to kill the rider, the rider seven);
+  the counter only wins at equal cost and in numbers, as `simrunner
+  balance` measures (12 against 9). The fourth scenario's first wave is
+  three riders against the six spearmen it asks for, so the lesson
+  reads. Whether the counter should be harder is the owner's call.
+- **Scenario 4 is set in 1550 BC**, not early Egypt (`docs/02` §13 as
+  built): horses came with the Hyksos.
+
+### Work record: M9, fourth chunk — the scenario editor (2026-10-05)
+
+- **The editor** (`GD-CAMP-06`, `docs/02` §13 as built): SCENARIO EDITOR
+  on the title opens new maps (48 to 128 tiles) or a scenario, the
+  player's own or a campaign's as a copy. Terrain, height and units on
+  the map with a brush or a click; the title, the briefing, the sides,
+  the objectives and the triggers as lists of chips; a check tab; SAVE,
+  PLAYTEST and EXIT. The model (`app::editor`) holds the scenario and
+  nothing else; the world on screen is a match made from it.
+- **The player's own scenarios** (`save::campaigns::load_user`) are a
+  campaign on the campaigns screen with every scenario open; the editor
+  saves into it and lists it again.
+- **Simulation**: `site_clear` says whether a kind could stand on a
+  tile whoever's it is; `view::scene::tile_marks` draws the brush.
+- **Typing**: the editor's lines take letters, digits, space and the
+  punctuation the font has (`cheats::text_char`), as a US keyboard lays
+  them out.
+- **Tests**: the model (a new map plays at once; painting and heights
+  that stay valid; placing, naming and erasing; every field of every
+  objective, condition and action stepped both ways without leaving a
+  problem the check does not name; saving by title without overwriting;
+  a generated map baked to the same ground and the same things); the
+  screens fit at 1024 by 640; the app plays the whole flow from the
+  title through a playtest and back and opens the file again. An opt-in
+  test (`NE_SHOT_DIR`) draws the editor in each tool with the software
+  rasterizer for looking at; it was looked at.
+- **Not done**: undo; resizing a map; copying and pasting; editing the
+  parts of `Any` and `Not` in the editor (they are shown and deleted).
+  Closing the window with changes unsaved loses them.
+
+### Work record: M9, fifth chunk — the historical campaigns (2026-10-05)
+
+- **The Persian Wars and Sargon of Akkad**, four scenarios each
+  (`docs/02` §13 as built), on drawn maps of Attica, Thermopylae, the
+  straits of Salamis, Boeotia and southern Mesopotamia. Two are full
+  matches against the computer (Plataea, Uruk); the others are battles
+  and sieges driven by triggers.
+- **`Condition::Since`**: so long after a trigger first happened. The
+  Marathon fleet sails twenty seconds after the battle, Kish raids four
+  minutes into the Cupbearer; the editor offers it.
+- **`Side::start`**: where a side starts, so a battle opens on the army,
+  not on the town behind it.
+- **The shipped-campaign check** now also holds every building to land
+  and every ship to water, and keeps sides other than the player's out
+  of each other's sight (there are no alliances; "Spears Against Horses"
+  had its waves entering by Avaris's tower, now fixed).
+- **Played through**: the bot of `crates/sim/tests/common/bot.rs`, shared
+  with the learning campaign, plays each battle as a player would: holds
+  posts, takes on what comes near, turns to the Immortals, attacks
+  soldiers, then towers, then the target, keeps Sargon sheltered.
+  Marathon's plain falls with 11 hoplites standing and Athens is reached
+  with the fleet 18 tiles short; Thermopylae is held with 27 of 32 (and
+  lost by standing still); Salamis is won with 11 ships of 20; the gulf
+  with 17 of 30; the four quarters held and their camps destroyed. The
+  Plataea and Uruk computers are seen to gather and give orders.
+- **Found on the way, and left for the owner** (§6): soldiers on their
+  default stance do not answer archers shooting from beyond their sight;
+  a first Town Center needs a Government Centre, though D22 speaks of a
+  second; a Spearman loses to a Light Cavalry one on one.
+
+### Work record: the owner's three answers (2026-10-05)
+
+The three questions M9 left in §6, answered as recommended (`docs/07`
+D36):
+
+- **Soldiers answer what hits them** (`GD-STANCE-03`,
+  `crates/sim/src/battle.rs` `answer`). An Aggressive or Defensive unit
+  that is free (idle, attack-moving, patrolling) and is hit by an enemy
+  unit turns on it, seen or not, as far as its stance's leash or two
+  tiles past where the shooter stood, whichever is further, then walks
+  back. Stand ground and Passive do not answer; towers are not answered.
+  The stance tooltips say "in sight or shooting".
+- **A first Town Center is free**: only a second needs a Government
+  Centre. A foundation counts as the first.
+- **The Spearman's bonus against cavalry is +12**: six hits to a Light
+  Cavalry's seven, three to a Scout, ten to Heavy Cavalry
+  (`docs/damage-matrix.md`).
+- **Recorded again**: the 40-a-side battle's input and three corpus
+  digests (`battle-40v40`, `marching-crowd`, `smallest-map`); the
+  Hard-against-Easy record, Hard still winning 20 of 20. The battle
+  acceptance and the counter balance pass (the Spearman wins 10 of 10
+  each side). The golden images did not move.
+- **The campaigns played again**: all fourteen tests pass. Thermopylae
+  is held with 28 of 32 and still lost by standing still; the gulf is
+  won with 12 of 30 (was 17); Marathon's fleet is 16 tiles short. King
+  of the Four Quarters got harder: the rebels now go for the bowmen who
+  shoot them and break in at the north gate, and a defence that trains
+  nothing loses its swordsmen and cannot raze the camps. The bot now
+  keeps the town working and the Barracks training through the siege,
+  as a player would, and holds with 25 and wins at 14.3 minutes. The
+  scenario itself is unchanged.
+
 ### Resume here next session
+
+**M9 is built** (`docs/07` D35): scenarios and campaigns, the learning
+campaign, the scenario editor, and the two historical campaigns. The
+three questions it raised are answered and built (D36, above). Next:
+the owner plays them; then M10, multiplayer.
 
 **M8's items are all built** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the
@@ -2234,7 +2400,7 @@ builds Storehouses by its work; naval is in the simulation — the water,
 the Dock, fishing, warships, transports, trade and Islands (above).
 The opponent goes to sea, and the boats, the Dock and the fish are
 rendered; the four architecture sets are drawn (above, `docs/07` D34).
-Next: the owner's playtest of M8, then `docs/06` M9.
+Next: the owner's playtest of M8.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded
@@ -2482,6 +2648,9 @@ in the order they bite:
 | Q1 — Naval in the vertical slice? | M4 scope | Leave it out of the slice; the map generator has water but nothing sails |
 | Q8 — Four ages or five? | Content tables | Four, as `docs/02` stands; M3 shipped the four-age structure |
 | Q5 — The game's name | M6 (menus), M9 | Answered: *Brenden's Empires* (`docs/07` D27) |
+| Should soldiers answer archers shooting from beyond their sight? | Feel of every fight | Answered 2026-10-05 (`docs/07` D36): yes, on Aggressive and Defensive (`GD-STANCE-03`) |
+| Does a *first* Town Center need a Government Centre? | Rebuilding a lost town | Answered 2026-10-05 (`docs/07` D36): no, only a second, as D22 says |
+| A Spearman loses to a Light Cavalry one on one | Counter clarity (`GD-COMBAT-02`) | Answered 2026-10-05 (`docs/07` D36): the bonus is +12, six hits to the rider's seven |
 
 ---
 

@@ -43,6 +43,7 @@ fn any_config() -> impl Strategy<Value = SimConfig> {
                     starting_stockpile,
                     gather_bonus_pct: Vec::new(),
                     civs: Vec::new(),
+                    scenario: None,
                 }
             },
         )

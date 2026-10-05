@@ -14,9 +14,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Stance {
-    /// Pursues enemies it can see, then returns to where it stood.
+    /// Pursues enemies it can see, then returns to where it stood. Answers
+    /// a unit that hits it, seen or not (`GD-STANCE-03`).
     Aggressive = 0,
-    /// Attacks enemies it can see, does not chase far. Soldiers' default.
+    /// Attacks enemies it can see, does not chase far. Answers a unit that
+    /// hits it, seen or not (`GD-STANCE-03`). Soldiers' default.
     #[default]
     Defensive = 1,
     /// Attacks in range, never moves.

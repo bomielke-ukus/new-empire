@@ -193,6 +193,9 @@ pub struct HudInput<'a> {
     pub notices: &'a [Notice],
     /// The first-time hint up now, if one is (`docs/03` §7).
     pub hint: Option<&'a str>,
+    /// A scenario's narrator, speaking now (`docs/02` §13). The
+    /// objectives come from the match itself.
+    pub narration: Option<&'a str>,
     /// Resources the bar flashes red, in [`Resource::ALL`] order: what
     /// the last refused click was short of (`docs/03` §6.3).
     pub flash: [bool; 4],
@@ -572,6 +575,83 @@ pub(crate) fn fit(text: &str, width: f32) -> String {
     text.chars().take(max).collect()
 }
 
+/// Width of the objectives panel.
+const OBJECTIVES_W: f32 = 230.0;
+
+/// A scenario's narration line and objectives over the world.
+fn scenario_overlay(p: &mut Painter<'_>, sim: &Simulation, narration: Option<&str>, vw: f32) {
+    let objectives = sim.objectives();
+    let line = 11.0;
+    let mut right = vw;
+    if !objectives.is_empty() {
+        let tw = OBJECTIVES_W - 30.0;
+        let lines: Vec<(Vec<String>, sim::scenario::ObjectiveStatus)> = objectives
+            .iter()
+            .map(|o| {
+                let text = if o.optional {
+                    format!("{} (OPTIONAL)", o.text)
+                } else {
+                    o.text.to_string()
+                };
+                (font::wrap(&text.to_uppercase(), tw), o.status)
+            })
+            .collect();
+        let h = 22.0
+            + lines
+                .iter()
+                .map(|(l, _)| l.len() as f32 * line + 3.0)
+                .sum::<f32>();
+        let x = (vw - OBJECTIVES_W - 6.0).floor();
+        let y = TOP_BAR + 6.0;
+        p.rect(x - 1.0, y - 1.0, OBJECTIVES_W + 2.0, h + 2.0, BLACK, 0);
+        p.rect(x, y, OBJECTIVES_W, h, BROWN_DARK, 0);
+        p.text_in(x + 8.0, y + 6.0, "OBJECTIVES", Ink::Gold, 1.0);
+        let mut ly = y + 20.0;
+        for (text, status) in &lines {
+            use sim::scenario::ObjectiveStatus as S;
+            let mark = match status {
+                S::Done => GOLD,
+                S::Failed => RED,
+                _ => GOLD_DARK,
+            };
+            p.rect(x + 8.0, ly, 7.0, 7.0, BLACK, 0);
+            if *status != S::Open {
+                p.rect(x + 9.0, ly + 1.0, 5.0, 5.0, mark, 0);
+            } else {
+                p.rect(x + 9.0, ly + 1.0, 5.0, 5.0, BROWN, 0);
+            }
+            for l in text {
+                if *status == S::Done {
+                    p.text_in(x + 20.0, ly, l, Ink::Gold, 1.0);
+                } else {
+                    p.text(x + 20.0, ly, l, false, 1.0);
+                }
+                ly += line;
+            }
+            ly += 3.0;
+        }
+        right = x - 8.0;
+    }
+    if let Some(n) = narration {
+        let max = (right - 16.0).clamp(160.0, 520.0);
+        let lines = font::wrap(&n.to_uppercase(), max - 24.0);
+        let w = lines
+            .iter()
+            .map(|l| font::width(l) as f32)
+            .fold(0.0_f32, f32::max)
+            + 24.0;
+        let h = lines.len() as f32 * line + 14.0;
+        let x = ((right.min(vw) - w) / 2.0).max(8.0).round();
+        let y = TOP_BAR + 6.0;
+        p.rect(x - 1.0, y - 1.0, w + 2.0, h + 2.0, BLACK, 0);
+        p.rect(x, y, w, h, BROWN_DARK, 0);
+        p.rect(x, y, 3.0, h, GOLD, 0);
+        for (i, l) in lines.iter().enumerate() {
+            p.text(x + 12.0, y + 7.0 + i as f32 * line, l, false, 1.0);
+        }
+    }
+}
+
 /// "400F 200W": a cost in the resource bar's shorthand.
 fn cost_label(cost: &Cost) -> String {
     let parts: Vec<String> = Resource::ALL
@@ -806,8 +886,8 @@ fn stance_label(s: Stance) -> &'static str {
 
 fn stance_tooltip(s: Stance) -> &'static str {
     match s {
-        Stance::Aggressive => "AGGRESSIVE: CHASE ENEMIES IN SIGHT, THEN COME BACK",
-        Stance::Defensive => "DEFENSIVE: FIGHT ENEMIES IN SIGHT, DO NOT CHASE FAR",
+        Stance::Aggressive => "AGGRESSIVE: CHASE ENEMIES IN SIGHT OR SHOOTING, THEN COME BACK",
+        Stance::Defensive => "DEFENSIVE: FIGHT ENEMIES IN SIGHT OR SHOOTING, DO NOT CHASE FAR",
         Stance::StandGround => "STAND GROUND: FIGHT IN REACH, NEVER MOVE",
         Stance::Passive => "PASSIVE: NEVER FIGHT, RUN HOME WHEN HIT",
     }
@@ -2017,6 +2097,12 @@ impl Hud {
             p.text(x + 18.0, y + 4.0, h, false, 1.0);
         }
 
+        // A scenario's narrator, across the top of the world under the bar,
+        // and its objectives in the top right corner (`docs/02` §13).
+        if !input.help {
+            scenario_overlay(&mut p, sim, input.narration, vw);
+        }
+
         // Health bars over selected damaged units and construction bars over sites.
         for s in &selected {
             let i = s.index();
@@ -2351,7 +2437,7 @@ mod tests {
             spear.starts_with("SPEARMAN: 40 FOOD 20 WOOD, 26S. 45 HP, 4 MELEE"),
             "{spear}"
         );
-        assert!(spear.contains("BONUS 6 VS CAVALRY"), "{spear}");
+        assert!(spear.contains("BONUS 12 VS CAVALRY"), "{spear}");
         assert!(spear.contains("WEAK TO SLINGERS"), "{spear}");
         let bow = unit_tooltip(
             kinds::BOWMAN,
@@ -2436,6 +2522,7 @@ mod tests {
             settings: &DEFAULT_SETTINGS,
             notices: &[],
             hint: None,
+            narration: None,
             flash: [false; 4],
             perf: None,
             fresh: &[],
@@ -2538,6 +2625,7 @@ mod tests {
             &atlas,
             &HudInput {
                 hint: Some("VILLAGERS ARE IDLE: PRESS . TO FIND THEM"),
+                narration: None,
                 ..base
             },
         );
@@ -2601,6 +2689,7 @@ mod tests {
             settings: &DEFAULT_SETTINGS,
             notices: &[],
             hint: None,
+            narration: None,
             flash: [false; 4],
             perf: None,
             fresh: &[],
@@ -2765,6 +2854,7 @@ mod tests {
                     settings: &DEFAULT_SETTINGS,
                     notices: &[],
                     hint: None,
+                    narration: None,
                     flash: [false; 4],
                     perf: None,
                     fresh: &[],
@@ -2811,6 +2901,7 @@ mod tests {
                 settings: &DEFAULT_SETTINGS,
                 notices: &[],
                 hint: None,
+                narration: None,
                 flash: [false; 4],
                 perf: None,
                 fresh: &[],
@@ -2880,6 +2971,7 @@ mod tests {
             settings: &DEFAULT_SETTINGS,
             notices: &[],
             hint: None,
+            narration: None,
             flash: [false; 4],
             perf: None,
             fresh: &[],
@@ -2937,6 +3029,7 @@ mod tests {
                     settings: &DEFAULT_SETTINGS,
                     notices: &[],
                     hint: None,
+                    narration: None,
                     flash: [false; 4],
                     perf: None,
                     fresh: &[],
@@ -3022,6 +3115,7 @@ mod tests {
             settings: &DEFAULT_SETTINGS,
             notices: &[],
             hint: None,
+            narration: None,
             flash: [false; 4],
             perf: None,
             fresh: &[],

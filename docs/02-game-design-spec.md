@@ -155,7 +155,7 @@ Slice units marked **[V1]**. Stats are opening values for tuning, not gospel.
 |---|---|---|---|---|---|---|
 | **Clubman** [V1] | Stone | 50F | 40 | 3 melee | 0/0 | The first thing you can build |
 | **Axeman** [V1] | Tool | 50F 20W | 50 | 5 melee | 0/0 | Clubman upgrade |
-| **Spearman** [V1] | Tool | 40F 20W | 45 | 4 melee | 0/1 | +6 vs cavalry & elephants |
+| **Spearman** [V1] | Tool | 40F 20W | 45 | 4 melee | 0/1 | +12 vs cavalry & elephants |
 | **Swordsman** | Bronze | 45F 25G | 70 | 8 melee | 1/1 | Line infantry |
 | **Hoplite** | Bronze | 60F 40G | 120 | 12 melee | 4/2 | Slow, brutal, from the Academy |
 | **Legionary** | Iron | 60F 40G | 160 | 16 melee | 5/3 | Hoplite line, final tier |
@@ -329,6 +329,13 @@ damage = max(1, (attack × elevation_modifier) − armour_of_matching_type + bon
 **[GD-STANCE-02]** Villagers being attacked **run and raise an alarm** rather than standing there
 being killed. This one change removes most of the original's cruelty.
 
+**[GD-STANCE-03]** A soldier on Aggressive or Defensive that is **hit by an enemy unit answers
+it**, even one standing beyond its sight: an archer cannot stand off and shoot soldiers that
+wait to see it. It answers only when free to (idle, attack-moving or patrolling), follows no
+further than its stance's leash or two tiles past where the shooter stood, whichever is
+further, and then walks back. Stand ground and Passive units do not answer, and nobody
+answers a tower's arrows on their own. (Decided 2026-10-05, `docs/10` §6.)
+
 ---
 
 ## 9. Map, exploration and vision
@@ -470,8 +477,139 @@ be walked to, and land it on the shore nearest the enemy's Town Center.
 - **Campaign** — scripted scenarios with objectives, triggers and narration. Post-slice.
   First campaign is a *learning campaign*, in the model of *Ascent of Egypt*:
   each scenario teaches exactly one system.
+  - **[GD-CAMP-01]** A scenario sets the match up as written: its map
+    (generated as a skirmish map is, or drawn tile by tile), its sides
+    (civilization, starting age, stockpile, technologies, who plays them),
+    and what stands where.
+  - **[GD-CAMP-02]** The player's objectives decide a scenario: every one
+    that is not optional done wins it; one failed, or nothing of the
+    player's left standing, loses it. The skirmish victories hold only when
+    the scenario says so.
+  - **[GD-CAMP-03]** Triggers, checked once a second in order, wait on
+    time, objectives, other triggers, counts, stockpiles, ages,
+    technologies, units in an area or a named unit gone, so long after
+    another trigger, or any one of several such things, or one not
+    holding; they narrate,
+    show, complete or fail objectives, set units down, give resources,
+    reveal ground, send a side to attack, and win or lose the scenario.
+  - **[GD-CAMP-04]** A scenario is checked when it is loaded, and refused
+    with what is wrong: a name that names nothing, an id defined twice or
+    never, a map whose rows disagree, a place off the map.
+  - **[GD-CAMP-05]** The campaigns are listed from the title, each with
+    its scenarios in order; a scenario opens once the one before it is won,
+    and a win is kept between sessions. A briefing gives the story and the
+    objectives before play. In the match the objectives stand at the top
+    right and the narrator's lines at the top, and the results offer the
+    scenario again, the campaigns, or the next scenario once it is won.
+
+  **As built** (2026-10-05, `sim::scenario`): a scenario is a RON file —
+  the map, the sides, the placements, the objectives and the triggers —
+  carried in the match's configuration, so a save and a replay carry it.
+  A drawn map is rows of letters, one a tile (`g` grass, `d` dirt, `a`
+  desert, `s` sand, `w` and `W` shallow and deep water, `f` forest, `n`
+  snow), with optional corner heights; kinds and technologies are named as
+  they are shown (`"Town Center"` or `"town_center"`). The campaigns are
+  directories under `assets/campaigns`, each a `campaign.ron` naming its
+  scenarios in order (`save::campaigns`); the scenarios won are kept in
+  `campaigns.ron` beside the settings. Narration is text only (D35): a
+  line stays up at least eight seconds, longer the longer it is.
+
+  **The learning campaign** (2026-10-05, `assets/campaigns/learning`),
+  *The Gift of the River*, played as the Egyptians on drawn maps of the
+  Nile, one idea a scenario, each objective shown when the one before it
+  is done:
+  1. *Hunters on the Bank* (Naqada, about 3500 BC): gather wood, build a
+     house, grow to seven villagers, build a storehouse by a far forest,
+     gather food.
+  2. *The Black Land* (Nekhen, about 3300 BC): a storehouse and a
+     barracks, 400 food, the advance to the Tool Age, then farms (a
+     market is optional).
+  3. *Raiders from the West* (Thinis, about 3150 BC): train clubmen; the
+     Tjehenu raid when they are ready or at five minutes; then destroy
+     their camp, with a second raid at ten minutes for a slow player. The
+     Town Center lost loses it.
+  4. *Spears Against Horses* (Thebes, about 1550 BC): spearmen against
+     Hyksos horsemen, slingers against their axemen, then both against
+     Avaris. **This one leaves early Egypt on purpose:** the horse came to
+     Egypt with the Hyksos, so a lesson in spears against riders set
+     before them would be false history. Its raids are smaller than the
+     army asked for, so the counter is seen to win.
+
+  Each scenario is played to a win by a plain bot in the tests
+  (`crates/sim/tests/campaign_learning.rs`), in about nine to twelve
+  minutes for the first, second and fourth.
+
+  **The historical campaigns** (2026-10-05, `assets/campaigns/persian-wars`
+  and `assets/campaigns/sargon`), told from the history (D35):
+
+  *The Persian Wars*, as the Greeks, 490 to 479 BC:
+  1. *Marathon*: beat the Persian army on the plain, then march 8 hoplites
+     home to Athens before the fleet, which sails twenty seconds after the
+     battle, rounds the cape to Phaleron.
+  2. *Thermopylae*: hold the pass for ten minutes against six waves; the
+     archers shoot from beyond a hoplite's sight, so they must be charged,
+     and at 6:30 Ephialtes' path brings the Immortals down behind, onto the
+     road south, forty seconds after the warning. Leonidas living is
+     optional.
+  3. *Salamis*: three Persian squadrons come up the straits, the last round
+     the island from the west; sink them all. The ships of Aegina join.
+  4. *Plataea*: a full match against Mardonius, played by the computer;
+     burn his tent (a Government Centre) and keep the Greek camp.
+
+  *Sargon of Akkad*, as the Akkadians (the Assyrians' civilization, for
+  its Mesopotamian look), about 2334 to 2280 BC; Sargon is a named unit
+  who must live, and may shelter in a Town Center or a tower:
+  1. *The Cupbearer*: grow Agade to 15 villagers, build a barracks and
+     reach the Tool Age while Kish raids at four and eight minutes.
+  2. *Lugal-zage-si*: a full match against Uruk, walled, played by the
+     computer; take its Town Center. Bringing five soldiers to Nippur is
+     optional.
+  3. *Washing Weapons in the Sea*: take Ur (its old walls breached) and
+     Lagash, then bring five soldiers to the shore of the Lower Sea; Umma
+     raids the camp at five minutes.
+  4. *King of the Four Quarters*: hold walled Agade for ten minutes against
+     seven waves from Kish, Uruk, Ur and Elam, then destroy their camps.
+
+  The bot wins every battle by playing it as asked
+  (`crates/sim/tests/campaign_history.rs`); standing still loses at
+  Thermopylae, and dawdling after Marathon loses the race. The app's
+  tests have the computer play Mardonius and Uruk.
+
+  A side may name where it starts, which the camera opens on (`start`).
+  There are no alliances: every side other than the player's is at war
+  with every other, so the shipped scenarios set no two of them within
+  twelve tiles of each other, and the shipped-campaign check holds them to
+  it. The check also holds every building to land and every ship to water.
 - **Scenario editor** — terrain painting, unit placement, triggers, save/load,
   playtest. Post-slice, but the data formats are designed for it from the start.
+  - **[GD-CAMP-06]** The editor opens a new map of a chosen size, or a
+    scenario (the player's own, or a campaign's as a copy). It paints the
+    ground, raises and lowers it, sets units, buildings and nature down
+    for any side and takes them up, and edits the title, the briefing,
+    the sides, the objectives and the triggers, every field of them. It
+    shows what the check says is wrong, saves the scenario as the file a
+    campaign reads, and plays it from where it stands and back. The
+    player's saved scenarios are a campaign of their own, all open.
+
+  **As built** (2026-10-05, `app::editor`, `app::editing`,
+  `view::editor`): SCENARIO EDITOR on the title. The world on screen is
+  a match made from the scenario and never stepped, so what is drawn is
+  what will be played, without fog. A strip of tools along the top
+  (terrain, height, units, scenario, objectives, triggers, check) and
+  SAVE, PLAYTEST, EXIT; a palette beside the minimap; for the scenario,
+  objectives and triggers, a list whose every field is a chip: a left
+  click steps it on, a right click back, shift for big steps, a quoted
+  line opens a line to type, and an area or a tile is dragged or clicked
+  on the map. On the map a left click paints (right picks the letter
+  up), raises (right lowers), or sets down, takes up or names a unit for
+  a trigger to wait on (right takes up). A unit or building goes only
+  where the ground is clear for it. A scenario on a generated map opens
+  baked onto a drawn one. Saves go to `scenarios/` beside the settings,
+  named after the title; PLAYTEST refuses while anything is wrong and
+  shows the check; a playtest is not recorded and does not count as a
+  win. Leaving with changes unsaved takes a second EXIT or Escape.
+  Conditions made of others (`Any`, `Not`) are shown and deleted in the
+  editor but edited in the file.
 - **Cheat codes** — anachronistic joke units and resource grants, disabled in
   multiplayer and flagged in the replay. Non-negotiable; they are part of the
   memory of this game.
@@ -505,4 +643,4 @@ Tracked in `docs/07-decisions-and-open-questions.md`. The significant ones:
 3. Is the Government Centre worth its own building, or should its upgrades fold
    into the Town Center?
 4. How much of the campaign fiction do we write ourselves versus lean on real
-   history?
+   history? *(Answered: history, one narrator, in text; `docs/07` D35.)*
