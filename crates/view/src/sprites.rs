@@ -2634,6 +2634,8 @@ mod tests {
     fn an_architecture_draws_its_own_look_and_the_first_sets_where_it_has_none() {
         let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
         let (mut sheets, _) = crate::sheets::load_all(&dir);
+        // The first architecture's sets only, whatever else is rendered.
+        sheets.retain(|s| set_target(&s.name).is_some_and(|(_, _, arch)| arch == 0));
         let named = |name: &str, sheets: &[crate::sheets::Sheet]| {
             sheets.iter().find(|s| s.name == name).cloned().unwrap()
         };
