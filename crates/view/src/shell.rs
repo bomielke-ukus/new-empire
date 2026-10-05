@@ -1566,6 +1566,59 @@ mod tests {
             .unwrap_or_else(|| panic!("no button for {action:?}"))
     }
 
+    /// The campaigns are listed with their scenarios; a locked one is a
+    /// greyed button that says why, and everything fits on a small
+    /// window. The briefing has the way back and the way in.
+    ///
+    /// REQ: GD-CAMP-05
+    #[test]
+    fn the_campaigns_list_their_scenarios_and_a_briefing_leads_into_one() {
+        let small = ShellInput {
+            viewport: (1024.0, 640.0),
+            ..input()
+        };
+        let entry = |title: &str, won, open| ScenarioEntry {
+            title: title.into(),
+            won,
+            open,
+        };
+        let campaigns = [
+            CampaignEntry {
+                title: "The Gift of the River".into(),
+                about: "Learn the game along the Nile.".into(),
+                scenarios: vec![
+                    entry("Hunters on the Bank", true, true),
+                    entry("The Black Land", false, true),
+                    entry("Raiders from the West", false, false),
+                    entry("Spears Against Horses", false, false),
+                ],
+            },
+            CampaignEntry {
+                title: "Sargon of Akkad".into(),
+                about: "The first empire.".into(),
+                scenarios: vec![entry("The Cupbearer", false, true)],
+            },
+        ];
+        let screen = campaigns_screen(&Atlas::placeholder(), &small, &campaigns, None);
+        assert_eq!(screen.buttons.len(), 6, "five scenarios and BACK");
+        assert!(find(&screen, ShellAction::Brief(0, 1)).enabled);
+        let locked = find(&screen, ShellAction::Brief(0, 2));
+        assert!(!locked.enabled && !locked.reason.is_empty());
+        assert!(find(&screen, ShellAction::Brief(1, 0)).enabled);
+        assert!(find(&screen, ShellAction::Back).enabled);
+        assert!(inside(&screen, &small));
+        let briefing = Briefing {
+            campaign: "The Gift of the River".into(),
+            title: "The Black Land".into(),
+            paragraphs: vec!["Nekhen, about 3300 BC. ".repeat(12), "Grow.".into()],
+            objectives: vec!["Build a storehouse".into(), "Build a barracks".into()],
+        };
+        let screen = briefing_screen(&Atlas::placeholder(), &small, &briefing);
+        assert!(find(&screen, ShellAction::Play).enabled);
+        assert!(find(&screen, ShellAction::Campaigns).enabled);
+        assert!(inside(&screen, &small));
+    }
+
     fn inside(screen: &Screen, input: &ShellInput) -> bool {
         screen.buttons.iter().all(|b| {
             b.x >= 0.0
@@ -1645,13 +1698,14 @@ mod tests {
         assert_eq!(MapSize::from_tiles(100), None);
     }
 
-    /// The title lists the shell's five entries, with the ones that do
+    /// The title lists the shell's six entries, with the ones that do
     /// not exist yet greyed and saying so, and every button on screen.
     #[test]
     fn the_title_offers_a_new_game_and_says_what_is_not_there_yet() {
         let input = input();
         let screen = title(&Atlas::placeholder(), &input);
-        assert_eq!(screen.buttons.len(), 5);
+        assert_eq!(screen.buttons.len(), 6);
+        assert_eq!(screen.buttons[0].action, ShellAction::Campaigns);
         assert!(find(&screen, ShellAction::NewGame).enabled);
         assert!(find(&screen, ShellAction::LoadGame).enabled);
         assert!(find(&screen, ShellAction::WatchReplay).enabled);

@@ -369,6 +369,73 @@ fn a_scripted_side_attacks_and_a_tagged_unit_gone_is_noticed() {
     assert_eq!(sim.outcome(), Some(&Outcome::Won), "every raider dead");
 }
 
+/// A trigger may wait on any one of several things, or on something not
+/// holding: a raid that comes when the army is ready or at a set time,
+/// whichever is first, and once.
+///
+/// REQ: GD-CAMP-03
+#[test]
+fn a_trigger_waits_on_any_of_several_or_on_one_not_holding() {
+    let mut sc = base();
+    sc.triggers = vec![
+        Trigger {
+            id: Some("raid".into()),
+            ..trigger(
+                vec![Condition::Any(vec![
+                    Condition::Has {
+                        owner: 0,
+                        kind: Some("Clubman".into()),
+                        count: 2,
+                    },
+                    Condition::After(4),
+                ])],
+                vec![Action::Give {
+                    owner: 0,
+                    resource: kinds::Resource::Gold,
+                    amount: 100,
+                }],
+            )
+        },
+        Trigger {
+            repeat: true,
+            ..trigger(
+                vec![Condition::Not(Box::new(Condition::Fired("raid".into())))],
+                vec![Action::Give {
+                    owner: 0,
+                    resource: kinds::Resource::Stone,
+                    amount: 7,
+                }],
+            )
+        },
+    ];
+    // Ready early: the first branch.
+    let mut sim = start(&sc);
+    sim.issue(spawn(0, kinds::CLUBMAN, sim::Vec2Fx::from_int(8, 8)));
+    sim.issue(spawn(0, kinds::CLUBMAN, sim::Vec2Fx::from_int(9, 8)));
+    seconds(&mut sim, 2);
+    let p = sim.player(0).unwrap();
+    assert_eq!(p.stockpile[3], 100, "the raid came for the army");
+    let stone = p.stockpile[2];
+    assert!(stone > 0, "and the other waited on it not having come");
+    seconds(&mut sim, 6);
+    let p = sim.player(0).unwrap();
+    assert_eq!(p.stockpile[3], 100, "once only");
+    assert_eq!(
+        p.stockpile[2], stone,
+        "it no longer holds once the raid came"
+    );
+    // Not ready: the clock.
+    let mut sim = start(&sc);
+    seconds(&mut sim, 3);
+    assert_eq!(sim.player(0).unwrap().stockpile[3], 0);
+    seconds(&mut sim, 2);
+    assert_eq!(
+        sim.player(0).unwrap().stockpile[3],
+        100,
+        "the raid came on time"
+    );
+}
+
 /// REQ: GD-CAMP-04
 #[test]
 fn a_scenario_is_checked_when_it_is_loaded() {
@@ -381,7 +448,11 @@ fn a_scenario_is_checked_when_it_is_loaded() {
     sc.triggers.push(trigger(
         vec![
             Condition::Done("nothing".into()),
-            Condition::Gone("nobody".into()),
+            Condition::Any(vec![
+                Condition::Gone("nobody".into()),
+                Condition::Not(Box::new(Condition::Fired("never".into()))),
+            ]),
+            Condition::Any(Vec::new()),
         ],
         vec![Action::Show("missing".into())],
     ));
@@ -394,6 +465,8 @@ fn a_scenario_is_checked_when_it_is_loaded() {
         "\"food\" is defined twice",
         "no objective \"nothing\"",
         "nothing tagged \"nobody\"",
+        "no trigger \"never\"",
+        "Any of nothing never holds",
         "no objective \"missing\"",
     ] {
         assert!(

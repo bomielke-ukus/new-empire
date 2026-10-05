@@ -1,0 +1,7 @@
+// The learning campaign: one idea a scenario (docs/03 §7, docs/07 D35).
+(
+    title: "The Gift of the River",
+    about: "Learn to gather, build, advance, fight and choose your soldiers.",
+    order: 0,
+    scenarios: ["hunters", "black-land", "raiders", "horses"],
+)

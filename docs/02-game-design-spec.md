@@ -480,7 +480,8 @@ be walked to, and land it on the shore nearest the enemy's Town Center.
     the scenario says so.
   - **[GD-CAMP-03]** Triggers, checked once a second in order, wait on
     time, objectives, other triggers, counts, stockpiles, ages,
-    technologies, units in an area or a named unit gone; they narrate,
+    technologies, units in an area or a named unit gone, or any one of
+    several such things, or one not holding; they narrate,
     show, complete or fail objectives, set units down, give resources,
     reveal ground, send a side to attack, and win or lose the scenario.
   - **[GD-CAMP-04]** A scenario is checked when it is loaded, and refused
@@ -504,6 +505,31 @@ be walked to, and land it on the shore nearest the enemy's Town Center.
   scenarios in order (`save::campaigns`); the scenarios won are kept in
   `campaigns.ron` beside the settings. Narration is text only (D35): a
   line stays up at least eight seconds, longer the longer it is.
+
+  **The learning campaign** (2026-10-05, `assets/campaigns/learning`),
+  *The Gift of the River*, played as the Egyptians on drawn maps of the
+  Nile, one idea a scenario, each objective shown when the one before it
+  is done:
+  1. *Hunters on the Bank* (Naqada, about 3500 BC): gather wood, build a
+     house, grow to seven villagers, build a storehouse by a far forest,
+     gather food.
+  2. *The Black Land* (Nekhen, about 3300 BC): a storehouse and a
+     barracks, 400 food, the advance to the Tool Age, then farms (a
+     market is optional).
+  3. *Raiders from the West* (Thinis, about 3150 BC): train clubmen; the
+     Tjehenu raid when they are ready or at five minutes; then destroy
+     their camp, with a second raid at ten minutes for a slow player. The
+     Town Center lost loses it.
+  4. *Spears Against Horses* (Thebes, about 1550 BC): spearmen against
+     Hyksos horsemen, slingers against their axemen, then both against
+     Avaris. **This one leaves early Egypt on purpose:** the horse came to
+     Egypt with the Hyksos, so a lesson in spears against riders set
+     before them would be false history. Its raids are smaller than the
+     army asked for, so the counter is seen to win.
+
+  Each scenario is played to a win by a plain bot in the tests
+  (`crates/sim/tests/campaign_learning.rs`), in about nine to eleven
+  minutes for the first, second and fourth.
 - **Scenario editor** — terrain painting, unit placement, triggers, save/load,
   playtest. Post-slice, but the data formats are designed for it from the start.
 - **Cheat codes** — anachronistic joke units and resource grants, disabled in

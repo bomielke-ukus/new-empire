@@ -531,7 +531,7 @@ fn a_skirmish_is_set_up_on_the_screens_and_the_opponents_play_as_the_ai() {
     assert_eq!(app.shell, Shell::Title);
     draw(&mut app);
     assert!(app.hud.buttons.is_empty(), "no HUD on the title");
-    assert_eq!(app.screen.buttons.len(), 5);
+    assert_eq!(app.screen.buttons.len(), 6);
     // Letters and clicks on the title reach no match.
     let commands = app.sim.replay().commands.len();
     assert!(!app.keyboard_input(KeyCode::KeyV, ElementState::Pressed, false));

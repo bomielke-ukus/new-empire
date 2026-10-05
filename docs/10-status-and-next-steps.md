@@ -2266,11 +2266,36 @@ the trade boat, Islands and the opponent's use of all of it follow.
   briefing, a loss with its reason, a retry and a resignation. The title
   screen's golden image is re-recorded for the CAMPAIGNS button.
 
+### Work record: M9, third chunk — the learning campaign (2026-10-05)
+
+- **Four scenarios** in `assets/campaigns/learning`, as `docs/02` §13
+  lists them: gathering and building, advancing an age, combat, counters.
+  Drawn 64-tile maps of the Nile (desert, black land, sand bank, river)
+  with low dunes in the desert. Their text is checked against the font.
+- **Triggers can wait on any of several things, or on one not holding**
+  (`Condition::Any`, `Condition::Not`, `GD-CAMP-03`), so a raid comes
+  when the army is ready or at five minutes, whichever is first, without
+  marking the army objective done for a player who has not trained it.
+  Their parts are checked like any other condition.
+- **`Simulation::objective(id)`** says how an objective stands.
+- **Played through in the tests**: a plain bot (villagers kept at work,
+  buildings put near where they are wanted, soldiers sent at what comes)
+  wins each scenario: in 9.4, 9.3, 4.8 and 10.5 game minutes. A slow
+  player is raided on time and the objective stays open.
+- **Balance found on the way, not changed:** one Spearman loses to one
+  Light Cavalry (it needs nine hits to kill the rider, the rider seven);
+  the counter only wins at equal cost and in numbers, as `simrunner
+  balance` measures (12 against 9). The fourth scenario's first wave is
+  three riders against the six spearmen it asks for, so the lesson
+  reads. Whether the counter should be harder is the owner's call.
+- **Scenario 4 is set in 1550 BC**, not early Egypt (`docs/02` §13 as
+  built): horses came with the Hyksos.
+
 ### Resume here next session
 
 **M9 is under way** (`docs/07` D35): scenarios and campaigns are in the
-game (above). Next: the learning campaign (four Egyptian scenarios),
-then the scenario editor, then the Persian Wars and Sargon of Akkad.
+game, and the learning campaign is shipped (above). Next: the scenario
+editor, then the Persian Wars and Sargon of Akkad.
 
 **M8's items are all built** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the

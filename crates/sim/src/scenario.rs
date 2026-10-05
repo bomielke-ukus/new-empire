@@ -340,6 +340,31 @@ pub enum Condition {
     },
     /// A tagged unit or building is gone (or was never placed).
     Gone(String),
+    /// Any one of these holds: a raid that comes when the army is ready
+    /// or at five minutes, whichever is first.
+    Any(Vec<Condition>),
+    /// This does not hold.
+    Not(Box<Condition>),
+}
+
+impl Condition {
+    /// The conditions this one is made of, itself if it is not made of
+    /// others, for checking each.
+    pub fn leaves(&self) -> Vec<&Condition> {
+        match self {
+            Condition::Any(cs) => cs.iter().flat_map(Condition::leaves).collect(),
+            Condition::Not(c) => c.leaves(),
+            c => vec![c],
+        }
+    }
+
+    fn has_empty_any(&self) -> bool {
+        match self {
+            Condition::Any(cs) => cs.is_empty() || cs.iter().any(Condition::has_empty_any),
+            Condition::Not(c) => c.has_empty_any(),
+            _ => false,
+        }
+    }
 }
 
 /// Something a trigger does.
@@ -615,7 +640,10 @@ impl Scenario {
             .collect();
         for (i, t) in self.triggers.iter().enumerate() {
             let at = format!("trigger {}", t.id.clone().unwrap_or_else(|| i.to_string()));
-            for c in &t.when {
+            if t.when.iter().any(Condition::has_empty_any) {
+                out.push(format!("{at}: Any of nothing never holds"));
+            }
+            for c in t.when.iter().flat_map(Condition::leaves) {
                 let bad = match c {
                     Condition::Done(o) | Condition::Failed(o) => {
                         (!ids.contains(&o.as_str())).then(|| format!("no objective {o:?}"))
@@ -661,7 +689,7 @@ impl Scenario {
                     Condition::Stockpile { owner, .. } | Condition::Age { owner, .. } => {
                         (!side_ok(*owner)).then(|| format!("no side {owner}"))
                     }
-                    Condition::After(_) => None,
+                    Condition::After(_) | Condition::Any(_) | Condition::Not(_) => None,
                 };
                 if let Some(b) = bad {
                     out.push(format!("{at}: {b}"));
@@ -827,6 +855,12 @@ impl Simulation {
                 optional: o.optional,
             })
             .collect()
+    }
+
+    /// How an objective stands, by its id.
+    pub fn objective(&self, id: &str) -> Option<ObjectiveStatus> {
+        let i = Self::objective_index(self.scenario()?, id)?;
+        self.scenario_state.objectives.get(i).copied()
     }
 
     /// How the scenario ended for the player, once it has.
@@ -1089,6 +1123,8 @@ impl Simulation {
                 kind,
                 count,
             } => self.count_inside(*owner, area, named(kind)) >= *count as u32,
+            Condition::Any(cs) => cs.iter().any(|c| self.holds(sc, c)),
+            Condition::Not(c) => !self.holds(sc, c),
             Condition::Gone(tag) => match self.scenario_state.tags.get(tag) {
                 None => true,
                 Some(&id) => self
