@@ -538,6 +538,7 @@ fn randomised_scenario(seed: u64, ticks: u64) -> Scenario {
             } else {
                 Vec::new()
             },
+            scenario: None,
         },
         style,
     }

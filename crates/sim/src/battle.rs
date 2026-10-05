@@ -142,6 +142,21 @@ pub const WORK_PERIOD: u64 = 16;
 /// tick; not state, so not hashed or saved.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Event {
+    /// A scenario's narrator speaks: the line is
+    /// [`Simulation::line`](crate::Simulation::line)`(trigger, action)`.
+    Said {
+        /// Which trigger.
+        trigger: u16,
+        /// Which of its actions.
+        action: u16,
+    },
+    /// A scenario's objective was shown, done or failed.
+    Objective {
+        /// Which, in the scenario's order.
+        index: u16,
+        /// How it stands now.
+        status: crate::scenario::ObjectiveStatus,
+    },
     /// A player's unit was hit and their side had not been told lately.
     Alarm {
         /// Whose unit.

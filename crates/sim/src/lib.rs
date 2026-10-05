@@ -39,6 +39,7 @@ pub mod priests;
 pub mod relics;
 pub mod replay;
 pub mod rng;
+pub mod scenario;
 pub mod simulation;
 pub mod tech;
 pub mod transport;
@@ -70,6 +71,7 @@ pub use orders::{
 };
 pub use replay::{Divergence, Replay, ReplayError, Trace, VerifyError};
 pub use rng::Rng;
+pub use scenario::{Outcome, Scenario};
 pub use simulation::{
     repair_due, SimConfig, Simulation, DEFAULT_STOCKPILE, POP_CAP_RANGE, TICKS_PER_SECOND, TICK_MS,
 };

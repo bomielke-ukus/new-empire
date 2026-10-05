@@ -359,6 +359,14 @@ pub fn all() -> &'static [TechInfo] {
     TABLE
 }
 
+/// The technology a scenario names, as [`crate::kinds::by_name`] does.
+pub fn by_name(name: &str) -> Option<TechId> {
+    TABLE
+        .iter()
+        .find(|t| crate::kinds::same_name(t.name, name))
+        .map(|t| t.id)
+}
+
 /// Technologies researched at a building kind, in table order.
 pub fn at_building(kind: KindId) -> impl Iterator<Item = &'static TechInfo> {
     TABLE.iter().filter(move |t| t.building == kind)

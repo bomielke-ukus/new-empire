@@ -27,6 +27,9 @@ pub enum Victory {
     Wonder,
     /// Every relic was held ten minutes (`GD-WIN-03`).
     Relics,
+    /// A scenario's objectives decided it (`docs/02` §13): won by the
+    /// player, or lost (the winner then [`kinds::GAIA`], nobody).
+    Objectives,
 }
 
 /// The clocks, and what they decided.
@@ -79,6 +82,16 @@ impl HashState for Clocks {
 impl Simulation {
     /// How the match was won, and by whom, once it has been.
     pub fn victory(&self) -> Option<(PlayerId, Victory)> {
+        if let Some(sc) = self.scenario() {
+            match self.outcome() {
+                Some(crate::scenario::Outcome::Won) => return Some((0, Victory::Objectives)),
+                Some(crate::scenario::Outcome::Lost(_)) => {
+                    return Some((kinds::GAIA, Victory::Objectives))
+                }
+                None if !sc.skirmish_victories => return None,
+                None => {}
+            }
+        }
         if let Some(w) = self.clocks.won {
             return Some(w);
         }
@@ -105,6 +118,7 @@ impl Simulation {
     /// Reads the clocks, once a second; a clock run out decides the match.
     pub(crate) fn victory_clocks(&mut self) {
         if self.players.len() < 2
+            || self.scenario().is_some_and(|sc| !sc.skirmish_victories)
             || self.clocks.won.is_some()
             || !self.tick.is_multiple_of(TICKS_PER_SECOND as u64)
         {

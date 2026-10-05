@@ -470,6 +470,30 @@ be walked to, and land it on the shore nearest the enemy's Town Center.
 - **Campaign** — scripted scenarios with objectives, triggers and narration. Post-slice.
   First campaign is a *learning campaign*, in the model of *Ascent of Egypt*:
   each scenario teaches exactly one system.
+  - **[GD-CAMP-01]** A scenario sets the match up as written: its map
+    (generated as a skirmish map is, or drawn tile by tile), its sides
+    (civilization, starting age, stockpile, technologies, who plays them),
+    and what stands where.
+  - **[GD-CAMP-02]** The player's objectives decide a scenario: every one
+    that is not optional done wins it; one failed, or nothing of the
+    player's left standing, loses it. The skirmish victories hold only when
+    the scenario says so.
+  - **[GD-CAMP-03]** Triggers, checked once a second in order, wait on
+    time, objectives, other triggers, counts, stockpiles, ages,
+    technologies, units in an area or a named unit gone; they narrate,
+    show, complete or fail objectives, set units down, give resources,
+    reveal ground, send a side to attack, and win or lose the scenario.
+  - **[GD-CAMP-04]** A scenario is checked when it is loaded, and refused
+    with what is wrong: a name that names nothing, an id defined twice or
+    never, a map whose rows disagree, a place off the map.
+
+  **As built** (2026-10-05, `sim::scenario`): a scenario is a RON file —
+  the map, the sides, the placements, the objectives and the triggers —
+  carried in the match's configuration, so a save and a replay carry it.
+  A drawn map is rows of letters, one a tile (`g` grass, `d` dirt, `a`
+  desert, `s` sand, `w` and `W` shallow and deep water, `f` forest, `n`
+  snow), with optional corner heights; kinds and technologies are named as
+  they are shown (`"Town Center"` or `"town_center"`).
 - **Scenario editor** — terrain painting, unit placement, triggers, save/load,
   playtest. Post-slice, but the data formats are designed for it from the start.
 - **Cheat codes** — anachronistic joke units and resource grants, disabled in

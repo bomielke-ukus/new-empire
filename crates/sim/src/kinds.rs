@@ -922,6 +922,24 @@ pub fn all() -> &'static [KindInfo] {
     TABLE
 }
 
+/// The kind a scenario names (`docs/02` §13): its display name, in any
+/// case, with spaces or underscores (`"Town Center"`, `"town_center"`).
+pub fn by_name(name: &str) -> Option<KindId> {
+    TABLE.iter().find(|k| same_name(k.name, name)).map(|k| k.id)
+}
+
+/// Whether two names match ignoring case and spaces against underscores.
+pub(crate) fn same_name(a: &str, b: &str) -> bool {
+    let norm = |c: char| {
+        if c == ' ' {
+            '_'
+        } else {
+            c.to_ascii_lowercase()
+        }
+    };
+    a.len() == b.len() && a.chars().map(norm).eq(b.chars().map(norm))
+}
+
 /// The units a building kind trains, in table order. Whether a player may
 /// train one right now (age, line upgrades) is the simulation's question.
 pub fn trained_at(building: KindId) -> impl Iterator<Item = &'static KindInfo> {
