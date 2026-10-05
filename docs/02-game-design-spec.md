@@ -155,7 +155,7 @@ Slice units marked **[V1]**. Stats are opening values for tuning, not gospel.
 |---|---|---|---|---|---|---|
 | **Clubman** [V1] | Stone | 50F | 40 | 3 melee | 0/0 | The first thing you can build |
 | **Axeman** [V1] | Tool | 50F 20W | 50 | 5 melee | 0/0 | Clubman upgrade |
-| **Spearman** [V1] | Tool | 40F 20W | 45 | 4 melee | 0/1 | +6 vs cavalry & elephants |
+| **Spearman** [V1] | Tool | 40F 20W | 45 | 4 melee | 0/1 | +12 vs cavalry & elephants |
 | **Swordsman** | Bronze | 45F 25G | 70 | 8 melee | 1/1 | Line infantry |
 | **Hoplite** | Bronze | 60F 40G | 120 | 12 melee | 4/2 | Slow, brutal, from the Academy |
 | **Legionary** | Iron | 60F 40G | 160 | 16 melee | 5/3 | Hoplite line, final tier |
@@ -328,6 +328,13 @@ damage = max(1, (attack × elevation_modifier) − armour_of_matching_type + bon
 
 **[GD-STANCE-02]** Villagers being attacked **run and raise an alarm** rather than standing there
 being killed. This one change removes most of the original's cruelty.
+
+**[GD-STANCE-03]** A soldier on Aggressive or Defensive that is **hit by an enemy unit answers
+it**, even one standing beyond its sight: an archer cannot stand off and shoot soldiers that
+wait to see it. It answers only when free to (idle, attack-moving or patrolling), follows no
+further than its stance's leash or two tiles past where the shooter stood, whichever is
+further, and then walks back. Stand ground and Passive units do not answer, and nobody
+answers a tower's arrows on their own. (Decided 2026-10-05, `docs/10` §6.)
 
 ---
 

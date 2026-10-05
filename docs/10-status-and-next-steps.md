@@ -2351,12 +2351,44 @@ the trade boat, Islands and the opponent's use of all of it follow.
   a first Town Center needs a Government Centre, though D22 speaks of a
   second; a Spearman loses to a Light Cavalry one on one.
 
+### Work record: the owner's three answers (2026-10-05)
+
+The three questions M9 left in §6, answered as recommended (`docs/07`
+D36):
+
+- **Soldiers answer what hits them** (`GD-STANCE-03`,
+  `crates/sim/src/battle.rs` `answer`). An Aggressive or Defensive unit
+  that is free (idle, attack-moving, patrolling) and is hit by an enemy
+  unit turns on it, seen or not, as far as its stance's leash or two
+  tiles past where the shooter stood, whichever is further, then walks
+  back. Stand ground and Passive do not answer; towers are not answered.
+  The stance tooltips say "in sight or shooting".
+- **A first Town Center is free**: only a second needs a Government
+  Centre. A foundation counts as the first.
+- **The Spearman's bonus against cavalry is +12**: six hits to a Light
+  Cavalry's seven, three to a Scout, ten to Heavy Cavalry
+  (`docs/damage-matrix.md`).
+- **Recorded again**: the 40-a-side battle's input and three corpus
+  digests (`battle-40v40`, `marching-crowd`, `smallest-map`); the
+  Hard-against-Easy record, Hard still winning 20 of 20. The battle
+  acceptance and the counter balance pass (the Spearman wins 10 of 10
+  each side). The golden images did not move.
+- **The campaigns played again**: all fourteen tests pass. Thermopylae
+  is held with 28 of 32 and still lost by standing still; the gulf is
+  won with 12 of 30 (was 17); Marathon's fleet is 16 tiles short. King
+  of the Four Quarters got harder: the rebels now go for the bowmen who
+  shoot them and break in at the north gate, and a defence that trains
+  nothing loses its swordsmen and cannot raze the camps. The bot now
+  keeps the town working and the Barracks training through the siege,
+  as a player would, and holds with 25 and wins at 14.3 minutes. The
+  scenario itself is unchanged.
+
 ### Resume here next session
 
 **M9 is built** (`docs/07` D35): scenarios and campaigns, the learning
-campaign, the scenario editor, and the two historical campaigns. Next:
-the owner plays them, and answers the three questions in §6; then M10,
-multiplayer.
+campaign, the scenario editor, and the two historical campaigns. The
+three questions it raised are answered and built (D36, above). Next:
+the owner plays them; then M10, multiplayer.
 
 **M8's items are all built** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the
@@ -2616,9 +2648,9 @@ in the order they bite:
 | Q1 — Naval in the vertical slice? | M4 scope | Leave it out of the slice; the map generator has water but nothing sails |
 | Q8 — Four ages or five? | Content tables | Four, as `docs/02` stands; M3 shipped the four-age structure |
 | Q5 — The game's name | M6 (menus), M9 | Answered: *Brenden's Empires* (`docs/07` D27) |
-| Should soldiers answer archers shooting from beyond their sight? Today a Defensive unit (the default) does not: hoplites stand and are shot from five tiles away | Feel of every fight; the campaigns are balanced for it | Yes, on Aggressive and Defensive: the unit hit turns on its attacker within a leash. It changes every fight, so the replay corpus and the balance harness are re-recorded |
-| Does a *first* Town Center need a Government Centre? The code says yes (any Town Center), D22 says "a second one" | Rebuilding a lost town; scenarios without a town | Follow D22: only a second. The Cupbearer was redesigned around it |
-| A Spearman loses to a Light Cavalry one on one (nine hits to seven); the counter wins only in numbers | Counter clarity (`GD-COMBAT-02`) | Raise the Spearman's bonus against cavalry from +6 to +12 (six hits to the rider's seven), and check the balance harness |
+| Should soldiers answer archers shooting from beyond their sight? | Feel of every fight | Answered 2026-10-05 (`docs/07` D36): yes, on Aggressive and Defensive (`GD-STANCE-03`) |
+| Does a *first* Town Center need a Government Centre? | Rebuilding a lost town | Answered 2026-10-05 (`docs/07` D36): no, only a second, as D22 says |
+| A Spearman loses to a Light Cavalry one on one | Counter clarity (`GD-COMBAT-02`) | Answered 2026-10-05 (`docs/07` D36): the bonus is +12, six hits to the rider's seven |
 
 ---
 

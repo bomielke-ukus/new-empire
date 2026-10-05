@@ -886,8 +886,8 @@ fn stance_label(s: Stance) -> &'static str {
 
 fn stance_tooltip(s: Stance) -> &'static str {
     match s {
-        Stance::Aggressive => "AGGRESSIVE: CHASE ENEMIES IN SIGHT, THEN COME BACK",
-        Stance::Defensive => "DEFENSIVE: FIGHT ENEMIES IN SIGHT, DO NOT CHASE FAR",
+        Stance::Aggressive => "AGGRESSIVE: CHASE ENEMIES IN SIGHT OR SHOOTING, THEN COME BACK",
+        Stance::Defensive => "DEFENSIVE: FIGHT ENEMIES IN SIGHT OR SHOOTING, DO NOT CHASE FAR",
         Stance::StandGround => "STAND GROUND: FIGHT IN REACH, NEVER MOVE",
         Stance::Passive => "PASSIVE: NEVER FIGHT, RUN HOME WHEN HIT",
     }
@@ -2437,7 +2437,7 @@ mod tests {
             spear.starts_with("SPEARMAN: 40 FOOD 20 WOOD, 26S. 45 HP, 4 MELEE"),
             "{spear}"
         );
-        assert!(spear.contains("BONUS 6 VS CAVALRY"), "{spear}");
+        assert!(spear.contains("BONUS 12 VS CAVALRY"), "{spear}");
         assert!(spear.contains("WEAK TO SLINGERS"), "{spear}");
         let bow = unit_tooltip(
             kinds::BOWMAN,

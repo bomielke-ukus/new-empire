@@ -427,19 +427,20 @@ fn the_four_quarters_are_won_by_holding_agade_then_breaking_the_camps() {
         ids: vec![sargon],
         building: tc,
     });
-    let army: Vec<_> = soldiers(&b)
-        .into_iter()
-        .filter(|&id| id != sargon)
-        .collect();
+    // A siege is ten minutes long: the town keeps working and the
+    // Barracks keeps training, and what it trains goes to the posts.
     while b.status("hold") != ObjectiveStatus::Done {
         assert!(b.sim.outcome().is_none(), "{:?}", b.sim.outcome());
         if b.sim.tick().is_multiple_of(2 * SECOND as u64) {
-            let alive: Vec<_> = army
-                .iter()
-                .copied()
-                .filter(|&id| b.sim.world().slot(id).is_some())
+            let army: Vec<_> = soldiers(&b)
+                .into_iter()
+                .filter(|&id| id != sargon)
                 .collect();
-            hold(&mut b, &alive, (44, 40));
+            hold(&mut b, &army, (44, 40));
+            b.work();
+        }
+        if b.sim.tick().is_multiple_of(20 * SECOND as u64) {
+            b.train(kinds::BARRACKS, kinds::SWORDSMAN, 1);
         }
         b.sim.step();
     }

@@ -1043,14 +1043,28 @@ impl Simulation {
             return Err(PlaceError::AgeLocked { needs: info.age });
         }
         // As in the original, a second Town Center needs the Government
-        // Centre (`docs/07` D22).
-        if kind == kinds::TOWN_CENTER && !self.has_standing(p, kinds::GOVERNMENT_CENTRE) {
+        // Centre (`docs/07` D22). A player with none, its town lost or a
+        // scenario begun without one, may raise its first freely; a
+        // foundation already laid counts as the first.
+        if kind == kinds::TOWN_CENTER
+            && self.owns_any(p, kinds::TOWN_CENTER)
+            && !self.has_standing(p, kinds::GOVERNMENT_CENTRE)
+        {
             return Err(PlaceError::NeedsGovernmentCentre);
         }
         if !pl.can_afford(&self.cost_of(p, kind)) {
             return Err(PlaceError::Unaffordable);
         }
         Ok(())
+    }
+
+    /// True if `p` has a building of `kind`, finished or a foundation,
+    /// that is not falling.
+    fn owns_any(&self, p: PlayerId, kind: KindId) -> bool {
+        self.world.slots().any(|s| {
+            let i = s.index();
+            self.world.owner[i] == p && self.world.kind[i] == kind && self.world.dying[i] == 0
+        })
     }
 
     /// True if `p` has a finished, standing building of `kind`.
@@ -4985,32 +4999,54 @@ mod tests {
     }
 
     /// A second Town Center needs a finished Government Centre standing
-    /// (`docs/07` D22); rubble does not count.
+    /// (`docs/07` D22); a first does not, a foundation counts as the first,
+    /// and another player's buildings count for nothing.
     #[test]
-    fn a_town_center_needs_a_government_centre() {
+    fn a_second_town_center_needs_a_government_centre() {
         let mut sim = Simulation::new(4, flat(48, 2));
         sim.issue(spawn_cmd(0, kinds::VILLAGER, 10, 10));
         run(&mut sim, 3);
         assert_eq!(
-            sim.can_build(0, kinds::TOWN_CENTER),
-            Err(PlaceError::NeedsGovernmentCentre)
-        );
-        assert_eq!(
             sim.can_place(0, kinds::TOWN_CENTER, 30, 30),
-            Err(PlaceError::NeedsGovernmentCentre)
+            Ok(()),
+            "a player without a Town Center may raise one"
         );
-        sim.issue(spawn_cmd(0, kinds::GOVERNMENT_CENTRE, 20, 20));
+        let mine = owned(&sim, 0, kinds::VILLAGER);
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Build {
+                kind: kinds::TOWN_CENTER,
+                x: 30,
+                y: 30,
+                ids: mine,
+            },
+        });
         run(&mut sim, 3);
-        assert_eq!(sim.can_place(0, kinds::TOWN_CENTER, 30, 30), Ok(()));
+        assert_eq!(owned(&sim, 0, kinds::TOWN_CENTER).len(), 1, "laid");
         assert_eq!(
-            sim.can_place(0, kinds::TOWN_CENTER, 20, 20),
-            Err(PlaceError::Blocked),
-            "the ground is still checked"
+            sim.can_build(0, kinds::TOWN_CENTER),
+            Err(PlaceError::NeedsGovernmentCentre),
+            "the foundation is the first"
         );
-        // Another player's Government Centre is no help.
         assert_eq!(
             sim.can_build(1, kinds::TOWN_CENTER),
-            Err(PlaceError::NeedsGovernmentCentre)
+            Ok(()),
+            "player 0's Town Center does not count against player 1"
+        );
+        sim.issue(spawn_cmd(1, kinds::TOWN_CENTER, 10, 30));
+        sim.issue(spawn_cmd(0, kinds::GOVERNMENT_CENTRE, 20, 20));
+        run(&mut sim, 3);
+        assert_eq!(
+            sim.can_build(1, kinds::TOWN_CENTER),
+            Err(PlaceError::NeedsGovernmentCentre),
+            "another player's Government Centre is no help"
+        );
+        // The first foundation spent the wood; only the price stands in
+        // the way now.
+        assert_eq!(
+            sim.can_build(0, kinds::TOWN_CENTER),
+            Err(PlaceError::Unaffordable),
+            "with the Government Centre standing, a second may go up"
         );
     }
 

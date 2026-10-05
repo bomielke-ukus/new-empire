@@ -573,8 +573,10 @@ const TABLE: &[KindInfo] = &[
     KindInfo {
         age: Age::Tool,
         class: Class::Infantry,
+        // +12 so that one Spearman beats one Light Cavalry, six hits to
+        // the rider's seven (`docs/10` §6, decided 2026-10-05).
         combat: Combat {
-            bonuses: &[(Class::Cavalry, 6)],
+            bonuses: &[(Class::Cavalry, 12)],
             ..melee(4, 0, 1)
         },
         trained_at: Some(BARRACKS),
@@ -1117,7 +1119,7 @@ mod tests {
                 assert_eq!(k.combat.arrows, 1, "{}: one shot a volley", k.name);
             }
         }
-        assert_eq!(info(SPEARMAN).combat.bonuses, &[(Class::Cavalry, 6)]);
+        assert_eq!(info(SPEARMAN).combat.bonuses, &[(Class::Cavalry, 12)]);
         assert_eq!(info(BOWMAN).combat.damage, DamageType::Pierce);
         assert_eq!(info(TREE).combat.attack, 0);
         for c in Class::ALL {
