@@ -1424,7 +1424,7 @@ ARCH_MATERIALS = {
             "slate": "sandstone"},
     },
     "mesopotamian": {
-        0: {"thatch": "straw"},
+        0: {"thatch": "straw", "plaster": "mudbrick"},
         1: {"thatch": "straw", "plaster": "mudbrick"},
         2: {"thatch": "straw", "mudbrick": "baked_brick", "plaster": "baked_brick",
             "stone_light": "baked_brick", "white": "glaze", "clay_roof": "baked_brick"},
