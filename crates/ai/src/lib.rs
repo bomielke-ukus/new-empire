@@ -7,13 +7,16 @@
 //! compile-fail tests in `tests/` prove the world is unnameable from here
 //! (`TA-AI-01`).
 //!
-//! The economy manager and the build orders are in [`economy`]; the
-//! military manager follows in M5's later steps.
+//! The economy manager and the build orders are in [`economy`], the
+//! military manager in [`military`], the technologies in [`research`], the
+//! boats in [`navy`] and the priests in [`temple`].
 
 #![warn(missing_docs)]
 
 pub mod economy;
 pub mod military;
+pub mod navy;
+pub mod research;
 pub mod temple;
 
 use economy::{BuildOrder, Economy};
@@ -78,6 +81,9 @@ pub struct Opponent {
     economy: Economy,
     /// The military manager.
     military: Military,
+    /// The navy (`navy`). A save from before reads an idle one.
+    #[serde(default)]
+    navy: navy::Navy,
 }
 
 impl Opponent {
@@ -93,6 +99,7 @@ impl Opponent {
             order: BuildOrder::for_difficulty(difficulty),
             economy: Economy::default(),
             military: Military::default(),
+            navy: navy::Navy::default(),
         }
     }
 
@@ -119,8 +126,10 @@ impl Opponent {
     /// One tick: the commands to issue this tick, in order. It listens
     /// every tick, thinks every `cadence` ticks of its order, on a tick of
     /// its own so two opponents do not think together, and answers with
-    /// nothing between. The economy spends first; the military gets what
-    /// is left.
+    /// nothing between. The economy spends first. Until the army has gone
+    /// out once the military spends next and the technologies get what it
+    /// leaves; from then the technologies (with a reserve kept) go before
+    /// the military. The priests get what is left.
     pub fn think(&mut self, view: &FoggedView<'_>) -> Vec<Command> {
         debug_assert_eq!(view.player(), self.player, "a view of someone else's side");
         self.military.observe(view);
@@ -139,10 +148,28 @@ impl Opponent {
         for (have, saved) in stock.iter_mut().zip(self.economy.saving()) {
             *have = (*have - saved).max(0);
         }
+        // Until the army has gone out once it comes first, so the first
+        // attack goes out on time; from then the technologies do.
+        let army_first = !self.military.sent_out();
+        if !army_first {
+            kinds.extend(research::think(view, &self.order, &mut stock));
+        }
+        // An enemy over the water waits for the navy to carry the army,
+        // and the navy's boats come before more soldiers.
+        let by_land = self.navy.by_land(view) || !self.navy.has_dock(view);
+        if !by_land {
+            kinds.extend(self.navy.think(view, &self.order, &mut stock));
+        }
         kinds.extend(
             self.military
-                .think(view, &self.order, &mut self.rng, &mut stock),
+                .think(view, &self.order, &mut self.rng, &mut stock, by_land),
         );
+        if army_first {
+            kinds.extend(research::think(view, &self.order, &mut stock));
+        }
+        if by_land {
+            kinds.extend(self.navy.think(view, &self.order, &mut stock));
+        }
         kinds.extend(temple::think(
             view,
             &self.order,

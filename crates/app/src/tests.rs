@@ -2671,3 +2671,73 @@ fn hints_are_counted_in_the_file_and_a_short_click_flashes_the_bar() {
     draw(&mut app);
     assert!(app.hud.sprites.len() > 40, "the bar drew with its flash");
 }
+
+/// A trade boat right-clicked onto another side's Dock trades there
+/// (`GD-NAVAL-04`).
+///
+/// REQ: GD-NAVAL-04
+#[test]
+fn a_right_click_sends_a_trade_boat_to_another_sides_dock() {
+    let mut app = app();
+    let boat = spawn(&mut app, kinds::TRADE_BOAT, 10, 10);
+    app.sim.issue(Command {
+        player: 1,
+        kind: CommandKind::Spawn {
+            kind: kinds::DOCK,
+            pos: sim::nav::building_centre(13, 10, 3),
+        },
+    });
+    // In sight of the boat, so it can be picked.
+    step(&mut app, 3);
+    let dock = app
+        .sim
+        .world()
+        .slots()
+        .find(|s| app.sim.world().kind[s.index()] == kinds::DOCK)
+        .map(|s| app.sim.world().id_at(s))
+        .unwrap();
+    app.selection.set(vec![boat]);
+    app.camera.look_at_tile(12.0, 10.0);
+    draw(&mut app);
+    let d = app.sim.world().pos[app.sim.world().slot(dock).unwrap().index()];
+    let (px, py) = on_screen(&app, view::fx_to_f32(d.x), view::fx_to_f32(d.y), 6.0);
+    app.right_press(px, py);
+    assert!(matches!(
+        app.sim.replay().commands.last().unwrap().1.kind,
+        CommandKind::Trade { dock: d, .. } if d == dock
+    ));
+}
+
+/// A transport with someone aboard, right-clicked onto land, sails there
+/// to put them ashore; empty, it just goes (`GD-NAVAL-03`).
+///
+/// REQ: GD-NAVAL-03
+#[test]
+fn a_right_click_on_land_unloads_a_full_transport() {
+    let mut app = app();
+    let boat = spawn(&mut app, kinds::TRANSPORT, 10, 10);
+    let man = spawn(&mut app, kinds::CLUBMAN, 11, 10);
+    app.issue(CommandKind::Garrison {
+        ids: vec![man],
+        building: boat,
+    });
+    step(&mut app, 20);
+    assert_eq!(app.sim.garrison_of(boat), vec![man], "aboard");
+    app.selection.set(vec![boat]);
+    app.camera.look_at_tile(16.0, 16.0);
+    draw(&mut app);
+    let (px, py) = on_screen(&app, 20.5, 20.5, 0.0);
+    app.right_press(px, py);
+    assert!(matches!(
+        app.sim.replay().commands.last().unwrap().1.kind,
+        CommandKind::Unload { ref ids, .. } if *ids == vec![boat]
+    ));
+    // Everyone ashore from the panel, where it lies.
+    draw(&mut app);
+    let b = button(&app, "ALL ASHORE");
+    click(&mut app, &b);
+    assert!(matches!(
+        app.sim.replay().commands.last().unwrap().1.kind,
+        CommandKind::Ungarrison { building } if building == boat
+    ));
+}

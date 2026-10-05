@@ -51,14 +51,49 @@ pub struct NavGrid {
 
 const ORTHO: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 
+/// The four orthogonal steps.
+pub const ORTHO_STEPS: [(i32, i32); 4] = ORTHO;
+
+impl Default for NavGrid {
+    /// An empty grid: what a save from before boats reads for the water.
+    fn default() -> NavGrid {
+        NavGrid {
+            width: 0,
+            height: 0,
+            blockers: Vec::new(),
+            components: Vec::new(),
+            dirty: false,
+            sector_gen: Vec::new(),
+            generation: 0,
+        }
+    }
+}
+
 impl NavGrid {
-    /// A grid where water is blocked and everything else is open.
+    /// A grid where water is blocked and everything else is open: the
+    /// land, where everything but a boat moves.
     pub fn from_map(map: &TileMap) -> NavGrid {
+        NavGrid::open_where(map, |t| t.walkable())
+    }
+
+    /// A grid where the water is open and the land blocked: where boats
+    /// move (`docs/07` D33).
+    pub fn water_from_map(map: &TileMap) -> NavGrid {
+        NavGrid::open_where(map, |t| t.is_water())
+    }
+
+    /// True for the grid of a match from before there were boats, read
+    /// from a save, which is rebuilt before it is used.
+    pub fn is_empty(&self) -> bool {
+        self.blockers.is_empty()
+    }
+
+    fn open_where(map: &TileMap, open: impl Fn(crate::map::Terrain) -> bool) -> NavGrid {
         let (w, h) = (map.width(), map.height());
         let mut blockers = vec![0u16; (w * h) as usize];
         for y in 0..h {
             for x in 0..w {
-                if !map.terrain(x, y).walkable() {
+                if !open(map.terrain(x, y)) {
                     blockers[(y * w + x) as usize] = 1;
                 }
             }
@@ -561,6 +596,23 @@ pub fn footprint_tiles(x: i32, y: i32, footprint: i32) -> Vec<Tile> {
     for dy in -half..fp - half {
         for dx in -half..fp - half {
             out.push((x + dx, y + dy));
+        }
+    }
+    out
+}
+
+/// The tiles touching a footprint on any side or corner, the ring one tile
+/// out from [`footprint_tiles`].
+pub fn footprint_ring(x: i32, y: i32, footprint: i32) -> Vec<Tile> {
+    let fp = footprint.max(1);
+    let half = fp / 2;
+    let (lo, hi) = (-half - 1, fp - half);
+    let mut out = Vec::with_capacity((4 * fp + 4) as usize);
+    for dy in lo..=hi {
+        for dx in lo..=hi {
+            if dx == lo || dx == hi || dy == lo || dy == hi {
+                out.push((x + dx, y + dy));
+            }
         }
     }
     out

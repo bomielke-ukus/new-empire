@@ -26,7 +26,7 @@ use crate::fog;
 use crate::fx_to_f32;
 use crate::iso;
 use crate::palette;
-use crate::sprites::{Anim, Atlas};
+use crate::sprites::{self, Anim, Atlas};
 use crate::walls::{self, Piece};
 use std::collections::HashMap;
 
@@ -41,6 +41,8 @@ pub struct SpriteInstance {
     pub w: f32,
     /// Size in px at 1×.
     pub h: f32,
+    /// Atlas page.
+    pub page: u8,
     /// Atlas rectangle, px.
     pub u: u16,
     /// Atlas rectangle, px.
@@ -62,6 +64,14 @@ pub struct SpriteInstance {
     /// Light out of 255: full for what is in sight, [`fog::EXPLORED`] for
     /// what is drawn from memory.
     pub light: u8,
+}
+
+/// The architecture `p` builds in (`docs/02` §11), by
+/// [`sprites::arch_index`]: the first set's when the match named no
+/// civilization.
+fn arch_of(sim: &Simulation, p: sim::PlayerId) -> u8 {
+    sim.civ(p)
+        .map_or(0, |c| sprites::arch_index(c.info().architecture))
 }
 
 /// A building the player is about to place.
@@ -209,7 +219,7 @@ impl Scene {
             let age = sim
                 .player(world.owner[i])
                 .map_or(0, |p| p.age.index() as u8);
-            let look = atlas.variant(kind, age);
+            let look = atlas.variant(kind, age, arch_of(sim, world.owner[i]));
             // What the unit is doing decides which animation plays; the clock
             // is game time plus a per-slot phase so a crowd does not march in
             // lockstep. Presentation only: nothing here feeds the simulation.
@@ -369,6 +379,7 @@ impl Scene {
                 y: (gy - ay * worn).round(),
                 w: frame.draw_w() * worn,
                 h: frame.draw_h() * worn,
+                page: frame.page,
                 u: frame.x,
                 v: frame.y,
                 uw: frame.w,
@@ -426,7 +437,7 @@ impl Scene {
             for ((x, y), m) in f.memories() {
                 let info = kinds::info(m.kind);
                 let fp = info.footprint.max(1) as i32;
-                let look = atlas.variant(m.kind, m.age);
+                let look = atlas.variant(m.kind, m.age, arch_of(sim, m.owner));
                 let at = piece_of(m.owner);
                 let gate = (m.kind == kinds::GATE && !m.site)
                     .then(|| atlas.gate_frame(look, walls::gate_line((x, y), &at), false))
@@ -533,7 +544,7 @@ impl Scene {
                     piece_of(g.player)(x, y)
                 }
             };
-            let look = atlas.variant(g.kind, g.age);
+            let look = atlas.variant(g.kind, g.age, arch_of(sim, g.player));
             for ((x, y), ok) in tiles {
                 let centre = sim::nav::building_centre(x, y, fp as i32);
                 let (cx, cy) = (fx_to_f32(centre.x), fx_to_f32(centre.y));
@@ -626,11 +637,14 @@ pub fn order_point(sim: &Simulation, order: &Order) -> Option<Vec2Fx> {
     let of = |id: sim::EntityId| world.slot(id).map(|s| world.pos[s.index()]);
     match *order {
         Order::Idle => None,
-        Order::Move { target } | Order::AttackMove { target } | Order::Flee { target, .. } => {
-            Some(target)
-        }
+        Order::Move { target }
+        | Order::AttackMove { target }
+        | Order::Flee { target, .. }
+        | Order::Unload { at: target } => Some(target),
         Order::Patrol { to, .. } => Some(to),
-        Order::Attack { target, .. } | Order::Convert { target, .. } => of(target),
+        Order::Attack { target, .. }
+        | Order::Convert { target, .. }
+        | Order::Trade { market: target, .. } => of(target),
         Order::Relic { relic, temple } => temple.and_then(of).or_else(|| of(relic)),
         Order::Garrison { building } | Order::Repair { building, .. } => of(building),
         Order::Gather { node, .. } => of(node),
@@ -660,6 +674,7 @@ fn waypoint_marks(
             y: (gy - size / 2.0 - lift).round(),
             w: size,
             h: size,
+            page: frame.page,
             u: frame.x,
             v: frame.y,
             uw: frame.w,
@@ -837,6 +852,7 @@ pub(crate) fn overlay(
         y: (gy - ay).round(),
         w: frame.draw_w(),
         h: frame.draw_h(),
+        page: frame.page,
         u: frame.x,
         v: frame.y,
         uw: frame.w,
@@ -925,6 +941,55 @@ mod tests {
     ///
     /// REQ: GD-AGE-02
     /// REQ: RM-M3-01
+    #[test]
+    fn buildings_are_drawn_in_their_owners_architecture() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
+        let (sheets, _) = crate::sheets::load_all(&dir);
+        let atlas = Atlas::with_sheets(&sheets);
+        let drawn = |civs: Vec<sim::Civ>| {
+            let sim = Simulation::new(
+                5,
+                SimConfig {
+                    civs,
+                    ..SimConfig::default()
+                },
+            );
+            let scene = Scene::build(&sim, &atlas, None, 0.0);
+            (0..2u8)
+                .map(|p| {
+                    scene
+                        .sprites
+                        .iter()
+                        .find(|s| {
+                            s.slot != u32::MAX
+                                && sim.world().kind[s.slot as usize] == kinds::TOWN_CENTER
+                                && sim.world().owner[s.slot as usize] == p
+                        })
+                        .map(|s| (s.page, s.u, s.v))
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+        let frame_of = |look| {
+            let f = atlas.frame(look, 0).unwrap().0;
+            (f.page, f.x, f.y)
+        };
+        // The Egyptians' Town Center and the Shang's, each its own.
+        let looks = drawn(vec![sim::Civ::Egyptians, sim::Civ::Shang]);
+        assert_eq!(
+            looks[0],
+            frame_of(sprites::look_id(kinds::TOWN_CENTER, 0, 1))
+        );
+        assert_eq!(
+            looks[1],
+            frame_of(sprites::look_id(kinds::TOWN_CENTER, 0, 3))
+        );
+        // The Greeks', and a match that names no civilization, the first set.
+        let greek = drawn(vec![sim::Civ::Greeks, sim::Civ::Phoenicians]);
+        assert_eq!(greek[0], frame_of(kinds::TOWN_CENTER));
+        assert_eq!(drawn(vec![]), greek);
+    }
+
     #[test]
     fn buildings_wear_their_owners_age_and_the_sweep_lights_them() {
         let mut sim = Simulation::new(

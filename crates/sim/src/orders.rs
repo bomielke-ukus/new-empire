@@ -4,7 +4,7 @@
 use crate::entity::{EntityId, KindId};
 use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
-use crate::kinds::{Cost, Resource, CARRY_CAPACITY};
+use crate::kinds::{Class, Cost, Resource, CARRY_CAPACITY};
 use crate::tech::{Age, TechId};
 use crate::vec2::Vec2Fx;
 use serde::{Deserialize, Serialize};
@@ -220,6 +220,20 @@ pub enum Order {
         /// Ticks of the chant still to go; 0 before it has begun.
         chant: u16,
     },
+    /// A transport's: sail to the water by the land nearest `at` and put
+    /// everyone aboard ashore there (`GD-NAVAL-03`).
+    Unload {
+        /// Where on land.
+        at: Vec2Fx,
+    },
+    /// A trade boat's: wood out from a Dock of its side's to `market`,
+    /// another side's, and gold home, over and over (`GD-NAVAL-04`).
+    Trade {
+        /// The other side's Dock.
+        market: EntityId,
+        /// Sailing out (true) or home.
+        out: bool,
+    },
 }
 
 /// Stages of the gather cycle.
@@ -280,6 +294,15 @@ impl HashState for Order {
                 h.write_u8(11);
                 h.write(relic);
                 h.write(temple);
+            }
+            Order::Unload { at } => {
+                h.write_u8(12);
+                h.write(at);
+            }
+            Order::Trade { market, out } => {
+                h.write_u8(13);
+                h.write(market);
+                h.write_bool(*out);
             }
             Order::Attack {
                 target,
@@ -593,6 +616,21 @@ impl Modifiers {
             Fx::from_int(100 + self.gather_rate_pct[r.index()]),
             Fx::from_int(100),
         )
+    }
+
+    /// A per-class table's entry for `c`. The tables predate ships and no
+    /// technology touches them yet, so a ship's entry is none (and old
+    /// saves and hashes keep their shape).
+    pub fn of(table: &[i32; 8], c: Class) -> i32 {
+        table.get(c.index()).copied().unwrap_or(0)
+    }
+
+    /// Adds `n` to a per-class table's entry for `c`; nothing for a ship,
+    /// which no technology names.
+    pub fn add(table: &mut [i32; 8], c: Class, n: i32) {
+        if let Some(v) = table.get_mut(c.index()) {
+            *v += n;
+        }
     }
 
     /// Carry capacity after modifiers.

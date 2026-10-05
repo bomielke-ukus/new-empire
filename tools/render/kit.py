@@ -98,9 +98,27 @@ COLOURS = {
     "elephant": srgb(0.5, 0.48, 0.46),
     "elephant_toe": srgb(0.66, 0.63, 0.58),
     "ivory": srgb(0.93, 0.9, 0.82),
+    # Boats: the tarred hull below the strakes; fish, and the foam they
+    # break the water with.
+    "pitch": srgb(0.20, 0.15, 0.11),
+    "fish": srgb(0.64, 0.68, 0.72),
+    "fish_dark": srgb(0.32, 0.38, 0.44),
+    "foam": srgb(0.86, 0.90, 0.92),
     # Split-wood shingles, the Tool Age's roofs; slate, the Iron Age's.
     "shingle": srgb(0.46, 0.37, 0.27),
     "slate": srgb(0.36, 0.39, 0.44),
+    # The other architectures (docs/07 D34). Egyptian: sandstone, white
+    # limestone, and paint of blue and red ochre. Mesopotamian: baked brick
+    # and blue glaze. East Asian: rammed earth, red lacquer, dark tile.
+    "sandstone": srgb(0.80, 0.70, 0.52),
+    "limestone": srgb(0.90, 0.86, 0.76),
+    "paint_blue": srgb(0.24, 0.40, 0.60),
+    "paint_red": srgb(0.64, 0.27, 0.17),
+    "baked_brick": srgb(0.52, 0.36, 0.26),
+    "glaze": srgb(0.20, 0.36, 0.60),
+    "rammed": srgb(0.68, 0.56, 0.38),
+    "lacquer": srgb(0.58, 0.20, 0.13),
+    "tile_dark": srgb(0.26, 0.28, 0.32),
 }
 
 
@@ -135,6 +153,15 @@ SURFACES = {
     "clay_roof": ("courses", 40.0, 0.14, 0.3),
     "shingle": ("courses", 45.0, 0.16, 0.35),
     "slate": ("courses", 40.0, 0.12, 0.3),
+    "sandstone": ("brick", 2.5, 0.08, 0.3),
+    "limestone": ("brick", 2.0, 0.05, 0.2),
+    "paint_blue": ("noise", 30.0, 0.04, 0.05),
+    "paint_red": ("noise", 30.0, 0.04, 0.05),
+    "baked_brick": ("brick", 5.0, 0.12, 0.3),
+    "glaze": ("brick", 5.0, 0.08, 0.2),
+    "rammed": ("courses", 14.0, 0.10, 0.2),
+    "lacquer": ("noise", 30.0, 0.05, 0.1),
+    "tile_dark": ("courses", 45.0, 0.14, 0.35),
     "earth": ("noise", 25.0, 0.12, 0.3),
     "crop": ("noise", 30.0, 0.20, 0.5),
     "leaf": ("noise", 30.0, 0.20, 0.6),
@@ -520,6 +547,24 @@ def oval(name, bottom, top, height, mat, location=(0.0, 0.0, 0.0), lean=0.0, sid
     for k in range(sides):
         j = (k + 1) % sides
         faces.append((k, j, sides + j, sides + k))
+    return _recalc(_mesh(name, verts, faces, mat, location))
+
+
+def oval_ring(name, outer, inner, height, mat, location=(0.0, 0.0, 0.0), sides=16):
+    """A band of oval section `height` tall, open in the middle: half-sizes
+    `outer` = (x, y) outside and `inner` inside. A boat's rail."""
+    (ox, oy), (ix, iy) = outer, inner
+    verts = []
+    for rx, ry, z in ((ox, oy, 0.0), (ox, oy, height), (ix, iy, height), (ix, iy, 0.0)):
+        for k in range(sides):
+            a = 2.0 * math.pi * k / sides
+            verts.append((rx * math.cos(a), ry * math.sin(a), z))
+    faces = []
+    for ring in range(4):
+        nxt = (ring + 1) % 4
+        for k in range(sides):
+            j = (k + 1) % sides
+            faces.append((ring * sides + k, ring * sides + j, nxt * sides + j, nxt * sides + k))
     return _recalc(_mesh(name, verts, faces, mat, location))
 
 
@@ -913,6 +958,16 @@ def rod(name, a, b, radius, mat, sides=6, top_radius=None):
                     rotation=(angle, 0.0, 0.0), top_radius=top_radius)
 
 
+def beam(name, a, b, radius, mat, sides=6):
+    """A round rod from `a` to `b`, pointing any way: what `rod` is for
+    rods across x as well as y and z."""
+    dx, dy, dz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+    length = math.sqrt(dx * dx + dy * dy + dz * dz)
+    tilt = math.acos(max(-1.0, min(1.0, dz / length)))
+    turn = math.atan2(dy, dx)
+    return cylinder(name, radius, length, mat, a, sides=sides, rotation=(0.0, tilt, turn))
+
+
 def bow(name):
     """A recurve bow: the limbs curving back from the grip toward the
     archer and their tips flicking forward again, the string straight
@@ -1019,8 +1074,15 @@ class Building:
         self.shown.append((obj, set(frames)))
         return obj
 
+    # Whether Building.finish restyles it for its architecture: a Wonder of
+    # another architecture is its own model.
+    restyle = True
+
     def finish(self):
-        if STYLE_AGE:
+        if STYLE_ARCH != "greek":
+            if self.restyle:
+                style_architecture(self, STYLE_ARCH, STYLE_AGE)
+        elif STYLE_AGE:
             style_building(self, STYLE_AGE)
         scene = bpy.context.scene
         scene.frame_start, scene.frame_end = 1, self.frames
@@ -1336,6 +1398,371 @@ def timber_frame(b, name, at, w, d, h, frames):
                   (cx, cy + d / 2 + 0.01, z0 + z)), frames)
         b.add(box("%s_rail_x%d" % (name, i), (0.02, d, beam), "wood_dark",
                   (cx + w / 2 + 0.01, cy, z0 + z)), frames)
+
+
+# --------------------------------------------------------------------------
+# The architectures (`docs/02` section 11, `docs/07` D34). The sets as first
+# built are the Greek; the Egyptian, the Mesopotamian and the East Asian are
+# the same buildings restyled in Building.finish, as the ages restyle the
+# Greek: each its own materials in each age, its own roofs in place of the
+# thatch and the gables, and its own work on the walls. What stood on a
+# roof is set on the new one. `STYLE_ARCH` is the architecture being built;
+# slice.py sets it for `house_egyptian_bronze`.
+
+STYLE_ARCH = "greek"
+
+# What each architecture builds in, age by age, by the Greek Stone Age
+# material it replaces.
+ARCH_MATERIALS = {
+    "egyptian": {
+        0: {"thatch": "straw"},
+        1: {"thatch": "straw", "mudbrick": "plaster"},
+        2: {"thatch": "straw", "mudbrick": "sandstone", "plaster": "sandstone",
+            "stone_light": "sandstone", "white": "limestone", "clay_roof": "sandstone"},
+        3: {"thatch": "straw", "mudbrick": "limestone", "plaster": "limestone",
+            "stone_light": "sandstone", "white": "limestone", "clay_roof": "sandstone",
+            "slate": "sandstone"},
+    },
+    "mesopotamian": {
+        0: {"thatch": "straw", "plaster": "mudbrick"},
+        1: {"thatch": "straw", "plaster": "mudbrick"},
+        2: {"thatch": "straw", "mudbrick": "baked_brick", "plaster": "baked_brick",
+            "stone_light": "baked_brick", "white": "glaze", "clay_roof": "baked_brick"},
+        3: {"thatch": "straw", "mudbrick": "baked_brick", "plaster": "baked_brick",
+            "stone_light": "baked_brick", "white": "glaze", "clay_roof": "baked_brick",
+            "slate": "baked_brick"},
+    },
+    "asian": {
+        0: {"mudbrick": "rammed"},
+        1: {"mudbrick": "rammed", "plaster": "rammed"},
+        2: {"mudbrick": "plaster", "stone_light": "stone", "white": "lacquer",
+            "clay_roof": "tile_dark"},
+        3: {"mudbrick": "plaster", "stone_light": "stone", "white": "lacquer",
+            "clay_roof": "tile_dark", "slate": "tile_dark"},
+    },
+}
+
+# The walled blocks an architecture dresses, by the end of their names.
+BLOCKS = ("_walls", "_upper", "_cella", "_hut", "tower_body")
+
+
+def frustum(name, bottom, top, height, mat, location=(0.0, 0.0, 0.0)):
+    """A box narrowing (or flaring) from `bottom` = (w, d) at its foot to
+    `top` at its head, `height` tall: a battered wall, a cornice."""
+    (bw, bd), (tw, td) = bottom, top
+    verts = [(-bw / 2, -bd / 2, 0.0), (bw / 2, -bd / 2, 0.0), (bw / 2, bd / 2, 0.0),
+             (-bw / 2, bd / 2, 0.0), (-tw / 2, -td / 2, height), (tw / 2, -td / 2, height),
+             (tw / 2, td / 2, height), (-tw / 2, td / 2, height)]
+    faces = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
+    return _mesh(name, verts, faces, mat, location)
+
+
+def rim(name, inner, outer_bottom, outer_top, height, mat, location=(0.0, 0.0, 0.0)):
+    """A rectangular band round an opening `inner` = (w, d), its outside
+    `outer_bottom` at its foot and `outer_top` at its head: a cornice that
+    flares out over a wall, open over the roof inside it."""
+    loops = [(outer_bottom, 0.0), (outer_top, height), (inner, height), (inner, 0.0)]
+    verts = []
+    for (w, d), z in loops:
+        verts += [(-w / 2, -d / 2, z), (w / 2, -d / 2, z), (w / 2, d / 2, z), (-w / 2, d / 2, z)]
+    faces = []
+    for ring in range(4):
+        nxt = (ring + 1) % 4
+        for k in range(4):
+            j = (k + 1) % 4
+            faces.append((ring * 4 + k, ring * 4 + j, nxt * 4 + j, nxt * 4 + k))
+    return _recalc(_mesh(name, verts, faces, mat, location))
+
+
+def hip_roof(name, w, d, h, mat, location, flare=0.05):
+    """A hipped roof over `w` by `d`, `h` high, its ridge along the longer
+    side and its corners turned up by `flare` over eaves that sag between
+    them. Returns the roof and its height above its foot at a point."""
+    x, y, z = location
+    long_x = w >= d
+    half_long, half_short = (w, d) if long_x else (d, w)
+    half_long, half_short = half_long / 2.0, half_short / 2.0
+    r = max(half_long - half_short, 0.002)
+    # The eaves round from the -x -y corner, a corner then a middle.
+    ring = [(-w / 2, -d / 2, flare), (0.0, -d / 2, 0.0), (w / 2, -d / 2, flare), (w / 2, 0.0, 0.0),
+            (w / 2, d / 2, flare), (0.0, d / 2, 0.0), (-w / 2, d / 2, flare), (-w / 2, 0.0, 0.0)]
+    ridge = [(-r, 0.0, h), (r, 0.0, h)] if long_x else [(0.0, -r, h), (0.0, r, h)]
+    verts = ring + ridge
+    a, b2 = 8, 9
+    if long_x:
+        faces = [(0, 1, a), (1, 2, b2), (1, b2, a),        # -y slope
+                 (4, 5, b2), (5, 6, a), (5, a, b2),        # +y slope
+                 (2, 3, b2), (3, 4, b2),                   # +x hip
+                 (6, 7, a), (7, 0, a)]                     # -x hip
+    else:
+        faces = [(2, 3, a), (3, 4, b2), (3, b2, a),        # +x slope
+                 (6, 7, b2), (7, 0, a), (7, a, b2),        # -x slope
+                 (4, 5, b2), (5, 6, b2),                   # +y hip
+                 (0, 1, a), (1, 2, a)]                     # -y hip
+    faces.append(tuple(reversed(range(8))))
+    roof = _recalc(_mesh(name, verts, faces, mat, location))
+
+    def height_at(px, py):
+        u, v = abs(px - x), abs(py - y)
+        along, across = (u, v) if long_x else (v, u)
+        t = min(1.0 - across / half_short, 1.0 - max(0.0, along - r) / max(half_long - r, 1e-6))
+        return z + h * max(0.0, min(1.0, t))
+    return roof, height_at
+
+
+def _bounds(objs):
+    """World-space bounds of `objs`, by their vertices: (x0, x1, y0, y1, z0,
+    z1). (A turned object's bound_box is its own axes' box, turned.)"""
+    pts = [o.matrix_world @ v.co for o in objs for v in o.data.vertices]
+    return (min(p.x for p in pts), max(p.x for p in pts), min(p.y for p in pts),
+            max(p.y for p in pts), min(p.z for p in pts), max(p.z for p in pts))
+
+
+def style_architecture(b, arch, age):
+    """Rebuilds `b` in `arch` as of `age`: its materials, its roofs and the
+    work on its walls and columns."""
+    swaps = ARCH_MATERIALS[arch].get(age, {})
+    for obj in b.root.children_recursive:
+        if obj.type != "MESH" or not obj.data.materials:
+            continue
+        name = obj.data.materials[0].name
+        if name in swaps:
+            obj.data.materials[0] = material(swaps[name])
+    bpy.context.view_layer.update()
+    _restyle_roofs(b, arch, age)
+    for obj, frames in list(b.shown):
+        if obj.type == "MESH" and obj.name.endswith(BLOCKS):
+            _dress_block(b, obj, tuple(frames), arch, age)
+        elif obj.type == "MESH" and "_col_" in obj.name:
+            _dress_column(b, obj, tuple(frames), arch, age)
+
+
+def _restyle_roofs(b, arch, age):
+    """Takes every roof off `b` (a part named for a roof, a ridge, an East
+    Asian building's parapet) and builds the architecture's in its place;
+    what stood on the old roof stands on the new."""
+    groups = {}
+    for obj, frames in b.shown:
+        n = obj.name
+        if "_roof" in n:
+            key = n.split("_roof")[0]
+        elif n.endswith("_ridge"):
+            key = n[:-len("_ridge")]
+        else:
+            continue
+        groups.setdefault(key, []).append((obj, frames))
+    for key, parts in groups.items():
+        objs = [o for o, _ in parts]
+        frames = set().union(*[f for _, f in parts])
+        x0, x1, y0, y1, z0, z1 = _bounds(objs)
+        names = {o.name for o in objs}
+        b.shown = [(o, f) for o, f in b.shown if o.name not in names]
+        for o in objs:
+            bpy.data.objects.remove(o, do_unlink=True)
+        if arch == "asian":
+            # A hipped roof comes down over the walls' tops.
+            for o, f in list(b.shown):
+                if "parapet" in o.name:
+                    b.shown.remove((o, f))
+                    bpy.data.objects.remove(o, do_unlink=True)
+        # What stood on it: wholly above its foot and within its eaves.
+        riders = []
+        for o, f in b.shown:
+            if o.type not in ("MESH",) or not (set(f) & frames):
+                continue
+            ox0, ox1, oy0, oy1, oz0, _ = _bounds([o])
+            cx, cy = (ox0 + ox1) / 2, (oy0 + oy1) / 2
+            if (oz0 >= z0 + 0.05 and x0 <= cx <= x1 and y0 <= cy <= y1
+                    and "parapet" not in o.name):
+                riders.append((o, cx, cy, oz0))
+        height_at = _arch_roof(b, key, (x0, x1, y0, y1, z0, z1), tuple(sorted(frames)), arch,
+                               age, [(cx, cy) for _, cx, cy, _ in riders])
+        # Riders move together by the name they share (a flag's pole and
+        # its cloth), set on the roof under the lowest of them.
+        by_name = {}
+        for o, cx, cy, oz0 in riders:
+            by_name.setdefault(o.name.rsplit("_", 1)[0], []).append((o, cx, cy, oz0))
+        for group in by_name.values():
+            _, cx, cy, low = min(group, key=lambda g: g[3])
+            dz = height_at(cx, cy) - low
+            for o, _, _, _ in group:
+                o.location.z += dz
+    bpy.context.view_layer.update()
+
+
+def _arch_roof(b, key, bounds, frames, arch, age, keep_clear=()):
+    """`arch`'s roof over `bounds`, the old roof's, with nothing of its own
+    on the points `keep_clear` (where a flag will stand); returns its
+    height at a point."""
+    x0, x1, y0, y1, z0, z1 = bounds
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    w, d = x1 - x0, y1 - y0
+    if arch == "asian":
+        mat = "thatch" if age < 2 else "tile_dark"
+        h = max(0.18, min(0.55, 0.32 * min(w, d)))
+        roof, height_at = hip_roof(key + "_hip", w + 0.06, d + 0.06, h, mat, (cx, cy, z0),
+                                   flare=0.06 if age < 2 else 0.09)
+        b.add(roof, frames)
+        if age >= 2:
+            # A ridge of tile with its ends turned up, gilt in the Iron Age.
+            long_x = w >= d
+            r = max(abs(w - d) / 2.0, 0.04)
+            size = (2 * r + 0.08, 0.06, 0.05) if long_x else (0.06, 2 * r + 0.08, 0.05)
+            b.add(box(key + "_hip_ridge", size, "tile_dark", (cx, cy, z0 + h - 0.02)), frames)
+            ends = [(-r, 0.0), (r, 0.0)] if long_x else [(0.0, -r), (0.0, r)]
+            for i, (ex, ey) in enumerate(ends):
+                b.add(cone(key + "_hip_horn%d" % i, 0.035, 0.12,
+                           "gold" if age >= 3 else "tile_dark",
+                           (cx + ex, cy + ey, z0 + h + 0.02), sides=6), frames)
+        return height_at
+    # Egyptian and Mesopotamian: a flat earthen or brick roof on the walls.
+    slab = {"egyptian": {0: "mudbrick", 1: "plaster", 2: "sandstone", 3: "sandstone"},
+            "mesopotamian": {0: "mudbrick", 1: "mudbrick", 2: "baked_brick",
+                             3: "baked_brick"}}[arch][age]
+    sw, sd = max(w - 0.18, 0.3), max(d - 0.18, 0.3)
+    top = z0 + 0.1
+    b.add(box(key + "_flat", (sw, sd, 0.1), slab, (cx, cy, z0)), frames)
+    if arch == "egyptian":
+        # A low parapet under a cavetto cornice, painted from the Tool Age,
+        # and on a roof big enough to live on, a wind-catcher turned to the
+        # north wind.
+        lip = "limestone" if age >= 2 else "plaster"
+        wall = {0: "mudbrick", 1: "plaster", 2: "sandstone", 3: "limestone"}[age]
+        t = 0.05
+        for k, (px, py, pw, pd) in enumerate(((0.0, -sd / 2 + t / 2, sw, t),
+                                              (0.0, sd / 2 - t / 2, sw, t),
+                                              (-sw / 2 + t / 2, 0.0, t, sd),
+                                              (sw / 2 - t / 2, 0.0, t, sd))):
+            b.add(box("%s_parapet%d" % (key, k), (pw, pd, 0.08), wall, (cx + px, cy + py, top)),
+                  frames)
+        b.add(rim(key + "_cornice", (sw - 2 * t, sd - 2 * t), (sw, sd), (sw + 0.1, sd + 0.1),
+                  0.06, lip, (cx, cy, top + 0.06)), frames)
+        if age >= 1:
+            b.add(rim(key + "_band", (sw - 2 * t, sd - 2 * t), (sw + 0.02, sd + 0.02),
+                      (sw + 0.02, sd + 0.02), 0.03, "paint_blue", (cx, cy, top + 0.025)), frames)
+        corners = [(cx - sw / 2 + 0.25, cy - sd / 2 + 0.25), (cx + sw / 2 - 0.25, cy - sd / 2 + 0.25),
+                   (cx - sw / 2 + 0.25, cy + sd / 2 - 0.25)]
+        clear = [c for c in corners
+                 if all(math.hypot(c[0] - px, c[1] - py) > 0.35 for px, py in keep_clear)]
+        if min(sw, sd) >= 1.0 and clear:
+            mx, my = clear[0]
+            b.add(box(key + "_malqaf", (0.24, 0.2, 0.3), wall, (mx, my, top)), frames)
+            b.add(frustum(key + "_malqaf_hood", (0.24, 0.2), (0.26, 0.06), 0.12, wall,
+                          (mx, my + 0.0, top + 0.3)), frames)
+            b.add(box(key + "_malqaf_mouth", (0.16, 0.02, 0.16), "opening",
+                      (mx, my + 0.1, top + 0.12)), frames)
+        return lambda px, py: top
+    # Mesopotamian: crenellated, the merlons stepped from the Bronze Age.
+    mat = "mudbrick" if age < 2 else "baked_brick"
+    _merlons(b, key + "_crenel", (cx, cy, top), sw, sd, mat, frames, stepped=age >= 2)
+    return lambda px, py: top
+
+
+def _merlons(b, name, at, w, d, mat, frames, stepped=False, size=0.07):
+    """Merlons round the edge of a `w` by `d` top at `at`."""
+    cx, cy, z = at
+    step = size * 2.0
+    k = 0
+    for along, fixed, axis in ((w, d, "x"), (d, w, "y")):
+        n = max(2, int(along / step))
+        # The corners once, with the first edges.
+        for i in range(n + 1) if axis == "x" else range(1, n):
+            t = -along / 2 + along * i / n
+            for side in (-1.0, 1.0):
+                x, y = (t, side * fixed / 2) if axis == "x" else (side * fixed / 2, t)
+                b.add(box("%s_%d" % (name, k), (size, size, size), mat,
+                          (cx + x, cy + y, z)), frames)
+                if stepped:
+                    b.add(box("%s_%d_top" % (name, k), (size * 0.55, size * 0.55, size * 0.5),
+                              mat, (cx + x, cy + y, z + size)), frames)
+                k += 1
+
+
+def _dress_block(b, obj, shown, arch, age):
+    """`arch`'s work on a walled block: Egyptian, a cornice, painted bands
+    and, from the Bronze Age, a battered foot; Mesopotamian, buttresses and,
+    from the Bronze Age, a band of blue glaze, glazed above it in the Iron;
+    East Asian, a podium and posts, lacquered from the Bronze Age, with
+    brackets under the eaves."""
+    xs = [v.co for v in obj.data.vertices]
+    w = max(c.x for c in xs) - min(c.x for c in xs)
+    d = max(c.y for c in xs) - min(c.y for c in xs)
+    h = max(c.z for c in xs) - min(c.z for c in xs)
+    cx, cy, z0 = obj.location.x, obj.location.y, obj.location.z
+    name = obj.name
+    wall = obj.data.materials[0].name
+    if arch == "egyptian":
+        lip = "limestone" if age >= 2 else "plaster"
+        b.add(rim(name + "_cavetto", (w - 0.1, d - 0.1), (w, d), (w + 0.1, d + 0.1), 0.07, lip,
+                  (cx, cy, z0 + h - 0.06)), shown)
+        if age >= 1:
+            for k, (mat, z) in enumerate((("paint_blue", h - 0.1), ("paint_red", h - 0.14))):
+                b.add(box("%s_paint%d" % (name, k), (w + 0.012, d + 0.012, 0.03), mat,
+                          (cx, cy, z0 + z)), shown)
+        if age >= 2:
+            b.add(frustum(name + "_batter", (w + 0.12, d + 0.12), (w + 0.01, d + 0.01),
+                          h * 0.3, wall, (cx, cy, z0)), shown)
+    elif arch == "mesopotamian":
+        n_x, n_y = max(2, int(w / 0.3)), max(2, int(d / 0.3))
+        for i in range(n_x + 1):
+            x = -w / 2 + w * i / n_x
+            b.add(box("%s_buttress_y%d" % (name, i), (0.07, 0.04, h), wall,
+                      (cx + x, cy + d / 2 + 0.01, z0)), shown)
+        for i in range(n_y + 1):
+            y = -d / 2 + d * i / n_y
+            b.add(box("%s_buttress_x%d" % (name, i), (0.04, 0.07, h), wall,
+                      (cx + w / 2 + 0.01, cy + y, z0)), shown)
+        if age >= 2:
+            b.add(box(name + "_glaze", (w + 0.05, d + 0.05, 0.08), "glaze",
+                      (cx, cy, z0 + h * 0.72)), shown)
+        if age >= 3:
+            # Glazed to the top: a band round the wall, short of its top face.
+            b.add(rim(name + "_glaze_top", (w - 0.04, d - 0.04), (w + 0.03, d + 0.03),
+                      (w + 0.03, d + 0.03), h * 0.18 - 0.01, "glaze", (cx, cy, z0 + h * 0.82)),
+                  shown)
+            for i in range(n_x):
+                x = -w / 2 + w * (i + 0.5) / n_x
+                b.add(cylinder("%s_rosette_y%d" % (name, i), 0.025, 0.02, "gold",
+                               (cx + x, cy + d / 2 + 0.03, z0 + h * 0.76), sides=8,
+                               pivot="centre", rotation=(math.radians(90.0), 0.0, 0.0)), shown)
+    elif arch == "asian":
+        b.add(box(name + "_podium", (w + 0.16, d + 0.16, 0.07), "stone" if age >= 2 else "earth",
+                  (cx, cy, z0)), shown)
+        post = "lacquer" if age >= 2 else "wood_dark"
+        n_x, n_y = (2, 2) if age == 0 else (max(2, int(w / 0.4)), max(2, int(d / 0.4)))
+        for i in range(n_x + 1):
+            x = -w / 2 + w * i / n_x
+            b.add(box("%s_post_y%d" % (name, i), (0.05, 0.03, h), post,
+                      (cx + x, cy + d / 2 + 0.01, z0)), shown)
+            if age >= 2:
+                b.add(box("%s_bracket_y%d" % (name, i), (0.1, 0.06, 0.05), "wood_dark",
+                          (cx + x, cy + d / 2 + 0.03, z0 + h - 0.05)), shown)
+        for i in range(n_y + 1):
+            y = -d / 2 + d * i / n_y
+            b.add(box("%s_post_x%d" % (name, i), (0.03, 0.05, h), post,
+                      (cx + w / 2 + 0.01, cy + y, z0)), shown)
+            if age >= 2:
+                b.add(box("%s_bracket_x%d" % (name, i), (0.06, 0.1, 0.05), "wood_dark",
+                          (cx + w / 2 + 0.03, cy + y, z0 + h - 0.05)), shown)
+        if age >= 1:
+            b.add(box(name + "_beam_y", (w, 0.03, 0.04), post, (cx, cy + d / 2 + 0.012, z0 + h - 0.04)),
+                  shown)
+            b.add(box(name + "_beam_x", (0.03, d, 0.04), post, (cx + w / 2 + 0.012, cy, z0 + h - 0.04)),
+                  shown)
+
+
+def _dress_column(b, obj, shown, arch, age):
+    """An Egyptian column's flared papyrus capital, painted; the others'
+    columns take their materials from the swaps."""
+    if arch != "egyptian":
+        return
+    xs = [v.co for v in obj.data.vertices]
+    r = (max(c.x for c in xs) - min(c.x for c in xs)) / 2
+    h = max(c.z for c in xs) - min(c.z for c in xs)
+    x, y, z = obj.location
+    b.add(cylinder(obj.name + "_capital", r, 0.08, "paint_blue" if age >= 2 else "leaf",
+                   (x, y, z + h - 0.08), sides=8, top_radius=r * 1.9), shown)
+    b.add(cylinder(obj.name + "_foot", r * 1.3, 0.04, "sandstone", (x, y, z), sides=8), shown)
 
 
 def age_dress(h, age, costume):
@@ -2317,6 +2744,301 @@ def engine_pose(kind, anim, i, count):
             k = (i + 1) / float(count)
             body["scale_z"] = 1.0 - 0.2 * k
     return body, s, loaded
+
+
+# --------------------------------------------------------------------------
+# Boats (`docs/07` D33): a hull facing +Y on the water line at z = 0.
+
+# Each boat's hull: length, beam, height of the sides, and what it carries.
+BOATS = {
+    "fishing": (0.78, 0.30, 0.13),
+    "transport": (1.25, 0.52, 0.17),
+    "trade": (1.15, 0.48, 0.19),
+    "archer": (1.20, 0.38, 0.16),
+    "galley": (1.30, 0.42, 0.18),
+    "catapult": (1.35, 0.50, 0.20),
+}
+
+
+def water_line(name, parent, z=0.002):
+    """A holdout at the water line: whatever lies below it does not render,
+    as if under the water the sprite is drawn over. It hides the shadow
+    there too."""
+    h = 4.0
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata([(-h, -h, 0.0), (h, -h, 0.0), (h, h, 0.0), (-h, h, 0.0)], [],
+                     [(0, 1, 2, 3)])
+    water = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(water)
+    water.is_holdout = True
+    water.location = (0.0, 0.0, z)
+    water.parent = parent
+    return water
+
+
+class Boat:
+    """A boat facing +Y, its keel on the water line: a planked hull tarred
+    below, a deck, a mast and a sail of the owner's colour, and what its
+    kind carries. "fishing": a net over the stern and one fisher; "transport":
+    benches and a wide hull for passengers; "trade": bales and jars;
+    "archer": archers along the rail; "galley": two banks of oars, shields
+    of the owner's colour along the rail, a bronze ram and archers;
+    "catapult": a catapult on deck. It rocks at rest, pulls its oars at the
+    walk, looses (or throws) at the attack, and heels over and sinks."""
+
+    def __init__(self, root_name, kind):
+        self.root = empty(root_name)
+        self.body = empty(root_name + "_body", parent=self.root)
+        self.parts = {}
+        self.oars = []
+        self.kind = kind
+        n = root_name
+        add = self._add
+        L, B, H = BOATS[kind]
+        hl, hb = L / 2.0, B / 2.0
+        # The hull: tarred at the water, planked above, a stem curling up at
+        # the bow and a stern post; foam where it meets the water.
+        add("foam", oval(n + "_foam", (hb * 0.88, hl * 0.95), (hb * 0.88, hl * 0.95), 0.006,
+                         "foam"))
+        add("keel", oval(n + "_keel", (hb * 0.72, hl * 0.84), (hb * 0.9, hl * 0.95), H * 0.45,
+                         "pitch"))
+        # The deck lies a little below the rail: its own top, nothing on it.
+        add("strakes", oval(n + "_strakes", (hb * 0.9, hl * 0.95), (hb * 0.97, hl * 0.985),
+                            H * 0.55 - 0.035, "wood", (0.0, 0.0, H * 0.45)))
+        add("deck", oval(n + "_deck", (hb * 0.97, hl * 0.985), (hb * 0.97, hl * 0.985), 0.015,
+                         "wood_dark", (0.0, 0.0, H - 0.035)))
+        add("wale", oval_ring(n + "_wale", (hb * 1.02, hl * 1.01), (hb * 0.9, hl * 0.93), 0.05,
+                              "wood_dark", (0.0, 0.0, H - 0.04)))
+        add("stem", rod(n + "_stem", (0.0, hl * 0.92, H * 0.6), (0.0, hl * 1.08, H + 0.12),
+                        0.025, "wood_dark", sides=6))
+        add("stern", rod(n + "_sternpost", (0.0, -hl * 0.9, H * 0.6), (0.0, -hl * 1.02, H + 0.16),
+                         0.025, "wood_dark", sides=6))
+        # The mast, a yard and the sail, furled for the catapult's arm.
+        mast_h = {"fishing": 0.5, "catapult": 0.62}.get(kind, 0.72)
+        mast_y = {"catapult": hl * 0.35, "fishing": hl * 0.15}.get(kind, 0.0)
+        add("mast", cylinder(n + "_mast", 0.018, mast_h, "wood", (0.0, mast_y, H), sides=6))
+        sail_w = B * (1.3 if kind in ("transport", "trade") else 1.05)
+        add("yard", beam(n + "_yard", (-sail_w / 2, mast_y + 0.02, H + mast_h * 0.92),
+                         (sail_w / 2, mast_y + 0.02, H + mast_h * 0.92), 0.014, "wood_dark",
+                         sides=6))
+        sail_h = mast_h * (0.62 if kind != "catapult" else 0.3)
+        sail = "linen" if kind in ("fishing", "trade") else "player"
+        sail_z = H + mast_h * 0.92 - sail_h
+        add("sail", box(n + "_sail", (sail_w, 0.012, sail_h), sail, (0.0, mast_y + 0.03, sail_z)))
+        if kind != "catapult":
+            # Reef bands across it, a rope at its foot.
+            for k, f in enumerate((0.0, 0.36, 0.68)):
+                add("reef%d" % k, box("%s_reef%d" % (n, k), (sail_w + 0.004, 0.018, 0.012), "rope",
+                                      (0.0, mast_y + 0.03, sail_z + sail_h * f)))
+        if sail == "linen":
+            add("sail_band", box(n + "_sail_band", (sail_w + 0.004, 0.016, sail_h * 0.18), "player",
+                                 (0.0, mast_y + 0.03, H + mast_h * 0.92 - sail_h * 0.55)))
+        add("pennant", box(n + "_pennant", (0.012, 0.12, 0.05), "player",
+                           (0.0, mast_y - 0.06, H + mast_h + 0.0)))
+        if kind in ("transport", "galley", "archer"):
+            # Oars, pivoting on the wale; two banks for the galley.
+            banks = (0, 1) if kind == "galley" else (0,)
+            count = {"transport": 4, "archer": 4, "galley": 5}[kind]
+            for side in (-1.0, 1.0):
+                for bank in banks:
+                    for k in range(count):
+                        y = -hl * 0.55 + (hl * 1.1) * k / max(count - 1, 1)
+                        z = H - 0.02 - bank * 0.06
+                        pivot = empty("%s_oarlock_%d_%d_%d" % (n, int(side), bank, k), parent=self.body,
+                                      location=(side * hb * 0.98, y, z))
+                        # Out from the rail and down to the water line,
+                        # where the blade dips.
+                        reach = side * (0.3 + bank * 0.06)
+                        oar = beam("%s_oar_%d_%d_%d" % (n, int(side), bank, k), (0.0, 0.0, 0.0),
+                                   (reach, 0.0, 0.01 - z), 0.013, "wood", sides=5)
+                        oar.parent = pivot
+                        blade_ = box("%s_blade_%d_%d_%d" % (n, int(side), bank, k),
+                                     (0.09, 0.035, 0.008), "wood", (reach, 0.0, 0.006 - z),
+                                     rotation=(0.0, side * math.atan2(z - 0.01, abs(reach)), 0.0))
+                        blade_.parent = pivot
+                        self.oars.append((pivot, side))
+        if kind == "fishing":
+            add("net", box(n + "_net", (B * 0.7, 0.16, 0.05), "rope", (0.0, -hl * 0.55, H)))
+            self._crew(n + "_fisher", (0.0, -hl * 0.15, H), "linen")
+        elif kind == "transport":
+            for k, y in enumerate((-hl * 0.45, -hl * 0.1, hl * 0.25, hl * 0.6)):
+                add("bench%d" % k, box("%s_bench%d" % (n, k), (B * 0.82, 0.05, 0.025), "wood",
+                                       (0.0, y, H - 0.02)))
+            self._crew(n + "_helm", (0.0, -hl * 0.8, H), "linen")
+        elif kind == "trade":
+            for k, (x, y) in enumerate(((-0.1, -0.3), (0.1, -0.25), (0.0, 0.25), (-0.1, 0.32))):
+                add("bale%d" % k, box("%s_bale%d" % (n, k), (0.14, 0.14, 0.11), "linen" if k % 2 else "hide",
+                                      (x, y * hl / 0.6, H - 0.02)))
+            for k, y in enumerate((-0.05, 0.08)):
+                add("jar%d" % k, ellipsoid("%s_jar%d" % (n, k), (0.05, 0.05, 0.08), "clay_roof",
+                                           (0.12, y, H + 0.06)))
+            self._crew(n + "_helm", (0.0, -hl * 0.8, H), "linen")
+        elif kind in ("archer", "galley"):
+            n_arch = 3 if kind == "archer" else 4
+            for k in range(n_arch):
+                y = -hl * 0.5 + hl * 1.0 * k / max(n_arch - 1, 1)
+                side = -1.0 if k % 2 else 1.0
+                self._crew("%s_archer%d" % (n, k), (side * hb * 0.5, y, H), "linen", archer=True)
+            if kind == "galley":
+                add("ram", cone(n + "_ram", 0.05, 0.16, "bronze", (0.0, hl * 1.02, H * 0.3)))
+                self.parts["ram"].rotation_euler = (_deg(-90.0), 0.0, 0.0)
+                for side in (-1.0, 1.0):
+                    for k in range(5):
+                        y = -hl * 0.6 + hl * 1.2 * k / 4
+                        sh = round_shield("%s_shield_%d_%d" % (n, int(side), k), radius=0.06)
+                        sh.parent = self.body
+                        sh.location = (side * (hb + 0.01), y, H + 0.03)
+                        sh.rotation_euler = (0.0, 0.0, _deg(90.0 * side))
+        elif kind == "catapult":
+            add("frame_l", box(n + "_frame_l", (0.05, 0.36, 0.2), "wood", (-0.12, 0.0, H)))
+            add("frame_r", box(n + "_frame_r", (0.05, 0.36, 0.2), "wood", (0.12, 0.0, H)))
+            add("skein", cylinder(n + "_skein", 0.06, 0.3, "rope", (0.0, -0.1, H + 0.1),
+                                  sides=10, pivot="centre", rotation=(0.0, _deg(90.0), 0.0)))
+            arm = add("throw_arm", limb(n + "_arm", 0.45, 0.035, 0.028, "wood",
+                                        (0.0, -0.1, H + 0.1), rotation=(_deg(-100.0), 0.0, 0.0)))
+            cup = ellipsoid(n + "_bucket", (0.07, 0.07, 0.04), "iron", (0.0, 0.0, -0.45), upper=True)
+            cup.parent = arm
+            stone = ellipsoid(n + "_stone", (0.045, 0.045, 0.045), "stone", (0.0, 0.0, -0.47))
+            stone.parent = arm
+            self.stone = stone
+            self._crew(n + "_loader", (0.15, -hl * 0.3, H), "linen")
+            self._crew(n + "_helm", (0.0, -hl * 0.85, H), "linen")
+
+    def _add(self, key, obj, parent=None):
+        obj.parent = parent if parent is not None else self.body
+        self.parts[key] = obj
+        return obj
+
+    def _crew(self, name, at, coat, archer=False):
+        """A sailor or an archer standing on the deck: legs, a tunic
+        belted in the owner's colour, a head, and a bow if an archer."""
+        x, y, z = at
+        self._add(name + "_legs", oval(name + "_legs", (0.03, 0.025), (0.035, 0.03), 0.07, "skin",
+                                       (x, y, z)))
+        self._add(name + "_body", oval(name + "_coat", (0.045, 0.04), (0.05, 0.045), 0.11, coat,
+                                       (x, y, z + 0.06)))
+        self._add(name + "_belt", oval(name + "_belt", (0.049, 0.044), (0.049, 0.044), 0.025,
+                                       "player", (x, y, z + 0.1)))
+        self._add(name + "_head", ellipsoid(name + "_head", (0.035, 0.035, 0.04), "skin",
+                                            (x, y, z + 0.2)))
+        self._add(name + "_cap", ellipsoid(name + "_cap", (0.037, 0.037, 0.02), "bronze" if archer
+                                           else "hair", (x, y, z + 0.225), upper=True))
+        if archer:
+            b = bow("%s_bow" % name)
+            b.parent = self.body
+            b.scale = (0.7, 0.7, 0.7)
+            b.location = (x + 0.06, y + 0.04, z + 0.1)
+            self.parts[name + "_bow"] = b
+
+    def animate(self):
+        scene = bpy.context.scene
+        scene.frame_start, scene.frame_end = 1, 30
+        rest = {k: (tuple(o.location), tuple(o.rotation_euler)) for k, o in self.parts.items()}
+        stone = getattr(self, "stone", None)
+        # The water, for a boat going down: it hides whatever has sunk.
+        water = water_line(self.root.name + "_water", self.root)
+        # What floats once it has gone: planks, a cask, the foam over it.
+        self.wreck = []
+        L, B, H = BOATS[self.kind]
+        for k, (x, y, turn) in enumerate(((-0.12, 0.2, 0.4), (0.15, -0.05, -0.7),
+                                          (-0.05, -0.28, 1.3), (0.2, 0.25, 2.0))):
+            plank = box("%s_drift%d" % (self.root.name, k), (0.05, L * 0.28, 0.02), "wood",
+                        (x, y, 0.002), rotation=(0.0, 0.0, turn))
+            plank.parent = self.root
+            self.wreck.append(plank)
+        cask = cylinder(self.root.name + "_cask", 0.04, 0.05, "wood_dark", (0.05, 0.08, 0.002),
+                        sides=10)
+        cask.parent = self.root
+        self.wreck.append(cask)
+        for j in range(12):
+            a = 2.0 * math.pi * j / 12
+            r = 0.22
+            bubble = ellipsoid("%s_swirl%d" % (self.root.name, j), (0.03, 0.03, 0.006), "foam",
+                               (r * math.cos(a), r * math.sin(a), 0.002))
+            bubble.parent = self.root
+            self.wreck.append(bubble)
+        for anim, (first, last) in MOBILE_SPANS.items():
+            count = last - first + 1
+            for i in range(count):
+                frame = first + i
+                body, sweep, swings, loaded = boat_pose(self.kind, anim, i, count)
+                self.body.location = (0.0, 0.0, body["dz"])
+                self.body.rotation_euler = (body["pitch"], body["roll"], 0.0)
+                self.body.scale = (1.0, 1.0, body["scale_z"])
+                for path in ("location", "rotation_euler", "scale"):
+                    self.body.keyframe_insert(path, frame=frame)
+                for key, obj in self.parts.items():
+                    loc, rot = rest[key]
+                    obj.location = loc
+                    obj.rotation_euler = (rot[0] + swings.get(key, 0.0), rot[1], rot[2])
+                    obj.keyframe_insert("location", frame=frame)
+                    obj.keyframe_insert("rotation_euler", frame=frame)
+                for pivot, side in self.oars:
+                    # Trailing aft at rest, swept about that in the stroke.
+                    pivot.rotation_euler = (0.0, 0.0, (sweep - OAR_RAKE) * side)
+                    pivot.keyframe_insert("rotation_euler", frame=frame)
+                water.hide_render = not body["under"]
+                water.keyframe_insert("hide_render", frame=frame)
+                for piece in self.wreck:
+                    # Breaking up as it goes down, left on the water after.
+                    piece.hide_render = not (anim == "decay"
+                                             or (anim == "death" and i >= count // 2))
+                    piece.keyframe_insert("hide_render", frame=frame)
+                if stone is not None:
+                    stone.hide_render = not loaded
+                    stone.keyframe_insert("hide_render", frame=frame)
+        hold_frames([self.body, water] + [p for p, _ in self.oars] + list(self.parts.values())
+                    + self.wreck + ([stone] if stone is not None else []))
+
+
+def boat_pose(kind, anim, i, count):
+    """One frame of a boat: the hull's rise, roll and pitch, the oars'
+    sweep, each part's swing about x (the catapult's arm), and whether the
+    stone is in the bucket."""
+    body = {"dz": 0.0, "roll": 0.0, "pitch": 0.0, "scale_z": 1.0, "under": False}
+    s = {}
+    sweep = 0.0
+    loaded = True
+    t = 2.0 * math.pi * i / count
+    if anim == "idle":
+        body["dz"] = 0.008 * math.sin(t)
+        body["roll"] = _deg(2.0) * math.sin(t)
+    elif anim == "walk":
+        body["dz"] = 0.01 * math.sin(2.0 * t)
+        body["pitch"] = _deg(2.5) * math.sin(t)
+        sweep = _deg(28.0) * math.sin(t)
+    elif anim == "attack":
+        body["roll"] = _deg(1.5) * math.sin(t)
+        if kind == "catapult":
+            # The arm lies aft; it throws up over the top and past it.
+            arm = [-8.0, -14.0, -16.0, -95.0, -80.0, -30.0]
+            s["throw_arm"] = _deg(arm[i])
+            loaded = i < 3
+        else:
+            body["dz"] = 0.006 * math.sin(t)
+    elif anim == "death":
+        # Heels over, the bow lifting, and goes down until the masthead and
+        # the head of the sail are all that stand out of the water.
+        k = i / float(count - 1)
+        ease = k * k
+        body["roll"] = _deg(30.0) * k
+        body["pitch"] = _deg(12.0) * ease
+        body["dz"] = -0.62 * ease
+        body["under"] = True
+        sweep = _deg(10.0)
+        loaded = False
+    elif anim == "decay":
+        # Gone under: what floated off is left on the water.
+        body["roll"] = _deg(30.0)
+        body["pitch"] = _deg(12.0)
+        body["dz"] = -2.0
+        body["under"] = True
+        loaded = False
+    return body, sweep, s, loaded
+
+
+# How far a boat's oars trail aft when it is not pulling them.
+OAR_RAKE = _deg(22.0)
 
 
 # --------------------------------------------------------------------------

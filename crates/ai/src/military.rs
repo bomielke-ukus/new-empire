@@ -43,6 +43,9 @@ pub struct Military {
     /// from home, for the priests to follow.
     #[serde(default)]
     army_at: Option<Vec2Fx>,
+    /// The army has gone out at least once. A save from before reads no.
+    #[serde(default)]
+    sent_out: bool,
 }
 
 /// A soldier: mobile, armed, and not a villager or the scout.
@@ -50,12 +53,22 @@ fn is_soldier(s: &Sighting) -> bool {
     is_soldier_kind(s.kind)
 }
 
+/// A soldier of the land army: warships are the navy's (`crate::navy`).
 fn is_soldier_kind(kind: KindId) -> bool {
     let info = kinds::info(kind);
-    info.mobile && info.combat.attack > 0 && kind != kinds::VILLAGER && kind != kinds::SCOUT
+    info.mobile
+        && info.combat.attack > 0
+        && !info.naval
+        && kind != kinds::VILLAGER
+        && kind != kinds::SCOUT
 }
 
 impl Military {
+    /// Whether the army has gone out at least once.
+    pub fn sent_out(&self) -> bool {
+        self.sent_out
+    }
+
     /// Where the army is while it is out, for the priests to follow.
     pub fn army_at(&self) -> Option<Vec2Fx> {
         self.army_at
@@ -74,12 +87,15 @@ impl Military {
     }
 
     /// One thought, with `stock` being what the economy has not spent.
+    /// `by_land` is whether the enemy can be walked to; when it cannot,
+    /// the army waits at home for the navy to carry it (`crate::navy`).
     pub fn think(
         &mut self,
         view: &FoggedView<'_>,
         order: &BuildOrder,
         rng: &mut Rng,
         stock: &mut Cost,
+        by_land: bool,
     ) -> Vec<CommandKind> {
         let mut out = Vec::new();
         let Some(me) = view.me() else {
@@ -166,11 +182,12 @@ impl Military {
         // for a while, every building with anyone inside is emptied. A
         // side that forgets this ends the match with its whole workforce
         // sitting in the Town Center.
+        // Not a transport: its passengers are the navy's to land.
         if self.threats.is_empty() && mine.iter().any(|s| s.inside) {
-            for b in mine
-                .iter()
-                .filter(|s| kinds::info(s.kind).garrison > 0 && !s.site)
-            {
+            for b in mine.iter().filter(|s| {
+                let k = kinds::info(s.kind);
+                k.garrison > 0 && !k.mobile && !s.site
+            }) {
                 out.push(CommandKind::Ungarrison { building: b.id });
             }
         }
@@ -259,7 +276,7 @@ impl Military {
                     .or(enemy_tc.map(|(_, p)| p))
             });
         let clock_target = wonder.or(relic_temple);
-        if let Some(target) = clock_target {
+        if let (Some(target), true) = (clock_target, by_land) {
             let idle: Vec<EntityId> = soldiers
                 .iter()
                 .filter(|s| s.job == Job::Idle && !s.inside)
@@ -272,12 +289,13 @@ impl Military {
                 });
                 out.push(CommandKind::AttackMove { ids: idle, target });
                 self.attack = Some((target, tick));
+                self.sent_out = true;
             }
         }
         let n_home = idle_home.len() as u32;
         let assault = n_home >= order.attack_size
             || (tick >= order.attack_by && n_home >= (order.attack_size * 3).div_ceil(4));
-        if clock_target.is_none() && assault && !out_already && self.threats.is_empty() {
+        if clock_target.is_none() && assault && !out_already && self.threats.is_empty() && by_land {
             if let Some((order, target)) = orders_for(idle_home.clone(), tc.pos) {
                 out.push(CommandKind::SetStance {
                     ids: idle_home,
@@ -285,6 +303,7 @@ impl Military {
                 });
                 out.push(order);
                 self.attack = Some((target, tick));
+                self.sent_out = true;
             }
         }
         let idle_away: Vec<EntityId> = soldiers

@@ -1,7 +1,7 @@
 // Palette-indexed sprites, instanced. Index 0 is transparent; the owning
 // player's palette row supplies the colour, so one atlas serves all players.
 
-@group(1) @binding(0) var atlas: texture_2d<u32>;
+@group(1) @binding(0) var atlas: texture_2d_array<u32>;
 @group(1) @binding(1) var palette: texture_2d<f32>;
 
 struct Inst {
@@ -9,7 +9,8 @@ struct Inst {
     @location(0) rect: vec4<f32>,
     // u, v, uw, vh in atlas px
     @location(1) uv: vec4<f32>,
-    // palette row, flip, screen-space flag, light out of 255
+    // palette row, flip (bit 0) and atlas page (above it), screen-space
+    // flag, light out of 255
     @location(2) misc: vec4<u32>,
 };
 
@@ -18,6 +19,7 @@ struct VsOut {
     @location(0) uv: vec2<f32>,
     @location(1) @interpolate(flat) row: u32,
     @location(2) @interpolate(flat) light: u32,
+    @location(3) @interpolate(flat) page: u32,
 };
 
 @vertex
@@ -35,12 +37,13 @@ fn vs_main(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
         out.clip = world_to_clip(corner);
     }
     var u = c.x;
-    if (inst.misc.y == 1u) {
+    if ((inst.misc.y & 1u) == 1u) {
         u = 1.0 - u;
     }
     out.uv = inst.uv.xy + vec2<f32>(u, c.y) * inst.uv.zw;
     out.row = inst.misc.x;
     out.light = inst.misc.w;
+    out.page = inst.misc.y >> 1u;
     return out;
 }
 
@@ -48,7 +51,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Clamp inside the frame so a mirrored edge never samples a neighbour.
     let texel = vec2<i32>(in.uv);
-    let idx = textureLoad(atlas, texel, 0).r;
+    let idx = textureLoad(atlas, texel, i32(in.page), 0).r;
     if (idx == 0u) {
         discard;
     }

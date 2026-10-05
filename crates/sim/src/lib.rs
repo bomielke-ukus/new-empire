@@ -41,6 +41,7 @@ pub mod replay;
 pub mod rng;
 pub mod simulation;
 pub mod tech;
+pub mod transport;
 mod trig_table;
 pub mod vec2;
 pub mod victory;

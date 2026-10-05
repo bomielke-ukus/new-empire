@@ -263,6 +263,22 @@
       ],
       "camera_up_shift": 0.762349
     },
+    "Ship": {
+      "sprite_px": [
+        80,
+        80
+      ],
+      "render_px": [
+        320,
+        320
+      ],
+      "ortho_scale": 1.767767,
+      "anchor_px": [
+        80,
+        112
+      ],
+      "camera_up_shift": 0.353553
+    },
     "SmallBuilding": {
       "sprite_px": [
         64,

@@ -71,6 +71,7 @@ line of the wall it stands in.
 | Villager, infantry | 40 × 48 px |
 | Cavalry, chariot | 56 × 56 px |
 | Elephant, siege | 72 × 72 px |
+| Boat | 80 × 80 px, anchored 24 px above the bottom: a hull reaches as far toward the camera as away from it, so a boat is drawn by its middle |
 | Small building (House, Farm) | 64 × 64 px (1×1 or 2×2 tiles) |
 | Medium building (Barracks, Storehouse) | 128 × 96 px (2×2 tiles) |
 | Large building (Town Center, Temple) | 192 × 144 px (3×3 tiles) |
@@ -84,7 +85,9 @@ sliding around" bugs, so they are authored data, not a guess.
 
 - **Indexed 256-colour palette**, one shared palette per architecture set.
   Restricting the palette is what makes independently produced art look like one
-  game, and it is why the 1997 aesthetic is coherent.
+  game, and it is why the 1997 aesthetic is coherent. **As built:** the four
+  sets share the one palette, `ancient`; its sand, cloth and granite ramps
+  carry the sandstone, the paint and glaze, and the dark tile.
 - **Palette indices 240–247 are reserved for player colour** and remapped in the
   fragment shader to the owning player's ramp. Art is drawn once, in the
   reserved indices, and appears in all eight player colours.
@@ -112,7 +115,10 @@ should go.
 materials and trim. Stone Age: mudbrick under thatch. Tool Age: a timber
 frame on the mudbrick, shingle roofs. Bronze Age: plaster over a stone
 base course, terracotta roofs. Iron Age: dressed stone with cornices and
-pilasters, slate roofs. The infantry go from tunics to hide caps and
+pilasters, slate roofs. That is the Greek architecture; the Egyptian, the
+Mesopotamian and the East Asian restyle the same buildings in their own
+materials, roofs and wall work, age by age, each with its own Wonder
+(`docs/07` D34). The infantry go from tunics to hide caps and
 wraps, then bronze and then iron caps, pads and greaves, with a cape in the
 Iron Age; villagers from bare heads to a linen cap, a straw hat and a hood.
 The ranged soldiers, the riders, the farm and the walls have one look.

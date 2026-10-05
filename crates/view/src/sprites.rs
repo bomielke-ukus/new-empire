@@ -37,8 +37,9 @@ pub const UI_GLYPH: KindId = 60_000;
 pub const UI_GLYPH_DARK: KindId = 61_000;
 /// Gold glyphs, for the age banner, at this id plus the character index.
 pub const UI_GLYPH_GOLD: KindId = 62_000;
-/// Age-styled placeholder variants live above this: `AGE_VARIANT_BASE +
-/// age * 1000 + kind`. See [`Atlas::variant`].
+/// A kind's looks for an age or an architecture live above this:
+/// `AGE_VARIANT_BASE + (architecture * 4 + age) * 500 + kind`, below the
+/// UI's ids. See [`Atlas::variant`].
 pub const AGE_VARIANT_BASE: KindId = 50_000;
 
 /// The colour text is drawn in.
@@ -174,6 +175,8 @@ pub struct Frame {
     pub index: u8,
     /// Authored pixels per 1× pixel. A frame drawn at 1× is `w / scale` wide.
     pub scale: u8,
+    /// Which page of the atlas.
+    pub page: u8,
     /// Atlas rectangle.
     pub x: u16,
     /// Atlas rectangle.
@@ -223,15 +226,18 @@ pub const fn source_facing(facing8: u8) -> (u8, bool) {
 pub struct Atlas {
     /// Texture width.
     pub width: u32,
-    /// Texture height.
+    /// Height of each page.
     pub height: u32,
-    /// Palette indices, row-major.
+    /// Pages: layers of a texture array, each `width` × `height`.
+    pub pages: u32,
+    /// Palette indices, row-major, page after page.
     pub indices: Vec<u8>,
     frames: Vec<Frame>,
     lookup: HashMap<(KindId, u8, Anim, u8), usize>,
     anims: HashMap<(KindId, Anim), AnimInfo>,
-    /// `(kind, age index)` to the id its age-styled frames are filed under.
-    variants: HashMap<(KindId, u8), KindId>,
+    /// `(kind, age index, architecture index)` to the id its frames in that
+    /// look are filed under.
+    variants: HashMap<(KindId, u8, u8), KindId>,
     /// Names of the rendered sets that replaced placeholders.
     pub loaded_sets: Vec<String>,
 }
@@ -284,10 +290,20 @@ impl Atlas {
     /// anew only for the ages that change it (`house_tool`, `temple_iron`;
     /// see [`set_target`]), so a temple keeps its own look in the Bronze Age
     /// and a slinger in every age.
-    pub fn variant(&self, kind: KindId, age: u8) -> KindId {
+    pub fn variant(&self, kind: KindId, age: u8, arch: u8) -> KindId {
+        // The architecture's own look, of the latest age it has one for;
+        // without one, the first set's.
+        if arch > 0 {
+            if let Some(id) = (0..=age)
+                .rev()
+                .find_map(|a| self.variants.get(&(kind, a, arch)).copied())
+            {
+                return id;
+            }
+        }
         (1..=age)
             .rev()
-            .find_map(|a| self.variants.get(&(kind, a)).copied())
+            .find_map(|a| self.variants.get(&(kind, a, 0)).copied())
             .unwrap_or(kind)
     }
 
@@ -301,10 +317,10 @@ impl Atlas {
         &self.frames
     }
 
-    /// Palette index at an atlas pixel; 0 outside.
-    pub fn index_at(&self, x: u32, y: u32) -> u8 {
-        if x < self.width && y < self.height {
-            self.indices[(y * self.width + x) as usize]
+    /// Palette index at a pixel of a page; 0 outside.
+    pub fn index_at(&self, page: u8, x: u32, y: u32) -> u8 {
+        if x < self.width && y < self.height && (page as u32) < self.pages {
+            self.indices[((page as u32 * self.height + y) * self.width + x) as usize]
         } else {
             0
         }
@@ -324,21 +340,22 @@ impl Atlas {
     pub fn with_sheets(sheets: &[crate::sheets::Sheet]) -> Atlas {
         let mut canvases: Vec<Entry> = Vec::new();
         let mut anims: HashMap<(KindId, Anim), AnimInfo> = HashMap::new();
-        let mut variants: HashMap<(KindId, u8), KindId> = HashMap::new();
+        let mut variants: HashMap<(KindId, u8, u8), KindId> = HashMap::new();
         let mut loaded_sets = Vec::new();
         let mut covered: Vec<KindId> = Vec::new();
         for sheet in sheets {
-            let Some((base, age)) = set_target(&sheet.name) else {
+            let Some((base, age, arch)) = set_target(&sheet.name) else {
                 continue;
             };
-            // The Stone Age set is the kind itself; a later age's is filed
-            // under its variant id, as the placeholders' are.
-            let kind = if age == 0 {
+            // The first architecture's Stone Age set is the kind itself; any
+            // other look is filed under its variant id, as the
+            // placeholders' are.
+            let kind = if age == 0 && arch == 0 {
                 covered.push(base);
                 base
             } else {
-                let id = variant_id(base, age);
-                variants.insert((base, age), id);
+                let id = look_id(base, age, arch);
+                variants.insert((base, age, arch), id);
                 id
             };
             loaded_sets.push(sheet.name.clone());
@@ -475,7 +492,7 @@ impl Atlas {
             // The Stone Age look is the kind itself; the three later ages
             // are drawn in their materials and filed under variant ids.
             for age in 1..=3u8 {
-                if variants.contains_key(&(k.id, age)) {
+                if variants.contains_key(&(k.id, age, 0)) {
                     // Drawn by a rendered set.
                     continue;
                 }
@@ -510,7 +527,7 @@ impl Atlas {
                 } else {
                     canvases.push(still(id, 0, draw_kind_aged(k.id, 1, age)));
                 }
-                variants.insert((k.id, age), id);
+                variants.insert((k.id, age, 0), id);
             }
         }
         for &idx in SOLIDS {
@@ -555,7 +572,7 @@ impl Atlas {
             canvases.push(still(UI_GLYPH_DARK + i as KindId, 0, glyph(ch, BLACK)));
             canvases.push(still(UI_GLYPH_GOLD + i as KindId, 0, glyph(ch, GOLD_LIGHT)));
         }
-        let mut atlas = pack(canvases, ATLAS_WIDTH);
+        let mut atlas = pack(canvases, ATLAS_WIDTH, ATLAS_PAGE_HEIGHT);
         atlas.anims = anims;
         atlas.variants = variants;
         atlas.loaded_sets = loaded_sets;
@@ -723,11 +740,16 @@ fn glyph(ch: char, idx: u8) -> Canvas {
     c
 }
 
-/// Atlas texture width. Height grows to fit, up to the GPU's limit (8192 a
-/// side by default): with every rendered set, its age looks and the later
-/// ages' soldiers loaded, a narrower atlas runs past it. One byte a pixel
-/// (`R8Uint`), so the whole square is 64 MB.
+/// Atlas texture width. A page's height grows to fit, up to the GPU's limit
+/// (8192 a side by default): with every rendered set, its age looks and the
+/// later ages' soldiers loaded, a narrower atlas runs past it. One byte a
+/// pixel (`R8Uint`), so a full page is 64 MB.
 pub const ATLAS_WIDTH: u32 = 8192;
+
+/// The tallest a page may be; what does not fit goes on the next page, a
+/// further layer of the texture array (each architecture's buildings
+/// filled more than one).
+pub const ATLAS_PAGE_HEIGHT: u32 = 8192;
 
 /// A frame waiting to be packed.
 struct Entry {
@@ -773,17 +795,27 @@ fn drawn_bounds(
 
 /// Shelf-packs canvases into an atlas of the given width. Taller frames go
 /// first so shelves waste less.
-fn pack(mut canvases: Vec<Entry>, width: u32) -> Atlas {
+/// Shelf-packs the frames, tallest first, onto pages `width` wide and at
+/// most `page_height` tall. One page is as tall as it needs to be (to the
+/// next power of two); more than one are all `page_height`.
+fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
     canvases.sort_by_key(|e| std::cmp::Reverse(e.canvas.h));
     let mut frames = Vec::new();
     let mut lookup = HashMap::new();
-    let mut placed: Vec<(u32, u32, Canvas)> = Vec::new();
-    let (mut x, mut y, mut shelf_h) = (0u32, 0u32, 0u32);
+    let mut placed: Vec<(u32, u32, u32, Canvas)> = Vec::new();
+    let (mut page, mut x, mut y, mut shelf_h) = (0u32, 0u32, 0u32, 0u32);
+    let mut used = 0u32;
     for e in canvases {
         let c = e.canvas;
         if x + c.w > width {
             x = 0;
             y += shelf_h + 1;
+            shelf_h = 0;
+        }
+        if y + c.h > page_height {
+            page += 1;
+            x = 0;
+            y = 0;
             shelf_h = 0;
         }
         frames.push(Frame {
@@ -792,6 +824,7 @@ fn pack(mut canvases: Vec<Entry>, width: u32) -> Atlas {
             anim: e.anim,
             index: e.index,
             scale: e.scale,
+            page: page as u8,
             x: x as u16,
             y: y as u16,
             w: c.w as u16,
@@ -801,21 +834,28 @@ fn pack(mut canvases: Vec<Entry>, width: u32) -> Atlas {
         });
         lookup.insert((e.kind, e.facing, e.anim, e.index), frames.len() - 1);
         shelf_h = shelf_h.max(c.h);
-        placed.push((x, y, c));
-        x += placed.last().unwrap().2.w + 1;
+        used = used.max(y + shelf_h);
+        x += c.w + 1;
+        placed.push((page, x - c.w - 1, y, c));
     }
-    let height = (y + shelf_h).next_power_of_two().max(1);
-    let mut indices = vec![0u8; (width * height) as usize];
-    for (px, py, c) in placed {
+    let pages = page + 1;
+    let height = if pages == 1 {
+        used.next_power_of_two().clamp(1, page_height)
+    } else {
+        page_height
+    };
+    let mut indices = vec![0u8; (width * height * pages) as usize];
+    for (pg, px, py, c) in placed {
         for row in 0..c.h {
             let src = (row * c.w) as usize;
-            let dst = ((py + row) * width + px) as usize;
+            let dst = (((pg * height) + py + row) * width + px) as usize;
             indices[dst..dst + c.w as usize].copy_from_slice(&c.px[src..src + c.w as usize]);
         }
     }
     Atlas {
         width,
         height,
+        pages,
         indices,
         frames,
         lookup,
@@ -829,17 +869,38 @@ fn pack(mut canvases: Vec<Entry>, width: u32) -> Atlas {
 /// [`sim::Age::index`]).
 const AGE_SUFFIXES: [(&str, u8); 3] = [("_tool", 1), ("_bronze", 2), ("_iron", 3)];
 
-/// The kind a rendered sprite set draws and the age it draws it in, by the
-/// set's name: `house` is the house as built in the Stone Age, and in any
-/// later age without a set of its own; `house_tool`, `house_bronze` and
-/// `house_iron` are the house in the three ages after it.
-pub fn set_target(name: &str) -> Option<(KindId, u8)> {
-    for (suffix, age) in AGE_SUFFIXES {
-        if let Some(kind) = name.strip_suffix(suffix).and_then(kind_for_set) {
-            return Some((kind, age));
-        }
+/// The suffix of a set that draws a kind in an architecture other than the
+/// first, and the architecture (by [`arch_index`]). The first, the Greek,
+/// is the set named plainly.
+const ARCH_SUFFIXES: [(&str, u8); 3] = [("_egyptian", 1), ("_mesopotamian", 2), ("_asian", 3)];
+
+/// The view's index of an architecture (`docs/02` §11): which of the sets
+/// a building is drawn from.
+pub fn arch_index(arch: sim::civs::Architecture) -> u8 {
+    use sim::civs::Architecture;
+    match arch {
+        Architecture::Greek => 0,
+        Architecture::Egyptian => 1,
+        Architecture::Mesopotamian => 2,
+        Architecture::Asian => 3,
     }
-    kind_for_set(name).map(|kind| (kind, 0))
+}
+
+/// The kind a rendered sprite set draws, the age and the architecture, by
+/// the set's name: `house` is the house as built in the Stone Age, and in
+/// any later age without a set of its own; `house_tool`, `house_bronze` and
+/// `house_iron` are the house in the three ages after it;
+/// `house_egyptian` and `house_egyptian_bronze` are the Egyptian's.
+pub fn set_target(name: &str) -> Option<(KindId, u8, u8)> {
+    let (rest, age) = AGE_SUFFIXES
+        .iter()
+        .find_map(|&(suffix, age)| name.strip_suffix(suffix).map(|rest| (rest, age)))
+        .unwrap_or((name, 0));
+    let (rest, arch) = ARCH_SUFFIXES
+        .iter()
+        .find_map(|&(suffix, arch)| rest.strip_suffix(suffix).map(|rest| (rest, arch)))
+        .unwrap_or((rest, 0));
+    kind_for_set(rest).map(|kind| (kind, age, arch))
 }
 
 /// Which kind a rendered sprite set draws, by the set's name.
@@ -887,6 +948,14 @@ pub fn kind_for_set(name: &str) -> Option<KindId> {
         "priest" => kinds::PRIEST,
         "relic" => kinds::RELIC,
         "wonder" => kinds::WONDER,
+        "dock" => kinds::DOCK,
+        "fishing_boat" => kinds::FISHING_BOAT,
+        "transport" => kinds::TRANSPORT,
+        "trade_boat" => kinds::TRADE_BOAT,
+        "archer_ship" => kinds::ARCHER_SHIP,
+        "war_galley" => kinds::WAR_GALLEY,
+        "catapult_ship" => kinds::CATAPULT_SHIP,
+        "fish" => kinds::FISH,
         _ => return None,
     })
 }
@@ -1001,7 +1070,14 @@ fn facing_dir(facing: u8) -> (f32, f32) {
 
 /// The id age-styled frames of `kind` are filed under.
 pub fn variant_id(kind: KindId, age: u8) -> KindId {
-    AGE_VARIANT_BASE + age as KindId * 1000 + kind
+    look_id(kind, age, 0)
+}
+
+/// The id the frames of `kind` in an age and an architecture are filed
+/// under.
+pub fn look_id(kind: KindId, age: u8, arch: u8) -> KindId {
+    debug_assert!(kind < 500 && age < 4 && arch < 4);
+    AGE_VARIANT_BASE + (arch as KindId * 4 + age as KindId) * 500 + kind
 }
 
 /// Kinds whose placeholder changes with the owner's age: what players build,
@@ -1707,6 +1783,102 @@ fn draw_kind_aged(kind: KindId, facing: u8, age: u8) -> Canvas {
             c.rect(12, 7, 8, 2, BLACK);
             c
         }
+        kinds::DOCK => {
+            // A deck of planks on posts, standing in the water, a bollard
+            // at each outer corner and a pennant of the player colour.
+            let (w, h) = (64 * fp, 32 * fp + 20);
+            let cx = w as f32 / 2.0;
+            let cy = h as f32 - 16.0 * fp as f32;
+            let mut c = Canvas::new(w, h, (cx as i16, cy as i16));
+            let (hw, hh) = (cx - 2.0, 16.0 * fp as f32 - 2.0);
+            for (px, py) in [
+                (cx - hw + 6.0, cy),
+                (cx + hw - 6.0, cy),
+                (cx, cy + hh - 4.0),
+            ] {
+                c.rect(px as i32 - 2, py as i32 - 6, 4, 10, BROWN_DARK);
+            }
+            c.diamond(cx, cy - 6.0, hw, hh, BLACK);
+            c.diamond(cx, cy - 6.0, hw - 1.0, hh - 1.0, BROWN);
+            for k in 1..(4 * fp as i32) {
+                let t = k as f32 / (4.0 * fp as f32);
+                let (sx, sy) = (cx - hw + t * hw, cy - 6.0 + t * hh);
+                c.line((sx, sy), (sx + hw, sy - hh), 1.0, BROWN_DARK);
+            }
+            c.rect(cx as i32 - 1, (cy - hh - 26.0) as i32, 2, 22, BLACK);
+            c.rect(cx as i32 + 1, (cy - hh - 26.0) as i32, 10, 6, P_BASE);
+            c
+        }
+        kinds::FISHING_BOAT => {
+            // A small hull with a mast and a sail of the player colour.
+            let mut c = Canvas::new(48, 44, (24, 36));
+            c.ellipse(24.0, 37.0, 18.0, 6.0, SHADOW);
+            c.ellipse(24.0 + dx * 2.0, 32.0, 16.0, 7.0, BLACK);
+            c.ellipse(24.0 + dx * 2.0, 31.0, 15.0, 6.0, BROWN);
+            c.ellipse(24.0 + dx * 2.0, 30.0, 12.0, 3.0, BROWN_DARK);
+            c.rect(23, 8, 2, 22, BLACK);
+            c.convex(&[(25.0, 9.0), (36.0, 22.0), (25.0, 24.0)], P_BASE);
+            c.circle(18.0 - dx * 6.0, 28.0, 3.0, SKIN);
+            c
+        }
+        kinds::ARCHER_SHIP | kinds::WAR_GALLEY | kinds::CATAPULT_SHIP => {
+            // A long hull, a square sail of the player colour, and its
+            // weapon: a row of archers' heads, or a catapult's arm.
+            let big = kind != kinds::ARCHER_SHIP;
+            let (hw, w) = if big { (24.0, 64) } else { (19.0, 56) };
+            let cx = w as f32 / 2.0;
+            let mut c = Canvas::new(w, 56, (cx as i16, 46));
+            c.ellipse(cx, 47.0, hw + 2.0, 7.0, SHADOW);
+            c.ellipse(cx + dx * 3.0, 41.0, hw, 8.0, BLACK);
+            c.ellipse(cx + dx * 3.0, 40.0, hw - 1.0, 7.0, BROWN_DARK);
+            c.ellipse(cx + dx * 3.0, 38.0, hw - 4.0, 3.0, BROWN);
+            c.rect(cx as i32 - 1, 8, 2, 30, BLACK);
+            c.rect(cx as i32 - 10, 10, 20, 14, BLACK);
+            c.rect(cx as i32 - 9, 11, 18, 12, P_BASE);
+            if kind == kinds::CATAPULT_SHIP {
+                c.line((cx - 12.0, 36.0), (cx - 2.0, 24.0), 3.0, BLACK);
+                c.line((cx - 12.0, 36.0), (cx - 2.0, 24.0), 1.5, BROWN);
+            } else {
+                for k in 0..if big { 4 } else { 3 } {
+                    c.circle(cx - hw + 10.0 + k as f32 * 8.0, 34.0, 3.0, SKIN);
+                }
+            }
+            c
+        }
+        kinds::TRANSPORT | kinds::TRADE_BOAT => {
+            // A broad hull with a sail of the player colour: open benches
+            // for a transport, bales of goods for a trade boat.
+            let mut c = Canvas::new(60, 52, (30, 42));
+            c.ellipse(30.0, 43.0, 25.0, 8.0, SHADOW);
+            c.ellipse(30.0 + dx * 3.0, 37.0, 23.0, 9.0, BLACK);
+            c.ellipse(30.0 + dx * 3.0, 36.0, 22.0, 8.0, BROWN);
+            c.ellipse(30.0 + dx * 3.0, 34.0, 18.0, 4.0, BROWN_DARK);
+            c.rect(29, 6, 2, 28, BLACK);
+            c.rect(20, 8, 20, 13, BLACK);
+            c.rect(21, 9, 18, 11, P_BASE);
+            if kind == kinds::TRADE_BOAT {
+                for k in 0..3 {
+                    let x = 16 + k * 10;
+                    c.rect(x, 28, 8, 6, BLACK);
+                    c.rect(x + 1, 29, 6, 4, TAN);
+                }
+            } else {
+                for k in 0..4 {
+                    c.rect(14 + k * 9, 33, 6, 2, BROWN_DARK);
+                }
+            }
+            c
+        }
+        kinds::FISH => {
+            // Two fish under rippled water.
+            let mut c = Canvas::new(32, 24, (16, 18));
+            c.ellipse(16.0, 18.0, 13.0, 5.0, SHADOW);
+            c.ellipse(11.0, 16.0, 6.0, 2.5, LIMESTONE_DARK);
+            c.convex(&[(5.0, 16.0), (2.0, 13.0), (2.0, 19.0)], LIMESTONE_DARK);
+            c.ellipse(21.0, 19.0, 6.0, 2.5, LIMESTONE);
+            c.convex(&[(27.0, 19.0), (30.0, 16.0), (30.0, 22.0)], LIMESTONE);
+            c
+        }
         kinds::PALISADE_WALL => palisade(),
         kinds::STONE_WALL => stone_wall(),
         kinds::GATE => gate(false),
@@ -2191,7 +2363,7 @@ mod tests {
         for (i, f) in frames.iter().enumerate() {
             let painted = (0..f.h as u32)
                 .flat_map(|y| (0..f.w as u32).map(move |x| (x, y)))
-                .filter(|&(x, y)| a.index_at(f.x as u32 + x, f.y as u32 + y) != 0)
+                .filter(|&(x, y)| a.index_at(f.page, f.x as u32 + x, f.y as u32 + y) != 0)
                 .count();
             if f.kind < UI_RING && f.scale == 1 {
                 assert!(
@@ -2252,10 +2424,51 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for y in 0..g.h as u32 {
             for x in 0..g.w as u32 {
-                seen.insert(a.index_at(g.x as u32 + x, g.y as u32 + y));
+                seen.insert(a.index_at(g.page, g.x as u32 + x, g.y as u32 + y));
             }
         }
         assert_eq!(seen, [TRANSPARENT, WHITE].into_iter().collect());
+    }
+
+    #[test]
+    fn frames_that_do_not_fit_a_page_go_on_the_next() {
+        // 10 x 10 frames on 32 x 24 pages: three to a shelf (a pixel apart),
+        // two shelves to a page, so eight frames fill a page and a third.
+        let entries = (0..8)
+            .map(|k| {
+                let mut canvas = Canvas::new(10, 10, (5, 9));
+                canvas.set(0, 0, 7 + k as u8);
+                Entry {
+                    kind: k,
+                    facing: 0,
+                    anim: Anim::Idle,
+                    index: 0,
+                    scale: 1,
+                    canvas,
+                }
+            })
+            .collect();
+        let a = pack(entries, 32, 24);
+        assert_eq!((a.pages, a.height), (2, 24));
+        assert_eq!(a.indices.len(), 32 * 24 * 2);
+        assert_eq!(a.frames().iter().filter(|f| f.page == 1).count(), 2);
+        for f in a.frames() {
+            assert_eq!(a.index_at(f.page, f.x as u32, f.y as u32), 7 + f.kind as u8);
+        }
+        // One page is only as tall as it needs.
+        let one = pack(
+            vec![Entry {
+                kind: 0,
+                facing: 0,
+                anim: Anim::Idle,
+                index: 0,
+                scale: 1,
+                canvas: Canvas::new(10, 10, (5, 9)),
+            }],
+            32,
+            24,
+        );
+        assert_eq!((one.pages, one.height), (1, 16));
     }
 
     #[test]
@@ -2294,11 +2507,11 @@ mod tests {
         assert_eq!(d.index, 7, "death holds its last frame");
         let (e, flip) = a.frame_at(kinds::VILLAGER, 7, Anim::Idle, 0).unwrap();
         assert!(flip && e.facing == 3, "east mirrors west");
-        // Every kind the simulation has is drawn from its rendered set but
-        // the ones still waiting for theirs, and the UI frames still exist.
+        // Every kind the simulation has is drawn from its rendered set, and
+        // the UI frames still exist.
         for k in kinds::all() {
             let rendered = a.frame(k.id, 1).unwrap().0.scale == 2;
-            assert_eq!(rendered, !AWAITING_ART.contains(&k.id), "{}", k.name);
+            assert!(rendered, "{} has no rendered set", k.name);
         }
         // The later ages' soldiers and the priest walk, strike and fall.
         for k in [
@@ -2360,44 +2573,100 @@ mod tests {
             kinds::CLUBMAN,
         ] {
             for age in 1..=3 {
-                assert_eq!(a.variant(kind, age), variant_id(kind, age), "{kind} {age}");
+                assert_eq!(
+                    a.variant(kind, age, 0),
+                    variant_id(kind, age),
+                    "{kind} {age}"
+                );
             }
         }
-        assert_eq!(a.variant(kinds::HOUSE, 0), kinds::HOUSE);
-        assert_eq!(a.variant(kinds::TEMPLE, 2), kinds::TEMPLE);
-        assert_eq!(a.variant(kinds::TEMPLE, 3), variant_id(kinds::TEMPLE, 3));
-        assert_eq!(a.variant(kinds::SLINGER, 3), kinds::SLINGER);
-        assert_eq!(a.variant(kinds::FARM, 2), kinds::FARM);
-        let iron = a.variant(kinds::VILLAGER, 3);
+        assert_eq!(a.variant(kinds::HOUSE, 0, 0), kinds::HOUSE);
+        assert_eq!(a.variant(kinds::TEMPLE, 2, 0), kinds::TEMPLE);
+        assert_eq!(a.variant(kinds::TEMPLE, 3, 0), variant_id(kinds::TEMPLE, 3));
+        assert_eq!(a.variant(kinds::SLINGER, 3, 0), kinds::SLINGER);
+        assert_eq!(a.variant(kinds::FARM, 2, 0), kinds::FARM);
+        let iron = a.variant(kinds::VILLAGER, 3, 0);
         let (chop, _) = a.frame_at(iron, 2, Anim::Chop, 0).unwrap();
         assert_eq!(chop.anim, Anim::Chop, "an Iron Age villager still works");
         assert_ne!(
             a.frame(kinds::HOUSE, 0).unwrap().0.x,
-            a.frame(a.variant(kinds::HOUSE, 2), 0).unwrap().0.x,
+            a.frame(a.variant(kinds::HOUSE, 2, 0), 0).unwrap().0.x,
             "a Bronze Age house is its own frame"
         );
         assert!(a.stage_frame(variant_id(kinds::HOUSE, 1), 0).is_some());
     }
 
-    /// The Bronze and Iron Ages' soldiers, drawn as placeholders until
-    /// their models are rendered (`docs/10` §5). The list only shrinks.
-    /// Kinds still drawn as placeholders: none. A new kind goes here until
-    /// its set is rendered.
-    const AWAITING_ART: [KindId; 0] = [];
-
     #[test]
     fn a_set_named_for_an_age_draws_its_kind_in_that_age() {
-        assert_eq!(set_target("house"), Some((kinds::HOUSE, 0)));
-        assert_eq!(set_target("house_tool"), Some((kinds::HOUSE, 1)));
+        assert_eq!(set_target("house"), Some((kinds::HOUSE, 0, 0)));
+        assert_eq!(set_target("house_tool"), Some((kinds::HOUSE, 1, 0)));
         assert_eq!(
             set_target("town_center_bronze"),
-            Some((kinds::TOWN_CENTER, 2))
+            Some((kinds::TOWN_CENTER, 2, 0))
         );
-        assert_eq!(set_target("temple_iron"), Some((kinds::TEMPLE, 3)));
+        assert_eq!(set_target("temple_iron"), Some((kinds::TEMPLE, 3, 0)));
         // Not every name with an age's word in it is an age's set.
-        assert_eq!(set_target("stone_wall"), Some((kinds::STONE_WALL, 0)));
+        assert_eq!(set_target("stone_wall"), Some((kinds::STONE_WALL, 0, 0)));
         assert_eq!(set_target("palace_iron"), None);
         assert_eq!(set_target("iron"), None);
+    }
+
+    #[test]
+    fn a_set_named_for_an_architecture_draws_its_kind_in_it() {
+        assert_eq!(set_target("house_egyptian"), Some((kinds::HOUSE, 0, 1)));
+        assert_eq!(
+            set_target("town_center_mesopotamian_bronze"),
+            Some((kinds::TOWN_CENTER, 2, 2))
+        );
+        assert_eq!(set_target("temple_asian_iron"), Some((kinds::TEMPLE, 3, 3)));
+        // The architecture's word comes before the age's, never after.
+        assert_eq!(set_target("house_tool_egyptian"), None);
+        assert_eq!(set_target("egyptian"), None);
+        use sim::civs::Civ;
+        let arch = |c: Civ| arch_index(c.info().architecture);
+        assert_eq!(arch(Civ::Greeks), 0);
+        assert_eq!(arch(Civ::Egyptians), 1);
+        assert_eq!(arch(Civ::Babylonians), 2);
+        assert_eq!(arch(Civ::Shang), 3);
+    }
+
+    #[test]
+    fn an_architecture_draws_its_own_look_and_the_first_sets_where_it_has_none() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
+        let (mut sheets, _) = crate::sheets::load_all(&dir);
+        // The first architecture's sets only, whatever else is rendered.
+        sheets.retain(|s| set_target(&s.name).is_some_and(|(_, _, arch)| arch == 0));
+        let named = |name: &str, sheets: &[crate::sheets::Sheet]| {
+            sheets.iter().find(|s| s.name == name).cloned().unwrap()
+        };
+        // Stand-ins: an Egyptian house for the Stone and Bronze Ages, cut
+        // from the Tool and Iron Ages' sheets so their frames differ.
+        let mut stone = named("house_tool", &sheets);
+        stone.name = "house_egyptian".into();
+        let mut bronze = named("house_iron", &sheets);
+        bronze.name = "house_egyptian_bronze".into();
+        sheets.push(stone);
+        sheets.push(bronze);
+        let a = Atlas::with_sheets(&sheets);
+        let x = |kind| a.frame(kind, 0).unwrap().0.x;
+        let page = |kind| a.frame(kind, 0).unwrap().0.page;
+        let egyptian = |age| a.variant(kinds::HOUSE, age, 1);
+        assert_eq!(egyptian(0), look_id(kinds::HOUSE, 0, 1));
+        assert_eq!(
+            egyptian(1),
+            look_id(kinds::HOUSE, 0, 1),
+            "the latest age it has"
+        );
+        assert_eq!(egyptian(2), look_id(kinds::HOUSE, 2, 1));
+        assert_eq!(egyptian(3), look_id(kinds::HOUSE, 2, 1));
+        assert_ne!(
+            (page(egyptian(0)), x(egyptian(0))),
+            (page(kinds::HOUSE), x(kinds::HOUSE))
+        );
+        // Without its own set of a kind, the first set's in that age.
+        assert_eq!(a.variant(kinds::TEMPLE, 3, 1), variant_id(kinds::TEMPLE, 3));
+        assert_eq!(a.variant(kinds::HOUSE, 2, 3), variant_id(kinds::HOUSE, 2));
+        assert_eq!(a.variant(kinds::HOUSE, 0, 2), kinds::HOUSE);
     }
 
     #[test]
@@ -2410,7 +2679,7 @@ mod tests {
             let mut tails = Vec::new();
             for y in 0..frame.h as u32 {
                 for x in 0..frame.w as u32 {
-                    let index = atlas.index_at(frame.x as u32 + x, frame.y as u32 + y);
+                    let index = atlas.index_at(frame.page, frame.x as u32 + x, frame.y as u32 + y);
                     let sx = if flip {
                         frame.w as f32 - 1.0 - x as f32
                     } else {
@@ -2443,7 +2712,7 @@ mod tests {
             let (f, _) = a.frame(kinds::VILLAGER, facing).unwrap();
             (0..f.h as u32)
                 .flat_map(|y| (0..f.w as u32).map(move |x| (x, y)))
-                .map(|(x, y)| a.index_at(f.x as u32 + x, f.y as u32 + y))
+                .map(|(x, y)| a.index_at(f.page, f.x as u32 + x, f.y as u32 + y))
                 .collect::<Vec<_>>()
         };
         assert_ne!(pixels(1), pixels(3));

@@ -100,6 +100,21 @@ impl Selection {
         })
     }
 
+    /// Selected units of `player` that can gather from a node of
+    /// `node`: villagers for the land's, fishing boats for fish.
+    pub fn own_gatherers_for(&self, sim: &Simulation, player: u8, node: KindId) -> Vec<EntityId> {
+        self.filter(sim, |i| {
+            sim.world().owner[i] == player && kinds::can_gather(sim.world().kind[i], node)
+        })
+    }
+
+    /// Selected units of `player` of one kind.
+    pub fn own_kind(&self, sim: &Simulation, player: u8, kind: KindId) -> Vec<EntityId> {
+        self.filter(sim, |i| {
+            sim.world().owner[i] == player && sim.world().kind[i] == kind
+        })
+    }
+
     /// Selected villagers of `player`.
     pub fn own_villagers(&self, sim: &Simulation, player: u8) -> Vec<EntityId> {
         self.filter(sim, |i| {
@@ -210,7 +225,7 @@ pub fn pick(
             if x < 0 || y < 0 || x >= s.uw as i32 || y >= s.vh as i32 {
                 return false;
             }
-            let idx = atlas.index_at(s.u as u32 + x as u32, s.v as u32 + y as u32);
+            let idx = atlas.index_at(s.page, s.u as u32 + x as u32, s.v as u32 + y as u32);
             idx != 0 && idx != view::palette::SHADOW
         };
         let (cx, cy) = (sx as i32, sy as i32);

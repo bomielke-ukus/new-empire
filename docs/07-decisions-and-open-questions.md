@@ -394,7 +394,7 @@ names one of them waits for it; the rest are read onto what exists:
 | Civ | Bonuses as built | Denied as built |
 |---|---|---|
 | Egyptians | Gold +20%; Chariot Archers +33% HP; priests convert from 2 tiles further | the Academy, Hoplite and Legionary (the Legion), Heavy Cavalry |
-| Greeks | Hoplites and Legionaries +25% speed; the Legion upgrade from the Bronze Age (the spec's "hoplites in Bronze" is every side's already); ships +30% waits for ships | Chariot Archer, Horse Archer |
+| Greeks | Hoplites and Legionaries +25% speed; the Legion upgrade from the Bronze Age (the spec's "hoplites in Bronze" is every side's already); ships +30% speed (since D33) | Chariot Archer, Horse Archer |
 | Assyrians | Villagers +10% speed; Slingers, Bowmen, Chariot and Horse Archers strike 20% more often | the Legion upgrade ("heavy infantry upgrades") |
 | Babylonians | Walls, the gate and towers +60% HP; stone +20% | Heavy Cavalry ("cavalry upgrades"); Torsion and the Catapult ("siege workshop tier 2") |
 | Persians | Hunting +30%; War Elephants +50% speed | Ballista; guard towers wait for them |
@@ -407,12 +407,111 @@ unit plays changes. A match names a civilization per side in its
 configuration; one that names none (every test and corpus match before
 this) plays as before and hashes as before. On the setup screen the
 player picks theirs and the opponents' are dealt from the seed. The four
-architecture sets are named per civilization but not drawn: every side's
-buildings look the same until the other three sets are made.
+architecture sets are named per civilization; D34 draws them.
+
+### D33 — Boats move on a grid of their own; the Dock stands in the water at the shore
+**Date:** 2026-10-04 · **Decided by:** Claude, on the owner's instruction to build naval next; Q1's recommendation (hold naval until M8)
+
+Q1 named the cost: water doubles the pathfinding surface. It is paid
+once, as a second `NavGrid` where the water is open and the land
+blocked, with its own sector graph and flow fields; every place a unit
+asks the grid (planning, walking, standing, approaching, spreading a
+group, stepping out of a building) asks the grid of its element. A group
+of boats and walkers ordered somewhere parts and goes as two. Shallow
+water stays closed to walkers, as it was: fords are land, and a boat
+can sail anywhere wet. The water grid is derived from the map and the
+Docks and fish standing in it, so it is not hashed and a match without
+boats hashes as before; a save from before boats reads it empty and it
+is rebuilt.
+
+The Dock is three tiles square, every tile of it open water, with open
+land beside it to be built from and open water beside it for its boats;
+anywhere else it is refused ("goes in the water by the shore"). It is
+the water's drop-off: a fishing boat's catch goes there and nothing from
+the land does, so the land keeps its one drop-off type (D5). Every
+letter is a key already, so the Dock is placed by its button, like the
+Town Center and the Wonder.
+
+Ships are a class of their own for the counter system. No technology
+names them yet, so the per-class technology tables keep their eight
+entries and a ship's is none; old saves and hashes keep their shape.
+
+The warships the spec leaves unnamed are three, one an age from the
+Tool Age (the owner agreed): the Archer Ship, the War Galley and the
+Catapult Ship, trained at the Dock. They fight across the shore with
+what reaches over the water: a melee unit never takes a unit of the
+other element as a target, given the order or not, and a unit sent
+after one across the shore that has gone as near as its element allows
+and is still out of reach gives up (`GD-NAVAL-02`). A building is hit
+from beside it, so hand weapons can still burn a Dock. The Greeks'
+ships are 30% faster.
+
+A transport is a garrison that moves. A unit told to board walks to the
+land nearest the boat and waits there, the boat comes in to the water
+nearest the party, and each steps aboard in reach; aboard, it rides
+where the boat goes. Told to unload somewhere, the boat sails to the
+water nearest the place and puts everyone ashore on the land beside it.
+At sea, nobody steps off; a transport that sinks, or is scuttled, takes
+everyone aboard with it; one converted brings them over. A trade boat
+loads 20 wood at a Dock of its side's, sells it at another side's Dock
+(an enemy's will do: there are no alliances yet) for 10 gold and
+three quarters of a gold a tile from its side's nearest Dock, brings the
+gold home and goes again, waiting at home while there is no wood.
+
+Islands puts the starts on a ring two fifths of the map out with
+little jitter and gives each the land within half the distance to its
+nearest neighbour, then cuts a channel of deep water along the line
+halfway between every two, no nearer a start than twelve tiles; a map
+where any start can still walk to another is thrown away and the next
+seed tried. Relics go on any island.
+
+### D34 — The first architecture set is the Greek; the other three restyle it
+**Date:** 2026-10-05 · **Decided by:** Claude, on the owner's instruction to make the other three building styles
+
+`docs/02` §11 gives eight civilizations four architecture sets, and D32
+named each civilization's. The set drawn first, mudbrick and thatch
+turning to plaster, terracotta, dressed stone and slate, with porticoes
+and a podium Wonder under a columned shrine, is the **Greek**: the
+plainly named sets (`house`, `house_bronze`) are the Greek, and a
+civilization without a set of its own (and every match that names no
+civilization) draws them. The other three are the same buildings, the
+same footprints and the same stages, restyled after they are built, as
+the ages restyle the Greek (D29), so that a building is the same shape
+to the eye in every architecture and a new kind costs one model, not
+four:
+
+- **Egyptian**: mudbrick, then whitewash, sandstone, and white
+  limestone in the Iron Age; flat roofs behind a low parapet under a
+  flared cavetto cornice, painted bands of blue and red ochre from the
+  Tool Age, battered wall feet from the Bronze, a wind-catcher on a roof
+  big enough to live on, papyrus capitals on columns. Its Wonder is a
+  pyramid cased in white limestone with a gilt capstone and two
+  obelisks.
+- **Mesopotamian**: mudbrick, then baked brick from the Bronze Age;
+  flat roofs crenellated, the merlons stepped from the Bronze; buttressed
+  walls; a band of blue glaze from the Bronze and walls glazed to the
+  top with gold rosettes in the Iron. Its Wonder is a three-tiered
+  ziggurat with a blue-glazed shrine.
+- **East Asian**: rammed earth on an earthen podium, then white plaster
+  on a stone one from the Bronze Age; hipped roofs with turned-up
+  corners, thatch and then dark tile with a ridge and, in the Iron Age,
+  gilt horns; posts of dark timber, lacquered red from the Bronze, with
+  brackets under the eaves. Its Wonder is a hall under two tiers of roof
+  on two terraces, with gate towers by its stair.
+
+What stood on a roof (a flag) is set on the new roof. The Dock, the
+farm, the walls and the gate are everyone's. The sets are named for
+their architecture before their age (`house_egyptian_bronze`); a
+building draws its owner's architecture in the latest age that
+architecture has a set for, and the Greek set where it has none.
+
+The four sets do not fit one 8192 × 8192 atlas, the widest texture the
+GPU's default limits allow: the atlas is a texture array, a page a
+layer, and each frame says which page it is on.
 
 ## Open questions
 
-### Q1 — Naval in the vertical slice, or after?
+### Q1 — Naval in the vertical slice, or after? — **answered, see D33**
 Water doubles the pathfinding surface (separate navigation domain, transports,
 shore-landing edge cases) for one map type. **Recommendation:** hold until M8.
 

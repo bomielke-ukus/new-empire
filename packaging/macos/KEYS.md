@@ -19,7 +19,7 @@ Press `F1` in a match for this list on screen. These are the defaults; the title
 | `,` | NEXT IDLE SOLDIER |
 | `RIGHT-CLICK` | MOVE, GATHER, BUILD, RALLY |
 | `T` | STOP |
-| `C P G B L O H M` | TRAIN AT A MILITARY BUILDING |
+| `C P G B L O H M F` | TRAIN AT A MILITARY BUILDING |
 | `RIGHT-CLICK` | ON AN ENEMY: ATTACK |
 | `RIGHT-CLICK` | PRIEST ON AN ENEMY UNIT: CONVERT |
 | `RIGHT-CLICK` | PRIEST ON A RELIC: TAKE IT TO A TEMPLE |
@@ -48,6 +48,7 @@ A letter works while the building or villager that has the button is selected.
 | `H` | HOUSE 30W |
 | `O` | STORE 100W |
 | `B` | BARRACKS 125W |
+| `ITS BUTTON` | Dock 100W |
 | `F` | FARM 75W (TOOL) |
 | `N` | ARCHERY 150W (TOOL) |
 | `L` | STABLE 150W (TOOL) |

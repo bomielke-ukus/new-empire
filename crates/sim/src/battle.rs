@@ -349,6 +349,17 @@ impl Simulation {
         Fx::from_int(combat::range_of(k, &self.modifiers(self.world.owner[i]))) + REACH
     }
 
+    /// Whether `i` could ever hit `j`: anything on its own element, and a
+    /// unit across the shore only with a weapon that reaches over the
+    /// water (`docs/07` D33). A building is hit from beside it, whatever it
+    /// stands in.
+    pub(crate) fn reaches(&self, i: usize, j: usize) -> bool {
+        let target = kinds::info(self.world.kind[j]);
+        !target.mobile
+            || self.naval(i) == target.naval
+            || kinds::info(self.world.kind[i]).combat.range > 0
+    }
+
     /// True if `i` can hit `target` from where it stands.
     fn in_range(&self, i: usize, target: Slot) -> bool {
         let reach = self.reach_of(i);
@@ -382,7 +393,7 @@ impl Simulation {
                 return;
             }
             let k = kinds::info(self.world.kind[j]);
-            if k.mobile == buildings || k.class == kinds::Class::Other {
+            if k.mobile == buildings || k.class == kinds::Class::Other || !self.reaches(i, j) {
                 return;
             }
             let d = pos.distance_sq_raw(self.world.pos[j]);
@@ -516,6 +527,17 @@ impl Simulation {
         // Walk toward it, re-aiming when it has moved a tile or the trip
         // has ended short.
         let arrive = (self.reach_of(i) - Fx::HALF).max(Fx::HALF);
+        // Across the shore, a walk that ended short of where it was sent
+        // ended as near as this unit's element goes: out of reach is out
+        // of the fight.
+        let cut_off = matches!(
+            &self.world.nav[i],
+            Some(n) if n.state == NavState::Arrived && n.goal.distance(tpos) > arrive + Fx::ONE
+        );
+        if cut_off && self.naval(i) != self.naval(ts.index()) {
+            self.finish_fight(i, then);
+            return;
+        }
         let stale = match &self.world.nav[i] {
             None => true,
             Some(n) => {
@@ -618,6 +640,11 @@ impl Simulation {
             self.enter(i, bs);
             return;
         }
+        // A transport moves: make for the shore by it and wait there.
+        if kinds::info(self.world.kind[bs.index()]).mobile {
+            self.board(i, bs);
+            return;
+        }
         match &self.world.nav[i] {
             None => match self.approach(i, bs) {
                 // To a tile beside the door, as a builder walks to a site.
@@ -686,6 +713,15 @@ impl Simulation {
             return;
         }
         let b = bs.index();
+        if kinds::info(self.world.kind[b]).mobile {
+            // A transport puts them ashore if land is in reach, and at sea
+            // keeps them aboard.
+            let t = nav::tile_of(self.world.pos[b]);
+            if let Some(land) = self.nav.nearest_passable(t.0, t.1, 3, None) {
+                self.put_ashore(bs, land);
+            }
+            return;
+        }
         let fp = kinds::info(self.world.kind[b]).footprint as i32;
         let (ax, ay) = nav::anchor_tile(self.world.pos[b], fp);
         let tiles = self.nav.spread(ax, ay, units.len(), None);
@@ -1091,6 +1127,10 @@ impl Simulation {
                 if self.world.kind[i] == kinds::PRIEST {
                     self.drop_relics_of(self.world.id_at(slot), self.world.pos[i]);
                 }
+                // A transport takes everyone aboard down with it.
+                if k.garrison > 0 {
+                    self.drown_passengers(slot);
+                }
                 // A hunted animal lies as a carcass, its food still on it.
                 self.world.dying[i] = decay_ticks(self.world.kind[i]);
                 self.world.move_target[i] = None;
@@ -1119,6 +1159,10 @@ impl Simulation {
         // An open gate's tile is already clear; the counts saturate.
         self.nav.unblock_footprint(ax, ay, info.footprint as i32);
         self.nav.refresh();
+        if info.naval {
+            self.water.unblock_footprint(ax, ay, info.footprint as i32);
+            self.water.refresh();
+        }
         self.world.production[i] = None;
         self.world.construction[i] = None;
         self.world.resource[i] = 0;

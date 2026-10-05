@@ -21,6 +21,8 @@ pub enum Class {
     Mounted,
     /// Elephant, siege.
     Heavy,
+    /// Boats, drawn by the middle of the hull.
+    Ship,
     /// House, Farm.
     SmallBuilding,
     /// Barracks, Storehouse.
@@ -40,6 +42,7 @@ impl Class {
             Class::Foot => (40, 48),
             Class::Mounted => (56, 56),
             Class::Heavy => (72, 72),
+            Class::Ship => (80, 80),
             Class::SmallBuilding => (64, 64),
             Class::MediumBuilding => (128, 96),
             Class::LargeBuilding => (192, 144),
@@ -50,7 +53,10 @@ impl Class {
 
     /// Whether the set has five facings or one.
     pub fn turns(self) -> bool {
-        matches!(self, Class::Foot | Class::Mounted | Class::Heavy)
+        matches!(
+            self,
+            Class::Foot | Class::Mounted | Class::Heavy | Class::Ship
+        )
     }
 }
 

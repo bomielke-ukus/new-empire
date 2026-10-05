@@ -104,15 +104,15 @@ pub fn attack_of(k: &KindInfo, mods: &Modifiers) -> i32 {
     if k.combat.attack == 0 {
         0
     } else {
-        k.combat.attack + mods.attack_bonus[k.class.index()]
+        k.combat.attack + Modifiers::of(&mods.attack_bonus, k.class)
     }
 }
 
 /// A kind's armour after its owner's technologies.
 pub fn armour_of(k: &KindInfo, mods: &Modifiers) -> Armour {
     Armour {
-        melee: k.combat.melee_armour + mods.melee_armour_bonus[k.class.index()],
-        pierce: k.combat.pierce_armour + mods.pierce_armour_bonus[k.class.index()],
+        melee: k.combat.melee_armour + Modifiers::of(&mods.melee_armour_bonus, k.class),
+        pierce: k.combat.pierce_armour + Modifiers::of(&mods.pierce_armour_bonus, k.class),
     }
 }
 
@@ -121,7 +121,7 @@ pub fn range_of(k: &KindInfo, mods: &Modifiers) -> i32 {
     if k.combat.attack == 0 || k.combat.range == 0 {
         k.combat.range
     } else {
-        (k.combat.range + mods.range_bonus[k.class.index()]).max(1)
+        (k.combat.range + Modifiers::of(&mods.range_bonus, k.class)).max(1)
     }
 }
 
@@ -371,9 +371,15 @@ mod tests {
         assert!(hits_friends(DamageType::Siege));
         assert!(!hits_friends(DamageType::Melee));
         assert!(!hits_friends(DamageType::Pierce));
+        // Siege engines fire it, and the Catapult Ship, a siege engine on
+        // a hull (`docs/07` D33).
         for k in kinds::all() {
             if k.combat.damage == DamageType::Siege {
-                assert_eq!(k.class, Class::Siege, "{}: only siege fires siege", k.name);
+                assert!(
+                    matches!(k.class, Class::Siege | Class::Ship),
+                    "{}: only siege fires siege",
+                    k.name
+                );
             }
         }
     }

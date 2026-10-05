@@ -200,6 +200,44 @@ second to the most wounded unit of the priest's side within 4 tiles, not
 to a siege engine. A priest at its chant does not run when hit; idle, it
 runs home like a villager. A priest can convert a priest.
 
+### 5.6 The water
+
+- **[GD-NAVAL-01]** Boats move on the water and nothing else does: a boat
+  never stands on land and a walker never stands in the water, shallow or
+  deep. The Dock is built in the water against the shore, from the land
+  beside it, and trains the boats onto the water beside it. Fish lie in
+  the water; only a fishing boat gathers them, and it brings its catch to
+  a Dock, which takes nothing from the land.
+- **[GD-NAVAL-02]** Warships fight across the shore with what reaches over
+  the water: a warship shoots at boats and at anything on land in its
+  range, and archers, towers and siege on land shoot back. Hand weapons
+  cannot fight a ship, and nothing waits at the water's edge for a target
+  it cannot reach.
+- **[GD-NAVAL-03]** A transport carries units over the water: they board
+  it from the shore and it comes in to meet them; sent to land, it sails
+  to the water nearest and puts them ashore there. At sea nobody steps
+  off, and a transport that sinks takes everyone aboard with it. On the
+  Islands map every start has an island of its own, and only boats cross.
+- **[GD-NAVAL-04]** A trade boat takes wood from a Dock of its side's to
+  another side's Dock and brings gold home, the more the further it
+  sails, over and over until told otherwise.
+
+**As built** (2026-10-04, `docs/07` D33): the water is its own grid with
+its own flow fields; a group of boats and walkers ordered somewhere goes
+as two. A Dock is three tiles square, every tile of it water, with land
+beside it and water beside it. A fishing boat holds 15 (a villager 10),
+gathers at the villager's rate and is trained in 30 seconds for 50 wood.
+Fish hold 350 food: about one for every seventy tiles of water on the
+wet map types, a tile or more from the shore and within six of it.
+The warships: the Archer Ship (Tool Age, 100W 20G, 110 HP, 5 pierce at
+range 5), the War Galley (Bronze, 130W 50G, 200 HP, 9 pierce at 6) and
+the Catapult Ship (Iron, 160W 100G, 180 HP, 45 siege at 9 with a blast,
+two population). The Transport (Tool Age, 75W, 150 HP) holds ten. The
+Trade Boat (Bronze, 100W, 100 HP) takes 20 wood a trip and brings home
+10 gold and three quarters of a gold for each tile between the market
+and its side's nearest Dock. A right-click on land with a loaded
+transport sails it there to unload; ALL ASHORE unloads where it lies.
+
 ---
 
 ## 6. Buildings
@@ -308,16 +346,17 @@ being killed. This one change removes most of the original's cruelty.
 - **Random map types for the full game:** Inland, Coastal, Continental,
   Highland, Islands, Narrows, Oasis. **Slice ships Inland only.**
 
-  **As built** (2026-10-04): all but Islands, chosen on the setup screen.
+  **As built** (2026-10-04): all seven, chosen on the setup screen.
   Highland is hillier, its mines richer and its forests thinner; Oasis is
   desert round a lake in the middle with six groves of palms on its shore;
   Coastal has a sea down one side, the starts moved away from it; Continental
   is a round land in a sea; Narrows is a river through the middle, between
   the starts, crossed at three fords that are kept clear of forest. No
   water lies within 14 tiles of a start, and every start's kit is the
-  same. Until there are ships (naval, below) water is only in the way:
-  nothing crosses or stands in it, and nobody fishes. Islands needs ships
-  to be played at all, and waits for them.
+  same. Islands puts every start on an island of its own on a ring two
+  fifths of the map out, a channel of sea cut between every two however
+  many players there are; only boats cross (`docs/07` D33). Boats sail
+  every wet map (§5.6).
 - **[GD-MAP-01]** Map generation is seeded and deterministic: the same seed always produces the
   same map, and starting positions are balanced (equal resources within a
   tolerance, verified by the generator before it returns).
@@ -374,7 +413,10 @@ civ, enough to prove asymmetry is working.
 technologies the game has (`docs/07` D32, which gives the table as built);
 what names something not yet in the game waits for it. The player picks a
 civilization on the setup screen; the opponents' are dealt from the seed.
-All eight build in the one architecture set there is.
+Each builds in its architecture (`docs/07` D34): the Greeks and
+the Phoenicians in the Greek set, the Egyptians and the Sumerians in the
+Egyptian, the Assyrians, the Babylonians and the Persians in the
+Mesopotamian, and the Shang in the East Asian.
 
 ---
 
@@ -401,6 +443,23 @@ The AI is built as: a **build-order planner** (age goals, ratios), an **economy
 manager** (villager assignment, drop-off placement), a **military manager**
 (composition, grouping, attack timing), and a **scouting/threat model** driven by
 its own fog state.
+
+**As built** (2026-10-04): Standard and Hard research the economy's and the
+army's technologies as each becomes worth having (Woodworking first; armour and
+arrows for the soldiers they field; the farming technologies once they farm);
+Easy researches none. Until the army has gone out once, research gets only what
+the army leaves, so the first attack is not late. The economy builds a new
+Storehouse by the trees or the mine once a third of their gatherers walk more
+than eight tiles to drop off, moves gatherers from a resource piled past 1000 to
+one running short, and saves for the next age after ten minutes in an age
+whatever its army. Hard saves for a Wonder after ten minutes in the Iron Age.
+At sea (`crate::navy`): with fish or an enemy over the water near home, it
+builds a Dock on open sea where its villagers can walk to build it, keeps
+fishing boats (Easy 2, Standard 4, Hard 6), keeps warships (Standard 2, Hard 4)
+when the enemy is at sea or over the water, and looks for an enemy it has not
+found with a ship along the edge of the water it has seen. Standard and Hard
+carry the army over in transports once it has gathered, when the enemy cannot
+be walked to, and land it on the shore nearest the enemy's Town Center.
 
 ---
 

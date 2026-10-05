@@ -59,6 +59,9 @@ pub const STONE_WALL: KindId = 24;
 pub const GATE: KindId = 25;
 /// Wonder: held ten minutes, it wins the match (`GD-WIN-02`).
 pub const WONDER: KindId = 26;
+/// The Dock (`docs/02` §6): built on the water at the shore; trains the
+/// boats and takes their catch.
+pub const DOCK: KindId = 27;
 
 /// Swordsman: the Bronze Age's line infantry, from the Barracks.
 pub const SWORDSMAN: KindId = 30;
@@ -84,6 +87,19 @@ pub const CATAPULT: KindId = 38;
 pub const BALLISTA: KindId = 39;
 /// Priest: converts enemy units and heals friendly ones (`docs/02` §5.5).
 pub const PRIEST: KindId = 40;
+/// A fishing boat: gathers fish from the water (`docs/02` §5.1).
+pub const FISHING_BOAT: KindId = 50;
+/// A transport: carries ten units over the water (`docs/02` §5.1).
+pub const TRANSPORT: KindId = 51;
+/// A trade boat: takes wood to another side's Dock and brings gold home
+/// (`docs/02` §5.1).
+pub const TRADE_BOAT: KindId = 52;
+/// The Tool Age's warship: archers on a light hull (`docs/07` D33).
+pub const ARCHER_SHIP: KindId = 53;
+/// The Bronze Age's warship: a war galley, more archers, more hull.
+pub const WAR_GALLEY: KindId = 54;
+/// The Iron Age's warship: a catapult on a heavy hull, for the shore.
+pub const CATAPULT_SHIP: KindId = 55;
 
 /// Wood to reseed a farm.
 pub const FARM_RESEED_COST: Cost = [0, 60, 0, 0];
@@ -98,6 +114,8 @@ pub const STONE_MINE: KindId = 103;
 /// A relic: carried by a priest to a Temple, where it earns gold; all of
 /// them held ten minutes win the match (`GD-WIN-03`, `docs/07` D31).
 pub const RELIC: KindId = 104;
+/// Fish in the water: food a fishing boat gathers.
+pub const FISH: KindId = 105;
 /// A gazelle: huntable food that runs.
 pub const GAZELLE: KindId = 110;
 
@@ -184,11 +202,13 @@ pub enum Class {
     Building = 6,
     /// Huntable animals.
     Animal = 7,
+    /// Boats.
+    Ship = 8,
 }
 
 impl Class {
     /// Every class, in index order.
-    pub const ALL: [Class; 8] = [
+    pub const ALL: [Class; 9] = [
         Class::Other,
         Class::Villager,
         Class::Infantry,
@@ -197,6 +217,7 @@ impl Class {
         Class::Siege,
         Class::Building,
         Class::Animal,
+        Class::Ship,
     ];
 
     /// Index into a per-class table.
@@ -215,6 +236,7 @@ impl Class {
             Class::Siege => "siege",
             Class::Building => "buildings",
             Class::Animal => "animals",
+            Class::Ship => "ships",
         }
     }
 }
@@ -404,6 +426,9 @@ pub struct KindInfo {
     /// Units that fit inside, for buildings that shelter them
     /// (`UX-CMD-09`); 0 for everything else.
     pub garrison: u8,
+    /// Of the water: a boat moves on it and never on land; a Dock or fish
+    /// stands in it, and only boats work there.
+    pub naval: bool,
 }
 
 /// Units of construction work per builder per tick at normal speed.
@@ -450,6 +475,7 @@ const BASE: KindInfo = KindInfo {
     combat: NO_COMBAT,
     trained_at: None,
     garrison: 0,
+    naval: false,
 };
 
 const fn unit(
@@ -681,6 +707,74 @@ const TABLE: &[KindInfo] = &[
         trained_at: Some(TEMPLE),
         ..unit(PRIEST, "Priest", 25, 8, [0, 0, 0, 125], 50)
     },
+    // Gathers fish and brings it to a Dock; cannot fight.
+    KindInfo {
+        class: Class::Ship,
+        combat: fortified(0, 2),
+        trained_at: Some(DOCK),
+        naval: true,
+        ..unit(FISHING_BOAT, "Fishing Boat", 45, 13, [0, 50, 0, 0], 30)
+    },
+    // Ten aboard, landed where its owner says; cannot fight.
+    KindInfo {
+        age: Age::Tool,
+        class: Class::Ship,
+        combat: fortified(0, 4),
+        garrison: 10,
+        trained_at: Some(DOCK),
+        naval: true,
+        ..unit(TRANSPORT, "Transport", 150, 14, [0, 75, 0, 0], 30)
+    },
+    // Sails wood out and gold home; cannot fight.
+    KindInfo {
+        age: Age::Bronze,
+        class: Class::Ship,
+        combat: fortified(0, 3),
+        trained_at: Some(DOCK),
+        naval: true,
+        ..unit(TRADE_BOAT, "Trade Boat", 100, 16, [0, 100, 0, 0], 40)
+    },
+    // The warships (`docs/07` D33): archers that shoot over the water at
+    // anything in reach, ashore or afloat, and a catapult for the shore.
+    KindInfo {
+        age: Age::Tool,
+        class: Class::Ship,
+        combat: Combat {
+            line_of_sight: 7,
+            ..ranged(5, 5, 3)
+        },
+        trained_at: Some(DOCK),
+        naval: true,
+        ..unit(ARCHER_SHIP, "Archer Ship", 110, 16, [0, 100, 0, 20], 35)
+    },
+    KindInfo {
+        age: Age::Bronze,
+        class: Class::Ship,
+        combat: Combat {
+            melee_armour: 1,
+            line_of_sight: 8,
+            ..ranged(9, 6, 4)
+        },
+        trained_at: Some(DOCK),
+        naval: true,
+        ..unit(WAR_GALLEY, "War Galley", 200, 16, [0, 130, 0, 50], 45)
+    },
+    KindInfo {
+        age: Age::Iron,
+        class: Class::Ship,
+        pop_cost: 2,
+        combat: thrown(45, 9, 100, 10),
+        trained_at: Some(DOCK),
+        naval: true,
+        ..unit(
+            CATAPULT_SHIP,
+            "Catapult Ship",
+            180,
+            12,
+            [0, 160, 0, 100],
+            60,
+        )
+    },
     KindInfo {
         pop_provided: 5,
         dropoff: true,
@@ -774,10 +868,23 @@ const TABLE: &[KindInfo] = &[
         age: Age::Iron,
         ..building(WONDER, "Wonder", 4000, 5, [0, 1000, 1000, 1000], 1500)
     },
+    // On the water at the shore: built from the land, trains boats from
+    // the water, and takes a fishing boat's catch.
+    KindInfo {
+        dropoff: true,
+        trains: true,
+        naval: true,
+        ..building(DOCK, "Dock", 500, 3, [0, 100, 0, 0], 40)
+    },
     node(TREE, "Tree", 20, Resource::Wood, 75),
     node(BERRY_BUSH, "Berry Bush", 1, Resource::Food, 150),
     node(GOLD_MINE, "Gold Vein", 1, Resource::Gold, 400),
     node(STONE_MINE, "Stone Vein", 1, Resource::Stone, 350),
+    // Deep fish, for boats (`docs/02` §3.2).
+    KindInfo {
+        naval: true,
+        ..node(FISH, "Fish", 1, Resource::Food, 350)
+    },
     // Stands on its tile like a bush, and nothing can hurt it.
     KindInfo {
         id: RELIC,
@@ -858,9 +965,32 @@ pub fn is_wall(kind: KindId) -> bool {
     matches!(kind, PALISADE_WALL | STONE_WALL)
 }
 
-/// A building that shelters units (`UX-CMD-09`).
+/// A building that shelters units (`UX-CMD-09`), or a transport that
+/// carries them.
 pub fn garrisons(kind: KindId) -> bool {
     info(kind).garrison > 0
+}
+
+/// A unit that gathers: the villager on land, the fishing boat on the
+/// water.
+pub fn gathers(kind: KindId) -> bool {
+    matches!(kind, VILLAGER | FISHING_BOAT)
+}
+
+/// Whether a gatherer of `gatherer` can work `node`: on its own element,
+/// so fish are a boat's and everything on land a villager's.
+pub fn can_gather(gatherer: KindId, node: KindId) -> bool {
+    gathers(gatherer) && info(gatherer).naval == info(node).naval
+}
+
+/// What a gatherer of `kind` carries at once before the bonus a player's
+/// technologies add: a boat's hold is half again a villager's arms.
+pub fn carry_base(kind: KindId) -> i32 {
+    if info(kind).naval {
+        CARRY_CAPACITY * 3 / 2
+    } else {
+        CARRY_CAPACITY
+    }
 }
 
 #[cfg(test)]
@@ -930,9 +1060,24 @@ mod tests {
         assert_eq!(trained_at(SIEGE_WORKSHOP).count(), 3);
         assert_eq!(trained_at(TEMPLE).count(), 1);
         assert_eq!(trained_at(TOWN_CENTER).count(), 1);
+        assert_eq!(trained_at(DOCK).count(), 6);
+        // A boat is of the water and so is where it is trained; nothing
+        // of the water lives on land.
+        for k in all() {
+            if let Some(b) = k.trained_at {
+                assert_eq!(k.naval, info(b).naval, "{}", k.name);
+            }
+            if k.naval && k.mobile {
+                assert_eq!(k.class, Class::Ship, "{}", k.name);
+            }
+        }
+        assert!(can_gather(FISHING_BOAT, FISH) && !can_gather(VILLAGER, FISH));
+        assert!(can_gather(VILLAGER, TREE) && !can_gather(FISHING_BOAT, TREE));
+        assert!(info(DOCK).dropoff && info(DOCK).naval);
         // Siege and elephants take two population (`GD-POP-03`).
         for k in all().iter().filter(|k| k.trained_at.is_some()) {
             let two = k.class == Class::Siege || k.id == WAR_ELEPHANT;
+            let two = two || k.combat.damage == DamageType::Siege && k.naval;
             assert_eq!(k.pop_cost, if two { 2 } else { 1 }, "{}", k.name);
         }
         assert!(is_wall(PALISADE_WALL) && is_wall(STONE_WALL) && !is_wall(GATE));

@@ -62,6 +62,23 @@ pub struct BuildOrder {
     /// with plenty over (`GD-WIN-02`). A save from before reads no.
     #[serde(default)]
     pub wonder: bool,
+    /// Whether it researches the economy's and the army's technologies
+    /// as they become worth having (`crate::research`). A save from
+    /// before reads no.
+    #[serde(default)]
+    pub research: bool,
+    /// Fishing boats kept while there are fish near home; none keeps the
+    /// side off the water altogether (`crate::navy`). A save from before
+    /// reads none.
+    #[serde(default)]
+    pub fishers: u32,
+    /// Warships kept when the enemy is over the water or at sea.
+    #[serde(default)]
+    pub warships: u32,
+    /// Whether it carries its army over the water to an enemy it cannot
+    /// walk to.
+    #[serde(default)]
+    pub ferries: bool,
 }
 
 fn standard_hunters() -> u32 {
@@ -96,9 +113,22 @@ const AGE_BUILDINGS: [&[KindId]; 4] = [
 /// Wood kept back for the next house.
 const HOUSE_RESERVE: i32 = 30;
 
-/// Ticks in the Tool Age after which the Bronze Age is saved for whatever
-/// the army: ten minutes, by which time the army has had its chance to
-/// attack.
+/// Tiles from every drop-off past which a gatherer's walk is long enough
+/// for a new Storehouse by its work.
+const DROPOFF_FAR: i32 = 8;
+
+/// Storehouses a side builds at most: the first, and those by the work.
+const MAX_STOREHOUSES: usize = 6;
+
+/// A stock this big is more than anything costs: its gatherers are better
+/// spent on what is short.
+const GLUT: i32 = 1000;
+
+/// A stock below this is short.
+const SHORT: i32 = 200;
+
+/// Ticks in an age after which the next is saved for whatever the army:
+/// ten minutes, by which time the army has had its chance to attack.
 const AGE_PATIENCE: u64 = 12_000;
 
 impl BuildOrder {
@@ -126,6 +156,10 @@ impl BuildOrder {
                 hunters: 1,
                 priests: 0,
                 wonder: false,
+                research: false,
+                fishers: 2,
+                warships: 0,
+                ferries: false,
             },
             Difficulty::Standard => BuildOrder {
                 villagers: [8, 16, 22, 26],
@@ -149,6 +183,10 @@ impl BuildOrder {
                 hunters: 2,
                 priests: 2,
                 wonder: false,
+                research: true,
+                fishers: 4,
+                warships: 2,
+                ferries: true,
             },
             Difficulty::Hard | Difficulty::Hardest => BuildOrder {
                 villagers: [10, 20, 28, 32],
@@ -171,6 +209,10 @@ impl BuildOrder {
                 hunters: 3,
                 priests: 3,
                 wonder: true,
+                research: true,
+                fishers: 6,
+                warships: 4,
+                ferries: true,
             },
         }
     }
@@ -404,6 +446,28 @@ impl Economy {
             shares[Resource::Food.index()] += food;
             shares[Resource::Wood.index()] += wood;
         }
+        // A glut: a resource piled up past what anything costs, while
+        // another the side gathers runs short, gives half its share to the
+        // one furthest short, as a player reading the top bar moves
+        // villagers. Farms reseeding can eat every piece of wood that
+        // comes in while the food they grow piles up unspent, and then the
+        // building the next age needs is never paid for. Short means below
+        // what is being saved for, or below a floor; stone is short only
+        // when something saved for costs it, since little else does.
+        let need = |i: usize| self.saving[i].max(SHORT);
+        let short = (0..4)
+            .filter(|&i| shares[i] > 0 && stock[i] < need(i))
+            .filter(|&i| i != Resource::Stone.index() || self.saving[i] > 0)
+            .max_by_key(|&i| (need(i) - stock[i], 3 - i));
+        if let Some(u) = short {
+            for o in 0..4 {
+                if o != u && stock[o] >= GLUT.max(self.saving[o] + SHORT) {
+                    let give = shares[o] / 2;
+                    shares[o] -= give;
+                    shares[u] += give;
+                }
+            }
+        }
         let mut have = [0u32; 4];
         for v in &villagers {
             match v.job {
@@ -424,7 +488,7 @@ impl Economy {
         // animal is taken before the next is killed and left to rot.
         let dropoffs: Vec<Vec2Fx> = mine
             .iter()
-            .filter(|s| !s.site && kinds::info(s.kind).dropoff)
+            .filter(|s| !s.site && kinds::info(s.kind).dropoff && !kinds::info(s.kind).naval)
             .map(|s| s.pos)
             .collect();
         let reach = Fx::from_int(HUNT_RANGE).raw() as u64;
@@ -576,6 +640,73 @@ impl Economy {
             }
         }
 
+        // ----- A Storehouse by the work (drop-off placement, `docs/02`
+        // §12): once a third of the side's woodcutters or miners are a
+        // long walk from every drop-off, the trees or the mine they left
+        // behind cut out, a new Storehouse by the node the furthest of
+        // them works, one at a time, as a player builds one when the walk
+        // grows.
+        let far = Fx::from_int(DROPOFF_FAR).raw() as u64;
+        let walk = |p: Vec2Fx| {
+            dropoffs
+                .iter()
+                .map(|d| d.distance_sq_raw(p))
+                .min()
+                .unwrap_or(u64::MAX)
+        };
+        let storehouses = mine.iter().filter(|s| s.kind == kinds::STOREHOUSE).count();
+        if owned(kinds::STOREHOUSE)
+            && !pending(&self.ordered, kinds::STOREHOUSE)
+            && storehouses < MAX_STOREHOUSES
+            && !farms_short
+            && view.can_build(kinds::STOREHOUSE).is_ok()
+        {
+            let cost = view.cost_of(kinds::STOREHOUSE);
+            for r in [Resource::Wood, Resource::Gold, Resource::Stone] {
+                let gatherers: Vec<&Sighting> = villagers
+                    .iter()
+                    .filter(|v| v.job == Job::Gathering(r))
+                    .copied()
+                    .collect();
+                let out_far: Vec<&Sighting> = gatherers
+                    .iter()
+                    .filter(|v| walk(v.pos) > far * far)
+                    .copied()
+                    .collect();
+                if out_far.len() < 2 || out_far.len() * 3 < gatherers.len() {
+                    continue;
+                }
+                let Some(furthest) = out_far
+                    .iter()
+                    .max_by_key(|v| (walk(v.pos), v.id))
+                    .map(|v| v.pos)
+                else {
+                    continue;
+                };
+                let Some(node) = nearest(r, furthest) else {
+                    continue;
+                };
+                if !afford(stock, &cost) {
+                    break;
+                }
+                if let Some((x, y)) = place(view, kinds::STOREHOUSE, tile(node.pos), 1, 4, rng) {
+                    let at = fogged::nav::centre((x, y));
+                    if let Some(b) = builder(&villagers, at, Some(r), &taken) {
+                        out.push(CommandKind::Build {
+                            kind: kinds::STOREHOUSE,
+                            x,
+                            y,
+                            ids: vec![b],
+                        });
+                        spend(stock, &cost);
+                        self.ordered.push((kinds::STOREHOUSE, tick));
+                        taken.push(b);
+                    }
+                }
+                break;
+            }
+        }
+
         // ----- The age gate: the buildings the next age needs, then the
         // advance itself.
         self.saving = [0; 4];
@@ -607,16 +738,15 @@ impl Economy {
                         // Saved for at once in the Stone Age: the Tool Age
                         // brings the farms. Later ages compete with the
                         // army for what comes in, so they are saved for
-                        // once the army is big enough to attack with; the
-                        // Bronze Age also after five minutes in the Tool
-                        // Age whatever the army, since a side that never
-                        // saves never advances and its later soldiers are
-                        // never seen. Not the Iron Age: its gold is the
-                        // Bronze Age army's gold.
+                        // once the army is big enough to attack with, and
+                        // also after ten minutes in the age before whatever
+                        // the army, since a side that never saves never
+                        // advances and its later soldiers and its Wonder
+                        // are never seen.
                         Err(fogged::ResearchError::Unaffordable)
                             if me.age == Age::Stone
                                 || soldiers >= order.attack_size
-                                || (me.age == Age::Tool && patience_spent) =>
+                                || patience_spent =>
                         {
                             self.saving = next.cost;
                         }
@@ -683,20 +813,30 @@ impl Economy {
         }
 
         // ----- A Wonder (`GD-WIN-02`), for the orders that raise one: in
-        // the Iron Age, with its cost in hand and as much again of food and
-        // wood besides, by the Town Center, and the most builders a site
-        // takes.
+        // the Iron Age, with its cost in hand and some food and wood
+        // besides, by the Town Center, and the most builders a site takes.
+        // After ten minutes in the Iron Age it is saved for, as an age is,
+        // or the army spends the gold as it comes in and it never stands.
         if order.wonder
             && age == Age::Iron.index()
             && !owned(kinds::WONDER)
             && !pending(&self.ordered, kinds::WONDER)
-            && view.can_build(kinds::WONDER).is_ok()
+            && matches!(
+                view.can_build(kinds::WONDER),
+                Ok(()) | Err(fogged::PlaceError::Unaffordable)
+            )
         {
             let cost = view.cost_of(kinds::WONDER);
             let mut with_reserve = cost;
             with_reserve[Resource::Food.index()] += 600;
             with_reserve[Resource::Wood.index()] += 300;
-            if afford(stock, &with_reserve) {
+            if !afford(stock, &with_reserve) {
+                if patience_spent {
+                    for (s, c) in self.saving.iter_mut().zip(with_reserve) {
+                        *s = (*s).max(c);
+                    }
+                }
+            } else {
                 if let Some((x, y)) = place(view, kinds::WONDER, tc_tile, 6, 18, rng) {
                     let to = fogged::nav::centre((x, y));
                     let mut ids = Vec::new();

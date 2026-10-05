@@ -512,10 +512,11 @@ impl Rig {
 
 use crate::manifest::Class;
 
-const ALL_CLASSES: [Class; 8] = [
+const ALL_CLASSES: [Class; 9] = [
     Class::Foot,
     Class::Mounted,
     Class::Heavy,
+    Class::Ship,
     Class::SmallBuilding,
     Class::MediumBuilding,
     Class::LargeBuilding,
@@ -528,6 +529,7 @@ fn class_name(c: Class) -> &'static str {
         Class::Foot => "Foot",
         Class::Mounted => "Mounted",
         Class::Heavy => "Heavy",
+        Class::Ship => "Ship",
         Class::SmallBuilding => "SmallBuilding",
         Class::MediumBuilding => "MediumBuilding",
         Class::LargeBuilding => "LargeBuilding",
@@ -621,9 +623,10 @@ mod tests {
             .any(|p| p.contains("puts the origin at")));
     }
 
-    /// Terrain anchors at the tile centre, a unit near its feet, and a
-    /// building at its footprint's centre, which is where the renderer puts
-    /// the building's position.
+    /// Terrain anchors at the tile centre, a unit near its feet, a boat
+    /// below the middle of its frame, with room under it for the half of
+    /// the hull toward the camera, and a building at its footprint's
+    /// centre, which is where the renderer puts the building's position.
     #[test]
     fn terrain_anchors_at_the_tile_centre_and_everything_else_near_its_feet() {
         let rig = rig();
@@ -637,6 +640,12 @@ mod tests {
             let frame_h = c.sprite_px[1] * rig.projection.authoring_scale;
             match class_by_name(name).map(|k| (k, k.kind())) {
                 Some((_, crate::manifest::Kind::Terrain)) => {}
+                Some((Class::Ship, _)) => assert!(
+                    c.anchor_px[1] > frame_h / 2 && c.anchor_px[1] <= frame_h * 3 / 4,
+                    "{name} anchors at {} in a {frame_h} px frame: a hull reaches \
+                     both ways from its middle",
+                    c.anchor_px[1]
+                ),
                 Some((k, crate::manifest::Kind::Building)) => assert_eq!(
                     c.anchor_px[1],
                     frame_h

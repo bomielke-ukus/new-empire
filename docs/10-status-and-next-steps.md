@@ -1972,15 +1972,269 @@ tier waits for it).
 - **Not yet.** The other three architecture sets: every civilization's
   buildings look the same.
 
+### Work record: the opponent's technologies and its economy (2026-10-04)
+
+The opponent researched only the ages and the line upgrades, and a Hard
+opponent reached the Iron Age in about half its long matches. Now it
+researches like a player, and the reason it stalled is fixed.
+
+- **Technologies** (`ai::research`). Standard and Hard research the ten
+  that are neither an age nor a line upgrade, each once it is worth
+  having to the side: Woodworking first; Toolworking, Leather Armour
+  and Fletching for the soldiers it fields; Domestication and Plough
+  once it farms; Gold and Stone Mining for what its villagers gather;
+  Carrying Baskets and Scaffolding. One at a time, with a reserve kept
+  and nothing the economy is saving for touched. Until the army has gone
+  out once, research gets only what the army leaves (an earlier version
+  that went first held Hard's first raid back by four minutes on
+  average). Easy researches nothing.
+- **What research is worth.** Over 80 Hard-against-Hard matches with
+  one side researching and the sides swapped halfway, the researching
+  side won 39 to 43 (49–54%, both orders tried): what it spends on
+  technology it does not spend on soldiers. It is in because a player
+  researches and the opponent's later soldiers are the stronger for it,
+  not because it wins more.
+- **Why Hard stalled in the Bronze Age.** Its wood ran out. The forest
+  by its one Storehouse was cut, its woodcutters walked across the map,
+  and twelve of them brought in 75 wood a minute while thirteen farms
+  reseeding ate it. The Siege Workshop, the second building the Iron Age
+  needs, was never paid for while 2,700 food piled up. Three changes to
+  the economy (`ai::economy`):
+  - **A Storehouse by the work.** Once a third of the woodcutters or
+    miners (two at least) are more than eight tiles from every drop-off,
+    a new Storehouse by the node the furthest of them works; one at a
+    time, six at most. Wood gathered in the Bronze Age more than doubled
+    (2,133 against 910 over the same thirteen minutes of one match);
+    gold rose by 70%.
+  - **A glut.** A resource stocked past 1000 (and past what is saved
+    for it) gives half its gatherer share to the one furthest below what
+    is being saved for, or below 200. Stone counts as short only when
+    something saved for costs it.
+  - **Patience in every age.** The next age is saved for after ten
+    minutes in an age whatever the army, the Iron Age included (only
+    the Tool Age had it), and Hard saves for a Wonder after ten minutes
+    in the Iron Age.
+- **Results.** In 10 forty-minute Hard-against-Hard matches, the
+  surviving sides reached the Iron Age 11 times in 15 (6 in 13 before).
+  Against Easy, Hard reaches the Iron Age inside forty minutes and
+  raises a Wonder in five of six hour-long matches, from the ordinary
+  start. Hard still beats Easy 20 of 20 and Standard 10 of 10, and
+  Hard still raids Easy inside twenty minutes.
+- **Tests** (`tools/simrunner/tests/ai_research.rs`): Standard researches
+  and Easy does not; Hard reaches the Iron Age; Hard raises a Wonder
+  from the ordinary start. `simrunner ai --stats` lists what each side
+  researched and gathered. The Hard-against-Easy record is rewritten.
+
+### Work record: naval, first part — the water, the Dock and fishing (2026-10-04)
+
+Boats are in the simulation (`docs/02` §5.6, `docs/07` D33). This part
+is the ground they stand on and the first of them; warships, transports,
+the trade boat, Islands and the opponent's use of all of it follow.
+
+- **A second grid.** `Simulation::water` is a `NavGrid` with the water
+  open and the land blocked, built from the map with
+  `NavGrid::water_from_map`; Docks and fish block it where they stand.
+  It has its own sector graph and flow fields in `Scratch`. Path planning
+  runs once per element (`plan_paths(naval)`), and walking, the push
+  between units, being put back on open ground, standing, approaching a
+  target and spreading a group all ask the grid of the unit's element
+  (`grid_of`). Move, attack-move and patrol part a mixed group by element
+  (`by_element`). The water grid is derived, so it is not hashed; a save
+  from before reads it empty and `rebuild_water` makes it. Every corpus
+  match is on dry ground and keeps its digest.
+- **Kinds.** `KindInfo::naval`; `Class::Ship` (the per-class technology
+  tables keep their eight entries, read through `Modifiers::of`/`add`,
+  and a ship's is none); the Dock (27), the fishing boat (50) and fish
+  (105). `kinds::gathers`, `can_gather` and `carry_base`.
+- **The Dock** is placed only where all nine of its tiles are open water
+  with open land and open water beside them (`PlaceError::NeedsShore`),
+  is built by villagers from the land, trains boats onto the water beside
+  it, and is the drop-off for boats only (`is_dropoff_for` matches the
+  gatherer's element). The HUD places it by its button, every letter
+  being taken.
+- **Fishing.** A fishing boat takes a Gather order on fish and nothing
+  else, and a villager the reverse; the boat's hold is 15. The app sends
+  selected fishing boats to fish on a right-click.
+- **Fish** on the wet map types (`mapgen::place_fish`), after everything
+  else so the rest of each map is unchanged.
+- **Placeholders** for the Dock, the boat and fish (`AWAITING_ART`).
+  Goldens: the six scenes with the build grid or the controls overlay
+  rebaked for the Dock's button.
+- **Tests** (`crates/sim/tests/behaviour_naval.rs`, `GD-NAVAL-01`): the
+  Dock's placement, built from the shore, trained boats on the water, a
+  catch brought home, fish a boat's and the land a villager's, boats and
+  walkers each on their own element, a mixed group parting, a replay.
+- **Not yet.** Warships, transports, trade, Islands; the opponent builds
+  no Dock. On Coastal the sea can lie sixty tiles from a start.
+
+### Work record: naval, second part — warships (2026-10-04)
+
+- **Three warships** at the Dock (`docs/02` §5.6): the Archer Ship (Tool
+  Age), the War Galley (Bronze) and the Catapult Ship (Iron, two
+  population, a blast like the Catapult's).
+- **Across the shore** (`Simulation::reaches`): a unit is a target for
+  another on the other element only if the attacker's weapon reaches
+  over the water, so a clubman neither takes a ship for a target nor
+  obeys an order to attack one; ships, archers, towers and siege shoot
+  across. A chase across the shore that arrived as near as its element
+  goes, out of reach, ends the fight instead of waiting at the edge.
+- **The Greeks' ships** are 30% faster (D32's last waiting bonus but the
+  guard towers and the priests' tier).
+- **HUD**: the Dock trains on F, B, G and O; placeholders for the three.
+- **Tests** (`GD-NAVAL-02`): an Archer Ship sinks a fishing boat; ship
+  and shore shoot each other; a clubman cannot fight a ship; a ship sent
+  inland gives up; the Greek bonus.
+
+### Work record: naval, third part — transports, Islands and trade (2026-10-04)
+
+- **Transports** (`sim::transport`, `GD-NAVAL-03`): ten aboard. Boarding
+  is the garrison order on a moving carrier: the walker makes for the
+  land nearest the boat and waits (`board`), and the boat comes in to the
+  water nearest the party (`come_alongside`). Aboard, units ride where it
+  goes (`carry_passengers`, for boats only, so a carried relic is as it
+  was). `CommandKind::Unload` / `Order::Unload` sail to the water nearest
+  the place and put everyone ashore on the land beside it
+  (`put_ashore`); `Ungarrison` on a transport lands them only if land is
+  within three tiles. A transport that sinks or is scuttled drowns its
+  passengers; one converted brings them over.
+- **Islands** (`MapKind::Islands`): starts on a ring at 40% of the map
+  with ±2° jitter; each island as wide as half the gap to the nearest
+  start; a deep channel on the bisector between every two starts, no
+  nearer either than 12 tiles; a map where starts still connect is
+  rejected. Relics on any island (`place_relics_on`). The other map
+  types' starts and maps are unchanged.
+- **Trade** (`GD-NAVAL-04`): the Trade Boat, `CommandKind::Trade` and
+  `Order::Trade` — 20 wood out, `trade_gold(tiles)` = 10 + ¾ a tile home.
+- **App and HUD**: a right-click on land with a loaded transport
+  unloads there; a trade boat right-clicked onto another side's Dock
+  trades; the transport's ALL ASHORE (U); the Dock trains the transport
+  (H) and the trade boat (M); placeholders for both.
+- **Tests**: transports board, ride and land, nobody gets off at sea and
+  boats do not board, a sunk transport drowns its passengers; a trade
+  boat's two round trips and their gold, and no trade at home; every
+  island is its own and on the sea (up to eight players on the smallest
+  map); the app's two right-clicks.
+
+### Work record: naval, fourth part — the opponent at sea (2026-10-04)
+
+- **`ai::navy`.** A Dock once the Stone Age's buildings stand, where
+  there is water near home worth one (fish, or an enemy over the water):
+  the nearest site the opponent may place, with land beside it that it
+  knows is open and joined to home (a sandbar or a tree-locked strip
+  will not do) and water beside it that is open sea, not a pond.
+  Fishing boats on the fish it knows of; warships when the enemy is at
+  sea or over the water, the best the age allows; one to find an enemy
+  not yet found by sailing to the edge of the water seen.
+- **The ferry.** When the enemy (its Town Center, or the nearest enemy
+  building known) cannot be walked to over the land the opponent has
+  seen, and it has a Dock, the army waits at home instead of walking to
+  the shore; the navy spends before the army; transports are trained,
+  the gathered army boards, sails to the shore nearest the enemy and is
+  put ashore, and the army manager takes it from there. Whoever misses
+  the boat stands down for the next one.
+- **In the simulation**, two fixes the opponent found: a boat trained at
+  a Dock comes out onto the largest water beside it (a Dock against a
+  cove trained boats into a two-tile pocket); `Military` keeps warships
+  and transports out of the land army, and ALL OUT leaves transports'
+  passengers aboard.
+- **Results.** On Islands, Hard beats Easy inside an hour (seed 1 in the
+  test); in Hard against Hard both sides land waves of 10 to 19 soldiers
+  every few minutes from about twenty minutes in. Inland play is
+  unchanged: the Hard-against-Easy record still matches.
+- **Tests** (`tools/simrunner/tests/ai_navy.rs`): Standard fishes on
+  Islands; Hard carries its army across and wins.
+- **Not yet.** The opponent does not trade, does not escort its
+  transports, and lands only near the enemy's Town Center. On Coastal
+  maps whose sea is far from its start it builds no Dock.
+
+### Work record: naval, fifth part — the boats' art (2026-10-04)
+
+- **A size class for boats** (`docs/05` §2.3, `docs/08` §7). A unit's
+  sprite is anchored at its feet, 3 px above the frame's bottom; a
+  boat's position is the middle of its hull, which reaches as far toward
+  the camera as away from it, so under the Heavy class the near half of
+  every hull was cut off. `Ship` is 80 × 80 at 1×, anchored 24 px above
+  the bottom, and counts a two-tile footprint for the validator's
+  allowance below the anchor. `rig.json`, `atlas` (manifest, compose,
+  rig, validate) and `view::sheets` know it.
+- **The models** (`tools/render/kit.py`, `Boat`): a hull tarred at the
+  water line and planked above, a deck below an open rail, foam where it
+  meets the water, a mast and yard with a sail of the owner's colour
+  (linen banded in it for the fishing and trade boats) and reef bands,
+  oars that trail aft at rest and sweep at the walk, and crew in linen
+  belted in the owner's colour. Each kind's fittings: the fisher's net,
+  the transport's benches, the trader's bales and jars, archers at the
+  rail, the galley's second bank of oars, shields and bronze ram, and the
+  catapult ship's engine, which throws up over its top.
+- **Sinking.** A holdout plane at the water line (`kit.water_line`)
+  hides what a boat has taken under: it heels, its bow lifts, it goes
+  down until the masthead is all that shows, and planks, a cask and a
+  ring of foam are left on the water. The fish use the same plane, so
+  their backs and fins break the surface; one leaps over its splash.
+- **The Dock**: piles in the water, a deck of planks, mooring posts, a
+  shed under slate with a band of the owner's colour, a crane with a
+  bale, crates, casks, nets drying on a rack and the owner's flag; built
+  pile by pile, half-decked, decked under a scaffold; its rubble is
+  stumps and planks adrift.
+- **Two kit fixes on the way.** `rod` draws only in the y-z plane, so
+  the yard (along x) had no length and the oars hung straight down;
+  `beam` points any way. A solid rail flush with the hull's top made
+  coincident faces that shaded black; the rail is now `oval_ring`, open
+  over a deck set below it.
+- **Atlas**: the eight sets took about 900 of the atlas's rows (§5).
+  Every kind the simulation has is now drawn from a rendered set; the
+  view test that checked the list of kinds awaiting art checks that none
+  is.
+
+### Work record: the other three architectures (2026-10-05)
+
+- **Atlas pages** (`view::sprites`, `render`). The sprite atlas is a
+  texture array; a page is at most 8192 rows, and what does not fit goes
+  on the next. Each frame and sprite instance carries its page, which
+  rides to the shader above the flip bit; the software rasterizer, picking
+  and `mapview --atlas` read it. One page is still as tall as it needs.
+- **Looks by architecture** (`view::sprites`, `view::scene`). A set named
+  `house_egyptian`, `house_mesopotamian_bronze` or `house_asian_iron`
+  draws the kind in that architecture and age; the plainly named sets are
+  the Greek (`docs/07` D34). A building is drawn in its owner's
+  civilization's architecture, the latest age it has a set for, and the
+  Greek set's where it has none; a match that names no civilization draws
+  the Greek. Variant ids leave room for four architectures below the UI's.
+- **The models** (`tools/render/kit.py`, `style_architecture`): each
+  building restyled after it is built, as the ages restyle the Greek —
+  each architecture's materials age by age, its roofs in place of the
+  thatch and gables (flat with a parapet, cavetto cornice and a
+  wind-catcher; flat and crenellated; hipped with turned-up corners and,
+  in tile, a ridge with horns), its wall work (painted bands and a
+  battered foot; buttresses and blue glaze with gold rosettes; a podium
+  and lacquered posts with brackets), and Egyptian papyrus capitals. What
+  stood on the old roof is set on the new. Three Wonders of their own: a
+  cased pyramid with obelisks, a ziggurat with a glazed shrine, a
+  double-eaved hall on terraces with gate towers.
+- **On the way**, two traps in the kit: a turned object's `bound_box` is
+  its own axes' box turned, far larger than the mesh (bounds come from
+  the vertices now), and a solid band flush with a wall's top shades
+  black (bands are open rims, short of the top).
+- **Sets**: 123 new (40 buildings by age and a Wonder in each
+  architecture), 240 in all, every one validated. The Dock, the farm, the
+  walls and the gate are everyone's.
+- **Tests**: set names with an architecture and an age; the lookup's
+  fallbacks (the architecture's latest age, then the Greek); frames that
+  overflow a page.
+
 ### Resume here next session
 
-**M8 is under way** (`docs/06`): the later ages' soldiers are in the
+**M8's items are all built** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the
 detailed soldiers and the new roster are rendered (chunk 3);
 priests, relics and the Wonder are in (chunk 4) and the opponent uses
 them (chunk 5); five map types are in (chunk 6) and the eight
-civilizations (chunk 7, above). Next: naval and Islands, and the other
-three architecture sets.
+civilizations (chunk 7); the opponent researches its technologies and
+builds Storehouses by its work; naval is in the simulation — the water,
+the Dock, fishing, warships, transports, trade and Islands (above).
+The opponent goes to sea, and the boats, the Dock and the fish are
+rendered; the four architecture sets are drawn (above, `docs/07` D34).
+Next: the owner's playtest of M8, then `docs/06` M9.
 
 **M7's five chunks have landed; what remains of M7 is the owner's** (§4d):
 the measurement on the Mac with `F4` open during a big fight, recorded
@@ -2194,14 +2448,14 @@ Stated so they are not rediscovered.
   nobody fishes (the
   simulation has no boats), and no rendered set has a second
   civilisation's look. A modeller's work can replace any set by name.
-- **The sprite atlas is 62% full** (5109 of 8192 rows at 8192 wide, a
-  64 MB texture; 84 sets). 8192 is the widest texture the GPU limits
-  allow, so a second civilisation's sets will need a second atlas page or
-  a texture array.
-- **The opponent researches no technology but ages and line upgrades**:
-  no Toolworking, Leather Armour, Fletching, gathering or farming
-  technology. It reaches the Iron Age in some long matches, not all, so
-  its Temple, priests and Wonder come late or not at all.
+- **The sprite atlas fills a page and a sliver** (8170 rows of the first
+  8192-row page and 164 of the second; 215 sets): two layers of a texture
+  array, 128 MB, of which the second is nearly empty. Packing tighter than
+  shelves sorted by height (a skyline packer) would likely bring it back to
+  one page until the next sets come.
+- **The opponent's Wonder comes late**: after ten minutes in the Iron
+  Age, which Hard reaches thirty-five to forty-five minutes in. Standard
+  never goes past the Bronze Age, by its order.
 - **The Mac build is not notarised and is Apple Silicon only.**
   Notarising needs an Apple Developer account and a signing identity in
   the workflow's secrets; an Intel slice needs a second target and `lipo`

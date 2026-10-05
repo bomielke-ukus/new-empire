@@ -1902,7 +1902,11 @@ impl App {
         let i = slot.index();
         let world = self.sim.world();
         let villagers = !self.selection.own_villagers(&self.sim, ME).is_empty();
-        if villagers && gatherable_by_me(&self.sim, i) {
+        let gatherers = !self
+            .selection
+            .own_gatherers_for(&self.sim, ME, world.kind[i])
+            .is_empty();
+        if gatherers && gatherable_by_me(&self.sim, i) {
             return Some(Target::Gather);
         }
         if villagers && world.owner[i] == ME && world.construction[i].is_some() {
@@ -2187,6 +2191,16 @@ impl App {
                 });
                 return;
             }
+            // Trade boats to another side's Dock: trade there
+            // (`GD-NAVAL-04`).
+            let traders = self.selection.own_kind(&self.sim, ME, kinds::TRADE_BOAT);
+            if !traders.is_empty() && self.sim.market_for(id, ME).is_some() {
+                self.issue(CommandKind::Trade {
+                    ids: traders,
+                    dock: id,
+                });
+                return;
+            }
             if !mobile.is_empty() && shelter_of_me(&self.sim, i) {
                 self.issue(CommandKind::Garrison {
                     ids: mobile,
@@ -2194,9 +2208,13 @@ impl App {
                 });
                 return;
             }
-            if !villagers.is_empty() && gatherable {
+            // Villagers on the land's nodes, fishing boats on fish.
+            let gatherers = self
+                .selection
+                .own_gatherers_for(&self.sim, ME, world.kind[i]);
+            if !gatherers.is_empty() && gatherable {
                 self.issue(CommandKind::Gather {
-                    ids: villagers,
+                    ids: gatherers,
                     node: id,
                 });
                 return;
@@ -2237,6 +2255,25 @@ impl App {
                 }
                 return;
             }
+        }
+        // A transport with passengers, sent onto land, sails there and
+        // puts them ashore (`GD-NAVAL-03`); everything else goes.
+        let tile = sim::nav::tile_of(target);
+        let ashore = minimap_uv.is_none() && self.sim.nav().passable(tile.0, tile.1);
+        let (landing, mobile): (Vec<EntityId>, Vec<EntityId>) =
+            mobile.into_iter().partition(|&id| {
+                ashore
+                    && self.sim.world().slot(id).is_some_and(|s| {
+                        kinds::info(self.sim.world().kind[s.index()]).naval
+                            && kinds::garrisons(self.sim.world().kind[s.index()])
+                    })
+                    && !self.sim.garrison_of(id).is_empty()
+            });
+        if !landing.is_empty() {
+            self.issue(CommandKind::Unload {
+                ids: landing,
+                target,
+            });
         }
         if !mobile.is_empty() {
             self.issue(CommandKind::Move {

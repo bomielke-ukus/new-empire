@@ -375,12 +375,12 @@ fn fold_modifier(m: &mut Modifiers, effect: Effect) {
         Effect::FarmYield(n) => m.farm_yield_bonus += n,
         Effect::VillagerSpeed(pct) => m.villager_speed_pct += pct,
         Effect::BuildSpeed(pct) => m.build_speed_pct += pct,
-        Effect::Attack(c, n) => m.attack_bonus[c.index()] += n,
+        Effect::Attack(c, n) => Modifiers::add(&mut m.attack_bonus, c, n),
         Effect::Armour(c, me, pi) => {
-            m.melee_armour_bonus[c.index()] += me;
-            m.pierce_armour_bonus[c.index()] += pi;
+            Modifiers::add(&mut m.melee_armour_bonus, c, me);
+            Modifiers::add(&mut m.pierce_armour_bonus, c, pi);
         }
-        Effect::Range(c, n) => m.range_bonus[c.index()] += n,
+        Effect::Range(c, n) => Modifiers::add(&mut m.range_bonus, c, n),
         Effect::AdvanceAge(_) | Effect::UpgradeLine(..) => {}
     }
 }
@@ -423,6 +423,9 @@ impl Sight {
 pub(crate) struct Scratch {
     sectors: flow::Sectors,
     fields: flow::Fields,
+    /// The sector graph and the flow fields over the water, for boats.
+    water_sectors: flow::Sectors,
+    water_fields: flow::Fields,
     /// The mobile units bucketed by tile ([`Simulation::bucket_mobiles`]):
     /// the first slot in each cell, and each slot's next in its cell.
     pub(crate) head: Vec<u32>,
@@ -532,6 +535,9 @@ pub enum PlaceError {
         /// Which civilization.
         civ: crate::civs::Civ,
     },
+    /// A Dock stands in the water against the shore: built from the land
+    /// beside it, its boats leaving onto the water beside it.
+    NeedsShore,
 }
 
 impl core::fmt::Display for PlaceError {
@@ -544,6 +550,7 @@ impl core::fmt::Display for PlaceError {
             PlaceError::NeedsWall => write!(f, "goes onto a wall of yours"),
             PlaceError::NeedsGovernmentCentre => write!(f, "needs a Government Centre"),
             PlaceError::Denied { civ } => write!(f, "not for the {}", civ.name()),
+            PlaceError::NeedsShore => write!(f, "goes in the water by the shore"),
         }
     }
 }
@@ -693,6 +700,12 @@ pub struct Simulation {
     starts: Vec<(i32, i32)>,
     pub(crate) players: Vec<Player>,
     pub(crate) nav: NavGrid,
+    /// Where boats move: the water open, the land and what stands in the
+    /// water blocked (`docs/07` D33). Derived from the map and the Docks
+    /// and fish on it, so not hashed; a save from before boats reads it
+    /// empty and it is rebuilt.
+    #[serde(default)]
+    pub(crate) water: NavGrid,
     pub(crate) world: World,
     queue: CommandQueue,
     /// Every command ever issued, with its issue tick. This *is* the replay.
@@ -707,6 +720,9 @@ pub struct Simulation {
     /// The grid generation walkers last checked their headings against.
     #[serde(default)]
     nav_seen: u32,
+    /// The same for boats and the water.
+    #[serde(default)]
+    water_seen: u32,
     /// Arrows and stones in flight.
     #[serde(default)]
     pub(crate) projectiles: Vec<Projectile>,
@@ -737,6 +753,7 @@ impl Simulation {
             .map(|_| Player::with_stockpile(config.starting_stockpile))
             .collect();
         let nav = NavGrid::from_map(&generated.tiles);
+        let water = NavGrid::water_from_map(&generated.tiles);
         let mut sim = Simulation {
             seed,
             tick: 0,
@@ -746,12 +763,14 @@ impl Simulation {
             starts: generated.starts,
             players,
             nav,
+            water,
             world: World::new(),
             queue: CommandQueue::new(),
             log: Vec::new(),
             log_sources: Vec::new(),
             fog: Vec::new(),
             nav_seen: 0,
+            water_seen: 0,
             projectiles: Vec::new(),
             last_alarm: Vec::new(),
             clocks: crate::victory::Clocks::default(),
@@ -989,10 +1008,29 @@ impl Simulation {
                     PlaceError::Blocked
                 });
             }
+        } else if info.naval {
+            return self.shore_clear(x, y, info.footprint as i32);
         } else if !self.nav.footprint_clear(x, y, info.footprint as i32) {
             return Err(PlaceError::Blocked);
         }
         Ok(())
+    }
+
+    /// Whether a building of the water may stand anchored at `(x, y)`:
+    /// every tile of it open water, with open land beside it to build it
+    /// from and open water beside it for its boats (`docs/07` D33).
+    fn shore_clear(&self, x: i32, y: i32, fp: i32) -> Result<(), PlaceError> {
+        if !self.water.footprint_clear(x, y, fp) {
+            return Err(PlaceError::Blocked);
+        }
+        let ring = nav::footprint_ring(x, y, fp);
+        let land = ring.iter().any(|&(tx, ty)| self.nav.passable(tx, ty));
+        let water = ring.iter().any(|&(tx, ty)| self.water.passable(tx, ty));
+        if land && water {
+            Ok(())
+        } else {
+            Err(PlaceError::NeedsShore)
+        }
     }
 
     /// `p`'s finished, standing wall segment on tile `(x, y)`, if any.
@@ -1340,6 +1378,9 @@ impl Simulation {
         if self.last_alarm.len() != self.players.len() {
             self.last_alarm.resize(self.players.len(), 0);
         }
+        if self.water.is_empty() {
+            self.rebuild_water();
+        }
         let mut t = Timings::default();
         let mut lap = Lap::start(clock);
         self.apply_commands();
@@ -1348,16 +1389,20 @@ impl Simulation {
         self.gates();
         lap.mark(&mut t.orders);
         self.nav.refresh();
+        self.water.refresh();
         lap.mark(&mut t.paths);
         self.orders();
         lap.mark(&mut t.orders);
         self.nav.refresh();
-        self.plan_paths();
+        self.water.refresh();
+        self.plan_paths(false);
+        self.plan_paths(true);
         lap.mark(&mut t.paths);
         self.wander();
         self.movement();
         self.separation();
         self.keep_off_blocked();
+        self.carry_passengers();
         lap.mark(&mut t.movement);
         self.acquire();
         self.strike();
@@ -1604,6 +1649,79 @@ impl Simulation {
 
     // ----- entity lifecycle -------------------------------------------------
 
+    /// The water grid from the map and what stands in the water, for a
+    /// match read from a save made before there were boats.
+    fn rebuild_water(&mut self) {
+        let mut water = NavGrid::water_from_map(&self.map);
+        for slot in self.world.slots() {
+            let i = slot.index();
+            let info = kinds::info(self.world.kind[i]);
+            if info.naval
+                && info.footprint > 0
+                && self.world.dying[i] == 0
+                && self.world.inside[i].is_none()
+            {
+                let (ax, ay) = nav::anchor_tile(self.world.pos[i], info.footprint as i32);
+                water.block_footprint(ax, ay, info.footprint as i32);
+            }
+        }
+        water.refresh();
+        self.water = water;
+    }
+
+    /// Where a boat trained at the building anchored at `(ax, ay)` comes
+    /// out: the nearest open water beside it in the largest body of water
+    /// there, so a cove shut off by the land is passed over for the sea.
+    fn boat_exit(&self, ax: i32, ay: i32, fp: i32) -> Option<Tile> {
+        let reach = fp / 2 + 3;
+        let near: Vec<Tile> = (-reach..=reach)
+            .flat_map(|dy| (-reach..=reach).map(move |dx| (ax + dx, ay + dy)))
+            .filter(|&(x, y)| self.water.passable(x, y))
+            .collect();
+        let labels: std::collections::BTreeSet<u16> = near
+            .iter()
+            .map(|&(x, y)| self.water.component(x, y))
+            .collect();
+        let mut sizes: std::collections::BTreeMap<u16, u32> =
+            labels.iter().map(|&l| (l, 0)).collect();
+        if sizes.len() > 1 {
+            for y in 0..self.water.height() {
+                for x in 0..self.water.width() {
+                    if let Some(n) = sizes.get_mut(&self.water.component(x, y)) {
+                        *n += 1;
+                    }
+                }
+            }
+        }
+        let sea = sizes
+            .iter()
+            .max_by_key(|(l, n)| (**n, core::cmp::Reverse(**l)))
+            .map(|(l, _)| *l)?;
+        near.into_iter()
+            .filter(|&(x, y)| self.water.component(x, y) == sea)
+            .min_by_key(|&(x, y)| ((x - ax).pow(2) + (y - ay).pow(2), y, x))
+    }
+
+    /// Whether the thing in slot `i` is of the water: a boat, a Dock, fish.
+    pub(crate) fn naval(&self, i: usize) -> bool {
+        kinds::info(self.world.kind[i]).naval
+    }
+
+    /// The grid the unit in slot `i` moves on: the water for a boat, the
+    /// land for everything else.
+    pub(crate) fn grid_of(&self, i: usize) -> &NavGrid {
+        if self.naval(i) {
+            &self.water
+        } else {
+            &self.nav
+        }
+    }
+
+    /// The grid boats move on (`docs/07` D33).
+    pub fn water_grid(&self) -> &NavGrid {
+        &self.water
+    }
+
     fn spawn(&mut self, kind: KindId, owner: PlayerId, pos: Vec2Fx) -> Option<EntityId> {
         if self.world.len() as u32 >= self.config.max_entities {
             return None;
@@ -1621,6 +1739,10 @@ impl Simulation {
         if info.footprint > 0 {
             let (ax, ay) = nav::anchor_tile(pos, info.footprint as i32);
             self.nav.block_footprint(ax, ay, info.footprint as i32);
+            if info.naval {
+                // A Dock or fish stands in the water: in a boat's way too.
+                self.water.block_footprint(ax, ay, info.footprint as i32);
+            }
         }
         if !info.mobile {
             let fp = info.footprint as i32;
@@ -1644,12 +1766,20 @@ impl Simulation {
             // A relic in hand stays on the map.
             self.drop_relics_of(id, self.world.pos[i]);
         }
+        if info.mobile && info.garrison > 0 {
+            // A transport scuttled takes everyone aboard with it.
+            self.drown_passengers(slot);
+        }
         if info.footprint > 0 && self.world.dying[i] == 0 && self.world.inside[i].is_none() {
             // A standing building goes: anyone inside steps out first, and
             // its footprint opens. Rubble opened its footprint when it fell.
             self.eject(slot);
             let (ax, ay) = nav::anchor_tile(self.world.pos[i], info.footprint as i32);
             self.nav.unblock_footprint(ax, ay, info.footprint as i32);
+            if info.naval {
+                self.water.unblock_footprint(ax, ay, info.footprint as i32);
+                self.water.refresh();
+            }
             // Relabel now, not at the end of the tick.
             //
             // `remove` is reachable from the middle of `orders()`, when a
@@ -1710,6 +1840,7 @@ impl Simulation {
             // between them (free when nothing changed), so a move ordered
             // in the same tick as a placement sees the new footprint.
             self.nav.refresh();
+            self.water.refresh();
             // Who last named a unit decides whose path request it makes:
             // the player's come first when the budget binds (`TA-PATH-06`).
             for id in cmd.kind.named() {
@@ -1768,15 +1899,14 @@ impl Simulation {
                     .iter()
                     .filter_map(|&id| self.owned_mobile(id, p))
                     .collect();
-                if units.is_empty() {
-                    return;
-                }
-                let (goals, pace, field) = self.group_goals(&units, target);
-                for (slot, goal) in units.iter().zip(goals) {
-                    let i = slot.index();
-                    self.world.order[i] = Order::Move { target: goal };
-                    self.world.nav[i] =
-                        Some(Nav::along(goal, Fx::from_ratio(15, 100), field).paced(pace));
+                for units in self.by_element(units) {
+                    let (goals, pace, field) = self.group_goals(&units, target);
+                    for (slot, goal) in units.iter().zip(goals) {
+                        let i = slot.index();
+                        self.world.order[i] = Order::Move { target: goal };
+                        self.world.nav[i] =
+                            Some(Nav::along(goal, Fx::from_ratio(15, 100), field).paced(pace));
+                    }
                 }
             }
             CommandKind::Attack { ids, target } => {
@@ -1801,7 +1931,9 @@ impl Simulation {
                             }
                             continue;
                         }
-                        if kinds::info(self.world.kind[i]).combat.attack == 0 {
+                        if kinds::info(self.world.kind[i]).combat.attack == 0
+                            || !self.reaches(i, ts.index())
+                        {
                             continue;
                         }
                         let then = if hunt && self.world.kind[i] == kinds::VILLAGER {
@@ -1827,18 +1959,17 @@ impl Simulation {
                     .iter()
                     .filter_map(|&id| self.owned_mobile(id, p))
                     .collect();
-                if units.is_empty() {
-                    return;
-                }
-                let (goals, pace, field) = self.group_goals(&units, target);
                 // The order keeps the point asked for; the trip goes to the
                 // unit's slot in the formation, or as near as it can get.
                 let wanted = self.clamp_to_map(target);
-                for (slot, goal) in units.iter().zip(goals) {
-                    let i = slot.index();
-                    self.world.order[i] = Order::AttackMove { target: wanted };
-                    self.world.nav[i] =
-                        Some(Nav::along(goal, Fx::from_ratio(15, 100), field).paced(pace));
+                for units in self.by_element(units) {
+                    let (goals, pace, field) = self.group_goals(&units, target);
+                    for (slot, goal) in units.iter().zip(goals) {
+                        let i = slot.index();
+                        self.world.order[i] = Order::AttackMove { target: wanted };
+                        self.world.nav[i] =
+                            Some(Nav::along(goal, Fx::from_ratio(15, 100), field).paced(pace));
+                    }
                 }
             }
             CommandKind::Patrol { ids, target } => {
@@ -1846,19 +1977,18 @@ impl Simulation {
                     .iter()
                     .filter_map(|&id| self.owned_mobile(id, p))
                     .collect();
-                if units.is_empty() {
-                    return;
-                }
-                let (goals, pace, field) = self.group_goals(&units, target);
-                for (slot, goal) in units.iter().zip(goals) {
-                    let i = slot.index();
-                    let from = self.world.pos[i];
-                    self.world.order[i] = Order::Patrol {
-                        from,
-                        to: goal,
-                        leg: 0,
-                    };
-                    self.world.nav[i] = Some(Nav::along(goal, Fx::HALF, field).paced(pace));
+                for units in self.by_element(units) {
+                    let (goals, pace, field) = self.group_goals(&units, target);
+                    for (slot, goal) in units.iter().zip(goals) {
+                        let i = slot.index();
+                        let from = self.world.pos[i];
+                        self.world.order[i] = Order::Patrol {
+                            from,
+                            to: goal,
+                            leg: 0,
+                        };
+                        self.world.nav[i] = Some(Nav::along(goal, Fx::HALF, field).paced(pace));
+                    }
                 }
             }
             CommandKind::SetStance { ids, stance } => {
@@ -1889,15 +2019,52 @@ impl Simulation {
                 }
             }
             CommandKind::Garrison { ids, building } => {
-                if self.shelter_slot(building, p).is_none() {
+                let Some(bs) = self.shelter_slot(building, p) else {
+                    return;
+                };
+                // Boats board nothing and shelter nowhere.
+                let boarding: Vec<Slot> = ids
+                    .iter()
+                    .filter_map(|&id| self.owned_mobile(id, p))
+                    .filter(|s| !self.naval(s.index()) && s.index() != bs.index())
+                    .collect();
+                for slot in &boarding {
+                    let i = slot.index();
+                    self.world.order[i] = Order::Garrison { building };
+                    self.world.nav[i] = None;
+                    self.world.move_target[i] = None;
+                }
+                // A transport comes in to meet them (`GD-NAVAL-03`).
+                if kinds::info(self.world.kind[bs.index()]).mobile && !boarding.is_empty() {
+                    self.come_alongside(bs, &boarding);
+                }
+            }
+            CommandKind::Trade { ids, dock } => {
+                if self.market_for(dock, p).is_none() {
                     return;
                 }
                 for id in ids {
                     if let Some(slot) = self.owned_mobile(id, p) {
                         let i = slot.index();
-                        self.world.order[i] = Order::Garrison { building };
-                        self.world.nav[i] = None;
-                        self.world.move_target[i] = None;
+                        if self.world.kind[i] == kinds::TRADE_BOAT {
+                            self.world.order[i] = Order::Trade {
+                                market: dock,
+                                out: true,
+                            };
+                            self.world.nav[i] = None;
+                        }
+                    }
+                }
+            }
+            CommandKind::Unload { ids, target } => {
+                let at = self.clamp_to_map(target);
+                for id in ids {
+                    if let Some(slot) = self.owned_mobile(id, p) {
+                        let i = slot.index();
+                        if self.naval(i) && kinds::garrisons(self.world.kind[i]) {
+                            self.world.order[i] = Order::Unload { at };
+                            self.world.nav[i] = None;
+                        }
                     }
                 }
             }
@@ -1927,7 +2094,11 @@ impl Simulation {
                     .map(|(r, _)| r)
                     .unwrap_or(Resource::Food);
                 for id in ids {
-                    if let Some(slot) = self.owned_villager(id, p) {
+                    // Fish are a boat's, and the land's nodes a villager's.
+                    if let Some(slot) = self
+                        .owned_gatherer(id, p)
+                        .filter(|s| kinds::can_gather(self.world.kind[s.index()], kind))
+                    {
                         let i = slot.index();
                         self.world.order[i] = Order::Gather {
                             node,
@@ -2103,8 +2274,10 @@ impl Simulation {
         let formation = self.world.formation[units[0].index()];
         let n = units.len();
         let offsets = formation::offsets(formation, n);
+        // A group is all of one element ([`Simulation::by_element`]).
+        let grid = self.grid_of(units[0].index());
         if offsets.is_empty() || n == 1 {
-            let spots = self.nav.spread(tx, ty, n, None);
+            let spots = grid.spread(tx, ty, n, None);
             let goals = (0..n)
                 .map(|k| match spots.get(k) {
                     Some(&t) if k == 0 && t == (tx, ty) => target,
@@ -2130,13 +2303,11 @@ impl Simulation {
                 let want = self.clamp_to_map(slots[assigned[k]]);
                 let t = nav::tile_of(want);
                 let from = self.standing_tile(slot.index());
-                let ok =
-                    self.nav.passable(t.0, t.1) && from.is_none_or(|f| self.nav.connected(f, t));
+                let ok = grid.passable(t.0, t.1) && from.is_none_or(|f| grid.connected(f, t));
                 if ok {
                     want
                 } else {
-                    self.nav
-                        .nearest_passable(t.0, t.1, 6, from)
+                    grid.nearest_passable(t.0, t.1, 6, from)
                         .map_or(want, nav::centre)
                 }
             })
@@ -2272,6 +2443,8 @@ impl Simulation {
                 Order::Patrol { from, to, leg } => self.tick_patrol(slot, from, to, leg),
                 Order::Flee { target, into } => self.tick_flee(slot, target, into),
                 Order::Garrison { building } => self.tick_garrison(slot, building),
+                Order::Unload { at } => self.tick_unload(slot, at),
+                Order::Trade { market, out } => self.tick_trade(slot, market, out),
                 Order::Move { .. } => {
                     if self.nav_settled(i) {
                         self.world.nav[i] = None;
@@ -2309,10 +2482,10 @@ impl Simulation {
     fn tick_gather(&mut self, slot: Slot, node: EntityId, resource: Resource, phase: GatherPhase) {
         let i = slot.index();
         let me = self.world.owner[i];
-        let node_slot = self
-            .world
-            .slot(node)
-            .filter(|s| self.gatherable_by(s.index(), me));
+        let node_slot = self.world.slot(node).filter(|s| {
+            self.gatherable_by(s.index(), me)
+                && kinds::can_gather(self.world.kind[i], self.world.kind[s.index()])
+        });
 
         match phase {
             GatherPhase::ToNode => {
@@ -2397,7 +2570,9 @@ impl Simulation {
                 if self.world.work[i] < Fx::ONE {
                     return;
                 }
-                let capacity = modifiers.carry_capacity();
+                let capacity = (modifiers.carry_capacity() - kinds::CARRY_CAPACITY
+                    + kinds::carry_base(self.world.kind[i]))
+                .max(1);
                 let carried = self.world.carry[i].map_or(0, |(_, a)| a);
                 let take = self.world.work[i]
                     .floor()
@@ -2426,7 +2601,7 @@ impl Simulation {
                 let ds = self
                     .world
                     .slot(dropoff)
-                    .filter(|s| self.is_dropoff_for(s.index(), me));
+                    .filter(|s| self.is_dropoff_for(s.index(), i));
                 let Some(ds) = ds else {
                     return self.go_dropoff(slot, node, resource, me);
                 };
@@ -2643,10 +2818,11 @@ impl Simulation {
             .map(|j| nav::tile_of(self.world.pos[j]))
             .collect();
         let mut best: Option<(bool, u64, Tile)> = None;
+        let grid = self.grid_of(i);
         for y in min_y - 1..=max_y + 1 {
             for x in min_x - 1..=max_x + 1 {
                 let inside = x >= min_x && x <= max_x && y >= min_y && y <= max_y;
-                if inside || !self.nav.passable(x, y) || !self.nav.connected(from, (x, y)) {
+                if inside || !grid.passable(x, y) || !grid.connected(from, (x, y)) {
                     continue;
                 }
                 let occupied = taken.contains(&(x, y));
@@ -2663,10 +2839,11 @@ impl Simulation {
     /// The passable tile a unit counts as standing on.
     pub(crate) fn standing_tile(&self, i: usize) -> Option<Tile> {
         let t = nav::tile_of(self.world.pos[i]);
-        if self.nav.passable(t.0, t.1) {
+        let grid = self.grid_of(i);
+        if grid.passable(t.0, t.1) {
             Some(t)
         } else {
-            self.nav.nearest_passable(t.0, t.1, 4, None)
+            grid.nearest_passable(t.0, t.1, 4, None)
         }
     }
 
@@ -2712,18 +2889,23 @@ impl Simulation {
         }
     }
 
-    fn is_dropoff_for(&self, slot: usize, p: PlayerId) -> bool {
-        self.world.owner[slot] == p
+    /// Whether the gatherer in slot `i` may drop its load at `slot`: a
+    /// finished drop-off of its side, of its element (a Dock for a boat,
+    /// never for a villager).
+    fn is_dropoff_for(&self, slot: usize, i: usize) -> bool {
+        self.world.owner[slot] == self.world.owner[i]
             && kinds::info(self.world.kind[slot]).dropoff
+            && self.naval(slot) == self.naval(i)
             && self.world.construction[slot].is_none()
             && self.world.dying[slot] == 0
     }
 
     fn nearest_dropoff(&self, i: usize, p: PlayerId) -> Option<EntityId> {
+        debug_assert_eq!(self.world.owner[i], p);
         let pos = self.world.pos[i];
         self.world
             .slots()
-            .filter(|s| self.is_dropoff_for(s.index(), p))
+            .filter(|s| self.is_dropoff_for(s.index(), i))
             .map(|s| (pos.distance_sq_raw(self.world.pos[s.index()]), s))
             .min_by_key(|&(d, s)| (d, s.index()))
             .map(|(_, s)| self.world.id_at(s))
@@ -2742,6 +2924,7 @@ impl Simulation {
             .filter(|s| {
                 let k = self.world.kind[s.index()];
                 self.gatherable_by(s.index(), me)
+                    && kinds::can_gather(self.world.kind[i], k)
                     && kinds::info(k).resource.is_some_and(|(r, _)| r == resource)
             })
             .map(|s| (pos.distance_sq_raw(self.world.pos[s.index()]), s))
@@ -2760,22 +2943,51 @@ impl Simulation {
     /// its destination. Per-unit A\* is gone: a field is built once per
     /// destination and shared, and a unit merely reads the way downhill from
     /// its tile and walks to the furthest point along it that it can see.
-    fn plan_paths(&mut self) {
+    /// Run once for the land and once for the water (`naval`), each over
+    /// its own grid and its own fields.
+    fn plan_paths(&mut self, naval: bool) {
+        // The grid and the flow caches of this pass's element, borrowed
+        // field by field so the world stays free to change.
+        macro_rules! grid {
+            () => {
+                if naval {
+                    &self.water
+                } else {
+                    &self.nav
+                }
+            };
+        }
+        macro_rules! flows {
+            () => {
+                if naval {
+                    (
+                        &mut self.scratch.water_fields,
+                        &mut self.scratch.water_sectors,
+                    )
+                } else {
+                    (&mut self.scratch.fields, &mut self.scratch.sectors)
+                }
+            };
+        }
         let mut slots: Vec<Slot> = self
             .world
             .slots()
-            .filter(
-                |s| matches!(&self.world.nav[s.index()], Some(n) if n.state == NavState::Planning),
-            )
+            .filter(|s| {
+                matches!(&self.world.nav[s.index()], Some(n) if n.state == NavState::Planning)
+                    && self.naval(s.index()) == naval
+            })
             .collect();
         // The player's requests claim the destination budget before a
         // computer opponent's (`TA-PATH-06`); within a source, slot order.
         slots.sort_by_key(|s| (self.world.priority[s.index()], s.index()));
         let tick = self.tick;
-        self.scratch.fields.flooded = 0;
-        self.scratch.fields.built = 0;
-        self.scratch.fields.corridors = 0;
-        self.scratch.fields.full = 0;
+        {
+            let (fields, _) = flows!();
+            fields.flooded = 0;
+            fields.built = 0;
+            fields.corridors = 0;
+            fields.full = 0;
+        }
         // First pass: settle what needs no field (a redirect, a straight
         // line), and group the rest by destination. The budget is in
         // destinations served this tick, in slot order, whatever the cache
@@ -2795,8 +3007,8 @@ impl Simulation {
             };
             // An unreachable goal becomes the nearest reachable tile.
             let gt = nav::tile_of(goal);
-            if !self.nav.passable(gt.0, gt.1) || !self.nav.connected(from, gt) {
-                match self.nav.nearest_passable(gt.0, gt.1, 10, Some(from)) {
+            if !grid!().passable(gt.0, gt.1) || !grid!().connected(from, gt) {
+                match grid!().nearest_passable(gt.0, gt.1, 10, Some(from)) {
                     Some(t) => {
                         goal = nav::centre(t);
                         if let Some(n) = self.world.nav[i].as_mut() {
@@ -2810,7 +3022,7 @@ impl Simulation {
                 }
             }
             // Close enough to see it: walk straight there.
-            if pos.distance(goal) <= arrive || self.nav.line_of_sight(pos, goal) {
+            if pos.distance(goal) <= arrive || grid!().line_of_sight(pos, goal) {
                 if let Some(n) = self.world.nav[i].as_mut() {
                     n.waypoints = vec![goal];
                     n.state = NavState::Walking;
@@ -2831,9 +3043,10 @@ impl Simulation {
         // covered by it in one go, then a heading each.
         for (key, units) in groups {
             let froms: Vec<Tile> = units.iter().map(|&(_, f)| f).collect();
-            self.scratch
-                .fields
-                .reach_many(&self.nav, &mut self.scratch.sectors, key, &froms, tick);
+            {
+                let (fields, sectors) = flows!();
+                fields.reach_many(grid!(), sectors, key, &froms, tick);
+            }
             for (i, from) in units {
                 let pos = self.world.pos[i];
                 let goal = match &self.world.nav[i] {
@@ -2842,11 +3055,12 @@ impl Simulation {
                 };
                 let gt = nav::tile_of(goal);
                 self.scratch.stats.steers += 1;
-                let heading = self
-                    .scratch
-                    .fields
-                    .reach(&self.nav, &mut self.scratch.sectors, key, from, tick)
-                    .and_then(|f| flow::steer(f, &self.nav, pos, LOOKAHEAD));
+                let heading = {
+                    let (fields, sectors) = flows!();
+                    fields
+                        .reach(grid!(), sectors, key, from, tick)
+                        .and_then(|f| flow::steer(f, grid!(), pos, LOOKAHEAD))
+                };
                 let heading = match heading {
                     Some(h) => Some(h),
                     // The field does not reach this tile, which happens when
@@ -2859,10 +3073,10 @@ impl Simulation {
                         if let Some(n) = self.world.nav[i].as_mut() {
                             n.field = own;
                         }
-                        self.scratch
-                            .fields
-                            .reach(&self.nav, &mut self.scratch.sectors, own, from, tick)
-                            .and_then(|f| flow::steer(f, &self.nav, pos, LOOKAHEAD))
+                        let (fields, sectors) = flows!();
+                        fields
+                            .reach(grid!(), sectors, own, from, tick)
+                            .and_then(|f| flow::steer(f, grid!(), pos, LOOKAHEAD))
                     }
                     None => None,
                 };
@@ -2892,12 +3106,27 @@ impl Simulation {
                 }
             }
         }
-        self.scratch.stats.path_searches += self.scratch.fields.built;
-        self.scratch.stats.path_nodes += self.scratch.fields.flooded;
-        self.scratch.stats.corridors += self.scratch.fields.corridors;
-        self.scratch.stats.full_fields += self.scratch.fields.full;
-        self.scratch.fields.evict(tick);
-        self.scratch.stats.fields_live = self.scratch.fields.len() as u32;
+        let (built, flooded, corridors, full, live) = {
+            let (fields, _) = flows!();
+            fields.evict(tick);
+            (
+                fields.built,
+                fields.flooded,
+                fields.corridors,
+                fields.full,
+                fields.len() as u32,
+            )
+        };
+        let stats = &mut self.scratch.stats;
+        stats.path_searches += built;
+        stats.path_nodes += flooded;
+        stats.corridors += corridors;
+        stats.full_fields += full;
+        if naval {
+            stats.fields_live += live;
+        } else {
+            stats.fields_live = live;
+        }
     }
 
     fn fail_nav(&mut self, i: usize) {
@@ -2938,8 +3167,10 @@ impl Simulation {
     fn movement(&mut self) {
         // Something was built or cleared this tick: every walker checks
         // that its straight line is still open ([TA-PATH-02]).
-        let grid_changed = self.nav.generation() != self.nav_seen;
+        let land_changed = self.nav.generation() != self.nav_seen;
         self.nav_seen = self.nav.generation();
+        let water_changed = self.water.generation() != self.water_seen;
+        self.water_seen = self.water.generation();
         for slot in self.world.slots().collect::<Vec<_>>() {
             let i = slot.index();
             let info = kinds::info(self.world.kind[i]);
@@ -2966,6 +3197,8 @@ impl Simulation {
             };
             let speed = per_second / TICKS_PER_SECOND as i32;
             let here = self.world.pos[i];
+            let naval = info.naval;
+            let grid_changed = if naval { water_changed } else { land_changed };
 
             // Animals: straight-line wander targets.
             if let Some(target) = self.world.move_target[i] {
@@ -2991,8 +3224,8 @@ impl Simulation {
                 continue;
             };
             let wt = nav::tile_of(w);
-            if !self.nav.passable(wt.0, wt.1) || (grid_changed && !self.nav.line_of_sight(here, w))
-            {
+            let grid = if naval { &self.water } else { &self.nav };
+            if !grid.passable(wt.0, wt.1) || (grid_changed && !grid.line_of_sight(here, w)) {
                 // Something was built on the way: ask the field again. The
                 // field itself is rebuilt from the changed tiles, so the new
                 // heading routes around it ([TA-PATH-02]).
@@ -3121,7 +3354,9 @@ impl Simulation {
                     let mut j = self.scratch.head[(cy * w + cx) as usize];
                     while j != u32::MAX {
                         let ju = j as usize;
-                        if ju > i {
+                        // A boat and a walker on the shore do not jostle:
+                        // neither could stand where the other would push it.
+                        if ju > i && self.naval(i) == self.naval(ju) {
                             let pi = self.world.pos[i];
                             let pj = self.world.pos[ju];
                             let dsq = pi.distance_sq_raw(pj);
@@ -3176,10 +3411,15 @@ impl Simulation {
                                 } else {
                                     (pi - dir * (overlap * wi), pj + dir * (overlap * wj))
                                 };
-                                if self.nav.passable(ni.x.floor(), ni.y.floor()) {
+                                let grid = self.grid_of(i);
+                                let (oki, okj) = (
+                                    grid.passable(ni.x.floor(), ni.y.floor()),
+                                    grid.passable(nj.x.floor(), nj.y.floor()),
+                                );
+                                if oki {
                                     self.world.pos[i] = ni;
                                 }
-                                if self.nav.passable(nj.x.floor(), nj.y.floor()) {
+                                if okj {
                                     self.world.pos[ju] = nj;
                                 }
                             }
@@ -3212,6 +3452,7 @@ impl Simulation {
     fn keep_off_blocked(&mut self) {
         // Labels must be current: a site went up this tick.
         self.nav.refresh();
+        self.water.refresh();
         for slot in self.world.slots().collect::<Vec<_>>() {
             let i = slot.index();
             if !kinds::info(self.world.kind[i]).mobile
@@ -3222,11 +3463,11 @@ impl Simulation {
             }
             let pos = self.clamp_to_map(self.world.pos[i]);
             let t = nav::tile_of(pos);
-            if self.nav.passable(t.0, t.1) {
+            if self.grid_of(i).passable(t.0, t.1) {
                 self.world.pos[i] = pos;
                 continue;
             }
-            if let Some(free) = self.nav.nearest_open(t.0, t.1, 6) {
+            if let Some(free) = self.grid_of(i).nearest_open(t.0, t.1, 6) {
                 self.world.pos[i] = nav::centre(free);
                 if let Some(n) = self.world.nav[i].as_mut() {
                     if n.state == NavState::Walking {
@@ -3400,10 +3641,16 @@ impl Simulation {
             if player.pop + info.pop_cost > player.pop_cap {
                 continue; // Housed out: wait at the door.
             }
-            // Step out onto the nearest open tile beside the building.
+            // Step out onto the nearest open tile beside the building: a
+            // boat onto the water by its Dock.
             let fp = kinds::info(self.world.kind[i]).footprint as i32;
             let (ax, ay) = nav::anchor_tile(self.world.pos[i], fp);
-            let Some(exit) = self.nav.nearest_passable(ax, ay + fp / 2 + 1, 4, None) else {
+            let exit = if info.naval {
+                self.boat_exit(ax, ay, fp)
+            } else {
+                self.nav.nearest_passable(ax, ay + fp / 2 + 1, 4, None)
+            };
+            let Some(exit) = exit else {
                 continue;
             };
             let rally = self.world.production[i].as_ref().and_then(|p| p.rally);
@@ -3884,6 +4131,24 @@ impl Simulation {
     fn owned_villager(&self, id: EntityId, player: PlayerId) -> Option<Slot> {
         self.owned_slot(id, player)
             .filter(|s| self.world.kind[s.index()] == kinds::VILLAGER)
+    }
+
+    /// The player's gatherer: a villager or a fishing boat.
+    fn owned_gatherer(&self, id: EntityId, player: PlayerId) -> Option<Slot> {
+        self.owned_slot(id, player)
+            .filter(|s| kinds::gathers(self.world.kind[s.index()]))
+    }
+
+    /// `units` parted by element, the land's first and then the water's,
+    /// each in the order given and none empty: a group ordered somewhere
+    /// moves as two, each on its own grid.
+    fn by_element(&self, units: Vec<Slot>) -> Vec<Vec<Slot>> {
+        let (water, land): (Vec<Slot>, Vec<Slot>) =
+            units.into_iter().partition(|s| self.naval(s.index()));
+        [land, water]
+            .into_iter()
+            .filter(|g| !g.is_empty())
+            .collect()
     }
 
     pub(crate) fn clamp_to_map(&self, p: Vec2Fx) -> Vec2Fx {

@@ -281,7 +281,10 @@ orbiting the camera. Orbiting swings the key light around with the camera, so
 every facing is lit differently, which is exactly the consistency failure in §2.
 It also slides up per size class so a subject standing on the origin lands on
 its ground-contact anchor instead of the frame centre, which would waste the
-bottom half of every frame.
+bottom half of every frame. A boat is the exception: its position is the
+middle of its hull, which reaches as far toward the camera as away from it,
+so the Ship class (80 × 80) anchors 24 px above the frame's bottom, and a
+holdout plane at the water line hides what a sinking boat has taken under.
 
 **Light.** Three suns, positioned *relative to the camera* — a warm key over
 the viewer's left shoulder, a cool fill at a quarter strength over the right,
