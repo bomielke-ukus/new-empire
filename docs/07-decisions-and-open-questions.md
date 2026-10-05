@@ -509,6 +509,30 @@ The four sets do not fit one 8192 × 8192 atlas, the widest texture the
 GPU's default limits allow: the atlas is a texture array, a page a
 layer, and each frame says which page it is on.
 
+### D35 — M9 is campaigns and the editor; multiplayer becomes M10
+**Date:** 2026-10-05 · **Decided by:** the owner
+
+M9 (`docs/06`) as planned held five things: the campaign system, the
+learning campaign, two historical campaigns, the scenario editor and
+multiplayer. The owner will play against the computer first, so
+**multiplayer leaves M9** for a milestone of its own after it (M10); the
+architecture it needs (D3: command turns, per-tick state hashes) is in
+place and waits. M9 is built in this order: the campaign system, the
+learning campaign, the scenario editor, then the two historical
+campaigns.
+
+- **The fiction is history** (Q4 answered as recommended), told by one
+  narrator, **in text**: briefings, objectives and messages on screen,
+  no recorded or generated voice (which also keeps Steam's disclosure
+  rule for generated voice out of it, `docs/08` §5.2).
+- **The learning campaign** follows early Egypt, one idea a scenario as
+  `docs/03` §7 sets out: gathering and building, advancing an age,
+  combat, counters.
+- **The historical campaigns** are **the Persian Wars**, played as the
+  Greeks, and **Sargon of Akkad**, played as the Mesopotamian kingdom he
+  founded. Neither borrows a shipped game's campaign: the history is the
+  source (D27, `docs/08` §5.3).
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after? — **answered, see D33**
@@ -525,7 +549,7 @@ Its upgrades could fold into the Town Center, saving a building and a data
 table. Counter-argument: a separate building is a real strategic investment and
 a target. **Decided 2026-09-18: it stays its own building.**
 
-### Q4 — Campaign fiction: written by us, or straight history?
+### Q4 — Campaign fiction: written by us, or straight history? — **answered, see D35**
 Straight history is free, accurate and evocative. Original fiction gives us
 narrative control. **Recommendation:** history, told through a single narrator,
 in the style of the original's campaign intros.

@@ -27,7 +27,9 @@ Six milestones landed; the vertical slice wants only the feel pass, M7.
 | M5 — An opponent | **Landed 2026-09-18** | 20 headless AI-vs-AI matches, Hard beats Easy 18 of 20: 20 of 20, 18 by elimination, in CI |
 | M6 — Game shell | **Landed 2026-09-19** | Configure, play, save, reload and watch a replay without a terminal: the run in `crates/app/src/tests.rs`; the owner played the Mac build 2026-09-20 |
 | M7 — The feel pass | **In progress since 2026-09-20** | Chunks 1–5 landed: audio, the score, visual feedback, tooltips and hints, the performance pass; the `RM-M7-01` playtest is the owner's (§4d); the sprite art is code-built (`docs/08` §9) for every unit, building and node, and the ground has a rendered grain |
-| M8 — Breadth, M9 — Content | Not started | Beyond the vertical slice |
+| M8 — Breadth | **Built 2026-10-05** | Every item in `docs/06` M8; the owner's playtest is to come |
+| M9 — Content | **Started 2026-10-05** | Campaigns, the learning campaign, the editor, two historical campaigns (`docs/07` D35) |
+| M10 — Multiplayer | Not started | Moved out of M9 (D35) |
 
 The Mac checks of 2026-09-12 exercised the economy and age progression
 (§3, row 4), then the native combat/siege window (work record below).

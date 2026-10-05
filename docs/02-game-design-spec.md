@@ -505,4 +505,4 @@ Tracked in `docs/07-decisions-and-open-questions.md`. The significant ones:
 3. Is the Government Centre worth its own building, or should its upgrades fold
    into the Town Center?
 4. How much of the campaign fiction do we write ourselves versus lean on real
-   history?
+   history? *(Answered: history, one narrator, in text; `docs/07` D35.)*

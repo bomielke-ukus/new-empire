@@ -295,18 +295,28 @@ sets are drawn (`docs/10`, `docs/07` D34).
 
 ---
 
-## M9 — Content and community
+## M9 — Content
 
-- Campaign system: scenarios, objectives, triggers, narration
-- The learning campaign (4 scenarios, one concept each)
-- Two historical campaigns
+In this order (`docs/07` D35):
+
+- Campaign system: scenarios, objectives, triggers, narration (in text)
+- The learning campaign (4 scenarios, one concept each), in early Egypt
 - Scenario editor with save, load and playtest
+- Two historical campaigns: the Persian Wars, and Sargon of Akkad
+
+**Size:** Very large. This is where the game gets its long tail.
+
+---
+
+## M10 — Multiplayer
+
+Moved out of M9 (`docs/07` D35): the owner plays against the computer first.
+
 - Multiplayer: lockstep transport over the existing command-turn architecture,
   lobby, adaptive turn length, desync detection using the state hashes we
   already compute
 
-**Size:** Very large. This is a second project's worth of work, and it is where
-the game gets its long tail.
+**Size:** Large. The architecture it needs (D3) is in place.
 
 ---
 
