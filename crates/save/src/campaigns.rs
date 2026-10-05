@@ -274,6 +274,31 @@ mod tests {
                         .collect();
                     assert!(bad.is_empty(), "{}: {bad:?} not in the font: {line}", sc.id);
                 }
+                // Two sides that are not the player's are at war with each
+                // other as with the player (there are no alliances): none
+                // is set down within sight of another.
+                let mut set_down: Vec<(u8, (i32, i32))> =
+                    sc.placements.iter().map(|p| (p.owner, p.at)).collect();
+                for t in &sc.triggers {
+                    for a in &t.then {
+                        if let sim::scenario::Action::Place(p) = a {
+                            set_down.push((p.owner, p.at));
+                        }
+                    }
+                }
+                let other = |o: u8| o != 0 && o != sim::kinds::GAIA;
+                for (i, &(a, pa)) in set_down.iter().enumerate() {
+                    for &(b, pb) in &set_down[i + 1..] {
+                        if other(a) && other(b) && a != b {
+                            let d = (pa.0 - pb.0).abs().max((pa.1 - pb.1).abs());
+                            assert!(
+                                d >= 12,
+                                "{}: sides {a} and {b} meet at {pa:?} and {pb:?}",
+                                sc.id
+                            );
+                        }
+                    }
+                }
                 // And it starts: a match can be made of it.
                 let sim = sim::Simulation::new(sc.match_seed(), sc.config());
                 assert!(sim.scenario().is_some());
