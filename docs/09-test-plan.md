@@ -64,7 +64,7 @@ raising a tree's wood yield from 75 to 76, which fails four entries by name.
 | **Hashes agree** | The final state hash from all three platforms must be identical |
 | **Performance** | Benchmark scenarios against `perf/budgets.ron`, with the numbers posted to the run summary |
 | **Soak** | 300 randomised matches with invariant checking; failure replays uploaded |
-| **Nightly** (`nightly.yml`, 04:17 UTC, and by hand) | The soak at 1,000 matches of 6,000 ticks; every simulation test with `sim/debug-checks`; the property tests at `PROPTEST_CASES=4096`; `simrunner mapgen` over 1,000 seeds of every map type; each fuzz target for twenty minutes, its corpus kept between nights; Miri over the entity store. Each is its own job; failures leave soak replays and fuzz crash inputs as artifacts |
+| **Nightly** (`nightly.yml`, 04:17 UTC, by hand, and on any push that changes it or `fuzz/`) | The soak at 1,000 matches of 6,000 ticks; every simulation test with `sim/debug-checks`; the property tests at `PROPTEST_CASES=4096`; `simrunner mapgen` over 1,000 seeds of every map type; each fuzz target for twenty minutes, its corpus kept between nights; Miri over the entity store. Each is its own job; failures leave soak replays and fuzz crash inputs as artifacts |
 
 ### Why the platform matrix matters
 

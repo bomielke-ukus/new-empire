@@ -14,6 +14,12 @@ on:
   schedule:
     - cron: "17 4 * * *"
   workflow_dispatch:
+  # A change to this file or to the fuzz targets is tried at once, on its
+  # own branch: a schedule only runs what is already on the default branch.
+  push:
+    paths:
+      - .github/workflows/nightly.yml
+      - fuzz/**
 
 env:
   CARGO_TERM_COLOR: always
