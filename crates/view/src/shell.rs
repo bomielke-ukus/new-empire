@@ -189,9 +189,22 @@ impl Setup {
     }
 
     /// The setup screen's check (`docs/04` §19): what the engine would
-    /// refuse, before a match is started on it.
+    /// refuse, before a match is started on it, and a map too small to
+    /// hold its players ([`sim::mapgen::smallest_size`]).
     pub fn validate(&self) -> Result<(), ConfigError> {
-        self.config().validate()
+        let config = self.config();
+        config.validate()?;
+        let m = &config.map;
+        let needs = sim::mapgen::smallest_size(m.kind, m.players);
+        if m.size < needs {
+            return Err(ConfigError::MapTooSmall {
+                kind: m.kind,
+                players: m.players,
+                size: m.size,
+                needs,
+            });
+        }
+        Ok(())
     }
 
     /// Moves a setting one step. Choices from a list wrap; counts stop at
@@ -1664,6 +1677,27 @@ mod tests {
         setup
             .validate()
             .expect("a setup the screen offers is valid");
+    }
+
+    /// Eight players on a Tiny Islands map are refused, with the size that
+    /// holds them, so START greys rather than the generator falling back
+    /// to flat grass (`sim::mapgen::smallest_size`).
+    #[test]
+    fn eight_islands_need_a_small_map() {
+        let mut setup = Setup::new(1);
+        setup.kind = MapKind::Islands;
+        setup.size = MapSize::Tiny;
+        setup.opponents = vec![Difficulty::Standard; MAX_OPPONENTS];
+        let e = setup.validate().expect_err("too small");
+        assert_eq!(
+            e.to_string(),
+            "Islands for 8 players needs a map 128 wide, not 96"
+        );
+        setup.size = MapSize::Small;
+        setup.validate().expect("room for eight");
+        setup.size = MapSize::Tiny;
+        setup.opponents.pop();
+        setup.validate().expect("seven fit on a Tiny map");
     }
 
     /// Every setup the screen can reach passes the engine's check: the

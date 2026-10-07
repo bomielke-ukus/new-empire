@@ -425,7 +425,13 @@ pub mod replays {
     /// included (`TA-DET-06`), and its setup as the engine would.
     pub fn read(path: &Path) -> Result<Replay, SaveError> {
         let text = std::fs::read_to_string(path).map_err(|e| io(e, path))?;
-        let replay: Replay = ron::from_str(&text).map_err(|e| SaveError::Parse(e.to_string()))?;
+        parse(&text)
+    }
+
+    /// [`read`] on text already read: what the fuzz target
+    /// `replay_reader` feeds arbitrary bytes.
+    pub fn parse(text: &str) -> Result<Replay, SaveError> {
+        let replay: Replay = ron::from_str(text).map_err(|e| SaveError::Parse(e.to_string()))?;
         replay.validate().map_err(SaveError::Replay)?;
         replay
             .config

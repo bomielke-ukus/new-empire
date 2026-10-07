@@ -1216,7 +1216,10 @@ impl Simulation {
                 self.world.order[i] = Order::Idle;
                 self.world.nav[i] = None;
                 self.world.move_target[i] = None;
-                self.world.carry[i] = None;
+                // The dead drop what they carried; nobody picks it up.
+                if let Some((r, n)) = self.world.carry[i].take() {
+                    self.ledger.lost(r, n);
+                }
                 self.world.reload[i] = 0;
             } else {
                 self.demolish(slot);
@@ -1244,6 +1247,10 @@ impl Simulation {
         }
         self.world.production[i] = None;
         self.world.construction[i] = None;
+        // A farm's food goes down with it.
+        if let Some((r, _)) = info.resource {
+            self.ledger.lost(r, self.world.resource[i]);
+        }
         self.world.resource[i] = 0;
         self.world.health[i] = Fx::ZERO;
         self.world.order[i] = Order::Idle;

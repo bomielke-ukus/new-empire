@@ -285,7 +285,13 @@ impl Simulation {
                 .home_dock(me, self.world.pos[ms.index()])
                 .map_or(self.world.pos[i], |h| self.world.pos[h.index()]);
             let tiles = from.distance(self.world.pos[ms.index()]).floor();
-            self.world.carry[i] = Some((Resource::Gold, trade_gold(tiles)));
+            // The wood is sold away and the gold comes from the market.
+            if let Some((r, n)) = self.world.carry[i] {
+                self.ledger.lost(r, n);
+            }
+            let gold = trade_gold(tiles);
+            self.ledger.made(Resource::Gold, gold);
+            self.world.carry[i] = Some((Resource::Gold, gold));
             self.world.order[i] = Order::Trade { market, out: false };
         } else {
             if !self.sail_to(i, home) {

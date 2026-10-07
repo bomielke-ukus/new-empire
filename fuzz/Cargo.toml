@@ -1,0 +1,38 @@
+# Fuzz targets for the simulation's two doors to the outside: a replay file
+# and the command stream (`docs/09` §4.6, §11). Run with cargo-fuzz on a
+# nightly toolchain; see fuzz/README.md. Not a workspace member: libFuzzer
+# needs nightly and sanitizer flags the rest of the build never wants.
+[package]
+name = "new-empire-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+ron = "0.10"
+# Every invariant, conservation included, after every tick: a fuzz input
+# that breaks one panics, and libFuzzer keeps it.
+sim = { path = "../crates/sim", features = ["debug-checks"] }
+save = { path = "../crates/save" }
+
+[[bin]]
+name = "replay_reader"
+path = "fuzz_targets/replay_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "commands"
+path = "fuzz_targets/commands.rs"
+test = false
+doc = false
+bench = false
+
+# Its own workspace, so the repository's does not claim it.
+[workspace]
+members = ["."]

@@ -1,0 +1,150 @@
+name: Nightly
+
+# The checks too slow for every push (`docs/09` §3, §11): the soak at depth,
+# every behaviour test with every invariant checked after every tick, the
+# property tests at sixteen times their cases, the map generator over a
+# thousand seeds, the fuzz targets for twenty minutes each, and Miri over the
+# entity store. Each is its own job, so a red one names what broke. A failure
+# leaves what reproduces it as an artifact: soak replays, fuzz crash inputs.
+#
+# GitHub mails a scheduled run's failure to whoever last changed the
+# schedule below.
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  soak:
+    name: Soak (deep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 1,000 randomised matches of 6,000 ticks with invariant checking
+        run: |
+          cargo run --release --quiet -p simrunner --features sim/debug-checks -- \
+            soak --matches 1000 --ticks 6000 --timeout 300 --dump soak-failures
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: deep-soak-failure-replays
+          path: soak-failures/
+
+  invariants:
+    name: Every behaviour test, every invariant, every tick
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Resource conservation among them (`docs/09` §5): the tests drive
+      # farms, trade, relics, cheats and scenarios, which the corpus and
+      # the soak reach less often.
+      - name: the simulation's tests with sim/debug-checks
+        run: cargo test -p sim --features debug-checks
+
+  properties:
+    name: Property tests (16x cases)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The default is 256; the properties that set their own count scale
+      # with this too.
+      - name: every property at PROPTEST_CASES=4096
+        env:
+          PROPTEST_CASES: "4096"
+        run: |
+          cargo test -p sim --test properties_math --test properties_nav \
+            --test properties_rng --test properties_sim --test properties_state
+
+  mapgen:
+    name: Map generator, 1,000 seeds
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: every playable map type, 1,000 seeds each
+        run: cargo run --release --quiet -p simrunner -- mapgen --seeds 1000
+
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: replay_reader
+            flags: ""
+          - target: commands
+            flags: "-max_len=2048 -len_control=0"
+    steps:
+      - uses: actions/checkout@v4
+      # `rust-toolchain.toml` pins stable for the repository, so the
+      # nightly is named on each command that needs it.
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - name: cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      # What earlier nights found interesting, so each night starts where
+      # the last left off.
+      - uses: actions/cache@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: seed the replay reader with the committed corpus
+        if: matrix.target == 'replay_reader'
+        run: |
+          mkdir -p fuzz/corpus/replay_reader
+          for f in battle-40v40 smallest-map inland-no-wander idle-inland; do
+            cp crates/sim/tests/corpus/$f.ron fuzz/corpus/replay_reader/
+          done
+      - name: twenty minutes
+        working-directory: fuzz
+        run: |
+          cargo +nightly fuzz run ${{ matrix.target }} -- \
+            -max_total_time=1200 -rss_limit_mb=4096 ${{ matrix.flags }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          # `cargo fuzz run <target> <file>` reproduces one.
+          path: fuzz/artifacts/
+
+  miri:
+    name: Miri (the entity store)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+      - uses: Swatinem/rust-cache@v2
+      # The store is struct-of-arrays indexed by slot (`docs/09` §11): its
+      # unit tests, and its properties at a few cases, since Miri is slow.
+      - name: the entity store's tests
+        run: "cargo +nightly miri test -p sim --lib -- entity::"
+      - name: the entity store's properties
+        env:
+          PROPTEST_CASES: "8"
+          # proptest reads the environment and writes its regressions file.
+          MIRIFLAGS: -Zmiri-disable-isolation
+        run: cargo +nightly miri test -p sim --test properties_state

@@ -64,6 +64,7 @@ raising a tree's wood yield from 75 to 76, which fails four entries by name.
 | **Hashes agree** | The final state hash from all three platforms must be identical |
 | **Performance** | Benchmark scenarios against `perf/budgets.ron`, with the numbers posted to the run summary |
 | **Soak** | 300 randomised matches with invariant checking; failure replays uploaded |
+| **Nightly** (`nightly.yml`, 04:17 UTC, and by hand) | The soak at 1,000 matches of 6,000 ticks; every simulation test with `sim/debug-checks`; the property tests at `PROPTEST_CASES=4096`; `simrunner mapgen` over 1,000 seeds of every map type; each fuzz target for twenty minutes, its corpus kept between nights; Miri over the entity store. Each is its own job; failures leave soak replays and fuzz crash inputs as artifacts |
 
 ### Why the platform matrix matters
 
@@ -195,6 +196,23 @@ call it, so nothing executes unvalidated.
 does not have is an inert no-op, since a replay can name any player index
 inside `MAX_PLAYERS` while a match may have one.
 
+**Fuzzing** (`fuzz/`, 2026-10-07; `cargo-fuzz` on nightly, see
+`fuzz/README.md`). Two targets, built with `sim/debug-checks` so a broken
+invariant is a crash:
+
+- `replay_reader`: any bytes through the app's own reader
+  (`save::replays::parse`: parse, validate the replay and its setup), and a
+  replay that passes runs its first 64 ticks on a map up to 64 tiles.
+- `commands`: any bytes as a script of commands, every one of the 29
+  variants, against a land and a coastal world: entity handles mostly
+  picked from what is alive, sometimes forged; players real and not;
+  kinds, positions and technologies in range and out; selections past
+  `MAX_COMMAND_IDS`. Valid or not, each is issued and the match runs.
+
+Its first run found a panic: a water map smaller than 73 tiles a side
+asked `clamp` for a minimum above its maximum (`mapgen::pour`), fixed, and
+pinned by `every_map_type_generates_at_the_smallest_sizes`.
+
 ---
 
 ## 5. What is tested when it lands
@@ -207,8 +225,13 @@ remains deferred until M5 supplies competing AI orders.
 ### Map generation — M1 shipped
 
 Same seed produces a bit-identical map (`GD-MAP-01`, `RM-M1-01`), covered.
-Still owed: a nightly sweep over 1,000 seeds, because a generator that fails
-one seed in five hundred will meet that seed in front of a player.
+The nightly sweep, `simrunner mapgen --seeds 1000` (2026-10-07), generates
+every playable map type over a thousand seeds at the sizes and player
+counts the setup screen offers, and fails a seed that panics, falls back to
+flat grass, places the wrong number of starts or breaks an invariant in its
+first tick. Its first run found Islands with eight players on a Tiny map
+falling back to flat one seed in nine: the setup screen now refuses that
+(`mapgen::smallest_size`, a Small map holds eight islands).
 
 ### Economy and ages — M2 and M3 shipped
 
@@ -232,11 +255,20 @@ tests and by the `ages-tool-hud` and `ages-bronze-sweep` golden images. The
 corpus gained `ages-2p`, a rich two-player match whose bot researches,
 advances and farms.
 
-The strong one, still not written: **resource conservation** as a per-tick
-invariant — map remaining + carried + stockpiled + spent is constant. Every
-duplication and every leak violates it and it costs nothing to check. Farms
-make it slightly more interesting: a reseed converts 60 wood into 250 food
-at the moment of seeding.
+**Resource conservation** is a per-tick invariant (2026-10-07,
+`crate::ledger`, `Violation::NotConserved`): what lies on the nodes, what
+is carried and what is stockpiled, plus what was spent and lost, less what
+was made, does not move. Every flow the rules mean is recorded where it
+happens: paying and refunds; a node spawned or a farm seeded (a reseed
+spends 60 wood and makes its food); a trade boat's wood sold and gold
+bought; a relic's gold; a cheat; a scenario's gift or taking; a load
+dropped on switching resource or lost with its carrier; what was left on a
+node, a farm or a site when it went. The books are not state: not hashed,
+not saved, invisible to equality, so no digest moved. `Simulation::check`
+holds it, so the corpus, the soak, the AI acceptance and every test run
+with `sim/debug-checks` check it every tick; all passed when it landed.
+`a_resource_made_or_lost_by_accident_breaks_conservation` makes food and a
+load from nothing and sees both caught.
 
 ### Combat — M4
 
@@ -967,10 +999,13 @@ cargo run --release -p simrunner -- battle
 cargo run --release -p simrunner --features sim/debug-checks -- balance --matches 10 --dump balance-failures
 scripts/check-perf.sh
 
-# Deeper, when changing the simulation.
+# Deeper, when changing the simulation; the nightly job runs these.
 PROPTEST_CASES=20000 cargo test --release -p sim
 cargo run --release -p simrunner --features sim/debug-checks -- soak --matches 1000
 cargo test -p sim --features debug-checks
+cargo run --release -p simrunner -- mapgen --seeds 1000
+(cd fuzz && cargo +nightly fuzz run commands -- -max_total_time=600)
+cargo +nightly miri test -p sim --lib -- entity::
 
 # Deliberate updates, which must be reviewed as diffs.
 cargo run -p simrunner -- record          # re-record the corpus inputs
@@ -994,18 +1029,17 @@ Stated rather than left to be discovered.
   #9 and #10 are merged and M4 is landed.
 - The original twelve M1/M2 test gaps are closed (§7), and `TA-PATH-06`'s
   priority half with M5 chunk 1.
-- **No resource-conservation invariant.** The strongest economy check
-  available and it is not written.
+- ~~**No resource-conservation invariant.**~~ Written 2026-10-07 (§5).
 - ~~**The HUD overlaps below ~960px.**~~ Fixed in M3: the resource bar
   drops worker counts, then shrinks, then drops the status, then wraps to two
   lines, and `view`'s `the_resource_bar_reflows_instead_of_overlapping` pins
   it at four widths. The `narrow-hud-overlap` golden keeps its name and now
   shows the reflow.
-- **No fuzzing.** `cargo-fuzz` targets for the replay reader and the command
-  interface were written against M0 and need rebuilding for the current command
-  variants, including combat and garrison.
-- **No nightly job.** The long soak, deep property runs, Miri over the
-  hand-rolled entity store, and the mapgen seed sweep all belong there.
+- ~~**No fuzzing.**~~ Two targets, the replay reader and the command
+  stream, since 2026-10-07 (§4.6). A save file's snapshot is not fuzzed:
+  it is the simulation's own serialised state, and a hand-corrupted one
+  may still panic when played on.
+- ~~**No nightly job.**~~ `nightly.yml` since 2026-10-07 (§3).
 - **GPU/window coverage remains bounded.** The real-device render test may
   skip if no adapter exists. The recorded Mac economy, siege and 40-versus-40
   checks cover those scenarios on one hardware setup; they do not replace

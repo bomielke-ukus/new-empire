@@ -2383,12 +2383,55 @@ D36):
   as a player would, and holds with 25 and wins at 14.3 minutes. The
   scenario itself is unchanged.
 
+### Work record: the safeguards — conservation, fuzzing, the nightly job (2026-10-07)
+
+The three items of the parallel track (§4b), never taken up there, built
+in the main line:
+
+- **Resource conservation** (`crates/sim/src/ledger.rs`,
+  `Violation::NotConserved`): held on nodes, carried and stockpiled, plus
+  spent and lost, less made, constant from the first tick. Every flow is
+  recorded where it happens (`docs/09` §5 lists them). The books are not
+  state, so no digest moved. Every simulation test with
+  `sim/debug-checks` (352), the corpus, the 300-match soak and the twenty
+  Hard-against-Easy matches pass with it on.
+- **Fuzz targets** (`fuzz/`): the replay reader, through a new
+  `save::replays::parse` that `read` now calls, and the command stream,
+  every variant. 9,500 reader runs and 41,000 command runs clean after one
+  find: **a water map under 73 tiles panicked** in `mapgen::pour` (a
+  `clamp` whose minimum passed its maximum), reachable from a replay, a
+  save or a hand-written scenario. Fixed; no shipped map changes (every
+  size that worked keeps its numbers), pinned by a test generating every
+  map type at 48 to 72 tiles.
+- **`simrunner mapgen`**: every playable map type over `--seeds` seeds at
+  the setup screen's sizes and player counts. Its first run found
+  **Islands with eight players on a Tiny map falling back to flat grass**,
+  9 seeds of 28 there (22 of 200 in a closer look; seven players and
+  every larger size are fine). The setup screen now refuses it with the
+  size that fits ("Islands for 8 players needs a map 128 wide, not 96"),
+  from `mapgen::smallest_size`; the engine still accepts it, so no save
+  or replay is refused.
+- **The nightly job** (`.github/workflows/nightly.yml`, 04:17 UTC and by
+  hand): the soak at 1,000 matches of 6,000 ticks, every simulation test
+  with `sim/debug-checks`, the properties at 16 times their cases (the two
+  that set their own count now scale with `PROPTEST_CASES`), the map
+  sweep, each fuzz target for twenty minutes with its corpus kept, and
+  Miri over the entity store (its tests, and its properties at 8 cases:
+  clean, 8 minutes). GitHub mails a failure to whoever last changed the
+  schedule.
+- **Stale notes** in §5 corrected: boats fish, and the buildings have
+  their four architectures.
+
 ### Resume here next session
 
 **M9 is built** (`docs/07` D35): scenarios and campaigns, the learning
 campaign, the scenario editor, and the two historical campaigns. The
 three questions it raised are answered and built (D36, above). Next:
 the owner plays them; then M10, multiplayer.
+
+**The safeguards are in** (above): resource conservation checked every
+tick, two fuzz targets, the map sweep and the nightly job. Watch the
+first nightly runs; a red job's artifact reproduces what it found.
 
 **M8's items are all built** (`docs/06`): the later ages' soldiers are in the
 simulation (chunk 1) and the opponent fields them (chunk 2); the
@@ -2479,6 +2522,9 @@ step shipped and tested headless before it had a sprite:
    Hard 20 of 20 on score.
 
 ### The parallel track
+
+**Built 2026-10-07 in the main line**, not by a second agent: see the work
+record "the safeguards" in §3. The plan as it stood:
 
 Three items from `docs/09` §11 are independent of M5 and are being done
 alongside it by a second agent (Codex), on its own branch, merged by pull
@@ -2610,10 +2656,10 @@ Stated so they are not rediscovered.
   construction stages and rubble. The ground is blended colour under one
   grain per type, repeated on every tile, with no variants or transition
   tiles (`docs/07` D28). A falling building sinks into its rubble
-  under a dust cloud (`scene::COLLAPSE_TICKS`) rather than breaking apart,
-  nobody fishes (the
-  simulation has no boats), and no rendered set has a second
-  civilisation's look. A modeller's work can replace any set by name.
+  under a dust cloud (`scene::COLLAPSE_TICKS`) rather than breaking apart.
+  Buildings have the four architectures of `docs/07` D34; the units have
+  one look for every civilization. A modeller's work can replace any set
+  by name.
 - **The sprite atlas fills a page and a sliver** (8170 rows of the first
   8192-row page and 164 of the second; 215 sets): two layers of a texture
   array, 128 MB, of which the second is nearly empty. Packing tighter than
@@ -2632,8 +2678,10 @@ Stated so they are not rediscovered.
   building keeps its shape through the four ages and changes its
   materials and trim; a figure keeps its body and changes its dress. The
   ranged soldiers and the riders have one look in every age.
-- **No resource-conservation invariant, no fuzzing, no nightly job**
-  (`docs/09` §11): the parallel track in §4b.
+- **A save's snapshot is trusted on load** (`app::resume`): the app plays
+  on from it without replaying the log (`save::Save::verify` exists and is
+  not called there). A hand-corrupted snapshot may panic when played on;
+  it is not fuzzed (`docs/09` §11).
 
 ---
 
