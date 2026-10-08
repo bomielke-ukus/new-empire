@@ -252,8 +252,8 @@ already in place:
 - Owners are assigned in palette order, so a 1v1 is blue against red and a
   four-player game never reaches cyan. The first four are held to a much higher
   bar (0.15 measured 0.160) than the back four.
-- The real fix is an ownership cue that is not colour at all. That is Q9 in
-  `docs/07`.
+- The real fix is an ownership cue that is not colour at all: a symbol per
+  player, since 2026-10-08 (`docs/07` D37, `GD-A11Y-03`, `view::symbols`).
 
 ---
 

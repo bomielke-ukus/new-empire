@@ -318,6 +318,8 @@ pub enum ShellAction {
     Volume(Bus, i32),
     /// Settings: the first-time hints on or off.
     ToggleHints,
+    /// Settings: where the players' symbols show, a step along.
+    PlayerSymbols(i32),
     /// Title and briefing: the campaigns screen.
     Campaigns,
     /// Campaigns: the briefing of a campaign's scenario.
@@ -683,8 +685,8 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
         let ty = ry + (ROW_H - 7.0) / 2.0 - 1.0;
         let mut lx = label_x;
         if let Some(p) = swatch {
-            s.p.rect(lx, ty - 2.0, 11.0, 11.0, BLACK, 0);
-            s.p.rect(lx + 1.0, ty - 1.0, 9.0, 9.0, P_BASE, row_for_owner(p));
+            // Colour and shape (`GD-A11Y-03`).
+            s.p.symbol(lx, ty - 2.0, p);
             lx += 16.0;
         }
         s.p.text(lx, ty, label, false, 1.0);
@@ -1083,7 +1085,7 @@ pub fn settings_screen(
             (ShellAction::Volume(bus, 1), "+", true),
         );
     }
-    row(
+    ay = row(
         &mut s,
         ay,
         audio,
@@ -1091,6 +1093,16 @@ pub fn settings_screen(
         if settings.hints { "ON" } else { "OFF" },
         (ShellAction::ToggleHints, "-"),
         (ShellAction::ToggleHints, "+", true),
+    );
+    // Whose a unit is, by shape as well as colour (`GD-A11Y-03`).
+    row(
+        &mut s,
+        ay,
+        audio,
+        "SYMBOLS",
+        settings.player_symbols.label(),
+        (ShellAction::PlayerSymbols(-1), "-"),
+        (ShellAction::PlayerSymbols(1), "+", true),
     );
     ry = row(
         &mut s,
@@ -1328,15 +1340,7 @@ pub fn results(atlas: &Atlas, input: &ShellInput, r: &Results) -> Screen {
     s.p.text_in(col_status, hy, "STATUS", Ink::Gold, 1.0);
     for (i, side) in r.sides.iter().enumerate() {
         let ly = hy + 14.0 + i as f32 * 14.0;
-        s.p.rect(col_side, ly - 1.0, 9.0, 9.0, BLACK, 0);
-        s.p.rect(
-            col_side + 1.0,
-            ly,
-            7.0,
-            7.0,
-            P_BASE,
-            row_for_owner(side.player),
-        );
+        s.p.symbol(col_side - 1.0, ly - 2.0, side.player);
         s.p.text(
             col_side + 14.0,
             ly,
@@ -1926,6 +1930,9 @@ mod tests {
             assert!(find(&plain, ShellAction::Volume(b, 1)).enabled, "{b:?}");
         }
         assert!(find(&plain, ShellAction::ToggleHints).enabled);
+        // GD-A11Y-03: where the players' symbols show.
+        assert!(find(&plain, ShellAction::PlayerSymbols(-1)).enabled);
+        assert!(find(&plain, ShellAction::PlayerSymbols(1)).enabled);
         for c in Control::ALL {
             assert!(find(&plain, ShellAction::Rebind(c)).enabled, "{c:?}");
         }

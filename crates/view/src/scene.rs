@@ -11,6 +11,9 @@ pub const COLLAPSE_TICKS: u16 = 16;
 pub const SWEEP_MS: u32 = 1800;
 /// How long each building glows as the sweep passes it.
 const GLOW_MS: u32 = 700;
+/// Added to a player's symbol's depth, so it draws over the world: a
+/// symbol hidden behind a nearer unit tells nobody anything.
+const SYMBOL_DEPTH: f32 = 10_000.0;
 
 /// The age-up light sweep (`docs/02` [GD-AGE-02]): presentation state the
 /// app keeps, passed in so the scene is still a pure function of its inputs.
@@ -27,6 +30,7 @@ use crate::fx_to_f32;
 use crate::iso;
 use crate::palette;
 use crate::sprites::{self, Anim, Atlas};
+use crate::symbols::PlayerSymbols;
 use crate::walls::{self, Piece};
 use std::collections::HashMap;
 
@@ -111,6 +115,8 @@ pub struct SceneOptions<'a> {
     /// buildings only where in sight, buildings and nodes remembered where
     /// seen once, drawn dimmed. `None` shows everything, for tools.
     pub viewer: Option<u8>,
+    /// Where the players' symbols are drawn (`GD-A11Y-03`).
+    pub symbols: PlayerSymbols,
 }
 
 /// A frame's worth of sprites, sorted back to front.
@@ -167,6 +173,7 @@ impl Scene {
             ghost,
             sweep,
             viewer,
+            symbols,
         } = *opts;
         let world = sim.world();
         let map = sim.map();
@@ -401,7 +408,30 @@ impl Scene {
                 sprite.h = (full * keep).round();
                 sprite.y += full - sprite.h;
             }
+            let top = sprite.y;
             sprites.push(sprite);
+            // Whose it is, by shape as well as colour (`GD-A11Y-03`): over
+            // the selection, or over every unit and building but the walls.
+            let marked = match symbols {
+                PlayerSymbols::Off => false,
+                PlayerSymbols::Selected => selected.contains(&(i as u32)),
+                PlayerSymbols::Always => {
+                    selected.contains(&(i as u32)) || !(kinds::is_wall(kind) || kind == kinds::GATE)
+                }
+            };
+            if marked && row != 0 && world.dying[i] == 0 {
+                if let Some(b) = atlas.symbol(world.owner[i]) {
+                    // Above the sprite, and over whatever stands nearer.
+                    sprites.push(overlay(
+                        b,
+                        gx,
+                        top - 4.0,
+                        row,
+                        depth + SYMBOL_DEPTH,
+                        i as u32,
+                    ));
+                }
+            }
             // A building coming down: for its first moments it stands over
             // its rubble and sinks into it, faster as it goes. A site has no
             // building to bring down.
@@ -925,6 +955,66 @@ mod tests {
         assert_eq!(tree.row, 0, "gaia draws neutral");
     }
 
+    /// Whose a thing is shows by shape too (`GD-A11Y-03`): over the
+    /// selection by default, over every unit and building but the walls
+    /// with ALWAYS, nowhere with OFF, and never over nature's. Each in its
+    /// owner's colour, over the world.
+    /// REQ: GD-A11Y-03
+    #[test]
+    fn player_symbols_show_where_the_setting_says() {
+        let sim = Simulation::new(5, SimConfig::default());
+        let atlas = Atlas::placeholder();
+        let world = sim.world();
+        let theirs: Vec<u32> = world
+            .slots()
+            .map(|s| s.index() as u32)
+            .filter(|&i| world.owner[i as usize] == 1)
+            .collect();
+        let selected = &theirs[..2];
+        let symbols_in = |mode: PlayerSymbols| {
+            let scene = Scene::build_full(
+                &sim,
+                &atlas,
+                None,
+                0.0,
+                &SceneOptions {
+                    selected,
+                    symbols: mode,
+                    ..SceneOptions::default()
+                },
+            );
+            scene
+                .sprites
+                .into_iter()
+                .filter(|s| {
+                    (0..8u8).any(|o| {
+                        let f = atlas.symbol(o).unwrap();
+                        (s.u, s.v) == (f.x, f.y) && s.page == f.page
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        let picked = symbols_in(PlayerSymbols::Selected);
+        assert_eq!(picked.len(), 2, "one over each selected");
+        let square = atlas.symbol(1).unwrap();
+        for s in &picked {
+            assert!(selected.contains(&s.slot));
+            assert_eq!((s.u, s.v), (square.x, square.y), "player 1's square");
+            assert_eq!(s.row, palette::row_for_owner(1), "in player 1's colour");
+            let own = world.pos[s.slot as usize];
+            assert!(
+                s.depth > fx_to_f32(own.x) + fx_to_f32(own.y) + 100.0,
+                "over the world"
+            );
+        }
+        let owned = world
+            .slots()
+            .filter(|s| world.owner[s.index()] != kinds::GAIA)
+            .count();
+        assert_eq!(symbols_in(PlayerSymbols::Always).len(), owned);
+        assert!(symbols_in(PlayerSymbols::Off).is_empty());
+    }
+
     #[test]
     fn selection_rings_and_ghosts_are_added_in_order() {
         let sim = Simulation::new(5, SimConfig::default());
@@ -942,7 +1032,8 @@ mod tests {
             run: None,
         };
         let scene = Scene::build_with(&sim, &atlas, None, 0.0, &[first], Some(ghost));
-        assert_eq!(scene.sprites.len(), sim.world().len() + 3);
+        // The ring, the selection's symbol, and the ghost.
+        assert_eq!(scene.sprites.len(), sim.world().len() + 4);
         let fp = kinds::info(sim.world().kind[first as usize]).footprint;
         let ring = *atlas.ring(fp).unwrap();
         let is_ring = |s: &SpriteInstance| s.slot == first && s.u == ring.x && s.v == ring.y;

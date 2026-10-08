@@ -2,7 +2,7 @@
 //! mapview [--seed N] [--size N] [--players N] [--ticks N] [--stockpile N]
 //!         [--zoom 0.5|1|1.5|2] [--width W] [--height H]
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
-//!         [--scenario gather|build|ages|army|battle|siege|scout] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1]
+//!         [--scenario gather|build|ages|army|battle|siege|scout] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1] [--symbols off|selected|always]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
 //!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0]
@@ -52,6 +52,8 @@ struct Args {
     campaign: Option<String>,
     select: usize,
     hud: bool,
+    /// Where the players' symbols show (`GD-A11Y-03`).
+    symbols: view::symbols::PlayerSymbols,
     ghost: Option<String>,
     assets: Option<std::path::PathBuf>,
     stockpile: Option<i32>,
@@ -98,6 +100,7 @@ fn parse() -> Result<Args, String> {
         campaign: None,
         select: 0,
         hud: false,
+        symbols: view::symbols::PlayerSymbols::Selected,
         ghost: None,
         assets: None,
         stockpile: None,
@@ -163,6 +166,12 @@ fn parse() -> Result<Args, String> {
             "--campaign" => a.campaign = Some(val.clone()),
             "--select" => a.select = val.parse().map_err(|e| format!("{key}: {e}"))?,
             "--hud" => a.hud = val == "1" || val == "true",
+            "--symbols" => {
+                a.symbols = view::symbols::PlayerSymbols::ALL
+                    .into_iter()
+                    .find(|p| p.label().eq_ignore_ascii_case(val))
+                    .ok_or_else(|| format!("{key}: off, selected or always"))?
+            }
             "--ghost" => a.ghost = Some(val.clone()),
             "--assets" => a.assets = Some(std::path::PathBuf::from(val)),
             "--stockpile" => a.stockpile = Some(val.parse().map_err(|e| format!("{key}: {e}"))?),
@@ -541,6 +550,7 @@ fn run() -> Result<(), String> {
             ghost,
             sweep,
             viewer,
+            symbols: a.symbols,
         },
     );
     feedback.decorate(&mut scene, &sim, &atlas, viewer);

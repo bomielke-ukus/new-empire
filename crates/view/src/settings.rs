@@ -159,6 +159,8 @@ pub struct Settings {
     /// answers to its own key. Every letter keeps its meaning on every
     /// panel; only the key that presses it moves.
     pub letters: BTreeMap<char, String>,
+    /// Where the players' symbols show over the world (`GD-A11Y-03`).
+    pub player_symbols: crate::symbols::PlayerSymbols,
 }
 
 /// The volumes out of the box: everything full, the music under it.
@@ -180,6 +182,7 @@ impl Default for Settings {
             hints: true,
             hints_shown: BTreeMap::new(),
             letters: BTreeMap::new(),
+            player_symbols: crate::symbols::PlayerSymbols::default(),
         }
     }
 }
@@ -431,6 +434,19 @@ mod tests {
         assert!(
             old.hints && old.hints_shown.is_empty(),
             "and before the hints"
+        );
+        assert_eq!(
+            old.player_symbols,
+            crate::symbols::PlayerSymbols::Selected,
+            "and before the symbols"
+        );
+        let always = Settings {
+            player_symbols: crate::symbols::PlayerSymbols::Always,
+            ..Settings::default()
+        };
+        assert_eq!(
+            Settings::from_ron(&always.to_ron().unwrap()).unwrap(),
+            always
         );
         s.hints = false;
         s.hints_shown.insert("gather".to_string(), 2);

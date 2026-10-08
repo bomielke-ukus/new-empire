@@ -467,6 +467,15 @@ impl<'a> Painter<'a> {
         self.push(&f, x, y, w, h, row);
     }
 
+    /// A player's symbol in the player's colour (`GD-A11Y-03`), 11 pixels
+    /// square with its top left at `(x, y)`; nothing for nature.
+    pub fn symbol(&mut self, x: f32, y: f32, owner: u8) {
+        if let Some(f) = self.atlas.symbol(owner) {
+            let f = *f;
+            self.push(&f, x, y, f.w as f32, f.h as f32, row_for_owner(owner));
+        }
+    }
+
     /// A rectangle outline one pixel wide.
     pub fn outline(&mut self, x: f32, y: f32, w: f32, h: f32, idx: u8) {
         self.rect(x, y, w, 1.0, idx, 0);
