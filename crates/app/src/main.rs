@@ -1396,6 +1396,7 @@ impl App {
                 ghost: self.ghost(),
                 sweep,
                 viewer: self.viewer,
+                symbols: self.settings.player_symbols,
             },
         );
         self.feedback
@@ -1927,6 +1928,10 @@ impl App {
             }
             ShellAction::ToggleHints => {
                 self.settings.hints = !self.settings.hints;
+                self.apply_and_save_settings();
+            }
+            ShellAction::PlayerSymbols(delta) => {
+                self.settings.player_symbols = self.settings.player_symbols.step(delta);
                 self.apply_and_save_settings();
             }
             ShellAction::ToggleEdgeScroll => {

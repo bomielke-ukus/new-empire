@@ -31,6 +31,8 @@ pub const UI_ARROW: KindId = 58_500;
 pub const UI_RUBBLE: KindId = 58_600;
 /// A siege engine's stone in flight.
 pub const UI_STONE: KindId = 58_700;
+/// A player's symbol (`crate::symbols`): `UI_SYMBOL + owner`.
+pub const UI_SYMBOL: KindId = 58_800;
 /// Light glyphs: `UI_GLYPH + index into font::CHARS`.
 pub const UI_GLYPH: KindId = 60_000;
 /// Dark glyphs: `UI_GLYPH_DARK + index into font::CHARS`.
@@ -549,6 +551,9 @@ impl Atlas {
         stone.circle(6.0, 6.0, 4.0, GREY_DARK);
         stone.circle(5.0, 5.0, 2.0, GREY_LIGHT);
         canvases.push(still(UI_STONE, 0, stone));
+        for (owner, shape) in crate::symbols::SHAPES.iter().enumerate() {
+            canvases.push(still(UI_SYMBOL + owner as KindId, 0, symbol(shape)));
+        }
         for fp in 0..=3u32 {
             canvases.push(still(UI_RING + fp as KindId, 0, ring(fp)));
             if fp > 0 {
@@ -611,6 +616,15 @@ impl Atlas {
             Ink::Gold => UI_GLYPH_GOLD,
         };
         self.frame(base + i, 0).map(|(f, _)| f)
+    }
+
+    /// A player's symbol, in the player ramp so the row colours it
+    /// (`crate::symbols`); none for nature.
+    pub fn symbol(&self, owner: u8) -> Option<&Frame> {
+        if owner as usize >= crate::symbols::SHAPES.len() {
+            return None;
+        }
+        self.frame(UI_SYMBOL + owner as KindId, 0).map(|(f, _)| f)
     }
 
     /// Selection ring for a footprint (0 for units).
@@ -689,6 +703,28 @@ fn ring(footprint: u32) -> Canvas {
     let (rx, ry) = (cx - 1.0, cy - 1.0);
     c.ellipse(cx, cy, rx, ry, P_LIGHT);
     c.ellipse(cx, cy, rx - 2.0, ry - 1.5, TRANSPARENT);
+    c
+}
+
+/// A player's symbol: the shape in the player's colour, lit along its top
+/// edge, inside a black outline a pixel wide so it reads on any ground.
+fn symbol(shape: &[&str; 9]) -> Canvas {
+    let mut c = Canvas::new(11, 11, (5, 5));
+    let filled = |x: i32, y: i32| {
+        (0..9).contains(&x)
+            && (0..9).contains(&y)
+            && shape[y as usize].as_bytes()[x as usize] == b'#'
+    };
+    for y in -1..10 {
+        for x in -1..10 {
+            if filled(x, y) {
+                let lit = !filled(x, y - 1);
+                c.set(x + 1, y + 1, if lit { P_HIGHLIGHT } else { P_BASE });
+            } else if (-1..=1).any(|dy| (-1..=1).any(|dx| filled(x + dx, y + dy))) {
+                c.set(x + 1, y + 1, BLACK);
+            }
+        }
+    }
     c
 }
 

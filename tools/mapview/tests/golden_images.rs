@@ -350,6 +350,26 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The same fight with the players' symbols over everything
+        // (`GD-A11Y-03`): blue circles against red squares, readable
+        // without the colours.
+        name: "battle-symbols",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "battle",
+            "--ticks",
+            "140",
+            "--symbols",
+            "always",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // A siege: their column bunched at the shut gate of a palisade that
         // seals the map, the Watch Tower behind it shooting with two bowmen
         // inside, and the tower's panel showing its garrison and its job.

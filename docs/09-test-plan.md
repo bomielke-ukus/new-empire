@@ -550,6 +550,15 @@ SAVE and RESIGN and QUIT needs one click and records nothing; a
 recording from another build is refused on the screen with its number.
 The shell test covers the replay screen's buttons and the greyed menu.
 
+**The players' symbols** (`GD-A11Y-03`, 2026-10-08): `view::symbols`
+holds the eight shapes to differ from each other by at least 12 pixels;
+`scene`'s `player_symbols_show_where_the_setting_says` draws one over each
+selected thing, one over every owned unit and building with ALWAYS and
+none with OFF, in the owner's colour and over the world; the settings
+file carries the setting and an older one reads as SELECTED; the
+settings screen offers it. The golden image `battle-symbols` is the
+fight with ALWAYS.
+
 **M6 chunk 4, settings.** `crates/view/src/settings.rs` unit tests: the
 defaults give every control its own key and none a panel letter; a key
 another control holds, a panel letter, Escape and a digit are refused

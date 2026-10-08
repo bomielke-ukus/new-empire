@@ -563,6 +563,25 @@ Hard-against-Easy record (RM-M5-01) and the golden images are recorded
 again in the same change, and the campaigns are played through again
 by their tests.
 
+### D37 — Each player has a symbol as well as a colour
+**Date:** 2026-10-08 · **Decided by:** the owner, as recommended
+
+Q9 is answered with its cheapest option, a per-owner shape (`GD-A11Y-03`):
+a circle, a square, a triangle, a diamond, a plus, an X, a triangle
+upside down and a star, in player order, so a 1v1 is a blue circle
+against a red square. Each is 9 pixels square, in its player's colour
+with a lit top edge and a black outline, and needs no change to the art.
+
+- **Where**: over what is selected, by default; over every unit and
+  building of every side with the settings screen's SYMBOLS at ALWAYS
+  (walls and gates aside, which would bury a wall in symbols), or
+  nowhere with OFF; and in place of the plain colour square on the setup
+  and results screens. Over the world it draws above everything, so a
+  nearer unit never hides it.
+- **Not on the minimap**, where a unit is a dot a pixel or two wide.
+- The high-contrast palette, the third option, stays open if a
+  colour-blind player finds the symbols not enough.
+
 ## Open questions
 
 ### Q1 — Naval in the vertical slice, or after? — **answered, see D33**
@@ -627,7 +646,7 @@ The original's four ages map cleanly onto ancient history and end at a natural
 place. A fifth (Classical/Imperial) would extend matches past 40 minutes.
 **Recommendation:** stay at four. Long matches were not the appeal.
 
-### Q9 — What is the second ownership cue, besides colour?
+### Q9 — What is the second ownership cue, besides colour? — **answered, see D37**
 Player colour is currently the only way to tell whose unit is whose, and
 `docs/08` §6 shows that eight colours cannot be separated comfortably for a
 dichromatic player — the worst pair sits at 0.072 Oklab, against 0.15 for the

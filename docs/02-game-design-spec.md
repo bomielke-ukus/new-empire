@@ -630,6 +630,10 @@ be walked to, and land it on the shore nearest the enemy's Town Center.
 - **[GD-A11Y-01]** Colourblind-safe player palette, verified against deuteranopia and protanopia
   simulations.
 - **[GD-A11Y-02]** Full key rebinding, UI scale from 100% to 200%, subtitles for all narration.
+- **[GD-A11Y-03]** A second ownership cue besides colour: each player has a symbol (a circle,
+  a square, a triangle, a diamond, a plus, an X, a triangle upside down, a star, in player order),
+  drawn in the player's colour over the selection, over every unit and building with the
+  setting SYMBOLS at ALWAYS (none with OFF), and beside the colour wherever a side is listed.
 - No timed input requirements anywhere in the interface.
 
 ---

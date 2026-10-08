@@ -575,6 +575,7 @@ impl App {
                 ghost: self.editor_ghost(),
                 sweep: None,
                 viewer: None,
+                symbols: self.settings.player_symbols,
             },
         );
         let marks = self.brush_tiles();

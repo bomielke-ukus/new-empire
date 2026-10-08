@@ -2422,6 +2422,30 @@ in the main line:
 - **Stale notes** in §5 corrected: boats fish, and the buildings have
   their four architectures.
 
+### Work record: the players' symbols (2026-10-08)
+
+Q9 answered (`docs/07` D37, `GD-A11Y-03`):
+
+- **Eight symbols** (`view::symbols`): circle, square, triangle, diamond,
+  plus, X, triangle upside down, star, in player order; 9 pixels square,
+  drawn into the atlas (`sprites::UI_SYMBOL`) in the player ramp with a
+  black outline, so the row colours them like everything else.
+- **Over the world** (`scene`): above each selected unit and building
+  by default; with SYMBOLS at ALWAYS over every unit and building but
+  walls and gates; none at OFF. Drawn over everything so nothing hides
+  them. The editor shows them too.
+- **In lists** (`shell`): the setup screen's player rows and the results
+  screen draw the symbol where the colour square was.
+- **The setting** (`settings::Settings::player_symbols`): SYMBOLS on the
+  settings screen under HINTS, SELECTED, ALWAYS or OFF; an older settings
+  file reads as SELECTED. `mapview --symbols` for pictures.
+- **Tests**: the eight shapes differ from each other by at least 12
+  pixels; the scene draws them where each setting says, in the owner's
+  colour, over the world, never over nature's; the settings file and
+  screen carry the setting. The golden images were recorded again with
+  the symbols over their selections, and `battle-symbols` shows the
+  fight with ALWAYS.
+
 ### Resume here next session
 
 **M9 is built** (`docs/07` D35): scenarios and campaigns, the learning
@@ -2692,7 +2716,7 @@ in the order they bite:
 
 | Question | Blocks | Recommendation |
 |---|---|---|
-| Q9 — A second ownership cue besides colour | M4 (readability of a fight), M7 | Decide before combat art is commissioned; a banner glyph per player is the cheapest candidate |
+| Q9 — A second ownership cue besides colour | M4 (readability of a fight), M7 | Answered 2026-10-08 (`docs/07` D37): a symbol per player (`GD-A11Y-03`) |
 | Q1 — Naval in the vertical slice? | M4 scope | Leave it out of the slice; the map generator has water but nothing sails |
 | Q8 — Four ages or five? | Content tables | Four, as `docs/02` stands; M3 shipped the four-age structure |
 | Q5 — The game's name | M6 (menus), M9 | Answered: *Brenden's Empires* (`docs/07` D27) |
