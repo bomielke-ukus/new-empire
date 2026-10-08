@@ -34,7 +34,7 @@ fi
 
 for call in "${calls[@]}"; do
   # Keep the run short, and point file arguments at a scratch copy.
-  probe="$(sed -E 's/--ticks [0-9]+/--ticks 60/; s/--matches [0-9]+/--matches 1/' <<<"$call")"
+  probe="$(sed -E 's/--ticks [0-9]+/--ticks 60/; s/--matches [0-9]+/--matches 1/; s/--seeds [0-9]+/--seeds 1/' <<<"$call")"
   probe="${probe//replay-ci.ron/$tmp/replay.ron}"
   case "$probe" in
     verify*) # needs a file to exist first

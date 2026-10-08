@@ -95,6 +95,18 @@ impl Default for MapSpec {
     }
 }
 
+/// The smallest edge a map of `kind` holds `players` starts on reliably.
+/// Eight islands, each wide enough for a start's kit, need more sea than a
+/// 96-tile map has: one seed in nine gave up and fell back to flat grass
+/// (`simrunner mapgen`, 2026-10-07). The setup screen refuses less; the
+/// engine still accepts it, so an old save or replay of one still loads.
+pub fn smallest_size(kind: MapKind, players: u8) -> u16 {
+    match kind {
+        MapKind::Islands if players >= 8 => 128,
+        _ => 48,
+    }
+}
+
 /// An entity the generator wants placed at match start.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Spawn {
@@ -551,7 +563,11 @@ fn pour(g: &mut Gen, kind: MapKind, side: usize, shore: i32, base: Angle) {
         .map(|((ax, ay), (bx, by))| Vec2Fx::from_int(ax - bx, ay - by).length().floor())
         .min()
         .unwrap_or(size);
-    let island = (gap / 2 - 3).clamp(DRY_AROUND_STARTS + 2, size * 22 / 100);
+    // On a map too small for both bounds (under 73 tiles) the dry ground
+    // wins; `clamp` would panic there, as fuzzing found.
+    let island = (gap / 2 - 3)
+        .min(size * 22 / 100)
+        .max(DRY_AROUND_STARTS + 2);
     for y in 0..size {
         for x in 0..size {
             // -3 to 3, smoothly over the map.
@@ -1285,6 +1301,32 @@ mod tests {
         assert!(h[Terrain::Dirt as usize] > 0);
         assert!(h[Terrain::ForestFloor as usize] > 100);
         assert_eq!(h[Terrain::DeepWater as usize], 0, "inland has no water");
+    }
+
+    /// Every map type generates at the smallest sizes a setup accepts,
+    /// for every count of players, where it once panicked for want of room
+    /// (a fuzzing find, `docs/09` §11). Only the large maps carry the kit
+    /// guarantee above; a small one need only be a map.
+    #[test]
+    fn every_map_type_generates_at_the_smallest_sizes() {
+        for kind in MapKind::PLAYABLE {
+            for size in [48u16, 56, 64, 72] {
+                for players in 1..=8u8 {
+                    let g = generate(
+                        3,
+                        &MapSpec {
+                            kind,
+                            size,
+                            players,
+                        },
+                    );
+                    assert!(
+                        g.tiles.validate().is_ok(),
+                        "{kind:?} size {size} players {players}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

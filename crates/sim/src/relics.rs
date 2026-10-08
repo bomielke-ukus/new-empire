@@ -251,6 +251,7 @@ impl Simulation {
                 let gold = kinds::Resource::Gold.index();
                 p.stockpile[gold] += 1;
                 p.gathered[gold] += 1;
+                self.ledger.made(kinds::Resource::Gold, 1);
             }
         }
     }

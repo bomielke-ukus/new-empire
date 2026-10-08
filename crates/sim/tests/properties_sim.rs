@@ -123,8 +123,20 @@ fn drive(
     sim
 }
 
+/// `n` cases, scaled as `PROPTEST_CASES` scales proptest's default of 256,
+/// so the nightly job's deep run raises every property together
+/// (`docs/09` §3); `n` when it is unset.
+fn cases(n: u32) -> u32 {
+    std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map_or(n, |all| {
+            (n as u64 * all / 256).clamp(1, u32::MAX as u64) as u32
+        })
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(24))]
+    #![proptest_config(ProptestConfig::with_cases(cases(24)))]
 
     // REQ: TA-DET-01
     /// Determinism is not a property of one config.

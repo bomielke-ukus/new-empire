@@ -15,6 +15,7 @@
 //!                  [--difficulty easy,standard,hard,hardest] (one per player, repeating)
 //! simrunner versus [--matches N] [--seed N] [--ticks N] [--size N] [--difficulty hard,easy]
 //!                  [--expect FILE] [--update] [--min-wins N] (the RM-M5-01 acceptance)
+//! simrunner mapgen [--seeds N] [--seed N] (every playable map type, N seeds each)
 //! ```
 //!
 //! `golden` is the one CI leans on hardest: it replays the committed corpus
@@ -46,6 +47,7 @@ struct Flags {
     players: Option<u8>,
     size: Option<u16>,
     matches: Option<u32>,
+    seeds: Option<u64>,
     repeats: Option<u32>,
     stats: bool,
     timeout: Option<u64>,
@@ -97,6 +99,10 @@ fn parse(args: &[String]) -> Result<Flags, String> {
             "--matches" => {
                 let v = value(&mut f)?;
                 f.matches = Some(v.parse().map_err(|e| format!("--matches: {e}"))?);
+            }
+            "--seeds" => {
+                let v = value(&mut f)?;
+                f.seeds = Some(v.parse().map_err(|e| format!("--seeds: {e}"))?);
             }
             "--repeats" => {
                 let v = value(&mut f)?;
@@ -909,6 +915,7 @@ fn usage(err: &str) -> ExitCode {
     eprintln!(
         "                   [--expect FILE] [--update] [--min-wins N] (the RM-M5-01 acceptance)"
     );
+    eprintln!("  simrunner mapgen [--seeds N] [--seed N] (every playable map type, N seeds each)");
     ExitCode::from(2)
 }
 
@@ -1234,6 +1241,91 @@ fn versus(f: &Flags) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The map generator over many seeds (`docs/09` §5): a generator that
+/// fails one seed in five hundred will meet that seed in front of a player.
+/// Every playable map type, `--seeds` seeds from `--seed`, each at one of the
+/// sizes and player counts the setup screen offers, cycled so every pairing
+/// comes round (and skipping what it refuses, `mapgen::smallest_size`). A seed fails if the generator panics, gives up and falls
+/// back to a flat map, places the wrong number of starts, or makes a world
+/// that breaks an invariant in its first tick.
+fn mapgen_sweep(f: &Flags) -> ExitCode {
+    use sim::mapgen::{generate, MapKind, MapSpec};
+    // The setup screen's sizes (`view::shell::MapSize`) and player counts.
+    const SIZES: [u16; 5] = [96, 128, 168, 200, 240];
+    const GAVE_UP: u32 = 13;
+    let first = f.seed.unwrap_or(0);
+    let seeds = f.seeds.unwrap_or(1000);
+    let t0 = Instant::now();
+    let mut failures = Vec::new();
+    for kind in MapKind::PLAYABLE {
+        let mut attempts = [0u32; GAVE_UP as usize + 1];
+        for seed in first..first + seeds {
+            let spec = MapSpec {
+                kind,
+                size: SIZES[(seed % 5) as usize],
+                players: 2 + ((seed / 5) % 7) as u8,
+            };
+            // The setup screen refuses what does not fit; the sweep tests
+            // what it offers.
+            if spec.size < sim::mapgen::smallest_size(kind, spec.players) {
+                continue;
+            }
+            let at = format!(
+                "{kind:?} seed {seed} size {} players {}",
+                spec.size, spec.players
+            );
+            let run = std::panic::catch_unwind(|| {
+                let g = generate(seed, &spec);
+                let mut sim = sim::Simulation::new(
+                    seed,
+                    SimConfig {
+                        map: spec.clone(),
+                        ..SimConfig::default()
+                    },
+                );
+                sim.step();
+                (g.attempts, g.starts.len(), g.tiles.validate(), sim.check())
+            });
+            match run {
+                Err(_) => failures.push(format!("{at}: panicked")),
+                Ok((tries, starts, tiles, check)) => {
+                    attempts[tries.min(GAVE_UP) as usize] += 1;
+                    if tries >= GAVE_UP {
+                        failures.push(format!("{at}: gave up and fell back to a flat map"));
+                    }
+                    if starts != spec.players as usize {
+                        failures.push(format!("{at}: {starts} starts"));
+                    }
+                    if let Err(e) = tiles {
+                        failures.push(format!("{at}: tiles: {e:?}"));
+                    }
+                    if let Err(v) = check {
+                        failures.push(format!("{at}: {v}"));
+                    }
+                }
+            }
+        }
+        let worst = (1..=GAVE_UP).rev().find(|&a| attempts[a as usize] > 0);
+        println!(
+            "{:<12} {} maps, first try {}, most tries {}",
+            format!("{kind:?}"),
+            attempts.iter().sum::<u32>(),
+            attempts[1],
+            worst.unwrap_or(0)
+        );
+    }
+    println!("{:.1?}", t0.elapsed());
+    if failures.is_empty() {
+        println!("ok: every map generated");
+        ExitCode::SUCCESS
+    } else {
+        for f in &failures {
+            eprintln!("FAIL {f}");
+        }
+        fail(&format!("{} maps failed", failures.len()))
+    }
+}
+
 fn fail(msg: &str) -> ExitCode {
     eprintln!("{msg}");
     ExitCode::FAILURE
@@ -1261,6 +1353,7 @@ fn main() -> ExitCode {
         "balance" => balance(&flags),
         "ai" => ai(&flags),
         "versus" => versus(&flags),
+        "mapgen" => mapgen_sweep(&flags),
         other => usage(&format!("unknown subcommand {other}")),
     }
 }

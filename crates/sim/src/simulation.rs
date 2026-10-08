@@ -27,7 +27,7 @@ use crate::fx::Fx;
 use crate::hash::{HashState, StateHasher};
 use crate::kinds::{self, Cost, Resource, GAIA, MAX_BUILDERS};
 use crate::map::TileMap;
-use crate::mapgen::{self, MapSpec};
+use crate::mapgen::{self, MapKind, MapSpec};
 use crate::nav::{self, NavGrid, Tile};
 use crate::orders::{
     GatherPhase, Item, Modifiers, Nav, NavState, Order, Pending, Player, Production, QueueItem,
@@ -243,6 +243,19 @@ pub enum ConfigError {
         /// The value offered.
         percent: i32,
     },
+    /// The map is too small for its type and players
+    /// ([`crate::mapgen::smallest_size`]). The setup screen's refusal, not
+    /// the engine's: [`SimConfig::validate`] never returns it.
+    MapTooSmall {
+        /// The map type.
+        kind: MapKind,
+        /// How many players.
+        players: u8,
+        /// Its edge.
+        size: u16,
+        /// The smallest edge that holds them.
+        needs: u16,
+    },
 }
 
 impl core::fmt::Display for ConfigError {
@@ -260,6 +273,16 @@ impl core::fmt::Display for ConfigError {
             ConfigError::BonusOutOfRange { player, percent } => write!(
                 f,
                 "player {player}'s gather bonus {percent}% is outside 0..={MAX_GATHER_BONUS_PCT}"
+            ),
+            ConfigError::MapTooSmall {
+                kind,
+                players,
+                size,
+                needs,
+            } => write!(
+                f,
+                "{} for {players} players needs a map {needs} wide, not {size}",
+                kind.name()
             ),
         }
     }
@@ -810,9 +833,34 @@ pub struct Simulation {
     pub(crate) events: Vec<Event>,
     #[serde(skip)]
     pub(crate) scratch: Scratch,
+    /// Where every resource came from and went, for the conservation
+    /// check. Not state: see [`crate::ledger`].
+    #[serde(skip)]
+    pub(crate) ledger: crate::ledger::Ledger,
 }
 
 impl Simulation {
+    /// What the match holds of each resource: on the nodes, carried and
+    /// stockpiled ([`crate::ledger`]).
+    pub(crate) fn held(&self) -> [i64; 4] {
+        let mut held = [0i64; 4];
+        for s in self.world.slots() {
+            let i = s.index();
+            if let Some((r, _)) = kinds::info(self.world.kind[i]).resource {
+                held[r.index()] += self.world.resource[i] as i64;
+            }
+            if let Some((r, n)) = self.world.carry[i] {
+                held[r.index()] += n as i64;
+            }
+        }
+        for p in &self.players {
+            for (h, v) in held.iter_mut().zip(p.stockpile) {
+                *h += v as i64;
+            }
+        }
+        held
+    }
+
     /// A fresh match at tick 0, with its map generated and populated.
     pub fn new(seed: u64, config: SimConfig) -> Simulation {
         let generated = scenario_ground(seed, &config);
@@ -846,6 +894,7 @@ impl Simulation {
             scenario_state: crate::scenario::ScenarioState::default(),
             events: Vec::new(),
             scratch: Scratch::default(),
+            ledger: crate::ledger::Ledger::default(),
             config,
         };
         // A civilization's standing effects, from the first tick.
@@ -1478,6 +1527,10 @@ impl Simulation {
     }
 
     fn run_tick(&mut self, clock: Option<&mut dyn FnMut() -> u64>) -> Timings {
+        if !self.ledger.counting() {
+            let held = self.held();
+            self.ledger.begin(held);
+        }
         self.scratch.stats = TickStats::default();
         self.events.clear();
         if self.last_alarm.len() != self.players.len() {
@@ -1601,6 +1654,10 @@ impl Simulation {
     ///   because it owns nothing.
     pub fn check(&self) -> Result<(), Violation> {
         self.world.check().map_err(Violation::World)?;
+
+        if let Some((resource, was, now)) = self.ledger.imbalance(&self.held()) {
+            return Err(Violation::NotConserved { resource, was, now });
+        }
 
         if self.world.len() as u32 > self.config.max_entities {
             return Err(Violation::OverEntityCap {
@@ -1854,6 +1911,9 @@ impl Simulation {
         let info = kinds::info(kind);
         let pos = self.clamp_to_map(pos);
         let resource = info.resource.map_or(0, |(_, amount)| amount);
+        if let Some((r, amount)) = info.resource {
+            self.ledger.made(r, amount);
+        }
         let id = self.world.spawn_with_resource(
             kind,
             owner,
@@ -1932,6 +1992,7 @@ impl Simulation {
                 let total = info.build_work().max(1);
                 let back = cost.map(|c| c - c * done as i32 / total as i32);
                 p.refund(&back);
+                self.ledger.refunded(&back);
             }
         }
         if !info.mobile && self.world.inside[i].is_none() {
@@ -1947,6 +2008,13 @@ impl Simulation {
                     pl.reseed_exceptions.remove(k);
                 }
             }
+        }
+        // What was left on it, and what it carried, go with it.
+        if let Some((r, _)) = info.resource {
+            self.ledger.lost(r, self.world.resource[i]);
+        }
+        if let Some((r, n)) = self.world.carry[i] {
+            self.ledger.lost(r, n);
         }
         self.world.despawn(id)
     }
@@ -2001,6 +2069,7 @@ impl Simulation {
             CommandKind::Cheat { resource } => {
                 if let Some(pl) = self.players.get_mut(p as usize) {
                     pl.stockpile[resource.index()] += crate::command::CHEAT_AMOUNT;
+                    self.ledger.made(resource, crate::command::CHEAT_AMOUNT);
                 }
             }
             CommandKind::Spawn { kind, pos } => {
@@ -2236,6 +2305,7 @@ impl Simulation {
                         let cost = self.cost_of(p, self.world.kind[wall.index()]);
                         self.remove(wall);
                         self.players[p as usize].refund(&cost);
+                        self.ledger.refunded(&cost);
                     }
                 }
                 // Rubble under a new site is cleared away.
@@ -2256,15 +2326,20 @@ impl Simulation {
                 }
                 let cost = self.cost_of(p, kind);
                 self.players[p as usize].pay(&cost);
+                self.ledger.spent(&cost);
                 let pos = nav::building_centre(x, y, info.footprint as i32);
                 let Some(site) = self.spawn(kind, p, pos) else {
                     self.players[p as usize].refund(&cost);
+                    self.ledger.refunded(&cost);
                     return;
                 };
                 let i = site.index();
                 self.world.construction[i] = Some(0);
                 self.world.health[i] = Fx::ONE;
                 // A farm is seeded when it is finished, not when it is pegged out.
+                if let Some((r, _)) = info.resource {
+                    self.ledger.lost(r, self.world.resource[i]);
+                }
                 self.world.resource[i] = 0;
                 self.assign_builders(&ids, p, site);
             }
@@ -2304,6 +2379,7 @@ impl Simulation {
                 if !self.players[p as usize].pay(&cost) {
                     return;
                 }
+                self.ledger.spent(&cost);
                 self.world.production[i]
                     .get_or_insert_with(Production::default)
                     .queue
@@ -2321,6 +2397,7 @@ impl Simulation {
                             Item::Tech(t) => tech::info(t).map_or([0; 4], |t| t.cost),
                         };
                         self.players[p as usize].refund(&cost);
+                        self.ledger.refunded(&cost);
                     }
                 }
             }
@@ -2337,6 +2414,7 @@ impl Simulation {
                 if !self.players[p as usize].pay(&t.cost) {
                     return;
                 }
+                self.ledger.spent(&t.cost);
                 self.world.production[bs.index()]
                     .get_or_insert_with(Production::default)
                     .queue
@@ -2649,7 +2727,8 @@ impl Simulation {
                 let n = ns.index();
                 self.world.facing[i] = (self.world.pos[n] - self.world.pos[i]).angle().facing8();
                 // Switching resources drops the old load.
-                if matches!(self.world.carry[i], Some((r, _)) if r != resource) {
+                if let Some((r, n)) = self.world.carry[i].filter(|&(r, _)| r != resource) {
+                    self.ledger.lost(r, n);
                     self.world.carry[i] = None;
                 }
                 // The swing, for the ear: once every WORK_PERIOD ticks per
@@ -2999,7 +3078,11 @@ impl Simulation {
             if !p.farm_reseeds(farm) || !p.pay(&kinds::FARM_RESEED_COST) {
                 continue;
             }
-            self.world.resource[i] = p.modifiers.farm_yield(base);
+            let seeded = p.modifiers.farm_yield(base);
+            self.ledger.spent(&kinds::FARM_RESEED_COST);
+            self.ledger
+                .made(Resource::Food, seeded - self.world.resource[i]);
+            self.world.resource[i] = seeded;
         }
     }
 
@@ -3656,9 +3739,11 @@ impl Simulation {
                     owner,
                     pos: self.world.pos[i],
                 });
-                if let Some((_, base)) = info.resource {
+                if let Some((r, base)) = info.resource {
                     // A finished farm is seeded for free; only reseeds cost.
-                    self.world.resource[i] = modifiers.farm_yield(base);
+                    let seeded = modifiers.farm_yield(base);
+                    self.ledger.made(r, seeded - self.world.resource[i]);
+                    self.world.resource[i] = seeded;
                 }
                 if self.world.kind[i] == kinds::GATE {
                     // A finished gate stands open; the gates pass shuts it
@@ -4168,6 +4253,9 @@ impl Simulation {
                     .players
                     .get_mut(owner as usize)
                     .is_some_and(|p| p.pay(&due));
+                if paid {
+                    self.ledger.spent(&due);
+                }
                 if !paid {
                     // Cannot afford it: the repairers stand down.
                     self.stop_repairers(building);
@@ -4366,6 +4454,16 @@ pub enum Violation {
         /// How many players.
         players: usize,
     },
+    /// A resource was made or lost by something other than the flows the
+    /// rules mean (`docs/09` §5, [`crate::ledger`]).
+    NotConserved {
+        /// Which resource.
+        resource: crate::kinds::Resource,
+        /// Held plus spent plus lost less made, when counting began.
+        was: i64,
+        /// The same now.
+        now: i64,
+    },
     /// The incremental fog disagrees with a recount from the world.
     FogDrift {
         /// Whose fog.
@@ -4449,6 +4547,11 @@ impl core::fmt::Display for Violation {
                 "player {player}'s fog counts {have} observers at {tile:?} where the \
                  world's sight discs give {want}: the incremental fog has drifted"
             ),
+            Violation::NotConserved { resource, was, now } => write!(
+                f,
+                "{resource:?} is not conserved: held, spent and lost less made was {was} \
+                 and is {now}"
+            ),
         }
     }
 }
@@ -4458,7 +4561,6 @@ impl std::error::Error for Violation {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mapgen::MapKind;
 
     fn flat(size: u16, players: u8) -> SimConfig {
         SimConfig {
@@ -4754,6 +4856,62 @@ mod tests {
             );
             assert!(sim.world().carry[i].map_or(0, |(_, a)| a) <= kinds::CARRY_CAPACITY);
         }
+    }
+
+    /// The books balance while villagers gather, carry and deposit, and a
+    /// resource made from nothing or lost to nowhere breaks them
+    /// (`docs/09` §5, [`crate::ledger`]).
+    #[test]
+    fn a_resource_made_or_lost_by_accident_breaks_conservation() {
+        let mut sim = inland(2);
+        assert_eq!(sim.check(), Ok(()), "nothing counted before the first tick");
+        let (sx, sy) = sim.starts()[0];
+        let tc = nav::centre((sx, sy));
+        for k in 0..4 {
+            sim.issue(spawn_cmd(0, kinds::VILLAGER, sx - 2 + k, sy + 3));
+        }
+        run(&mut sim, 3);
+        let vill = owned(&sim, 0, kinds::VILLAGER);
+        let tree = nearest_kind(&sim, kinds::TREE, tc);
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Gather {
+                ids: vill.clone(),
+                node: tree,
+            },
+        });
+        for _ in 0..20 * 60 {
+            sim.step();
+            assert_eq!(sim.check(), Ok(()), "tick {}", sim.tick());
+        }
+        assert!(sim.player(0).unwrap().gathered[Resource::Wood.index()] > 0);
+        // Five food from nowhere.
+        sim.players[0].stockpile[Resource::Food.index()] += 5;
+        assert!(matches!(
+            sim.check(),
+            Err(Violation::NotConserved {
+                resource: Resource::Food,
+                ..
+            })
+        ));
+        sim.players[0].stockpile[Resource::Food.index()] -= 5;
+        assert_eq!(sim.check(), Ok(()));
+        // A load from nowhere: a villager carrying more than the tree gave.
+        let i = sim.world.slot(vill[0]).unwrap().index();
+        let load = sim.world.carry[i];
+        sim.world.carry[i] = Some((Resource::Wood, load.map_or(0, |(_, n)| n) + 3));
+        assert!(matches!(
+            sim.check(),
+            Err(Violation::NotConserved {
+                resource: Resource::Wood,
+                ..
+            })
+        ));
+        sim.world.carry[i] = load;
+        // A copy keeps its own books from its own next tick.
+        let mut copy = sim.clone();
+        copy.step();
+        assert_eq!(copy.check(), Ok(()));
     }
 
     #[test]

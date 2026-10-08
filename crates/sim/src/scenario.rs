@@ -1202,7 +1202,15 @@ impl Simulation {
             } => {
                 if let Some(p) = self.players.get_mut(*owner as usize) {
                     let v = &mut p.stockpile[resource.index()];
+                    let was = *v;
                     *v = (*v + amount).max(0);
+                    // A gift is made, a taking is lost.
+                    let change = *v - was;
+                    if change >= 0 {
+                        self.ledger.made(*resource, change);
+                    } else {
+                        self.ledger.lost(*resource, -change);
+                    }
                 }
             }
             Action::Reveal(area) => {
