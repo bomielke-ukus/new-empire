@@ -2446,6 +2446,27 @@ Q9 answered (`docs/07` D37, `GD-A11Y-03`):
   the symbols over their selections, and `battle-symbols` shows the
   fight with ALWAYS.
 
+### Work record: the campaign screens' diorama, and the locked rows (2026-10-11)
+
+From the owner's look at playtest-8:
+
+- **A live picture behind the campaigns and a briefing**
+  (`view::diorama`): a Greek town and an Egyptian one under its pyramid,
+  each raided from its far side while its villagers work and its tower
+  shoots, galleys fighting at sea, played at the game's speed and begun
+  again when the raids are spent (at most 100 seconds). The panel stands
+  in the middle of the window, so the fights are set to either side of
+  it, and the camera keeps both towns in view at any window size. It is
+  a scenario (`assets/menu/diorama.ron`, drawn by
+  `tools/campaigns/menu.py`, built into the game), so the editor opens
+  it. The ground and fog it puts on the GPU are swapped back when a
+  match or the editor starts. `mapview --screen campaigns --ticks N`
+  draws it; golden image `campaigns-screen`.
+- **The locked rows overflowed the panel**: each printed "WIN THE
+  SCENARIO BEFORE IT FIRST" beside it, past the panel's edge. A locked
+  row now says LOCKED inside it, and the rule is said once inside the
+  panel. The app test checks nothing is drawn past the panel's edge.
+
 ### Resume here next session
 
 **M9 is built** (`docs/07` D35): scenarios and campaigns, the learning

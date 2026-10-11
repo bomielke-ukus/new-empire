@@ -69,6 +69,22 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The campaigns over the diorama, twenty seconds in: both towns
+        // raided either side of the panel, a locked scenario saying so
+        // inside its row.
+        name: "campaigns-screen",
+        args: &[
+            "--screen",
+            "campaigns",
+            "--ticks",
+            "400",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The settings screen with the default keys, the cursor on the
         // first CHANGE button.
         name: "settings-screen",

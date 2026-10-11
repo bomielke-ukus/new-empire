@@ -384,6 +384,9 @@ pub struct ShellInput {
     pub ui_scale: f32,
     /// Cursor position in device px, for button hover.
     pub hover: Option<(f32, f32)>,
+    /// A world is drawn behind the screen (the campaigns' diorama), so
+    /// the backdrop leaves it showing round the panel.
+    pub world_behind: bool,
 }
 
 /// How the match ended, for the results screen.
@@ -477,6 +480,7 @@ pub(crate) struct Sheet<'a> {
     pub(crate) vh: f32,
     pub(crate) hover: Option<(f32, f32)>,
     scale: f32,
+    world_behind: bool,
 }
 
 impl<'a> Sheet<'a> {
@@ -489,12 +493,16 @@ impl<'a> Sheet<'a> {
             vh: input.viewport.1 / s,
             hover: input.hover.map(|(x, y)| (x / s, y / s)),
             scale: s,
+            world_behind: input.world_behind,
         }
     }
 
-    /// Covers the whole window: the shell screens stand on nothing.
+    /// Covers the whole window: the shell screens stand on nothing,
+    /// unless a world is drawn behind them.
     pub(crate) fn backdrop(&mut self) {
-        self.p.rect(0.0, 0.0, self.vw, self.vh, BLACK, 0);
+        if !self.world_behind {
+            self.p.rect(0.0, 0.0, self.vw, self.vh, BLACK, 0);
+        }
     }
 
     /// The framed panel the HUD's overlays use.
@@ -522,6 +530,21 @@ impl<'a> Sheet<'a> {
         enabled: bool,
         reason: &str,
     ) {
+        self.button_with(rect, action, label, enabled, reason, true);
+    }
+
+    /// [`Sheet::button`], saying why a disabled one is disabled beside it
+    /// only when `beside`: a screen with no room beside its buttons says
+    /// so its own way, and the reason is kept for the tooltip and tests.
+    pub(crate) fn button_with(
+        &mut self,
+        rect: (f32, f32, f32, f32),
+        action: ShellAction,
+        label: &str,
+        enabled: bool,
+        reason: &str,
+        beside: bool,
+    ) {
         let (x, y, w, h) = rect;
         let hover = self
             .hover
@@ -544,7 +567,7 @@ impl<'a> Sheet<'a> {
             ink,
             1.0,
         );
-        if !enabled && !reason.is_empty() {
+        if beside && !enabled && !reason.is_empty() {
             self.p
                 .text(x + w + 8.0, y + (h - 7.0) / 2.0, reason, false, 1.0);
         }
@@ -1433,7 +1456,12 @@ pub fn campaigns_screen(
         .iter()
         .map(|c| 34.0 + c.scenarios.len() as f32 * (SCENARIO_H + 4.0) + 10.0)
         .sum();
-    let ph = (60.0 + rows.max(30.0) + MENU_H + 24.0).min(s.vh - 8.0);
+    let locked = campaigns
+        .iter()
+        .flat_map(|c| &c.scenarios)
+        .any(|sc| !sc.open);
+    let rule = if locked { 16.0 } else { 0.0 };
+    let ph = (60.0 + rows.max(30.0) + rule + MENU_H + 24.0).min(s.vh - 8.0);
     let x = ((s.vw - pw) / 2.0).round();
     let y = ((s.vh - ph) / 2.0).max(4.0).round();
     s.panel(x, y, pw, ph);
@@ -1462,16 +1490,38 @@ pub fn campaigns_screen(
                 sc.title.to_uppercase(),
                 if sc.won { "   (WON)" } else { "" }
             );
-            s.button(
+            // A locked one says so inside its row; the rule is said once,
+            // below, inside the panel.
+            s.button_with(
                 (x + 32.0, ly, bw, SCENARIO_H),
                 ShellAction::Brief(ci, si),
                 &label,
                 sc.open,
                 "WIN THE SCENARIO BEFORE IT FIRST",
+                false,
             );
+            if !sc.open {
+                let lw = font::width("LOCKED") as f32;
+                s.p.text_in(
+                    x + 32.0 + bw - lw - 8.0,
+                    (ly + (SCENARIO_H - font::GLYPH_H as f32) / 2.0).round(),
+                    "LOCKED",
+                    Ink::Gold,
+                    1.0,
+                );
+            }
             ly += SCENARIO_H + 4.0;
         }
         ly += 10.0;
+    }
+    if locked {
+        s.centred(
+            cx,
+            y + ph - MENU_H - 38.0,
+            &fit("WIN A SCENARIO TO OPEN THE NEXT ONE", pw - 16.0),
+            Ink::White,
+            1.0,
+        );
     }
     if let Some(e) = error {
         s.centred(
@@ -1584,6 +1634,7 @@ mod tests {
             viewport: (1280.0, 720.0),
             ui_scale: 1.0,
             hover: None,
+            world_behind: false,
         }
     }
 
