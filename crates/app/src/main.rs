@@ -220,6 +220,13 @@ struct App {
     screen: Screen,
     /// The setup preview's minimap needs uploading.
     minimap_dirty: bool,
+    /// The live picture behind the campaigns and a briefing
+    /// (`view::diorama`), made when first shown; `None` if it would not
+    /// read, and the screens stand on their plain backdrop.
+    diorama: Option<view::diorama::Diorama>,
+    /// Whether the GPU holds the diorama's ground and fog rather than the
+    /// match's, so the right ones go up when the screen changes.
+    diorama_shown: bool,
     /// The player asked to close the game.
     quit: bool,
     /// Where saves are written and read.
@@ -521,6 +528,8 @@ impl App {
             setup_error: None,
             screen: Screen::default(),
             minimap_dirty: true,
+            diorama: None,
+            diorama_shown: false,
             quit: false,
             saves_dir: data_dir("NEW_EMPIRE_SAVES", "saves"),
             saves: Vec::new(),
@@ -1110,7 +1119,7 @@ impl App {
         match self.shell {
             Shell::Match => self.frame_match(now, dt),
             Shell::Editor => self.frame_editor(now, dt),
-            _ => self.frame_shell(now),
+            _ => self.frame_shell(now, dt),
         }
     }
 
@@ -1585,9 +1594,19 @@ impl App {
 
     /// The title and the setup screen: no world, a backdrop and buttons,
     /// and on the setup screen the seed's map as the minimap will show it.
-    fn frame_shell(&mut self, now: Instant) {
+    fn frame_shell(&mut self, now: Instant, dt: f32) {
         self.hear_title();
-        let input = self.shell_input();
+        // The campaigns and a briefing stand over the diorama.
+        let behind = matches!(self.shell, Shell::Campaigns | Shell::Briefing);
+        if behind && self.diorama.is_none() {
+            match view::diorama::Diorama::new() {
+                Ok(d) => self.diorama = Some(d),
+                Err(e) => eprintln!("warning: the menu diorama: {e}"),
+            }
+        }
+        let behind = behind && self.diorama.is_some();
+        let mut input = self.shell_input();
+        input.world_behind = behind;
         let screen = match self.shell {
             Shell::Title => shell::title(&self.atlas, &input),
             Shell::Load => shell::load_screen(
@@ -1635,8 +1654,28 @@ impl App {
                 self.setup_error.as_deref(),
             ),
         };
+        let mut camera = None;
+        let mut sprites = Vec::new();
+        if let Some(d) = self.diorama.as_mut().filter(|_| behind) {
+            d.advance(dt);
+            sprites = d.scene(&self.atlas).sprites;
+            camera = Some(d.camera(self.camera.viewport, self.camera.dpi));
+            if let Some(gpu) = &mut self.gpu {
+                // Its ground once, and everything in sight; the match puts
+                // its own back when it starts.
+                if !self.diorama_shown {
+                    let chunks = view::terrain::build_all(d.sim().map());
+                    gpu.renderer.upload_terrain(&gpu.device, &chunks);
+                    let map = d.sim().map();
+                    let lit = FogLights::lit(map.width(), map.height());
+                    gpu.renderer.upload_fog(&gpu.device, &gpu.queue, &lit);
+                    self.diorama_shown = true;
+                    self.last_fog_tick = None;
+                }
+            }
+        }
         let scene = Scene {
-            sprites: Vec::new(),
+            sprites,
             ui: screen.sprites.clone(),
         };
         self.hud = Hud::default();
@@ -1648,7 +1687,11 @@ impl App {
                 gpu.renderer.upload_minimap(&gpu.device, &gpu.queue, &m);
                 self.minimap_dirty = false;
             }
-            gpu.render(&self.camera, &scene, screen.preview);
+            gpu.render(
+                camera.as_ref().unwrap_or(&self.camera),
+                &scene,
+                screen.preview,
+            );
         }
         self.screen = screen;
         self.scene = scene;
@@ -1795,6 +1838,7 @@ impl App {
             viewport: self.camera.viewport,
             ui_scale: self.ui_scale(),
             hover: self.input.cursor,
+            world_behind: false,
         }
     }
 
@@ -2109,6 +2153,7 @@ impl App {
         self.match_started = now_secs();
         self.recording = None;
         self.shell = Shell::Match;
+        self.diorama_shown = false;
         if let Some(gpu) = &mut self.gpu {
             let chunks = view::terrain::build_all(self.sim.map());
             gpu.renderer.upload_terrain(&gpu.device, &chunks);

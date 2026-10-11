@@ -9,5 +9,6 @@ its campaign's files.
 python3 tools/campaigns/learning.py assets/campaigns/learning
 python3 tools/campaigns/persian_wars.py assets/campaigns/persian-wars
 python3 tools/campaigns/sargon.py assets/campaigns/sargon
+python3 tools/campaigns/menu.py assets/menu   # the diorama behind the campaign screens
 python3 tools/campaigns/mapdraw.py /tmp assets/campaigns/sargon/*.ron  # top-down pictures (Pillow)
 ```

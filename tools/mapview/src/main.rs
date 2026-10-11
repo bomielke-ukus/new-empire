@@ -210,11 +210,25 @@ fn save(path: &str, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> 
 /// Renders a shell screen (`--screen`) as the game shows it, with no
 /// match behind it: the title, or the setup screen with its preview.
 fn render_screen(a: &Args, name: &str) -> Result<(), String> {
-    let atlas = Atlas::placeholder();
+    // The campaigns and a briefing stand over the diorama (`view::diorama`),
+    // drawn with the rendered sets as the game draws it; `--ticks` plays
+    // it on that far.
+    let behind = matches!(name, "campaigns" | "briefing");
+    let sheet_dir = a.assets.clone().or_else(view::sheets::default_dir);
+    let atlas = if behind {
+        let (sheets, _) = sheet_dir
+            .as_ref()
+            .map(|d| view::sheets::load_all(d))
+            .unwrap_or_default();
+        Atlas::with_sheets(&sheets)
+    } else {
+        Atlas::placeholder()
+    };
     let input = ShellInput {
         viewport: (a.width as f32, a.height as f32),
         ui_scale: a.dpi * a.ui_scale,
         hover: a.hover,
+        world_behind: behind,
     };
     let (screen, preview) = match name {
         "title" => (shell::title(&atlas, &input), None),
@@ -324,8 +338,26 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
         }
     };
     let mut img = raster::Image::new(a.width, a.height, [12, 10, 14, 255]);
-    let cam = Camera::new(1, 1, (a.width as f32, a.height as f32));
     let palette = view::palette::texture();
+    if behind {
+        let mut d = view::diorama::Diorama::new()?;
+        for _ in 0..a.ticks {
+            d.tick();
+        }
+        let cam = d.camera((a.width as f32, a.height as f32), a.dpi);
+        let detail = sheet_dir
+            .as_ref()
+            .and_then(|d| d.parent())
+            .map(|assets| assets.join("terrain").join("detail.png"))
+            .filter(|p| p.exists())
+            .and_then(|p| view::detail::Detail::load(&p).ok())
+            .unwrap_or_else(view::detail::Detail::flat);
+        let chunks = view::terrain::build_all(d.sim().map());
+        raster::draw_terrain(&mut img, &cam, &chunks, None, &detail);
+        let scene = d.scene(&atlas);
+        raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.sprites);
+    }
+    let cam = Camera::new(1, 1, (a.width as f32, a.height as f32));
     raster::draw_sprites(&mut img, &cam, &atlas, &palette, &screen.sprites);
     if let (Some(m), Some(rect)) = (preview, screen.preview) {
         raster::draw_minimap(&mut img, &m, rect);

@@ -208,6 +208,7 @@ impl App {
         self.prev_pos = self.sim.world().pos.clone();
         self.last_fog_tick = None;
         self.last_minimap = Instant::now() - Duration::from_secs(10);
+        self.diorama_shown = false;
         if let Some(gpu) = &mut self.gpu {
             let chunks = view::terrain::build_all(self.sim.map());
             gpu.renderer.upload_terrain(&gpu.device, &chunks);

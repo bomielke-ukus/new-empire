@@ -460,6 +460,7 @@ mod tests {
             viewport: (w, h),
             ui_scale: 1.0,
             hover: None,
+            world_behind: false,
         }
     }
 

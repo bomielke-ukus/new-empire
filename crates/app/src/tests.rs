@@ -2809,9 +2809,34 @@ fn a_campaign_is_briefed_played_won_kept_and_the_next_one_opens() {
     press(&mut app, ShellAction::Campaigns);
     assert_eq!(app.shell, Shell::Campaigns);
     draw(&mut app);
+    // The diorama plays behind the screen, and the panel stands over it
+    // rather than over a plain backdrop.
+    let first = app
+        .diorama
+        .as_ref()
+        .expect("the diorama is up")
+        .sim()
+        .tick();
+    app.last_frame = Instant::now() - Duration::from_millis(100);
+    draw(&mut app);
+    assert!(
+        app.diorama.as_ref().unwrap().sim().tick() > first,
+        "and plays on"
+    );
     assert!(shell_button(&app, ShellAction::Brief(0, 0)).enabled);
     let locked = shell_button(&app, ShellAction::Brief(0, 1));
     assert!(!locked.enabled && !locked.reason.is_empty());
+    // Its reason is kept, but nothing is drawn past the panel's edge.
+    let edge = app
+        .screen
+        .buttons
+        .iter()
+        .map(|b| b.x + b.w)
+        .fold(0.0, f32::max);
+    assert!(
+        app.screen.sprites.iter().all(|s| s.x <= edge + 40.0),
+        "nothing drawn beyond the panel"
+    );
     // A locked scenario's briefing is not opened, even when asked for.
     app.shell_action(ShellAction::Brief(0, 1));
     assert_eq!(app.shell, Shell::Campaigns);
