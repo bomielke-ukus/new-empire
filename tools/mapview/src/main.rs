@@ -210,10 +210,10 @@ fn save(path: &str, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> 
 /// Renders a shell screen (`--screen`) as the game shows it, with no
 /// match behind it: the title, or the setup screen with its preview.
 fn render_screen(a: &Args, name: &str) -> Result<(), String> {
-    // The campaigns and a briefing stand over the diorama (`view::diorama`),
+    // The title, the campaigns and a briefing stand over the diorama (`view::diorama`),
     // drawn with the rendered sets as the game draws it; `--ticks` plays
     // it on that far.
-    let behind = matches!(name, "campaigns" | "briefing");
+    let behind = matches!(name, "title" | "campaigns" | "briefing");
     let sheet_dir = a.assets.clone().or_else(view::sheets::default_dir);
     let atlas = if behind {
         let (sheets, _) = sheet_dir

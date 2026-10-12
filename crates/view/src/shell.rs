@@ -639,6 +639,21 @@ pub fn title(atlas: &Atlas, input: &ShellInput) -> Screen {
     s.backdrop();
     let cx = (s.vw / 2.0).round();
     let ty = (s.vh * 0.2).round();
+    // On a panel the menu sits close under the title.
+    let my = if s.world_behind {
+        ty + 64.0
+    } else {
+        (s.vh * 0.38).round().max(ty + 64.0)
+    };
+    if s.world_behind {
+        // Over the diorama the title and the menu stand on a panel, and
+        // the line along the bottom on a dark strip, so they read.
+        let pw = (font::width(TITLE) as f32 * 4.0).max(MENU_W) + 64.0;
+        let bottom = my + 7.0 * (MENU_H + 8.0) + 12.0;
+        let px = (cx - pw / 2.0).round();
+        s.panel(px, ty - 20.0, pw, bottom - (ty - 20.0));
+        s.p.rect(0.0, s.vh - 30.0, s.vw, 30.0, BLACK, 0);
+    }
     s.centred(cx, ty, TITLE, Ink::Gold, 4.0);
     s.centred(cx, ty + 40.0, TAGLINE, Ink::White, 1.0);
     let entries = [
@@ -650,7 +665,6 @@ pub fn title(atlas: &Atlas, input: &ShellInput) -> Screen {
         (ShellAction::Settings, "SETTINGS", true, ""),
         (ShellAction::Quit, "QUIT", true, ""),
     ];
-    let my = (s.vh * 0.38).round().max(ty + 64.0);
     s.menu(cx, my, &entries);
     s.centred(
         cx,
