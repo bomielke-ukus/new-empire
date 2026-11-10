@@ -254,17 +254,19 @@ def _paint(t=TEX):
         w = (up(_fbm(x4, y4, 1.3, seed, 3)) - 0.5) * wob + ((n4 - 0.5) * 0.9 + (grain - 0.5) * 0.45) * wob
         return _ss(soft, -soft, d + w)
 
-    def earth(m, light, mid, dark, seed):
+    def earth(m, light, mid, dark, seed, lip=1.0):
         e = np.empty((t, t, 3), dtype=_F)
         e[:] = mid
         _mix(e, light, _ss(0.45, 0.80, up(_fbm(x4, y4, 2.2, seed, 3))) * 0.8)
         _mix(e, dark, _ss(0.50, 0.22, up(_fbm(x4, y4, 1.1, seed + 4, 3))) * 0.6)
         e *= (0.92 + 0.16 * n4)[..., None]
         e *= (0.97 + 0.06 * grain)[..., None]
-        peb = _fbm(x, y, 0.09, seed + 8, 1)
-        _mix(e, (0.95, 0.90, 0.76), _ss(0.93, 0.97, peb) * 0.55)  # a few pale pebbles
+        peb = np.random.RandomState(seed).rand(t, t).astype(_F)
+        peb = np.maximum(peb, np.roll(peb, 1, 1))
+        e[peb > 0.9985] = (0.96, 0.92, 0.80)                      # a few pale pebbles
+        e[peb < 0.0006] = (0.50, 0.38, 0.28)
         # a thin dark lip where the turf stops
-        c[:] = c * (1 - 0.30 * (_ss(0.05, 0.4, m) * _ss(0.75, 0.4, m)))[..., None]
+        c[:] = c * (1 - 0.30 * lip * (_ss(0.05, 0.4, m) * _ss(0.75, 0.4, m)))[..., None]
         c[:] = c + (e - c) * m[..., None]
 
     # sand beach, blending into the grass
@@ -286,12 +288,13 @@ def _paint(t=TEX):
     earth(edge(z["dg"], seed=30), (0.90, 0.78, 0.56), (0.80, 0.63, 0.41), (0.62, 0.45, 0.29), 60)
     earth(edge(z["de"], seed=33), (0.95, 0.84, 0.58), (0.86, 0.70, 0.44), (0.68, 0.50, 0.30), 70)
     rm = edge(z["road"] - 0.44, soft=0.10, wob=0.16, seed=36)
-    earth(rm, (0.88, 0.75, 0.52), (0.76, 0.59, 0.38), (0.58, 0.42, 0.27), 80)
+    offp = _ss(-0.1, 0.5, z["dg"]) * _ss(-0.1, 0.5, z["de"])
+    earth(rm, (0.88, 0.75, 0.52), (0.76, 0.59, 0.38), (0.58, 0.42, 0.27), 80, offp)
     rm2 = edge(z["road2"] - 0.34, soft=0.10, wob=0.16, seed=38)
-    earth(rm2, (0.90, 0.78, 0.54), (0.78, 0.62, 0.40), (0.60, 0.44, 0.28), 84)
+    earth(rm2, (0.90, 0.78, 0.54), (0.78, 0.62, 0.40), (0.60, 0.44, 0.28), 84, offp)
     for d, hw in ((z["road"], 0.40), (z["road2"], 0.30)):          # ruts, grassy crown
         rut = np.exp(-((d - hw * 0.52) / 0.045) ** 2) * (0.5 + 0.5 * n4)
-        c *= (1 - 0.22 * rut * _ss(0.3, -0.3, z["dg"] * 0 + d - hw))[..., None]
+        c *= (1 - 0.22 * rut * _ss(-0.3, 0.5, z["dg"]) * _ss(-0.3, 0.5, z["de"]))[..., None]
     bm = edge(z["db"], soft=0.45, wob=0.9, seed=41)
     earth(bm, (0.74, 0.62, 0.36), (0.56, 0.41, 0.25), (0.36, 0.25, 0.17), 90)
     churn = _fbm(x, y, 0.35, 95, 3)
@@ -328,27 +331,27 @@ def _paint(t=TEX):
 
     # the sea: sandy shallows -> turquoise -> blue; seabed, caustics, foam, glints
     sw = s + (up(_fbm(x4, y4, 0.5, 100, 2)) - 0.5) * 0.10
-    knots = [-0.05, 0.12, 0.6, 1.6, 3.2, 6.5, 12.0]
+    knots = [-0.05, 0.22, 1.0, 2.6, 4.6, 8.0, 14.0]
     cols = [(0.86, 0.84, 0.62), (0.62, 0.88, 0.74), (0.24, 0.82, 0.78), (0.10, 0.66, 0.80),
-            (0.06, 0.50, 0.78), (0.05, 0.38, 0.70), (0.04, 0.30, 0.62)]
+            (0.07, 0.54, 0.82), (0.06, 0.44, 0.78), (0.05, 0.36, 0.70)]
     sea = np.stack([np.interp(sw, knots, [k[i] for k in cols]).astype(_F) for i in range(3)], -1)
     bedn = up(_fbm(x4, y4, 1.0, 104, 3))
-    shallow = _ss(3.0, 0.2, sw)
+    shallow = _ss(4.2, 0.2, sw)
     _mix(sea, (0.06, 0.42, 0.50), _ss(0.58, 0.80, bedn) * shallow * 0.55)       # weed and rock
     _mix(sea, (0.60, 0.92, 0.82), _ss(0.40, 0.20, bedn) * shallow * 0.45)       # bright sand
     cau = np.abs(up(_fbm(x4, y4, 0.42, 108, 2)) - 0.5)
-    _mix(sea, (0.80, 0.98, 0.92), _ss(0.035, 0.0, cau) * _ss(3.5, 0.3, sw) * 0.55)
+    _mix(sea, (0.80, 0.98, 0.92), _ss(0.035, 0.0, cau) * _ss(4.5, 0.3, sw) * 0.55)
     swell = up(_fbm(u4 / 2.2, far4 / 0.5, 1.0, 112, 3))                               # long swells
     sea *= (0.90 + 0.20 * swell)[..., None]
     gl = _fbm(u / 0.5, far / 0.07, 1.0, 116, 2)
-    _mix(sea, (1.0, 1.0, 1.0), _ss(0.88, 0.96, gl) * _ss(0.3, 1.5, sw) * _ss(0.35, 0.7, swell) * 0.6)  # glints
+    _mix(sea, (1.0, 1.0, 1.0), _ss(0.88, 0.96, gl) * _ss(0.3, 1.5, sw) * _ss(0.4, 0.75, swell) * (0.3 + 0.35 * _ss(9.0, 2.0, sw)))  # glints
     fo = _fbm(x, y, 0.16, 120, 2)
-    foam = _ss(0.11, 0.03, np.abs(sw - 0.04)) * (0.65 + 0.35 * fo)
-    foam = np.maximum(foam, _ss(0.07, 0.02, np.abs(sw - 0.42 - 0.2 * (bedn - 0.5)))
+    foam = _ss(0.20, 0.06, np.abs(sw - 0.10)) * (0.75 + 0.25 * fo)
+    foam = np.maximum(foam, _ss(0.10, 0.03, np.abs(sw - 0.62 - 0.25 * (bedn - 0.5)))
                       * _ss(0.42, 0.62, up(_fbm(u4 / 1.5, far4 / 0.4, 1.0, 124, 2))))
-    foam = np.maximum(foam, 0.6 * _ss(0.05, 0.015, np.abs(sw - 0.95 - 0.3 * (bedn - 0.5)))
+    foam = np.maximum(foam, 0.7 * _ss(0.08, 0.02, np.abs(sw - 1.35 - 0.4 * (bedn - 0.5)))
                       * _ss(0.50, 0.66, up(_fbm(u4 / 1.2, far4 / 0.4, 1.0, 128, 2))))
-    foam = np.maximum(foam, _ss(0.30, 0.0, sw) * _ss(0.55, 0.75, fo) * 0.8)     # lacy edge
+    foam = np.maximum(foam, _ss(0.45, 0.05, sw) * _ss(0.50, 0.70, fo) * 0.85)     # lacy edge
     _mix(sea, (0.98, 1.0, 1.0), np.clip(foam, 0, 1))
     c[:] = c + (sea - c) * _ss(-0.02, 0.02, sw)[..., None]
 
@@ -676,11 +679,11 @@ def olive(loc=(0, 0, 0), seed=0, scale=1.0, parent=None):
                 bot = _c((0.13, 0.28, 0.17), 0.9 + 0.2 * hgt)
                 sc = (1.0, 1.0, r.uniform(0.62, 0.8))
                 b.blob(c, rad, top, bot, scale=sc, rough=0.2)
-                b.clumps(c, rad, 12, 0.105, (0.70, 0.80, 0.46), (0.24, 0.40, 0.23), scale=sc, stretch=(1, 1, 0.6))
+                b.clumps(c, rad, 10, 0.15, _c(top, 1.08), _c(bot, 1.25), scale=sc, stretch=(1, 1, 0.6))
                 b.leaves(c, rad, 14, 0.12, (0.82, 0.88, 0.62), scale=sc, width=0.45)
         c = fork + np.array([0, 0, 1.05])                    # the crown's top
         b.blob(c, 0.5, (0.56, 0.70, 0.36), (0.20, 0.36, 0.22), scale=(1.1, 1.1, 0.7))
-        b.clumps(c, 0.5, 18, 0.11, (0.76, 0.84, 0.50), (0.30, 0.46, 0.26), scale=(1.1, 1.1, 0.7), stretch=(1, 1, 0.6))
+        b.clumps(c, 0.5, 14, 0.16, (0.62, 0.75, 0.40), (0.26, 0.42, 0.25), scale=(1.1, 1.1, 0.7), stretch=(1, 1, 0.6))
         b.leaves(c, 0.5, 18, 0.12, (0.84, 0.90, 0.64), scale=(1.1, 1.1, 0.7), width=0.4)
         return True
     return _prop("olive", make, loc, seed, scale, parent)
@@ -787,8 +790,8 @@ def bush(loc=(0, 0, 0), seed=0, scale=1.0, parent=None):
     def make(b):
         r = b.rnd
         kind = seed % 4
-        top, bot = [((0.50, 0.78, 0.24), (0.16, 0.40, 0.14)), ((0.42, 0.70, 0.30), (0.14, 0.36, 0.18)),
-                    ((0.60, 0.78, 0.26), (0.22, 0.44, 0.14)), ((0.38, 0.66, 0.24), (0.12, 0.34, 0.16))][kind]
+        top, bot = [((0.44, 0.68, 0.24), (0.10, 0.30, 0.13)), ((0.40, 0.66, 0.30), (0.10, 0.30, 0.16)),
+                    ((0.54, 0.72, 0.26), (0.16, 0.36, 0.13)), ((0.36, 0.62, 0.24), (0.09, 0.28, 0.15))][kind]
         bloom = [None, (0.98, 0.50, 0.66), (1.0, 0.86, 0.18), (0.98, 0.97, 0.92)][kind]
         for k in range(r.choice((5, 6, 7))):
             a = r.uniform(0, 6.28)
@@ -797,7 +800,8 @@ def bush(loc=(0, 0, 0), seed=0, scale=1.0, parent=None):
             cen = (math.cos(a) * o, math.sin(a) * o, rad * 0.75 + r.uniform(0, 0.22))
             kk = r.uniform(0.9, 1.1)
             b.blob(cen, rad, _c(top, kk), _c(bot, kk), scale=(1, 1, 0.85))
-            b.leaves(cen, rad, 16, 0.17, _c(top, 1.2), scale=(1, 1, 0.85), width=0.6)
+            b.clumps(cen, rad, 6, 0.10, _c(top, 1.06), _c(bot, 1.3), scale=(1, 1, 0.85))
+            b.leaves(cen, rad, 14, 0.10, _c(top, 1.15), scale=(1, 1, 0.85), width=0.6)
             if bloom:
                 for _ in range(7):
                     d = b.np.randn(3)
@@ -1077,7 +1081,10 @@ def _pick(n, rng, region, min_d, taken, margin, tall=0.0, tries=4000):
             continue
         if tall:
             bad = abs(x + y - BATTLE[0] - BATTLE[1]) < 4.3 and -14.0 < y - x < -2.0
-            for t in (0.8, 1.6, 2.4, 3.2):
+            for fx, fy in (WHEAT[:2], PLOT[:2]):          # and not in front of the fields
+                if abs((x + y) - (fx + fy)) < 3.4 and -9.5 < (y - x) - (fy - fx) < 0.5:
+                    bad = True
+            for t in (0.8, 1.6, 2.4, 3.2, 4.0, 4.8):
                 if t <= tall and is_clear(x - 0.707 * t, y + 0.707 * t, -0.4) and _shore(
                         x - 0.707 * t, y + 0.707 * t) < -0.3:
                     bad = True
@@ -1119,7 +1126,7 @@ def tree_spots():
     put("cypress", _pick(5, rng, lambda r: (lambda a: (GREEK[0] + math.cos(a) * 4.4,
                                                          GREEK[1] + math.sin(a) * 4.4))(
         r.uniform(1.75, 3.1)), 0.9, taken, 0.5, 0), 5)
-    put("cypress", _pick(3, rng, band(-13.5, -9.0, -9, -3), 0.9, taken, 0.6, 3.2), 5)
+    put("cypress", _pick(3, rng, band(-13.5, -9.0, -9, -3), 0.9, taken, 0.6, 4.8), 5)
     put("cypress", _pick(2, rng, band(-12, -5, -15.5, -12), 0.9, taken, 0.6, 3.2), 5)
     # olives: between the towns, on the left, along the near edge
     put("olive", _pick(1, rng, band(-1.0, 1.5, 5.0, 6.8), 2.0, taken, 0.8, 0), 6, 0.8, 0.9)
@@ -1131,8 +1138,8 @@ def tree_spots():
     put("palm", _pick(6, rng, lambda r: (lambda a, d: (EGYPT[0] + math.cos(a) * d,
                                                          EGYPT[1] + math.sin(a) * d))(
         r.uniform(0.9, 3.4), r.uniform(4.1, 4.9)), 1.1, taken, 0.4, 0), 6)
-    put("palm", _pick(9, rng, band(-12.5, 13, 6.6, 8.7), 1.6, taken, 0.5, 3.2), 6)
-    put("palm", _pick(3, rng, band(10, 13.5, -9, -3), 1.4, taken, 0.6, 3.2), 6)
+    put("palm", _pick(8, rng, band(-13, 13.5, 6.9, 9.0), 1.15, taken, 0.2, 0), 6)
+    put("palm", _pick(3, rng, band(9.5, 13.5, -12.5, -7.8), 1.4, taken, 0.6, 4.8), 6)
     put("palm", _pick(2, rng, band(11.5, 13.5, 4.5, 6.5), 1.2, taken, 0.6, 0), 6)
     return out, taken
 
@@ -1154,7 +1161,7 @@ def _scatter(root):
     # bushes, rocks, boulders
     def region(r):
         return _uf(r.uniform(-14, 14), r.uniform(-16.5, 8.5))
-    for x, y in _pick(46, rng, region, 0.9, taken, 0.35):
+    for x, y in _pick(38, rng, region, 1.1, taken, 0.75):
         r = bush((x, y, ground_z(x, y) - 0.02), rng.randrange(8), rng.uniform(0.7, 1.25), root)
         r.rotation_euler = (0, 0, rng.uniform(0, 6.28))
     for x, y in _pick(46, rng, region, 0.7, taken, 0.3):
