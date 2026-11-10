@@ -161,6 +161,9 @@ pub struct Settings {
     pub letters: BTreeMap<char, String>,
     /// Where the players' symbols show over the world (`GD-A11Y-03`).
     pub player_symbols: crate::symbols::PlayerSymbols,
+    /// Whether the new art's colour sets (`docs/look/colour-sets.md`)
+    /// replace the indexed sets of their names. Read when the game starts.
+    pub new_art: bool,
 }
 
 /// The volumes out of the box: everything full, the music under it.
@@ -183,6 +186,7 @@ impl Default for Settings {
             hints_shown: BTreeMap::new(),
             letters: BTreeMap::new(),
             player_symbols: crate::symbols::PlayerSymbols::default(),
+            new_art: false,
         }
     }
 }
@@ -440,6 +444,14 @@ mod tests {
             crate::symbols::PlayerSymbols::Selected,
             "and before the symbols"
         );
+        assert!(!old.new_art, "and before the new art");
+        let new_art = Settings {
+            new_art: true,
+            ..Settings::default()
+        };
+        let text = new_art.to_ron().unwrap();
+        assert!(text.contains("new_art: true"), "{text}");
+        assert_eq!(Settings::from_ron(&text).unwrap(), new_art);
         let always = Settings {
             player_symbols: crate::symbols::PlayerSymbols::Always,
             ..Settings::default()

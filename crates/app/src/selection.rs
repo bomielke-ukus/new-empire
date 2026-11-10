@@ -225,8 +225,7 @@ pub fn pick(
             if x < 0 || y < 0 || x >= s.uw as i32 || y >= s.vh as i32 {
                 return false;
             }
-            let idx = atlas.index_at(s.page, s.u as u32 + x as u32, s.v as u32 + y as u32);
-            idx != 0 && idx != view::palette::SHADOW
+            atlas.solid_at(s.page, s.u as u32 + x as u32, s.v as u32 + y as u32)
         };
         let (cx, cy) = (sx as i32, sy as i32);
         let hit = (-reach..=reach)

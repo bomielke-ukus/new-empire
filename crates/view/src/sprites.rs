@@ -177,7 +177,8 @@ pub struct Frame {
     pub index: u8,
     /// Authored pixels per 1× pixel. A frame drawn at 1× is `w / scale` wide.
     pub scale: u8,
-    /// Which page of the atlas.
+    /// Which page of the atlas: an indexed page, or with [`COLOUR_PAGE`]
+    /// set a colour page, its number in the low bits.
     pub page: u8,
     /// Atlas rectangle.
     pub x: u16,
@@ -224,16 +225,31 @@ pub const fn source_facing(facing8: u8) -> (u8, bool) {
     }
 }
 
-/// An indexed-colour texture atlas plus its frame table.
+/// The bit of [`Frame::page`] (and `SpriteInstance::page`) that marks a
+/// colour page (`docs/look/colour-sets.md`); the page number is in the
+/// bits below it.
+pub const COLOUR_PAGE: u8 = 0x80;
+
+/// A texture atlas plus its frame table: indexed pages, and colour pages
+/// beside them for the colour sets, all the same size.
 pub struct Atlas {
     /// Texture width.
     pub width: u32,
     /// Height of each page.
     pub height: u32,
-    /// Pages: layers of a texture array, each `width` × `height`.
+    /// Indexed pages: layers of a texture array, each `width` × `height`.
     pub pages: u32,
     /// Palette indices, row-major, page after page.
     pub indices: Vec<u8>,
+    /// Colour pages: layers of a second pair of texture arrays, each
+    /// `width` × `height`; none without colour sets.
+    pub colour_pages: u32,
+    /// The colour pages' pixels, RGBA8 with straight alpha, row-major,
+    /// page after page.
+    pub colour: Vec<u8>,
+    /// The colour pages' player-colour mask, a byte a pixel, laid out as
+    /// [`Atlas::colour`] is.
+    pub mask: Vec<u8>,
     frames: Vec<Frame>,
     lookup: HashMap<(KindId, u8, Anim, u8), usize>,
     anims: HashMap<(KindId, Anim), AnimInfo>,
@@ -319,12 +335,48 @@ impl Atlas {
         &self.frames
     }
 
-    /// Palette index at a pixel of a page; 0 outside.
+    /// Palette index at a pixel of a page; 0 outside, and on a colour page.
     pub fn index_at(&self, page: u8, x: u32, y: u32) -> u8 {
         if x < self.width && y < self.height && (page as u32) < self.pages {
             self.indices[((page as u32 * self.height + y) * self.width + x) as usize]
         } else {
             0
+        }
+    }
+
+    /// Where a pixel of a colour page lies in [`Atlas::mask`], if `page`
+    /// is a colour page and the pixel is on it.
+    fn colour_offset(&self, page: u8, x: u32, y: u32) -> Option<usize> {
+        let p = (page & !COLOUR_PAGE) as u32;
+        (page & COLOUR_PAGE != 0 && x < self.width && y < self.height && p < self.colour_pages)
+            .then(|| ((p * self.height + y) * self.width + x) as usize)
+    }
+
+    /// RGBA (straight alpha) at a pixel of a colour page; transparent
+    /// outside, and on an indexed page.
+    pub fn rgba_at(&self, page: u8, x: u32, y: u32) -> [u8; 4] {
+        self.colour_offset(page, x, y).map_or([0; 4], |i| {
+            let p = &self.colour[i * 4..i * 4 + 4];
+            [p[0], p[1], p[2], p[3]]
+        })
+    }
+
+    /// The player-colour mask at a pixel of a colour page; 0 outside, and
+    /// on an indexed page.
+    pub fn mask_at(&self, page: u8, x: u32, y: u32) -> u8 {
+        self.colour_offset(page, x, y).map_or(0, |i| self.mask[i])
+    }
+
+    /// Whether a pixel of a page is the thing itself, for picking: an
+    /// index other than transparent and the shadow, or on a colour page
+    /// more than half covered (a soft edge, or a shadow on the ground at
+    /// half black or lighter, is not).
+    pub fn solid_at(&self, page: u8, x: u32, y: u32) -> bool {
+        if page & COLOUR_PAGE != 0 {
+            self.rgba_at(page, x, y)[3] > 128
+        } else {
+            let idx = self.index_at(page, x, y);
+            idx != TRANSPARENT && idx != SHADOW
         }
     }
 
@@ -338,14 +390,22 @@ impl Atlas {
     /// The placeholder atlas, with every kind that has a rendered sprite set
     /// in `sheets` drawn from that set instead, and its looks in later ages
     /// from the sets named for them. Sets whose name matches no kind are
-    /// ignored.
+    /// ignored. A colour set replaces the indexed set of its name
+    /// (`docs/look/colour-sets.md`), and its frames go on colour pages.
     pub fn with_sheets(sheets: &[crate::sheets::Sheet]) -> Atlas {
         let mut canvases: Vec<Entry> = Vec::new();
+        let mut colour: Vec<ColourEntry> = Vec::new();
+        let replaced = |s: &crate::sheets::Sheet| {
+            !s.colour && sheets.iter().any(|c| c.colour && c.name == s.name)
+        };
         let mut anims: HashMap<(KindId, Anim), AnimInfo> = HashMap::new();
         let mut variants: HashMap<(KindId, u8, u8), KindId> = HashMap::new();
         let mut loaded_sets = Vec::new();
         let mut covered: Vec<KindId> = Vec::new();
         for sheet in sheets {
+            if replaced(sheet) {
+                continue;
+            }
             let Some((base, age, arch)) = set_target(&sheet.name) else {
                 continue;
             };
@@ -384,7 +444,29 @@ impl Atlas {
                         let (bx, by, bw, bh) = drawn_bounds(sheet, x, y, w, h, sheet.scale);
                         // A wall's arm is anchored on its post, outside it.
                         let anchor = (ax as i32 - bx as i32, ay as i32 - by as i32);
-                        let mut c = Canvas::new(bw, bh, (anchor.0 as i16, anchor.1 as i16));
+                        let anchor = (anchor.0 as i16, anchor.1 as i16);
+                        if sheet.colour {
+                            let mut c = ColourCanvas::new(bw, bh, anchor);
+                            for yy in 0..bh {
+                                for xx in 0..bw {
+                                    let (sx, sy) = (x + bx + xx, y + by + yy);
+                                    let i = (yy * bw + xx) as usize;
+                                    c.rgba[i * 4..i * 4 + 4]
+                                        .copy_from_slice(&sheet.rgba_at(sx, sy));
+                                    c.mask[i] = sheet.mask_at(sx, sy);
+                                }
+                            }
+                            colour.push(ColourEntry {
+                                kind,
+                                facing,
+                                anim,
+                                index: frame as u8,
+                                scale: sheet.scale as u8,
+                                canvas: c,
+                            });
+                            continue;
+                        }
+                        let mut c = Canvas::new(bw, bh, anchor);
                         for yy in 0..bh {
                             for xx in 0..bw {
                                 let idx = sheet.index_at(x + bx + xx, y + by + yy);
@@ -578,6 +660,7 @@ impl Atlas {
             canvases.push(still(UI_GLYPH_GOLD + i as KindId, 0, glyph(ch, GOLD_LIGHT)));
         }
         let mut atlas = pack(canvases, ATLAS_WIDTH, ATLAS_PAGE_HEIGHT);
+        pack_colour(&mut atlas, colour, ATLAS_PAGE_HEIGHT);
         atlas.anims = anims;
         atlas.variants = variants;
         atlas.loaded_sets = loaded_sets;
@@ -797,8 +880,40 @@ struct Entry {
     canvas: Canvas,
 }
 
+/// A colour set's frame, trimmed: RGBA with straight alpha and its mask.
+struct ColourCanvas {
+    w: u32,
+    h: u32,
+    anchor: (i16, i16),
+    rgba: Vec<u8>,
+    mask: Vec<u8>,
+}
+
+impl ColourCanvas {
+    fn new(w: u32, h: u32, anchor: (i16, i16)) -> ColourCanvas {
+        ColourCanvas {
+            w,
+            h,
+            anchor,
+            rgba: vec![0; (w * h * 4) as usize],
+            mask: vec![0; (w * h) as usize],
+        }
+    }
+}
+
+/// A colour frame waiting to be packed.
+struct ColourEntry {
+    kind: KindId,
+    facing: u8,
+    anim: Anim,
+    index: u8,
+    scale: u8,
+    canvas: ColourCanvas,
+}
+
 /// The smallest rectangle of a sheet's frame at (`x`, `y`), `w` by `h`,
-/// that holds every drawn pixel, relative to the frame, with its edges on
+/// that holds every drawn pixel (any alpha, for a colour set), relative to
+/// the frame, with its edges on
 /// multiples of `scale` so the frame samples down to 1× on the same pixels
 /// as before the trim; the whole frame if nothing is drawn.
 fn drawn_bounds(
@@ -812,7 +927,7 @@ fn drawn_bounds(
     let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
     for yy in 0..h {
         for xx in 0..w {
-            if sheet.index_at(x + xx, y + yy) != 0 {
+            if sheet.drawn_at(x + xx, y + yy) {
                 x0 = x0.min(xx);
                 y0 = y0.min(yy);
                 x1 = x1.max(xx + 1);
@@ -829,59 +944,79 @@ fn drawn_bounds(
     (x0, y0, x1.min(w) - x0, y1.min(h) - y0)
 }
 
-/// Shelf-packs canvases into an atlas of the given width. Taller frames go
-/// first so shelves waste less.
-/// Shelf-packs the frames, tallest first, onto pages `width` wide and at
-/// most `page_height` tall. One page is as tall as it needs to be (to the
-/// next power of two); more than one are all `page_height`.
-fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
-    canvases.sort_by_key(|e| std::cmp::Reverse(e.canvas.h));
-    let mut frames = Vec::new();
-    let mut lookup = HashMap::new();
-    let mut placed: Vec<(u32, u32, u32, Canvas)> = Vec::new();
+/// Shelf-lays rectangles of `sizes`, in the order given, onto pages
+/// `width` wide and at most `page_height` tall, a pixel apart: each one's
+/// (page, x, y), the page count, and how far down the last page is used.
+fn shelve(
+    sizes: impl Iterator<Item = (u32, u32)>,
+    width: u32,
+    page_height: u32,
+) -> (Vec<(u32, u32, u32)>, u32, u32) {
+    let mut out = Vec::new();
     let (mut page, mut x, mut y, mut shelf_h) = (0u32, 0u32, 0u32, 0u32);
     let mut used = 0u32;
-    for e in canvases {
-        let c = e.canvas;
-        if x + c.w > width {
+    for (w, h) in sizes {
+        if x + w > width {
             x = 0;
             y += shelf_h + 1;
             shelf_h = 0;
         }
-        if y + c.h > page_height {
+        if y + h > page_height {
             page += 1;
             x = 0;
             y = 0;
             shelf_h = 0;
         }
+        out.push((page, x, y));
+        shelf_h = shelf_h.max(h);
+        used = used.max(y + shelf_h);
+        x += w + 1;
+    }
+    (out, page + 1, used)
+}
+
+/// How tall the pages are for `pages` pages, the last used `used` deep:
+/// one page is as tall as it needs to be (to the next power of two); more
+/// than one are all `page_height`.
+fn page_height_for(pages: u32, used: u32, page_height: u32) -> u32 {
+    if pages == 1 {
+        used.next_power_of_two().clamp(1, page_height)
+    } else {
+        page_height
+    }
+}
+
+/// Shelf-packs the frames, tallest first, onto pages `width` wide and at
+/// most `page_height` tall. One page is as tall as it needs to be (to the
+/// next power of two); more than one are all `page_height`.
+fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
+    canvases.sort_by_key(|e| std::cmp::Reverse(e.canvas.h));
+    let (spots, pages, used) = shelve(
+        canvases.iter().map(|e| (e.canvas.w, e.canvas.h)),
+        width,
+        page_height,
+    );
+    let height = page_height_for(pages, used, page_height);
+    let mut frames = Vec::new();
+    let mut lookup = HashMap::new();
+    let mut indices = vec![0u8; (width * height * pages) as usize];
+    for (e, (pg, px, py)) in canvases.into_iter().zip(spots) {
+        let c = e.canvas;
         frames.push(Frame {
             kind: e.kind,
             facing: e.facing,
             anim: e.anim,
             index: e.index,
             scale: e.scale,
-            page: page as u8,
-            x: x as u16,
-            y: y as u16,
+            page: pg as u8,
+            x: px as u16,
+            y: py as u16,
             w: c.w as u16,
             h: c.h as u16,
             anchor_x: c.anchor.0,
             anchor_y: c.anchor.1,
         });
         lookup.insert((e.kind, e.facing, e.anim, e.index), frames.len() - 1);
-        shelf_h = shelf_h.max(c.h);
-        used = used.max(y + shelf_h);
-        x += c.w + 1;
-        placed.push((page, x - c.w - 1, y, c));
-    }
-    let pages = page + 1;
-    let height = if pages == 1 {
-        used.next_power_of_two().clamp(1, page_height)
-    } else {
-        page_height
-    };
-    let mut indices = vec![0u8; (width * height * pages) as usize];
-    for (pg, px, py, c) in placed {
         for row in 0..c.h {
             let src = (row * c.w) as usize;
             let dst = (((pg * height) + py + row) * width + px) as usize;
@@ -893,12 +1028,78 @@ fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
         height,
         pages,
         indices,
+        colour_pages: 0,
+        colour: Vec::new(),
+        mask: Vec::new(),
         frames,
         lookup,
         anims: HashMap::new(),
         variants: HashMap::new(),
         loaded_sets: Vec::new(),
     }
+}
+
+/// Shelf-packs colour frames, tallest first, onto colour pages the size of
+/// the atlas's indexed pages, and adds them to its frame table with
+/// [`COLOUR_PAGE`] set. When they need taller pages than the indexed
+/// frames did (one indexed page, shorter than `page_height`), the indexed
+/// page grows to match: every page of both kinds is the same size.
+/// Without colour frames the atlas is left exactly as it was.
+fn pack_colour(atlas: &mut Atlas, mut entries: Vec<ColourEntry>, page_height: u32) {
+    if entries.is_empty() {
+        return;
+    }
+    entries.sort_by_key(|e| std::cmp::Reverse(e.canvas.h));
+    let width = atlas.width;
+    let (spots, pages, used) = shelve(
+        entries.iter().map(|e| (e.canvas.w, e.canvas.h)),
+        width,
+        page_height,
+    );
+    assert!(
+        pages <= u32::from(!COLOUR_PAGE) + 1,
+        "{pages} colour pages; the page bits hold 128"
+    );
+    let height = atlas.height.max(page_height_for(pages, used, page_height));
+    if height > atlas.height {
+        // Only a single indexed page is ever shorter than a full one, so
+        // growing it is padding its foot.
+        debug_assert_eq!(atlas.pages, 1);
+        atlas.indices.resize((width * height) as usize, 0);
+        atlas.height = height;
+    }
+    let mut rgba = vec![0u8; (width * height * pages * 4) as usize];
+    let mut mask = vec![0u8; (width * height * pages) as usize];
+    for (e, (pg, px, py)) in entries.into_iter().zip(spots) {
+        let c = e.canvas;
+        atlas.frames.push(Frame {
+            kind: e.kind,
+            facing: e.facing,
+            anim: e.anim,
+            index: e.index,
+            scale: e.scale,
+            page: COLOUR_PAGE | pg as u8,
+            x: px as u16,
+            y: py as u16,
+            w: c.w as u16,
+            h: c.h as u16,
+            anchor_x: c.anchor.0,
+            anchor_y: c.anchor.1,
+        });
+        atlas
+            .lookup
+            .insert((e.kind, e.facing, e.anim, e.index), atlas.frames.len() - 1);
+        for row in 0..c.h {
+            let src = (row * c.w) as usize;
+            let dst = (((pg * height) + py + row) * width + px) as usize;
+            let n = c.w as usize;
+            rgba[dst * 4..(dst + n) * 4].copy_from_slice(&c.rgba[src * 4..(src + n) * 4]);
+            mask[dst..dst + n].copy_from_slice(&c.mask[src..src + n]);
+        }
+    }
+    atlas.colour_pages = pages;
+    atlas.colour = rgba;
+    atlas.mask = mask;
 }
 
 /// The suffix of a set that draws a kind in a later age, and the age (by
@@ -2505,6 +2706,109 @@ mod tests {
             24,
         );
         assert_eq!((one.pages, one.height), (1, 16));
+    }
+
+    /// A colour set replaces the indexed set of its name and nothing else:
+    /// its frames go on a colour page, trimmed to what they cover (a
+    /// shadow included) with the anchor moved by the trim, the mask
+    /// beside them; the kind's later ages keep their indexed sets.
+    #[test]
+    fn a_colour_set_replaces_the_indexed_set_of_its_name() {
+        use crate::sheets::fixture;
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
+        let (mut sheets, _) = crate::sheets::load_all(&dir);
+        let indexed = Atlas::with_sheets(&sheets);
+        assert_eq!(indexed.colour_pages, 0);
+        assert!(indexed.colour.is_empty() && indexed.mask.is_empty());
+        let (old, _) = indexed.frame(kinds::HOUSE, 0).unwrap();
+        assert_eq!(old.page & COLOUR_PAGE, 0);
+
+        sheets.push(fixture::house("atlas"));
+        let a = Atlas::with_sheets(&sheets);
+        assert_eq!(
+            a.loaded_sets.iter().filter(|s| *s == "house").count(),
+            1,
+            "the indexed house is replaced, not drawn as well"
+        );
+        assert_eq!(a.colour_pages, 1);
+        assert_eq!(a.colour.len(), (a.width * a.height * 4) as usize);
+        assert_eq!(a.mask.len(), (a.width * a.height) as usize);
+        let (f, flip) = a.frame(kinds::HOUSE, 3).unwrap();
+        assert!(!flip);
+        assert_eq!(f.page, COLOUR_PAGE);
+        // The 4 x 2 block at (2, 2) of the 8 x 6 cell, anchored at (4, 5).
+        assert_eq!((f.w, f.h, f.scale), (4, 2, 2));
+        assert_eq!((f.anchor_x, f.anchor_y), (2, 3));
+        let (x, y) = (f.x as u32, f.y as u32);
+        assert_eq!(a.rgba_at(f.page, x, y), fixture::CLOTH);
+        assert_eq!(a.rgba_at(f.page, x + 2, y), fixture::SHADOW);
+        assert_eq!(a.rgba_at(f.page, x, y + 1), fixture::GREEN);
+        assert_eq!(a.mask_at(f.page, x, y), 255);
+        assert_eq!(a.mask_at(f.page, x + 3, y), 128);
+        assert_eq!(a.mask_at(f.page, x + 1, y), 0);
+        assert_eq!(a.index_at(f.page, x, y), 0, "no index on a colour page");
+        assert_eq!(a.rgba_at(0, x, y), [0; 4], "no colour on an indexed page");
+        // Picking takes the thing and not its shadow.
+        assert!(a.solid_at(f.page, x, y));
+        assert!(!a.solid_at(f.page, x + 2, y));
+        // Everything keyed by name still works: the later ages are the
+        // indexed sets', and the variant lookups are unchanged.
+        assert_eq!(
+            a.variant(kinds::HOUSE, 2, 0),
+            indexed.variant(kinds::HOUSE, 2, 0)
+        );
+        let (bronze, _) = a.frame(a.variant(kinds::HOUSE, 2, 0), 0).unwrap();
+        assert_eq!(bronze.page & COLOUR_PAGE, 0);
+        // The indexed pages are as they were.
+        assert_eq!(
+            (a.width, a.height, a.pages),
+            (indexed.width, indexed.height, indexed.pages)
+        );
+    }
+
+    /// Colour pages are the indexed pages' size: when the colour frames
+    /// need taller than a single short indexed page, it grows to match,
+    /// its frames where they were.
+    #[test]
+    fn colour_pages_match_the_indexed_pages_size() {
+        let mut canvas = Canvas::new(10, 10, (5, 9));
+        canvas.set(0, 0, 7);
+        let mut a = pack(
+            vec![Entry {
+                kind: 1,
+                facing: 0,
+                anim: Anim::Idle,
+                index: 0,
+                scale: 1,
+                canvas,
+            }],
+            32,
+            64,
+        );
+        assert_eq!(a.height, 16);
+        let mut c = ColourCanvas::new(8, 20, (4, 19));
+        c.rgba[..4].copy_from_slice(&[1, 2, 3, 4]);
+        c.mask[0] = 9;
+        pack_colour(
+            &mut a,
+            vec![ColourEntry {
+                kind: 2,
+                facing: 0,
+                anim: Anim::Idle,
+                index: 0,
+                scale: 2,
+                canvas: c,
+            }],
+            64,
+        );
+        assert_eq!((a.height, a.pages, a.colour_pages), (32, 1, 1));
+        assert_eq!(a.indices.len(), 32 * 32);
+        assert_eq!(a.colour.len(), 32 * 32 * 4);
+        assert_eq!(a.index_at(0, 0, 0), 7);
+        let (f, _) = a.frame(2, 0).unwrap();
+        assert_eq!((f.page, f.w, f.h), (COLOUR_PAGE, 8, 20));
+        assert_eq!(a.rgba_at(f.page, f.x as u32, f.y as u32), [1, 2, 3, 4]);
+        assert_eq!(a.mask_at(f.page, f.x as u32, f.y as u32), 9);
     }
 
     #[test]

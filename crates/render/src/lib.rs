@@ -2,7 +2,7 @@
 //!
 //! Three pipelines, in draw order: terrain (Gouraud diamonds, chunked and
 //! culled, each vertex in the fog light of its corner), sprites (one
-//! instanced draw, palette-indexed, depth-sorted on the CPU by
+//! instanced draw, palette-indexed or full colour, depth-sorted on the CPU by
 //! `view::Scene`, each in its own light), and UI quads (the minimap). All
 //! coordinate maths comes from `view`, so what this draws is what
 //! `view::raster` draws.
@@ -146,10 +146,47 @@ impl Renderer {
             queue,
             &atlas_tex,
             &atlas.indices,
-            atlas.width,
-            atlas.height,
-            atlas.pages,
+            (atlas.width, atlas.height, atlas.pages),
+            1,
         );
+        // The colour pages (`docs/look/colour-sets.md`): RGBA8 and an R8
+        // mask, a layer a page, the indexed pages' size. Without colour
+        // sets, a single clear texel each, so the bind group is the same.
+        let (colour_tex, mask_tex) = if atlas.colour_pages > 0 {
+            let size = (atlas.width, atlas.height, atlas.colour_pages);
+            let colour = layers_texture(
+                device,
+                "colour atlas",
+                size,
+                wgpu::TextureFormat::Rgba8Unorm,
+            );
+            let mask = layers_texture(device, "colour mask", size, wgpu::TextureFormat::R8Unorm);
+            write_layers(queue, &colour, &atlas.colour, size, 4);
+            write_layers(queue, &mask, &atlas.mask, size, 1);
+            (colour, mask)
+        } else {
+            let colour = layers_texture(
+                device,
+                "colour atlas",
+                (1, 1, 1),
+                wgpu::TextureFormat::Rgba8Unorm,
+            );
+            let mask = layers_texture(
+                device,
+                "colour mask",
+                (1, 1, 1),
+                wgpu::TextureFormat::R8Unorm,
+            );
+            write_layers(queue, &colour, &[0; 4], (1, 1, 1), 4);
+            write_layers(queue, &mask, &[0], (1, 1, 1), 1);
+            (colour, mask)
+        };
+        let array_view = |tex: &wgpu::Texture| {
+            tex.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                ..Default::default()
+            })
+        };
         let pal = view::palette::texture();
         let pal_bytes: Vec<u8> = pal.iter().flatten().copied().collect();
         let palette_tex = device.create_texture(&wgpu::TextureDescriptor {
@@ -197,6 +234,27 @@ impl Renderer {
                     },
                     count: None,
                 },
+                // The colour pages and their mask.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let sprite_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -205,18 +263,21 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&atlas_tex.create_view(
-                        &wgpu::TextureViewDescriptor {
-                            dimension: Some(wgpu::TextureViewDimension::D2Array),
-                            ..Default::default()
-                        },
-                    )),
+                    resource: wgpu::BindingResource::TextureView(&array_view(&atlas_tex)),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(
                         &palette_tex.create_view(&Default::default()),
                     ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&array_view(&colour_tex)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&array_view(&mask_tex)),
                 },
             ],
         });
@@ -550,7 +611,8 @@ impl Renderer {
         let to_gpu = |s: &view::SpriteInstance| SpriteGpu {
             rect: [s.x, s.y, s.w, s.h],
             uv: [s.u as f32, s.v as f32, s.uw as f32, s.vh as f32],
-            // The page rides above the flip bit.
+            // The page rides above the flip bit, the colour bit
+            // (`view::sprites::COLOUR_PAGE`) with it.
             misc: [
                 s.row as u32,
                 s.flip as u32 | (s.page as u32) << 1,
@@ -749,15 +811,38 @@ fn write_texture(
     );
 }
 
-/// Uploads `layers` layers of a one-byte-a-pixel texture array, laid one
-/// after another in `data`.
+/// A texture array of `layers` layers, each `width` × `height`, to be
+/// read with `textureLoad`.
+fn layers_texture(
+    device: &wgpu::Device,
+    label: &str,
+    (width, height, layers): (u32, u32, u32),
+    format: wgpu::TextureFormat,
+) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: layers,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
+/// Uploads `layers` layers of a `bpp`-bytes-a-pixel texture array, laid
+/// one after another in `data`.
 fn write_layers(
     queue: &wgpu::Queue,
     tex: &wgpu::Texture,
     data: &[u8],
-    width: u32,
-    height: u32,
-    layers: u32,
+    (width, height, layers): (u32, u32, u32),
+    bpp: u32,
 ) {
     queue.write_texture(
         wgpu::ImageCopyTexture {
@@ -769,7 +854,7 @@ fn write_layers(
         data,
         wgpu::ImageDataLayout {
             offset: 0,
-            bytes_per_row: Some(width),
+            bytes_per_row: Some(width * bpp),
             rows_per_image: Some(height),
         },
         wgpu::Extent3d {
@@ -808,6 +893,18 @@ mod tests {
                 entries.contains(&"vs_main") && entries.contains(&"fs_main"),
                 "{name}: {entries:?}"
             );
+            if name == "sprites" {
+                // The colour pages and their mask sit beside the indexed
+                // pages and the palette (`docs/look/colour-sets.md`).
+                let globals: Vec<_> = module
+                    .global_variables
+                    .iter()
+                    .filter_map(|(_, g)| Some((g.name.as_deref()?, g.binding.as_ref()?.binding)))
+                    .collect();
+                for want in [("atlas", 0), ("palette", 1), ("colour", 2), ("mask", 3)] {
+                    assert!(globals.contains(&want), "sprites: {globals:?}");
+                }
+            }
         }
     }
 

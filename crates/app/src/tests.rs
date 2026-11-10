@@ -3287,3 +3287,37 @@ fn the_computer_plays_its_side_of_a_shipped_scenario() {
         assert!(app.sim.outcome().is_none(), "{id}");
     }
 }
+
+/// The new art is kept in the file at once but drawn only from the next
+/// start: the atlas built at this one is untouched, and the next start's
+/// `load_settings` builds it with the colour sets, as `load_art` finds them.
+#[test]
+fn the_new_art_is_kept_at_once_and_drawn_from_the_next_start() {
+    let mut app = app();
+    assert!(!app.settings.new_art);
+    assert_eq!(app.atlas.colour_pages, 0, "off, the look is not read");
+    let frames = app.atlas.frames().len();
+    app.shell_action(ShellAction::ToggleNewArt);
+    assert!(app.settings.new_art);
+    let text = std::fs::read_to_string(&app.settings_path).unwrap();
+    assert!(text.contains("new_art: true"), "{text}");
+    assert_eq!(app.atlas.frames().len(), frames, "not until the next start");
+    assert_eq!(app.atlas.colour_pages, 0);
+    // The next start reads the file and loads the look.
+    let mut next = App::new();
+    next.settings_path = app.settings_path.clone();
+    next.load_settings();
+    assert!(next.settings.new_art);
+    let (sheets, _) = view::sheets::load_art(
+        view::sheets::default_dir().as_deref(),
+        view::sheets::look_dir().as_deref(),
+        true,
+    );
+    assert_eq!(
+        next.atlas.colour_pages > 0,
+        sheets.iter().any(|s| s.colour && view::sprites::set_target(&s.name).is_some()),
+        "colour pages exactly when there are colour sets to draw"
+    );
+    app.shell_action(ShellAction::ToggleNewArt);
+    assert!(!app.settings.new_art);
+}

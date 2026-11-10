@@ -320,6 +320,8 @@ pub enum ShellAction {
     ToggleHints,
     /// Settings: where the players' symbols show, a step along.
     PlayerSymbols(i32),
+    /// Settings: the new art on or off, from the next start.
+    ToggleNewArt,
     /// Title and briefing: the campaigns screen.
     Campaigns,
     /// Campaigns: the briefing of a campaign's scenario.
@@ -1132,7 +1134,7 @@ pub fn settings_screen(
         (ShellAction::ToggleHints, "+", true),
     );
     // Whose a unit is, by shape as well as colour (`GD-A11Y-03`).
-    row(
+    ay = row(
         &mut s,
         ay,
         audio,
@@ -1140,6 +1142,24 @@ pub fn settings_screen(
         settings.player_symbols.label(),
         (ShellAction::PlayerSymbols(-1), "-"),
         (ShellAction::PlayerSymbols(1), "+", true),
+    );
+    // The colour sets (`docs/look/colour-sets.md`): the atlas is built
+    // once, at the start, so a change waits for the next.
+    ay = row(
+        &mut s,
+        ay,
+        audio,
+        "NEW ART",
+        if settings.new_art { "ON" } else { "OFF" },
+        (ShellAction::ToggleNewArt, "-"),
+        (ShellAction::ToggleNewArt, "+", true),
+    );
+    s.p.text(
+        label_x + audio.0,
+        ay + (ROW_H - 7.0) / 2.0 - 1.0,
+        "FROM THE NEXT START",
+        false,
+        1.0,
     );
     ry = row(
         &mut s,
@@ -1998,6 +2018,8 @@ mod tests {
         // GD-A11Y-03: where the players' symbols show.
         assert!(find(&plain, ShellAction::PlayerSymbols(-1)).enabled);
         assert!(find(&plain, ShellAction::PlayerSymbols(1)).enabled);
+        // The new art, from the next start.
+        assert!(find(&plain, ShellAction::ToggleNewArt).enabled);
         for c in Control::ALL {
             assert!(find(&plain, ShellAction::Rebind(c)).enabled, "{c:?}");
         }

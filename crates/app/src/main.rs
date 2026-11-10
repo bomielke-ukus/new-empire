@@ -442,6 +442,31 @@ fn random_seed() -> u64 {
     nanos % 899_999 + 1
 }
 
+/// The atlas the game draws with: rendered sprite sets replace
+/// placeholders wherever they exist, and with the new art on
+/// (`Settings::new_art`) the colour sets under `assets/look` replace the
+/// indexed sets of their names.
+fn load_atlas(new_art: bool) -> Atlas {
+    let sprites = view::sheets::default_dir();
+    let look = if new_art {
+        view::sheets::look_dir()
+    } else {
+        None
+    };
+    let (sheets, errors) = view::sheets::load_art(sprites.as_deref(), look.as_deref(), new_art);
+    for e in &errors {
+        eprintln!("warning: {e}");
+    }
+    let atlas = Atlas::with_sheets(&sheets);
+    if !atlas.loaded_sets.is_empty() {
+        eprintln!("rendered sprite sets: {}", atlas.loaded_sets.join(", "));
+    }
+    if atlas.colour_pages > 0 {
+        eprintln!("new art: {} colour page(s)", atlas.colour_pages);
+    }
+    atlas
+}
+
 impl App {
     fn new() -> App {
         // `new-empire [SEED]` pre-fills the setup screen's seed; without
@@ -457,17 +482,8 @@ impl App {
         let (sx, sy) = sim.starts()[ME as usize];
         camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
         let prev_pos = sim.world().pos.clone();
-        // Rendered sprite sets replace placeholders wherever they exist.
-        let (sheets, errors) = view::sheets::default_dir()
-            .map(|d| view::sheets::load_all(&d))
-            .unwrap_or_default();
-        for e in &errors {
-            eprintln!("warning: {e}");
-        }
-        let atlas = Atlas::with_sheets(&sheets);
-        if !atlas.loaded_sets.is_empty() {
-            eprintln!("rendered sprite sets: {}", atlas.loaded_sets.join(", "));
-        }
+        // The new art waits for the settings (`App::load_settings`).
+        let atlas = load_atlas(false);
         // Recordings under assets/sounds replace the placeholder sounds by
         // cue name, as rendered sprite sets replace placeholder art.
         let mut library = audio::placeholder::library();
@@ -649,10 +665,14 @@ impl App {
 
     /// Reads the settings file, if there is one, and applies it. A file
     /// that does not parse is left alone and reported; the defaults
-    /// stand in.
+    /// stand in. Called once, at the start, before the window: the new
+    /// art, if the file switches it on, is loaded into the atlas here.
     fn load_settings(&mut self) {
         self.read_settings();
         self.hints = Hints::new(self.settings.hints, &self.settings.hints_shown);
+        if self.settings.new_art {
+            self.atlas = load_atlas(true);
+        }
     }
 
     fn read_settings(&mut self) {
@@ -1979,6 +1999,11 @@ impl App {
             }
             ShellAction::PlayerSymbols(delta) => {
                 self.settings.player_symbols = self.settings.player_symbols.step(delta);
+                self.apply_and_save_settings();
+            }
+            // Kept now, drawn from the next start: the atlas is built once.
+            ShellAction::ToggleNewArt => {
+                self.settings.new_art = !self.settings.new_art;
                 self.apply_and_save_settings();
             }
             ShellAction::ToggleEdgeScroll => {

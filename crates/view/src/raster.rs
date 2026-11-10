@@ -1,5 +1,7 @@
 //! A software rasteriser that draws exactly what the GPU renderer draws:
-//! Gouraud terrain triangles, then palette-indexed sprites in depth order.
+//! Gouraud terrain triangles, then sprites in depth order: palette-indexed,
+//! or full colour with the owner's colour laid on through a mask
+//! (`docs/look/colour-sets.md`).
 //! It exists so a frame can be checked as a PNG without a GPU, and so the
 //! renderer has a reference to match.
 
@@ -9,7 +11,7 @@ use crate::fog::FogLights;
 use crate::minimap::{Minimap, MinimapRect};
 use crate::palette::{self, SHADOW};
 use crate::scene::SpriteInstance;
-use crate::sprites::Atlas;
+use crate::sprites::{Atlas, COLOUR_PAGE};
 use crate::terrain::ChunkMesh;
 
 /// An RGBA8 image.
@@ -181,6 +183,30 @@ fn triangle(
     }
 }
 
+/// A colour frame's pixel with the owner's colour laid on, in sRGB bytes
+/// as the palette stores them (`docs/look/colour-sets.md`): the pixel's
+/// luma picks a step along `ramp` (the row's eight player-ramp entries,
+/// dark to light), lerped to the next, and `mask` blends from the pixel's
+/// own colour to that. Alpha is untouched. The sprite shader does the same
+/// sums in floats.
+pub fn tint(c: [u8; 4], mask: u8, ramp: &[[u8; 4]]) -> [u8; 4] {
+    if mask == 0 {
+        return c;
+    }
+    let l = (0.299 * c[0] as f32 + 0.587 * c[1] as f32 + 0.114 * c[2] as f32) / 255.0;
+    let t = l.clamp(0.0, 1.0) * 7.0;
+    let i = (t.floor() as usize).min(7);
+    let (lo, hi, f) = (ramp[i], ramp[(i + 1).min(7)], t - i as f32);
+    let m = mask as f32 / 255.0;
+    let ch = |k: usize| {
+        let tint = lo[k] as f32 + (hi[k] as f32 - lo[k] as f32) * f;
+        (c[k] as f32 + (tint - c[k] as f32) * m)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    [ch(0), ch(1), ch(2), c[3]]
+}
+
 /// Draws sprites through the camera, nearest-neighbour scaled.
 pub fn draw_sprites(
     img: &mut Image,
@@ -221,7 +247,20 @@ pub fn draw_sprites(
                 if s.flip {
                     sx = s.uw as u32 - 1 - sx;
                 }
-                let idx = atlas.index_at(s.page, s.u as u32 + sx, s.v as u32 + sy);
+                let (ax, ay) = (s.u as u32 + sx, s.v as u32 + sy);
+                if s.page & COLOUR_PAGE != 0 {
+                    // Full colour: tinted where the mask says, lit, and
+                    // laid over what is behind by its own alpha.
+                    let c = atlas.rgba_at(s.page, ax, ay);
+                    if c[3] == 0 {
+                        continue;
+                    }
+                    let ramp = &palette_tex[row + palette::PLAYER_RAMP.start as usize..][..8];
+                    let c = tint(c, atlas.mask_at(s.page, ax, ay), ramp);
+                    img.blend(x0 + dx, y0 + dy, lit(c, s.light));
+                    continue;
+                }
+                let idx = atlas.index_at(s.page, ax, ay);
                 if idx == palette::TRANSPARENT {
                     continue;
                 }
@@ -265,6 +304,110 @@ mod tests {
     use crate::scene::Scene;
     use crate::terrain;
     use sim::{SimConfig, Simulation};
+
+    /// The spec's tint, worked in doubles straight from
+    /// `docs/look/colour-sets.md`, for checking [`tint`] against.
+    fn spec_tint(c: [u8; 4], mask: u8, ramp: &[[u8; 4]]) -> [u8; 4] {
+        let l = (0.299 * c[0] as f64 + 0.587 * c[1] as f64 + 0.114 * c[2] as f64) / 255.0;
+        let t = l.clamp(0.0, 1.0) * 7.0;
+        let i = t.floor() as usize;
+        let lerp = |a: f64, b: f64, f: f64| a + (b - a) * f;
+        let ch = |k: usize| {
+            let tint = lerp(ramp[i][k] as f64, ramp[(i + 1).min(7)][k] as f64, t.fract());
+            lerp(c[k] as f64, tint, mask as f64 / 255.0).round() as u8
+        };
+        [ch(0), ch(1), ch(2), c[3]]
+    }
+
+    /// A colour frame draws per `docs/look/colour-sets.md`: the masked
+    /// cloth takes each owner's ramp by its grey, the unmasked red is
+    /// itself for every owner, the shadow lays over the ground by its
+    /// alpha, the fog's light dims it, and a mirrored draw reads the
+    /// frame from its other edge.
+    #[test]
+    fn a_colour_frame_takes_its_owners_colour_and_blends_by_alpha() {
+        use crate::sheets::fixture;
+        assert_eq!(palette::PLAYER_RAMP.start, 240, "the spec's ramp");
+        let atlas = Atlas::with_sheets(&[fixture::house("raster")]);
+        let (f, _) = atlas.frame(sim::kinds::HOUSE, 0).unwrap();
+        assert_eq!(f.page & COLOUR_PAGE, COLOUR_PAGE);
+        let pal = palette::texture();
+        let cam = Camera::new(16, 16, (16.0, 8.0));
+        let ground = [90, 110, 70, 255];
+        let draw = |row: u8, light: u8, flip: bool| {
+            let mut img = Image::new(16, 8, ground);
+            let s = SpriteInstance {
+                x: 1.0,
+                y: 1.0,
+                // A pixel of the frame to a pixel of the window.
+                w: f.w as f32,
+                h: f.h as f32,
+                page: f.page,
+                u: f.x,
+                v: f.y,
+                uw: f.w,
+                vh: f.h,
+                row,
+                flip,
+                depth: 0.0,
+                slot: u32::MAX,
+                screen: true,
+                light,
+            };
+            draw_sprites(&mut img, &cam, &atlas, &pal, &[s]);
+            img
+        };
+        let ramp = |row: usize| &pal[row * 256 + 240..row * 256 + 248];
+        let (one, two) = (draw(1, 255, false), draw(2, 255, false));
+        for (row, img) in [(1, &one), (2, &two)] {
+            assert_eq!(img.get(1, 1), spec_tint(fixture::CLOTH, 255, ramp(row)));
+            assert_eq!(img.get(4, 1), spec_tint(fixture::HALF, 128, ramp(row)));
+            assert_eq!(img.get(2, 1), fixture::RED);
+            assert_eq!(img.get(1, 2), fixture::GREEN);
+            assert_eq!(img.get(0, 0), ground, "outside the frame");
+        }
+        assert_ne!(one.get(1, 1), two.get(1, 1), "two owners, two colours");
+        // Lit at 128, a quarter of the way up a step: exactly the spec's
+        // lerp, for the cloth's luma of 128 / 255.
+        assert_eq!(
+            tint(fixture::CLOTH, 255, ramp(1)),
+            spec_tint(fixture::CLOTH, 255, ramp(1))
+        );
+        // Source over: half-covered black over the ground.
+        let half = |g: u8| ((g as u32 * 127) / 255) as u8;
+        assert_eq!(one.get(3, 1), [half(90), half(110), half(70), 255]);
+        // Drawn from memory: dimmed as an indexed frame is.
+        let dim = draw(1, 128, false);
+        assert_eq!(dim.get(2, 1), lit(fixture::RED, 128));
+        assert_eq!(dim.get(1, 2), lit(fixture::GREEN, 128));
+        // Mirrored: the frame's right edge on the left.
+        let flipped = draw(1, 255, true);
+        assert_eq!(flipped.get(1, 1), one.get(4, 1));
+        assert_eq!(flipped.get(3, 1), one.get(2, 1));
+        // Scaled to half (the frame's 1x size): every other pixel.
+        let mut small = Image::new(16, 8, ground);
+        let s = SpriteInstance {
+            x: 1.0,
+            y: 1.0,
+            w: f.draw_w(),
+            h: f.draw_h(),
+            page: f.page,
+            u: f.x,
+            v: f.y,
+            uw: f.w,
+            vh: f.h,
+            row: 1,
+            flip: false,
+            depth: 0.0,
+            slot: u32::MAX,
+            screen: true,
+            light: 255,
+        };
+        draw_sprites(&mut small, &cam, &atlas, &pal, &[s]);
+        assert_eq!(small.get(1, 1), one.get(1, 1));
+        assert_eq!(small.get(2, 1), one.get(3, 1));
+        assert_eq!(small.get(3, 1), ground);
+    }
 
     #[test]
     fn triangle_fills_inside_only() {

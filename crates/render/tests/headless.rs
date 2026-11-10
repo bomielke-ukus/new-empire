@@ -15,8 +15,9 @@ use view::{Atlas, Camera, FogLights, Scene, SceneOptions};
 const W: u32 = 640;
 const H: u32 = 360;
 
-#[test]
-fn a_frame_renders_on_a_real_device() {
+/// A device on whatever adapter wgpu can find, with the limits the app
+/// asks for, or `None` (and a message) on a machine with none.
+fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
     let Some(adapter) =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -26,7 +27,7 @@ fn a_frame_renders_on_a_real_device() {
         }))
     else {
         eprintln!("no wgpu adapter on this machine; skipping the headless render");
-        return;
+        return None;
     };
     let info = adapter.get_info();
     eprintln!(
@@ -46,20 +47,16 @@ fn a_frame_renders_on_a_real_device() {
     ))
     .expect("request device");
     device.on_uncaptured_error(Box::new(|e| panic!("wgpu validation error: {e}")));
+    Some((device, queue))
+}
 
-    let sim = Simulation::new(1, SimConfig::default());
-    let atlas = Atlas::placeholder();
-    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
-    let mut renderer = Renderer::new(&device, &queue, format, &atlas);
-    renderer.upload_terrain(&device, &view::terrain::build_all(sim.map()));
-    renderer.upload_minimap(&device, &queue, &Minimap::render_for(&sim, Some(0)));
-    renderer.upload_fog(&device, &queue, &FogLights::from_fog(sim.fog(0).unwrap()));
-
-    let target = device.create_texture(&wgpu::TextureDescriptor {
+/// A `w` x `h` render target of `format`.
+fn target(device: &wgpu::Device, format: wgpu::TextureFormat, w: u32, h: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
         label: Some("frame"),
         size: wgpu::Extent3d {
-            width: W,
-            height: H,
+            width: w,
+            height: h,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -68,7 +65,77 @@ fn a_frame_renders_on_a_real_device() {
         format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
+    })
+}
+
+/// Reads a `w` x `h` RGBA8 target back, row after row.
+fn read_back(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    target: &wgpu::Texture,
+    w: u32,
+    h: u32,
+) -> Vec<[u8; 4]> {
+    let bytes_per_row = (w * 4).div_ceil(256) * 256;
+    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("readback"),
+        size: (bytes_per_row * h) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
     });
+    let mut encoder = device.create_command_encoder(&Default::default());
+    encoder.copy_texture_to_buffer(
+        wgpu::ImageCopyTexture {
+            texture: target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::ImageCopyBuffer {
+            buffer: &readback,
+            layout: wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(bytes_per_row),
+                rows_per_image: Some(h),
+            },
+        },
+        wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit([encoder.finish()]);
+    let slice = readback.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+    device.poll(wgpu::Maintain::Wait);
+    rx.recv().unwrap().expect("map readback");
+    let data = slice.get_mapped_range();
+    let mut out = Vec::with_capacity((w * h) as usize);
+    for y in 0..h as usize {
+        let row = &data[y * bytes_per_row as usize..][..(w * 4) as usize];
+        // `as_chunks::<4>().0` rather than `chunks_exact(4)`: same pixels,
+        // and the form stable clippy asks for at a constant width.
+        out.extend(row.as_chunks::<4>().0.iter().copied());
+    }
+    out
+}
+
+#[test]
+fn a_frame_renders_on_a_real_device() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let sim = Simulation::new(1, SimConfig::default());
+    let atlas = Atlas::placeholder();
+    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    let mut renderer = Renderer::new(&device, &queue, format, &atlas);
+    renderer.upload_terrain(&device, &view::terrain::build_all(sim.map()));
+    renderer.upload_minimap(&device, &queue, &Minimap::render_for(&sim, Some(0)));
+    renderer.upload_fog(&device, &queue, &FogLights::from_fog(sim.fog(0).unwrap()));
+
+    let target = target(&device, format, W, H);
     let view = target.create_view(&Default::default());
     let mut camera = Camera::new(sim.map().width(), sim.map().height(), (W as f32, H as f32));
     let (sx, sy) = sim.starts()[0];
@@ -87,55 +154,130 @@ fn a_frame_renders_on_a_real_device() {
     renderer.render(&device, &queue, &view, &camera, &scene, Some(rect));
 
     // Read the frame back and make sure something was drawn.
-    let bytes_per_row = (W * 4).div_ceil(256) * 256;
-    let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("readback"),
-        size: (bytes_per_row * H) as u64,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut encoder = device.create_command_encoder(&Default::default());
-    encoder.copy_texture_to_buffer(
-        wgpu::ImageCopyTexture {
-            texture: &target,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::ImageCopyBuffer {
-            buffer: &readback,
-            layout: wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(bytes_per_row),
-                rows_per_image: Some(H),
-            },
-        },
-        wgpu::Extent3d {
-            width: W,
-            height: H,
-            depth_or_array_layers: 1,
-        },
-    );
-    queue.submit([encoder.finish()]);
-    let slice = readback.slice(..);
-    let (tx, rx) = std::sync::mpsc::channel();
-    slice.map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
-    device.poll(wgpu::Maintain::Wait);
-    rx.recv().unwrap().expect("map readback");
-    let data = slice.get_mapped_range();
-    let mut distinct = std::collections::BTreeSet::new();
-    for y in 0..H as usize {
-        let row = &data[y * bytes_per_row as usize..][..(W * 4) as usize];
-        // `as_chunks::<4>().0` rather than `chunks_exact(4)`: same pixels,
-        // and the form stable clippy asks for at a constant width.
-        for px in row.as_chunks::<4>().0 {
-            distinct.insert([px[0], px[1], px[2]]);
-        }
-    }
+    let distinct: std::collections::BTreeSet<[u8; 3]> = read_back(&device, &queue, &target, W, H)
+        .iter()
+        .map(|p| [p[0], p[1], p[2]])
+        .collect();
     assert!(
         distinct.len() > 16,
         "a rendered start position has terrain, trees and buildings in it; \
          only {} distinct colours came back",
         distinct.len()
     );
+}
+
+/// A colour set's frame (`docs/look/colour-sets.md`) drawn by the GPU is
+/// what the software rasteriser draws: the owner's colour through the
+/// mask, alpha over the clear colour, the fog's light, mirrored and not.
+#[test]
+fn a_colour_frame_draws_as_the_rasteriser_draws_it() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    // A 4 x 2 house: cloth, red, a shadow and half-masked grey over a row
+    // of green and cloth.
+    let dir = std::env::temp_dir().join(format!("ne-headless-look-{}", std::process::id()));
+    let set = dir.join("house");
+    std::fs::create_dir_all(&set).unwrap();
+    let px: [[u8; 4]; 8] = [
+        [128, 128, 128, 255],
+        [200, 30, 20, 255],
+        [0, 0, 0, 100],
+        [200, 200, 200, 255],
+        [20, 160, 40, 255],
+        [60, 60, 60, 255],
+        [250, 250, 250, 255],
+        [10, 20, 200, 160],
+    ];
+    let mask = [255u8, 0, 0, 128, 0, 255, 255, 0];
+    let png = |name: &str, colour: png::ColorType, data: &[u8]| {
+        let file = std::fs::File::create(set.join(name)).unwrap();
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), 4, 2);
+        enc.set_color(colour);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(data).unwrap();
+    };
+    png("house.png", png::ColorType::Rgba, px.as_flattened());
+    png("house.mask.png", png::ColorType::Grayscale, &mask);
+    std::fs::write(
+        set.join("house.ron"),
+        r#"SpriteSet(name: "house", class: SmallBuilding, scale: 1, palette: "rgba",
+            sheet: "house.png", anchor: (2, 2),
+            animations: [(name: "idle", frames: 1, frame_ms: 100, loops: true, impact: None)],
+            colour: true, mask: Some("house.mask.png"), frame: Some((4, 2)))"#,
+    )
+    .unwrap();
+    let sheet = view::sheets::Sheet::load(&set.join("house.ron")).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    let atlas = Atlas::with_sheets(&[sheet]);
+    let (f, _) = atlas.frame(sim::kinds::HOUSE, 0).unwrap();
+    assert_eq!(f.page, view::sprites::COLOUR_PAGE);
+
+    // Each texel 8 x 8 on screen, for three owners, lit and dimmed,
+    // mirrored and not.
+    let (w, h) = (160u32, 64u32);
+    let mut scene = Scene::default();
+    for (i, (row, light, flip)) in [(1, 255, false), (2, 255, true), (5, 128, false)]
+        .into_iter()
+        .enumerate()
+    {
+        scene.ui.push(view::SpriteInstance {
+            x: 8.0 + i as f32 * 48.0,
+            y: 8.0,
+            w: 32.0,
+            h: 16.0,
+            page: f.page,
+            u: f.x,
+            v: f.y,
+            uw: f.w,
+            vh: f.h,
+            row,
+            flip,
+            depth: 0.0,
+            slot: u32::MAX,
+            screen: true,
+            light,
+        });
+    }
+    // Unorm, not sRGB, so the GPU writes and blends the bytes as the
+    // rasteriser does.
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    let mut renderer = Renderer::new(&device, &queue, format, &atlas);
+    let clear = [51u8, 77, 102, 255];
+    renderer.clear = wgpu::Color {
+        r: 0.2,
+        g: 0.3,
+        b: 0.4,
+        a: 1.0,
+    };
+    let target = target(&device, format, w, h);
+    let camera = Camera::new(16, 16, (w as f32, h as f32));
+    renderer.render(
+        &device,
+        &queue,
+        &target.create_view(&Default::default()),
+        &camera,
+        &scene,
+        None,
+    );
+    let gpu = read_back(&device, &queue, &target, w, h);
+    let mut cpu = view::raster::Image::new(w, h, clear);
+    view::raster::draw_sprites(&mut cpu, &camera, &atlas, &view::palette::texture(), &scene.ui);
+    // Compare the middle of every texel's 8 x 8 block, a step or two of
+    // float rounding allowed.
+    for i in 0..3 {
+        for ty in 0..2 {
+            for tx in 0..4 {
+                let (x, y) = (8 + i * 48 + tx * 8 + 4, 8 + ty * 8 + 4);
+                let g = gpu[(y * w + x) as usize];
+                let c = cpu.get(x as i32, y as i32);
+                assert!(
+                    (0..3).all(|k| (g[k] as i32 - c[k] as i32).abs() <= 2),
+                    "sprite {i} texel ({tx}, {ty}): GPU {g:?}, rasteriser {c:?}"
+                );
+            }
+        }
+    }
+    // And the owners differ where the mask is set.
+    assert_ne!(cpu.get(12, 12), cpu.get(60 + 24, 12));
 }

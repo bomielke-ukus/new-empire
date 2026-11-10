@@ -5,7 +5,7 @@
 //!         [--scenario gather|build|ages|army|battle|siege|scout] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1] [--symbols off|selected|always]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
-//!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0]
+//!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0] [--look 1]
 //!         [--screen title|setup|load|settings] [--difficulty easy,standard,hard,hardest]
 //! mapview --keys KEYS.md
 //! ```
@@ -18,7 +18,9 @@
 //! `--difficulty` entry. `--keys` writes the controls overlay's two
 //! columns, as the default settings have them, as Markdown for the
 //! playtest release notes (`packaging/macos/KEYS.md`, checked by
-//! `scripts/check-generated.sh`).
+//! `scripts/check-generated.sh`). `--look 1` draws with the new art on:
+//! the colour sets under `assets/look` (beside `--assets`, if given)
+//! replace the indexed sets of their names (`docs/look/colour-sets.md`).
 
 use sim::kinds;
 use std::process::ExitCode;
@@ -56,6 +58,8 @@ struct Args {
     symbols: view::symbols::PlayerSymbols,
     ghost: Option<String>,
     assets: Option<std::path::PathBuf>,
+    /// Draw with the new art's colour sets (`Settings::new_art`).
+    look: bool,
     stockpile: Option<i32>,
     select_tc: bool,
     select_kind: Option<String>,
@@ -103,6 +107,7 @@ fn parse() -> Result<Args, String> {
         symbols: view::symbols::PlayerSymbols::Selected,
         ghost: None,
         assets: None,
+        look: false,
         stockpile: None,
         select_tc: false,
         select_kind: None,
@@ -174,6 +179,7 @@ fn parse() -> Result<Args, String> {
             }
             "--ghost" => a.ghost = Some(val.clone()),
             "--assets" => a.assets = Some(std::path::PathBuf::from(val)),
+            "--look" => a.look = val == "1" || val == "true",
             "--stockpile" => a.stockpile = Some(val.parse().map_err(|e| format!("{key}: {e}"))?),
             "--select-tc" => a.select_tc = val == "1" || val == "true",
             "--select-kind" => a.select_kind = Some(val.clone()),
@@ -202,6 +208,18 @@ fn parse() -> Result<Args, String> {
     Ok(a)
 }
 
+/// The rendered sets to draw with: `--assets` (or the checkout's
+/// `assets/sprites`), and with `--look 1` the colour sets in `look` beside
+/// it, as the game loads them with the new art on.
+fn load_sheets(a: &Args) -> (Vec<view::sheets::Sheet>, Vec<String>) {
+    let sprites = a.assets.clone().or_else(view::sheets::default_dir);
+    let look = match &a.assets {
+        Some(d) => d.parent().map(|p| p.join("look")),
+        None => view::sheets::look_dir(),
+    };
+    view::sheets::load_art(sprites.as_deref(), look.as_deref(), a.look)
+}
+
 fn save(path: &str, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
     image::save_buffer(path, rgba, width, height, image::ColorType::Rgba8)
         .map_err(|e| format!("{path}: {e}"))
@@ -216,10 +234,7 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
     let behind = matches!(name, "title" | "campaigns" | "briefing");
     let sheet_dir = a.assets.clone().or_else(view::sheets::default_dir);
     let atlas = if behind {
-        let (sheets, _) = sheet_dir
-            .as_ref()
-            .map(|d| view::sheets::load_all(d))
-            .unwrap_or_default();
+        let (sheets, _) = load_sheets(a);
         Atlas::with_sheets(&sheets)
     } else {
         Atlas::placeholder()
@@ -482,9 +497,7 @@ fn run() -> Result<(), String> {
             })
         })
         .unwrap_or_else(view::detail::Detail::flat);
-    let (sheets, errors) = sheet_dir
-        .map(|d| view::sheets::load_all(&d))
-        .unwrap_or_default();
+    let (sheets, errors) = load_sheets(&a);
     for e in &errors {
         eprintln!("warning: {e}");
     }
@@ -494,13 +507,16 @@ fn run() -> Result<(), String> {
     }
     if let Some(path) = &a.atlas {
         let pal = view::palette::texture();
-        let rgba: Vec<u8> = atlas
+        let mut rgba: Vec<u8> = atlas
             .indices
             .iter()
             .flat_map(|&i| pal[256 + i as usize]) // player 0's row so the ramp shows
             .collect();
+        // The colour pages after them, as they are stored.
+        rgba.extend_from_slice(&atlas.colour);
         // The pages one under another.
-        save(path, atlas.width, atlas.height * atlas.pages, &rgba)?;
+        let pages = atlas.pages + atlas.colour_pages;
+        save(path, atlas.width, atlas.height * pages, &rgba)?;
         println!(
             "wrote atlas {path} ({}x{}, {} page(s), {} frames)",
             atlas.width,
@@ -508,6 +524,9 @@ fn run() -> Result<(), String> {
             atlas.pages,
             atlas.frames().len()
         );
+        if atlas.colour_pages > 0 {
+            println!("  and {} colour page(s) below them", atlas.colour_pages);
+        }
     }
 
     let chunks = view::terrain::build_all(map);

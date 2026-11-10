@@ -1,8 +1,18 @@
-// Palette-indexed sprites, instanced. Index 0 is transparent; the owning
-// player's palette row supplies the colour, so one atlas serves all players.
+// Sprites, instanced. An indexed page's index 0 is transparent and the
+// owning player's palette row supplies the colour, so one atlas serves all
+// players. A colour page (bit 7 of the page) is full colour with straight
+// alpha, the owner's colour laid on through its mask
+// (`docs/look/colour-sets.md`), as `view::raster::tint` does it.
 
 @group(1) @binding(0) var atlas: texture_2d_array<u32>;
 @group(1) @binding(1) var palette: texture_2d<f32>;
+@group(1) @binding(2) var colour: texture_2d_array<f32>;
+@group(1) @binding(3) var mask: texture_2d_array<f32>;
+
+// The page bit that marks a colour page (`view::sprites::COLOUR_PAGE`).
+const COLOUR_PAGE: u32 = 0x80u;
+// The first of the eight player-ramp indices, dark to light.
+const RAMP: i32 = 240;
 
 struct Inst {
     // x, y, w, h in world-screen px
@@ -51,6 +61,27 @@ fn vs_main(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Clamp inside the frame so a mirrored edge never samples a neighbour.
     let texel = vec2<i32>(in.uv);
+    let light = f32(in.light) / 255.0;
+    if ((in.page & COLOUR_PAGE) != 0u) {
+        let layer = i32(in.page & (COLOUR_PAGE - 1u));
+        let c = textureLoad(colour, texel, layer, 0);
+        if (c.a == 0.0) {
+            discard;
+        }
+        // Where the mask is set, the pixel's grey picks a step of the
+        // owner's ramp by its luma, lerped toward the next.
+        let m = textureLoad(mask, texel, layer, 0).r;
+        var rgb = c.rgb;
+        if (m > 0.0) {
+            let t = clamp(dot(c.rgb, vec3<f32>(0.299, 0.587, 0.114)), 0.0, 1.0) * 7.0;
+            let i = min(i32(floor(t)), 7);
+            let row = i32(in.row);
+            let lo = textureLoad(palette, vec2<i32>(RAMP + i, row), 0).rgb;
+            let hi = textureLoad(palette, vec2<i32>(RAMP + min(i + 1, 7), row), 0).rgb;
+            rgb = mix(rgb, mix(lo, hi, t - f32(i)), m);
+        }
+        return vec4<f32>(rgb * light, c.a);
+    }
     let idx = textureLoad(atlas, texel, i32(in.page), 0).r;
     if (idx == 0u) {
         discard;
@@ -63,5 +94,5 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     // Drawn from memory: dimmed to the explored light (`GD-FOG-01`).
     let c = textureLoad(palette, vec2<i32>(i32(idx), row), 0);
-    return vec4<f32>(c.rgb * (f32(in.light) / 255.0), c.a);
+    return vec4<f32>(c.rgb * light, c.a);
 }
