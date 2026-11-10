@@ -287,3 +287,116 @@ fn a_colour_frame_draws_as_the_rasteriser_draws_it() {
     // And the owners differ where the mask is set.
     assert_ne!(cpu.get(12, 12), cpu.get(60 + 24, 12));
 }
+
+/// The ground painted from its textures (`docs/look/ground.md`) by the GPU
+/// looks as the software rasteriser paints it: a patch of meadow, beach,
+/// shallows and sea on a slope, drifting and foaming a few seconds in,
+/// half of it seen once and dimmed. Not bit for bit (the GPU's filtering
+/// rounds its own way) but within a few steps on almost every pixel.
+#[test]
+fn the_textured_ground_draws_as_the_rasteriser_draws_it() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let art = view::ground::GroundArt::load(
+        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/look/terrain"),
+    )
+    .unwrap();
+    let mut map = sim::TileMap::new(16, 16);
+    for y in 0..16 {
+        for x in 0..16 {
+            let t = match x + y / 3 {
+                0..=4 => sim::Terrain::DeepWater,
+                5..=6 => sim::Terrain::ShallowWater,
+                7..=8 => sim::Terrain::Sand,
+                9..=11 => sim::Terrain::Grass,
+                12 => sim::Terrain::Dirt,
+                _ => sim::Terrain::ForestFloor,
+            };
+            map.set_terrain(x, y, t);
+        }
+    }
+    // A hill on the meadow, lit on one side and shaded on the other.
+    for (x, y) in [(10, 6), (11, 6), (10, 7), (11, 7)] {
+        map.set_corner(x, y, 1);
+    }
+    let mut fog = sim::Fog::new(16, 16);
+    for y in 0..16 {
+        for x in 0..16 {
+            fog.see(x, y);
+        }
+    }
+    fog.clear_visible();
+    for y in 0..16 {
+        for x in 0..8 {
+            fog.see(x, y);
+        }
+    }
+    let lights = FogLights::from_fog(&fog);
+    let (w, h) = (320u32, 200u32);
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    let mut renderer = Renderer::new(&device, &queue, format, &Atlas::placeholder());
+    renderer.upload_ground_art(&device, &queue, &art);
+    assert!(renderer.textured_ground());
+    renderer.upload_map(&device, &queue, &map);
+    renderer.upload_fog(&device, &queue, &lights);
+    let time = 3.25;
+    renderer.set_ground_time(time);
+    // At 2x, a whole level of the textures; at 0.75x, between two.
+    for zoom in [4, 1] {
+        let mut camera = Camera::new(16, 16, (w as f32, h as f32));
+        camera.set_zoom_index(zoom);
+        camera.look_at_tile(8.0, 7.0);
+        let gpu = {
+            let target = target(&device, format, w, h);
+            renderer.render(
+                &device,
+                &queue,
+                &target.create_view(&Default::default()),
+                &camera,
+                &Scene::default(),
+                None,
+            );
+            read_back(&device, &queue, &target, w, h)
+        };
+        let mut cpu = view::raster::Image::new(w, h, [0, 0, 0, 255]);
+        let types = view::ground::TypeMap::from_map(&map);
+        view::raster::draw_ground(
+            &mut cpu,
+            &camera,
+            &view::terrain::build_all_textured(&map),
+            Some(&lights),
+            view::ground::Ground {
+                art: &art,
+                types: &types,
+            },
+            time,
+        );
+        let (mut far, mut total, mut sum) = (0usize, 0usize, 0u64);
+        for y in 0..h {
+            for x in 0..w {
+                let g = gpu[(y * w + x) as usize];
+                let c = cpu.get(x as i32, y as i32);
+                let d = (0..3)
+                    .map(|k| (g[k] as i32 - c[k] as i32).unsigned_abs())
+                    .max()
+                    .unwrap();
+                total += 1;
+                sum += d as u64;
+                if d > 6 {
+                    far += 1;
+                }
+            }
+        }
+        let mean = sum as f64 / total as f64;
+        eprintln!("ground at zoom {zoom}: mean channel delta {mean:.2}, {far} of {total} over 6");
+        assert!(mean < 1.5, "zoom {zoom}: mean channel delta {mean:.2}");
+        assert!(
+            far * 100 < total,
+            "zoom {zoom}: {far} of {total} pixels differ by more than 6"
+        );
+        // And it is the ground: many colours.
+        let distinct: std::collections::BTreeSet<[u8; 4]> = gpu.iter().copied().collect();
+        assert!(distinct.len() > 1000, "{} colours", distinct.len());
+    }
+}

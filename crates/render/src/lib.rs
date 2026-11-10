@@ -1,7 +1,9 @@
 //! The wgpu renderer.
 //!
 //! Three pipelines, in draw order: terrain (Gouraud diamonds, chunked and
-//! culled, each vertex in the fog light of its corner), sprites (one
+//! culled, each vertex in the fog light of its corner; or with the ground's
+//! textures uploaded, the same diamonds painted from them by the ground
+//! pipeline, `docs/look/ground.md`), sprites (one
 //! instanced draw, palette-indexed or full colour, depth-sorted on the CPU by
 //! `view::Scene`, each in its own light), and UI quads (the minimap). All
 //! coordinate maths comes from `view`, so what this draws is what
@@ -10,19 +12,22 @@
 use bytemuck::{Pod, Zeroable};
 use std::collections::HashMap;
 use view::detail::Detail;
+use view::ground::{GroundArt, TypeMap};
 use view::minimap::{Minimap, MinimapRect};
 use view::{Atlas, Camera, ChunkMesh, FogLights, Scene, TerrainVertex};
 use wgpu::util::DeviceExt;
 
 const COMMON: &str = include_str!("shaders/common.wgsl");
 const TERRAIN: &str = include_str!("shaders/terrain.wgsl");
+const GROUND: &str = include_str!("shaders/ground.wgsl");
 const SPRITES: &str = include_str!("shaders/sprites.wgsl");
 const UI: &str = include_str!("shaders/ui.wgsl");
 
 /// Full WGSL source for each pipeline, with the shared prelude.
-pub fn shader_sources() -> [(&'static str, String); 3] {
+pub fn shader_sources() -> [(&'static str, String); 4] {
     [
         ("terrain", format!("{COMMON}\n{TERRAIN}")),
+        ("ground", format!("{COMMON}\n{GROUND}")),
         ("sprites", format!("{COMMON}\n{SPRITES}")),
         ("ui", format!("{COMMON}\n{UI}")),
     ]
@@ -42,6 +47,18 @@ struct SpriteGpu {
 struct UiVertex {
     pos: [f32; 2],
     uv: [f32; 2],
+}
+
+/// The ground's textures on the GPU (`docs/look/ground.md`).
+struct GroundGpu {
+    /// A layer per ground type, with its mips.
+    textures: wgpu::TextureView,
+    /// The noise.
+    noise: wgpu::TextureView,
+    /// Linear, mipmapped, repeating.
+    sampler: wgpu::Sampler,
+    /// The textures, the noise and the map's types.
+    bind_group: wgpu::BindGroup,
 }
 
 struct ChunkGpu {
@@ -74,6 +91,13 @@ pub struct Renderer {
     /// The ground's grain (`view::detail`): a single neutral texel until a
     /// sheet is uploaded.
     grain: wgpu::BindGroup,
+    ground_pipeline: wgpu::RenderPipeline,
+    ground_bgl: wgpu::BindGroupLayout,
+    /// The ground's textures, once uploaded: the terrain is then drawn by
+    /// the ground pipeline.
+    ground: Option<GroundGpu>,
+    /// The ground's clock, seconds (`view::ground::wrap_time`).
+    time: f32,
     /// Clear colour.
     pub clear: wgpu::Color,
 }
@@ -86,7 +110,7 @@ impl Renderer {
         format: wgpu::TextureFormat,
         atlas: &Atlas,
     ) -> Renderer {
-        let [terrain_src, sprites_src, ui_src] = shader_sources();
+        let [terrain_src, ground_src, sprites_src, ui_src] = shader_sources();
         let module = |label: &str, src: &str| {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(label),
@@ -94,10 +118,12 @@ impl Renderer {
             })
         };
         let terrain_mod = module("terrain", &terrain_src.1);
+        let ground_mod = module("ground", &ground_src.1);
         let sprites_mod = module("sprites", &sprites_src.1);
         let ui_mod = module("ui", &ui_src.1);
 
-        // Camera uniform: group 0 everywhere.
+        // Camera uniform: group 0 everywhere. The ground's fragments read
+        // its clock from it too.
         let camera_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera"),
             size: 32,
@@ -108,7 +134,7 @@ impl Renderer {
             label: Some("camera"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -345,6 +371,51 @@ impl Renderer {
         });
         let grain = grain_texture(device, queue, &grain_bgl, &Detail::flat());
 
+        // The ground's types, noise and textures, and the sampler that
+        // reads the last two: group 2 for the ground pipeline.
+        let frag = wgpu::ShaderStages::FRAGMENT;
+        let ground_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ground"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: frag,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: frag,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: frag,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: frag,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
         let blend = Some(wgpu::BlendState::ALPHA_BLENDING);
         let target = |blend| {
             [Some(wgpu::ColorTargetState {
@@ -388,6 +459,43 @@ impl Renderer {
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &terrain_mod,
+                entry_point: Some("fs_main"),
+                targets: &terrain_targets,
+                compilation_options: Default::default(),
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        // The textured ground: the terrain's vertices, its own shader.
+        let ground_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("ground"),
+            bind_group_layouts: &[&camera_bgl, &fog_bgl, &ground_bgl],
+            push_constant_ranges: &[],
+        });
+        let ground_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("ground"),
+            layout: Some(&ground_layout),
+            vertex: wgpu::VertexState {
+                module: &ground_mod,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<TerrainVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x2,
+                        1 => Unorm8x4,
+                        2 => Uint16x2,
+                        3 => Uint16x2
+                    ],
+                }],
+                compilation_options: Default::default(),
+            },
+            primitive,
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &ground_mod,
                 entry_point: Some("fs_main"),
                 targets: &terrain_targets,
                 compilation_options: Default::default(),
@@ -492,6 +600,10 @@ impl Renderer {
             fog,
             grain_bgl,
             grain,
+            ground_pipeline,
+            ground_bgl,
+            ground: None,
+            time: 0.0,
             clear: wgpu::Color {
                 r: 0.05,
                 g: 0.04,
@@ -526,6 +638,194 @@ impl Renderer {
                 },
             );
         }
+    }
+
+    /// Uploads the ground's textures (`docs/look/ground.md`): from now on
+    /// the terrain is drawn from them, and the chunks uploaded should be
+    /// [`view::terrain::build_all_textured`]'s, as [`Renderer::upload_map`]
+    /// builds them. The map's types follow with the map.
+    pub fn upload_ground_art(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        art: &GroundArt,
+    ) {
+        let size = view::ground::TEX_SIZE;
+        let layers = art.textures.len() as u32;
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ground"),
+            size: wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: layers,
+            },
+            mip_level_count: view::ground::LEVELS,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        for (layer, levels) in art.textures.iter().enumerate() {
+            for (level, texels) in levels.iter().enumerate() {
+                let n = size >> level;
+                queue.write_texture(
+                    wgpu::ImageCopyTexture {
+                        texture: &tex,
+                        mip_level: level as u32,
+                        origin: wgpu::Origin3d {
+                            x: 0,
+                            y: 0,
+                            z: layer as u32,
+                        },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    bytemuck::cast_slice(texels),
+                    wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(n * 4),
+                        rows_per_image: Some(n),
+                    },
+                    wgpu::Extent3d {
+                        width: n,
+                        height: n,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
+        }
+        let n = view::ground::NOISE_SIZE;
+        let noise = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ground noise"),
+            size: wgpu::Extent3d {
+                width: n,
+                height: n,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        write_texture(queue, &noise, &art.noise, n, n, 1);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("ground"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let textures = tex.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let noise = noise.create_view(&Default::default());
+        // Every tile grass until the map's types come.
+        let types = TypeMap {
+            width: 1,
+            height: 1,
+            types: vec![0],
+        };
+        let bind_group = self.ground_bind_group(device, queue, &textures, &noise, &sampler, &types);
+        self.ground = Some(GroundGpu {
+            textures,
+            noise,
+            sampler,
+            bind_group,
+        });
+    }
+
+    /// The ground's bind group for a map's types.
+    fn ground_bind_group(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        textures: &wgpu::TextureView,
+        noise: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
+        types: &TypeMap,
+    ) -> wgpu::BindGroup {
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ground types"),
+            size: wgpu::Extent3d {
+                width: types.width,
+                height: types.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        write_texture(queue, &tex, &types.types, types.width, types.height, 1);
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ground"),
+            layout: &self.ground_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &tex.create_view(&Default::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(noise),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(textures),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        })
+    }
+
+    /// Whether the ground's textures are uploaded, and the terrain drawn
+    /// from them.
+    pub fn textured_ground(&self) -> bool {
+        self.ground.is_some()
+    }
+
+    /// Uploads a map's ground, replacing whatever map was there: its
+    /// chunks, built for the ground's textures if they are uploaded (and
+    /// then its types too), else for the flat colours as before.
+    pub fn upload_map(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, map: &sim::TileMap) {
+        if self.ground.is_some() {
+            self.upload_terrain(device, &view::terrain::build_all_textured(map));
+            let types = TypeMap::from_map(map);
+            if let Some(g) = &self.ground {
+                let bg = self.ground_bind_group(
+                    device,
+                    queue,
+                    &g.textures,
+                    &g.noise,
+                    &g.sampler,
+                    &types,
+                );
+                if let Some(g) = &mut self.ground {
+                    g.bind_group = bg;
+                }
+            }
+        } else {
+            self.upload_terrain(device, &view::terrain::build_all(map));
+        }
+    }
+
+    /// Sets the ground's clock for the frames that follow: seconds,
+    /// wrapped by [`view::ground::wrap_time`] so the water keeps moving
+    /// smoothly however long the game runs.
+    pub fn set_ground_time(&mut self, secs: f32) {
+        self.time = secs;
     }
 
     /// Uploads the ground's grain for the frames that follow.
@@ -603,7 +903,7 @@ impl Renderer {
         minimap_rect: Option<MinimapRect>,
     ) {
         let u = camera.uniform();
-        let cam = [u[0], u[1], u[2], 0.0, u[3], u[4], 0.0, 0.0];
+        let cam = [u[0], u[1], u[2], self.time, u[3], u[4], 0.0, 0.0];
         queue.write_buffer(&self.camera_buf, 0, bytemuck::cast_slice(&cam));
 
         // Sprites: cull to the view, then upload.
@@ -681,9 +981,17 @@ impl Renderer {
             });
             pass.set_bind_group(0, &self.camera_bg, &[]);
 
-            pass.set_pipeline(&self.terrain_pipeline);
+            match &self.ground {
+                Some(g) => {
+                    pass.set_pipeline(&self.ground_pipeline);
+                    pass.set_bind_group(2, &g.bind_group, &[]);
+                }
+                None => {
+                    pass.set_pipeline(&self.terrain_pipeline);
+                    pass.set_bind_group(2, &self.grain, &[]);
+                }
+            }
             pass.set_bind_group(1, &self.fog.1, &[]);
-            pass.set_bind_group(2, &self.grain, &[]);
             for chunk in self.chunks.values() {
                 let (l, t, r, b) = chunk.bounds;
                 if r < visible.0 || l > visible.2 || b < visible.1 || t > visible.3 {

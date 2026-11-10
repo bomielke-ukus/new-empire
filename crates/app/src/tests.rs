@@ -3320,6 +3320,16 @@ fn the_new_art_is_kept_at_once_and_drawn_from_the_next_start() {
             .any(|s| s.colour && view::sprites::set_target(&s.name).is_some()),
         "colour pages exactly when there are colour sets to draw"
     );
+    // And the ground: its textures and the scenery over it
+    // (`docs/look/ground.md`), which the first start had none of.
+    assert!(app.ground_art.is_none() && app.scenery.is_empty());
+    assert_eq!(
+        next.ground_art.is_some(),
+        view::sheets::look_dir().is_some_and(|d| d.join("terrain").join("grass.png").exists())
+    );
+    if next.ground_art.is_some() {
+        assert!(!next.scenery.is_empty());
+    }
     app.shell_action(ShellAction::ToggleNewArt);
     assert!(!app.settings.new_art);
 }

@@ -72,6 +72,9 @@ struct Gpu {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     renderer: render::Renderer,
+    /// The ground's clock (`view::ground::wrap_time`): the water drifts
+    /// and the foam breathes by it.
+    born: Instant,
 }
 
 impl Gpu {
@@ -125,6 +128,7 @@ impl Gpu {
             queue,
             config,
             renderer,
+            born: Instant::now(),
         }
     }
 
@@ -134,7 +138,15 @@ impl Gpu {
         self.surface.configure(&self.device, &self.config);
     }
 
+    /// Puts a map's ground on the GPU, replacing the last map's: from the
+    /// ground's textures if they are uploaded.
+    fn upload_map(&mut self, map: &sim::TileMap) {
+        self.renderer.upload_map(&self.device, &self.queue, map);
+    }
+
     fn render(&mut self, camera: &Camera, scene: &Scene, minimap: Option<MinimapRect>) {
+        let secs = view::ground::wrap_time(self.born.elapsed().as_secs_f64());
+        self.renderer.set_ground_time(secs);
         let frame = match self.surface.get_current_texture() {
             Ok(f) => f,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -157,6 +169,13 @@ struct App {
     window: Option<Arc<Window>>,
     gpu: Option<Gpu>,
     atlas: Atlas,
+    /// The ground's textures, with the new art on and the art found
+    /// (`docs/look/ground.md`); the ground is drawn as before without.
+    ground_art: Option<view::ground::GroundArt>,
+    /// The match's (or the editor's) scenery over the ground.
+    scenery: view::scenery::Scenery,
+    /// The menu diorama's.
+    diorama_scenery: view::scenery::Scenery,
     sim: Simulation,
     prev_pos: Vec<Vec2Fx>,
     feedback: view::feedback::CombatFeedback,
@@ -506,6 +525,11 @@ impl App {
             window: None,
             gpu: None,
             atlas,
+            ground_art: None,
+            // No scenery sets in the atlas yet: none, until the new art
+            // and a map come.
+            scenery: view::scenery::Scenery::default(),
+            diorama_scenery: view::scenery::Scenery::default(),
             sim,
             prev_pos,
             feedback: view::feedback::CombatFeedback::default(),
@@ -672,6 +696,9 @@ impl App {
         self.hints = Hints::new(self.settings.hints, &self.settings.hints_shown);
         if self.settings.new_art {
             self.atlas = load_atlas(true);
+            self.ground_art = view::ground::GroundArt::find(view::sheets::look_dir().as_deref());
+            self.scenery =
+                view::scenery::Scenery::new(self.sim.map(), self.sim.seed(), &self.atlas);
         }
     }
 
@@ -1430,6 +1457,13 @@ impl App {
         );
         self.feedback
             .decorate(&mut scene, &self.sim, &self.atlas, self.viewer);
+        // Scenery over the ground, with the new art (`docs/look/ground.md`).
+        self.scenery.decorate(
+            &mut scene,
+            &self.sim,
+            self.viewer,
+            Some(self.camera.visible_rect()),
+        );
         // An attack on the player's own out of view: a mark at the edge.
         scene.ui.extend(self.feedback.edge_indicators(
             &self.sim,
@@ -1623,7 +1657,11 @@ impl App {
         );
         if behind && self.diorama.is_none() {
             match view::diorama::Diorama::new() {
-                Ok(d) => self.diorama = Some(d),
+                Ok(d) => {
+                    self.diorama_scenery =
+                        view::scenery::Scenery::new(d.sim().map(), d.sim().seed(), &self.atlas);
+                    self.diorama = Some(d);
+                }
                 Err(e) => eprintln!("warning: the menu diorama: {e}"),
             }
         }
@@ -1681,14 +1719,17 @@ impl App {
         let mut sprites = Vec::new();
         if let Some(d) = self.diorama.as_mut().filter(|_| behind) {
             d.advance(dt);
-            sprites = d.scene(&self.atlas).sprites;
-            camera = Some(d.camera(self.camera.viewport, self.camera.dpi));
+            let cam = d.camera(self.camera.viewport, self.camera.dpi);
+            let mut scene = d.scene(&self.atlas);
+            self.diorama_scenery
+                .decorate(&mut scene, d.sim(), None, Some(cam.visible_rect()));
+            sprites = scene.sprites;
+            camera = Some(cam);
             if let Some(gpu) = &mut self.gpu {
                 // Its ground once, and everything in sight; the match puts
                 // its own back when it starts.
                 if !self.diorama_shown {
-                    let chunks = view::terrain::build_all(d.sim().map());
-                    gpu.renderer.upload_terrain(&gpu.device, &chunks);
+                    gpu.upload_map(d.sim().map());
                     let map = d.sim().map();
                     let lit = FogLights::lit(map.width(), map.height());
                     gpu.renderer.upload_fog(&gpu.device, &gpu.queue, &lit);
@@ -2182,9 +2223,9 @@ impl App {
         self.recording = None;
         self.shell = Shell::Match;
         self.diorama_shown = false;
+        self.scenery = view::scenery::Scenery::new(self.sim.map(), self.sim.seed(), &self.atlas);
         if let Some(gpu) = &mut self.gpu {
-            let chunks = view::terrain::build_all(self.sim.map());
-            gpu.renderer.upload_terrain(&gpu.device, &chunks);
+            gpu.upload_map(self.sim.map());
         }
     }
 
@@ -3170,8 +3211,12 @@ impl ApplicationHandler for App {
         // The ground's grain, beside the sprites; plain ground without it.
         gpu.renderer
             .upload_detail(&gpu.device, &gpu.queue, &view::detail::Detail::find());
-        let chunks = view::terrain::build_all(self.sim.map());
-        gpu.renderer.upload_terrain(&gpu.device, &chunks);
+        // With the new art, the ground's textures instead
+        // (`docs/look/ground.md`): eight textures and their mips, 10.7 MB.
+        if let Some(art) = &self.ground_art {
+            gpu.renderer.upload_ground_art(&gpu.device, &gpu.queue, art);
+        }
+        gpu.upload_map(self.sim.map());
         let size = window.inner_size();
         self.camera.viewport = (size.width as f32, size.height as f32);
         // A Retina display reports twice the device pixels for the same

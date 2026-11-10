@@ -209,9 +209,9 @@ impl App {
         self.last_fog_tick = None;
         self.last_minimap = Instant::now() - Duration::from_secs(10);
         self.diorama_shown = false;
+        self.scenery = view::scenery::Scenery::new(self.sim.map(), self.sim.seed(), &self.atlas);
         if let Some(gpu) = &mut self.gpu {
-            let chunks = view::terrain::build_all(self.sim.map());
-            gpu.renderer.upload_terrain(&gpu.device, &chunks);
+            gpu.upload_map(self.sim.map());
         }
     }
 
@@ -578,6 +578,12 @@ impl App {
                 viewer: None,
                 symbols: self.settings.player_symbols,
             },
+        );
+        self.scenery.decorate(
+            &mut scene,
+            &self.sim,
+            None,
+            Some(self.camera.visible_rect()),
         );
         let marks = self.brush_tiles();
         if !marks.is_empty() {

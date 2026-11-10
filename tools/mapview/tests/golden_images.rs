@@ -643,6 +643,64 @@ const SCENES: &[Scene] = &[
             "360",
         ],
     },
+    Scene {
+        // The new art's ground (`docs/look/ground.md`): meadow, dirt, a
+        // forest's floor and a beach blending along wobbling edges, the
+        // sea drifting and foaming at the shore two and a half seconds in,
+        // scenery scattered over it and left out under the trees.
+        name: "look-coast",
+        args: &[
+            "--seed", "1", "--map", "coastal", "--size", "96", "--look", "1", "--zoom", "1",
+            "--fog", "0", "--at", "70,40", "--time", "2.5", "--width", "960", "--height", "540",
+        ],
+    },
+    Scene {
+        // The battle on the new art's ground, through player 0's eyes:
+        // scenery among the fighters, dimmed on ground seen once, none on
+        // ground never seen, none under the Town Center.
+        name: "look-battle",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "battle",
+            "--ticks",
+            "140",
+            "--look",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // The new art's ground zoomed out: the textures read from their
+        // smaller levels, not shimmering.
+        name: "look-zoomed-out",
+        args: &[
+            "--seed",
+            "1",
+            "--size",
+            "96",
+            "--players",
+            "4",
+            "--ticks",
+            "300",
+            "--zoom",
+            "0.5",
+            "--start",
+            "1",
+            "--fog",
+            "0",
+            "--look",
+            "1",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
 ];
 
 fn golden_dir() -> PathBuf {

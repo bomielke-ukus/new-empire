@@ -5,7 +5,7 @@
 //!         [--scenario gather|build|ages|army|battle|siege|scout] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1] [--symbols off|selected|always]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
-//!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0] [--look 1]
+//!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0] [--look 1] [--time SECS]
 //!         [--screen title|setup|load|settings] [--difficulty easy,standard,hard,hardest]
 //! mapview --keys KEYS.md
 //! ```
@@ -20,7 +20,11 @@
 //! playtest release notes (`packaging/macos/KEYS.md`, checked by
 //! `scripts/check-generated.sh`). `--look 1` draws with the new art on:
 //! the colour sets under `assets/look` (beside `--assets`, if given)
-//! replace the indexed sets of their names (`docs/look/colour-sets.md`).
+//! replace the indexed sets of their names (`docs/look/colour-sets.md`),
+//! the ground is painted from its textures under `look/terrain` and
+//! scattered with scenery (`docs/look/ground.md`); `--time` is the
+//! ground's clock in seconds (the water's drift and the foam's breath),
+//! 0 by default.
 
 use sim::kinds;
 use std::process::ExitCode;
@@ -60,6 +64,8 @@ struct Args {
     assets: Option<std::path::PathBuf>,
     /// Draw with the new art's colour sets (`Settings::new_art`).
     look: bool,
+    /// The ground's clock, seconds (`--time`).
+    time: f32,
     stockpile: Option<i32>,
     select_tc: bool,
     select_kind: Option<String>,
@@ -108,6 +114,7 @@ fn parse() -> Result<Args, String> {
         ghost: None,
         assets: None,
         look: false,
+        time: 0.0,
         stockpile: None,
         select_tc: false,
         select_kind: None,
@@ -180,6 +187,7 @@ fn parse() -> Result<Args, String> {
             "--ghost" => a.ghost = Some(val.clone()),
             "--assets" => a.assets = Some(std::path::PathBuf::from(val)),
             "--look" => a.look = val == "1" || val == "true",
+            "--time" => a.time = num(val)?,
             "--stockpile" => a.stockpile = Some(val.parse().map_err(|e| format!("{key}: {e}"))?),
             "--select-tc" => a.select_tc = val == "1" || val == "true",
             "--select-kind" => a.select_kind = Some(val.clone()),
@@ -213,11 +221,47 @@ fn parse() -> Result<Args, String> {
 /// it, as the game loads them with the new art on.
 fn load_sheets(a: &Args) -> (Vec<view::sheets::Sheet>, Vec<String>) {
     let sprites = a.assets.clone().or_else(view::sheets::default_dir);
-    let look = match &a.assets {
+    view::sheets::load_art(sprites.as_deref(), look_dir(a).as_deref(), a.look)
+}
+
+/// The new art's directory: `look` beside `--assets`, or the checkout's.
+fn look_dir(a: &Args) -> Option<std::path::PathBuf> {
+    match &a.assets {
         Some(d) => d.parent().map(|p| p.join("look")),
         None => view::sheets::look_dir(),
-    };
-    view::sheets::load_art(sprites.as_deref(), look.as_deref(), a.look)
+    }
+}
+
+/// The ground's textures with `--look 1`, if they load (`docs/look/ground.md`).
+fn ground_art(a: &Args) -> Option<view::ground::GroundArt> {
+    a.look
+        .then(|| view::ground::GroundArt::find(look_dir(a).as_deref()))
+        .flatten()
+}
+
+/// Draws a map's ground: from the textures if there are any, else the
+/// flat colours and their grain as before.
+fn draw_ground(
+    img: &mut raster::Image,
+    cam: &Camera,
+    map: &sim::TileMap,
+    lights: Option<&FogLights>,
+    art: Option<&view::ground::GroundArt>,
+    detail: &view::detail::Detail,
+    time: f32,
+) {
+    match art {
+        Some(art) => {
+            let chunks = view::terrain::build_all_textured(map);
+            let types = view::ground::TypeMap::from_map(map);
+            let ground = view::ground::Ground { art, types: &types };
+            raster::draw_ground(img, cam, &chunks, lights, ground, time);
+        }
+        None => {
+            let chunks = view::terrain::build_all(map);
+            raster::draw_terrain(img, cam, &chunks, lights, detail);
+        }
+    }
 }
 
 fn save(path: &str, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
@@ -367,9 +411,24 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
             .filter(|p| p.exists())
             .and_then(|p| view::detail::Detail::load(&p).ok())
             .unwrap_or_else(view::detail::Detail::flat);
-        let chunks = view::terrain::build_all(d.sim().map());
-        raster::draw_terrain(&mut img, &cam, &chunks, None, &detail);
-        let scene = d.scene(&atlas);
+        let art = ground_art(a);
+        let time = a.time;
+        draw_ground(
+            &mut img,
+            &cam,
+            d.sim().map(),
+            None,
+            art.as_ref(),
+            &detail,
+            time,
+        );
+        let mut scene = d.scene(&atlas);
+        view::scenery::Scenery::new(d.sim().map(), d.sim().seed(), &atlas).decorate(
+            &mut scene,
+            d.sim(),
+            None,
+            Some(cam.visible_rect()),
+        );
         raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.sprites);
     }
     let cam = Camera::new(1, 1, (a.width as f32, a.height as f32));
@@ -541,7 +600,7 @@ fn run() -> Result<(), String> {
         }
     }
 
-    let chunks = view::terrain::build_all(map);
+    let art = ground_art(&a);
     // What to select: the first own building of `--select-kind`
     // (`barracks`, `light_cavalry`, ...), the Town Center, or the first
     // `--select` villagers.
@@ -630,6 +689,13 @@ fn run() -> Result<(), String> {
         };
         cam.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
     }
+    // Scenery over the ground, with the new art (`docs/look/ground.md`).
+    view::scenery::Scenery::new(map, sim.seed(), &atlas).decorate(
+        &mut scene,
+        &sim,
+        viewer,
+        Some(cam.visible_rect()),
+    );
     if a.hud {
         let settings = Settings::default();
         // The hint the moment would bring up, given the idle wait.
@@ -702,7 +768,15 @@ fn run() -> Result<(), String> {
     }
     let mut img = raster::Image::new(a.width, a.height, [12, 10, 14, 255]);
     let lights = viewer.and_then(|p| sim.fog(p)).map(FogLights::from_fog);
-    raster::draw_terrain(&mut img, &cam, &chunks, lights.as_ref(), &detail);
+    draw_ground(
+        &mut img,
+        &cam,
+        map,
+        lights.as_ref(),
+        art.as_ref(),
+        &detail,
+        a.time,
+    );
     let palette = view::palette::texture();
     raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.sprites);
     raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.ui);

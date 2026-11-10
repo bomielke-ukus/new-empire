@@ -1,5 +1,6 @@
 //! A software rasteriser that draws exactly what the GPU renderer draws:
-//! Gouraud terrain triangles, then sprites in depth order: palette-indexed,
+//! Gouraud terrain triangles (or with the new art, the ground's textures:
+//! `docs/look/ground.md`), then sprites in depth order: palette-indexed,
 //! or full colour with the owner's colour laid on through a mask
 //! (`docs/look/colour-sets.md`).
 //! It exists so a frame can be checked as a PNG without a GPU, and so the
@@ -8,11 +9,12 @@
 use crate::camera::Camera;
 use crate::detail::Detail;
 use crate::fog::FogLights;
+use crate::ground::{self, Ground};
 use crate::minimap::{Minimap, MinimapRect};
 use crate::palette::{self, SHADOW};
 use crate::scene::SpriteInstance;
 use crate::sprites::{Atlas, COLOUR_PAGE};
-use crate::terrain::ChunkMesh;
+use crate::terrain::{ChunkMesh, SHADE_ONE};
 
 /// An RGBA8 image.
 #[derive(Clone, PartialEq, Debug)]
@@ -108,26 +110,102 @@ pub fn draw_terrain(
     }
 }
 
-/// `c` scaled by `light / 255`, the alpha untouched.
-fn lit(c: [u8; 4], light: u8) -> [u8; 4] {
-    if light == 255 {
-        return c;
+/// Draws terrain chunks built by [`crate::terrain::build_all_textured`]
+/// painted with the ground's textures, as the GPU's ground shader does:
+/// each pixel's world position interpolated from its tile's corners, its
+/// colour from [`Ground::colour`] at `time` seconds, the textures read at
+/// the triangle's [`ground::lod`] with bilinear filtering between their
+/// levels, and scaled by the slope's shade and the fog's light, both
+/// interpolated from the vertices.
+pub fn draw_ground(
+    img: &mut Image,
+    cam: &Camera,
+    chunks: &[ChunkMesh],
+    fog: Option<&FogLights>,
+    ground: Ground,
+    time: f32,
+) {
+    let visible = cam.visible_rect();
+    for chunk in chunks.iter().filter(|c| c.overlaps(visible)) {
+        for tri in chunk.indices.as_chunks::<3>().0 {
+            let v = [
+                chunk.vertices[tri[0] as usize],
+                chunk.vertices[tri[1] as usize],
+                chunk.vertices[tri[2] as usize],
+            ];
+            let p = v.map(|v| cam.to_window(v.pos[0], v.pos[1]));
+            let light = v.map(|v| {
+                let fog = fog.map_or(255, |f| f.at(v.corner[0] as i32, v.corner[1] as i32));
+                v.colour[0] as f32 / SHADE_ONE * fog as f32 / 255.0
+            });
+            let world = v.map(|v| (v.corner[0] as f32, v.corner[1] as f32));
+            ground_triangle(img, p, light, world, |x, y, lod| {
+                ground.colour(x, y, time, lod)
+            });
+        }
     }
-    let l = u32::from(light);
-    let scale = |v: u8| ((u32::from(v) * l + 127) / 255) as u8;
-    [scale(c[0]), scale(c[1]), scale(c[2]), c[3]]
 }
 
-/// Gouraud-shaded triangle with a top-left fill rule, each pixel scaled by
-/// the grain texel its interpolated `uv` falls in (nearest, as the shader
-/// reads it).
-fn triangle(
+/// A triangle of textured ground with the same fill rule as [`triangle`]:
+/// `colour` gives the ground at an interpolated world position and the
+/// triangle's mip level, scaled by the interpolated light.
+fn ground_triangle(
     img: &mut Image,
     p: [(f32, f32); 3],
-    c: [[u8; 4]; 3],
-    uv: [(f32, f32); 3],
-    detail: &Detail,
+    light: [f32; 3],
+    world: [(f32, f32); 3],
+    colour: impl Fn(f32, f32, f32) -> [f32; 3],
 ) {
+    let Some((min_x, max_x, min_y, max_y)) = bounds(img, p) else {
+        return;
+    };
+    let edge = |a: (f32, f32), b: (f32, f32), x: f32, y: f32| {
+        (b.0 - a.0) * (y - a.1) - (b.1 - a.1) * (x - a.0)
+    };
+    let area = edge(p[0], p[1], p[2].0, p[2].1);
+    if area.abs() < 1e-6 {
+        return;
+    }
+    // How the world position moves a pixel right and a pixel down: each
+    // barycentric weight is linear in the pixel, so this is constant.
+    let dw = [
+        ((p[1].1 - p[2].1) / area, (p[2].0 - p[1].0) / area),
+        ((p[2].1 - p[0].1) / area, (p[0].0 - p[2].0) / area),
+        ((p[0].1 - p[1].1) / area, (p[1].0 - p[0].0) / area),
+    ];
+    let d = |axis: usize| {
+        let at = |k: usize| if axis == 0 { dw[k].0 } else { dw[k].1 };
+        (
+            world[0].0 * at(0) + world[1].0 * at(1) + world[2].0 * at(2),
+            world[0].1 * at(0) + world[1].1 * at(1) + world[2].1 * at(2),
+        )
+    };
+    let lod = ground::lod(d(0), d(1));
+    for y in min_y..max_y {
+        for x in min_x..max_x {
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            let w0 = edge(p[1], p[2], fx, fy) / area;
+            let w1 = edge(p[2], p[0], fx, fy) / area;
+            let w2 = edge(p[0], p[1], fx, fy) / area;
+            if w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0 {
+                let l = light[0] * w0 + light[1] * w1 + light[2] * w2;
+                if l <= 0.0 {
+                    img.put(x, y, [0, 0, 0, 255]);
+                    continue;
+                }
+                let wx = world[0].0 * w0 + world[1].0 * w1 + world[2].0 * w2;
+                let wy = world[0].1 * w0 + world[1].1 * w1 + world[2].1 * w2;
+                let c = colour(wx, wy, lod);
+                let ch = |k: usize| (c[k] * l * 255.0).round().clamp(0.0, 255.0) as u8;
+                img.put(x, y, [ch(0), ch(1), ch(2), 255]);
+            }
+        }
+    }
+}
+
+/// The window pixels a triangle's box covers, clipped to the image:
+/// `(min_x, max_x, min_y, max_y)`, or `None` if nothing.
+fn bounds(img: &Image, p: [(f32, f32); 3]) -> Option<(i32, i32, i32, i32)> {
     let min_x = p
         .iter()
         .map(|q| q.0)
@@ -152,9 +230,32 @@ fn triangle(
         .fold(f32::MIN, f32::max)
         .ceil()
         .min(img.height as f32) as i32;
-    if min_x >= max_x || min_y >= max_y {
-        return;
+    (min_x < max_x && min_y < max_y).then_some((min_x, max_x, min_y, max_y))
+}
+
+/// `c` scaled by `light / 255`, the alpha untouched.
+fn lit(c: [u8; 4], light: u8) -> [u8; 4] {
+    if light == 255 {
+        return c;
     }
+    let l = u32::from(light);
+    let scale = |v: u8| ((u32::from(v) * l + 127) / 255) as u8;
+    [scale(c[0]), scale(c[1]), scale(c[2]), c[3]]
+}
+
+/// Gouraud-shaded triangle with a top-left fill rule, each pixel scaled by
+/// the grain texel its interpolated `uv` falls in (nearest, as the shader
+/// reads it).
+fn triangle(
+    img: &mut Image,
+    p: [(f32, f32); 3],
+    c: [[u8; 4]; 3],
+    uv: [(f32, f32); 3],
+    detail: &Detail,
+) {
+    let Some((min_x, max_x, min_y, max_y)) = bounds(img, p) else {
+        return;
+    };
     let edge = |a: (f32, f32), b: (f32, f32), x: f32, y: f32| {
         (b.0 - a.0) * (y - a.1) - (b.1 - a.1) * (x - a.0)
     };
@@ -445,6 +546,81 @@ mod tests {
         let (a, b) = (plain.get(32, 24), grained.get(32, 24));
         for i in 0..3 {
             assert!((a[i] as i32 / 2 - b[i] as i32).abs() <= 1, "{a:?} {b:?}");
+        }
+    }
+
+    /// The textured ground (`docs/look/ground.md`): a pixel is the ground's
+    /// colour at the world point under it, scaled by the fog's light;
+    /// raising the ground lifts the picture without sliding the texture
+    /// over it; and a frame is drawn the same every time.
+    #[test]
+    fn the_ground_is_painted_from_its_textures() {
+        use crate::ground::{Ground, TypeMap};
+        let art = crate::ground::tests::committed_art();
+        let mut map = sim::TileMap::new(12, 12);
+        for y in 3..7 {
+            for x in 5..9 {
+                map.set_terrain(x, y, sim::Terrain::Sand);
+            }
+        }
+        let types = TypeMap::from_map(&map);
+        let ground = Ground {
+            art: &art,
+            types: &types,
+        };
+        let mut cam = Camera::new(12, 12, (96.0, 64.0));
+        cam.set_zoom_index(4); // 2x
+        cam.look_at_tile(6.0, 5.0);
+        let draw = |map: &sim::TileMap, fog: Option<&FogLights>| {
+            let mut img = Image::new(96, 64, [0, 0, 0, 255]);
+            let chunks = terrain::build_all_textured(map);
+            draw_ground(&mut img, &cam, &chunks, fog, ground, 0.0);
+            img
+        };
+        let flat = draw(&map, None);
+        assert_eq!(flat, draw(&map, None), "the same picture every time");
+        // The pixel at the middle of the window, against the reference.
+        let (wsx, wsy) = cam.from_window(48.5, 32.5);
+        let (wx, wy) = crate::iso::unproject(wsx, wsy);
+        let (ax, ay) = crate::iso::unproject(1.0 / cam.zoom(), 0.0);
+        let (bx, by) = crate::iso::unproject(0.0, 1.0 / cam.zoom());
+        let want = ground.colour(wx, wy, 0.0, crate::ground::lod((ax, ay), (bx, by)));
+        let got = flat.get(48, 32);
+        for k in 0..3 {
+            assert!(
+                (got[k] as f32 - want[k] * 255.0).abs() <= 1.0,
+                "{got:?} vs {want:?}"
+            );
+        }
+        // Seen once: half the light. Never seen: black.
+        let mut fog = sim::Fog::new(12, 12);
+        for y in 0..12 {
+            for x in 0..12 {
+                fog.see(x, y);
+            }
+        }
+        fog.clear_visible();
+        let dim = draw(&map, Some(&FogLights::from_fog(&fog)));
+        let d = dim.get(48, 32);
+        for k in 0..3 {
+            assert!(
+                (d[k] as i32 - (got[k] as i32 + 1) / 2).abs() <= 1,
+                "{d:?} {got:?}"
+            );
+        }
+        let dark = draw(&map, Some(&FogLights::from_fog(&sim::Fog::new(12, 12))));
+        assert_eq!(dark.get(48, 32), [0, 0, 0, 255]);
+        // The whole map a level up: the same ground, 16 px higher at 1x.
+        let mut high = map.clone();
+        for y in 0..=12 {
+            for x in 0..=12 {
+                high.set_corner(x, y, 1);
+            }
+        }
+        let lifted = draw(&high, None);
+        let lift = (crate::iso::ELEV_PX * cam.zoom()) as i32;
+        for (x, y) in [(48, 40), (20, 50), (70, 45)] {
+            assert_eq!(lifted.get(x, y - lift), flat.get(x, y), "at {x},{y}");
         }
     }
 

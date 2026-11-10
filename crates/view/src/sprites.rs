@@ -39,6 +39,13 @@ pub const UI_GLYPH: KindId = 60_000;
 pub const UI_GLYPH_DARK: KindId = 61_000;
 /// Gold glyphs, for the age banner, at this id plus the character index.
 pub const UI_GLYPH_GOLD: KindId = 62_000;
+/// Scenery (`crate::scenery`, `docs/look/ground.md`): the set
+/// `decor_<kind>_<n>` is filed under `DECOR + kind * 100 + n`, `kind` the
+/// index of its name in [`DECOR_KINDS`]. Pictures only: no simulation kind
+/// is ever one of these.
+pub const DECOR: KindId = 63_000;
+/// The kinds of scenery, by the middle of their sets' names.
+pub const DECOR_KINDS: [&str; 5] = ["flowers", "tuft", "rock", "bush", "reeds"];
 /// A kind's looks for an age or an architecture live above this:
 /// `AGE_VARIANT_BASE + (architecture * 4 + age) * 500 + kind`, below the
 /// UI's ids. See [`Atlas::variant`].
@@ -413,19 +420,24 @@ impl Atlas {
             if replaced(sheet) {
                 continue;
             }
-            let Some((base, age, arch)) = set_target(&sheet.name) else {
-                continue;
-            };
-            // The first architecture's Stone Age set is the kind itself; any
-            // other look is filed under its variant id, as the
-            // placeholders' are.
-            let kind = if age == 0 && arch == 0 {
-                covered.push(base);
-                base
-            } else {
-                let id = look_id(base, age, arch);
-                variants.insert((base, age, arch), id);
+            // Scenery (`crate::scenery`) is filed under its own ids.
+            let kind = if let Some(id) = decor_id_for_set(&sheet.name) {
                 id
+            } else {
+                let Some((base, age, arch)) = set_target(&sheet.name) else {
+                    continue;
+                };
+                // The first architecture's Stone Age set is the kind
+                // itself; any other look is filed under its variant id, as
+                // the placeholders' are.
+                if age == 0 && arch == 0 {
+                    covered.push(base);
+                    base
+                } else {
+                    let id = look_id(base, age, arch);
+                    variants.insert((base, age, arch), id);
+                    id
+                }
             };
             loaded_sets.push(sheet.name.clone());
             for (ai, animation) in sheet.animations.iter().enumerate() {
@@ -1157,6 +1169,22 @@ pub fn set_target(name: &str) -> Option<(KindId, u8, u8)> {
         .find_map(|&(suffix, arch)| rest.strip_suffix(suffix).map(|rest| (rest, arch)))
         .unwrap_or((rest, 0));
     kind_for_set(rest).map(|kind| (kind, age, arch))
+}
+
+/// The id a scenery set (`decor_flowers_0`, `decor_rock_2`, ...) is filed
+/// under, or `None` if the name is not one.
+pub fn decor_id_for_set(name: &str) -> Option<KindId> {
+    let rest = name.strip_prefix("decor_")?;
+    let (kind, n) = rest.rsplit_once('_')?;
+    let k = DECOR_KINDS.iter().position(|&d| d == kind)?;
+    let n: KindId = n.parse().ok().filter(|&n| n < 100)?;
+    Some(decor_id(k, n))
+}
+
+/// The id variant `n` of scenery kind `kind` (an index into
+/// [`DECOR_KINDS`]) is filed under.
+pub fn decor_id(kind: usize, n: KindId) -> KindId {
+    DECOR + kind as KindId * 100 + n
 }
 
 /// Which kind a rendered sprite set draws, by the set's name.

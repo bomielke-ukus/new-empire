@@ -351,7 +351,7 @@ fn read_png8(path: &Path) -> Result<(u32, u32, png::ColorType, Vec<u8>), String>
 
 /// Reads a colour set's sheet as RGBA8 with straight alpha. An RGB or grey
 /// sheet is opaque; a grey one with alpha keeps it.
-fn read_rgba_png(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+pub(crate) fn read_rgba_png(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
     let (w, h, colour, buf) = read_png8(path)?;
     let rgba = match colour {
         png::ColorType::Rgba => buf,
@@ -374,7 +374,7 @@ fn read_rgba_png(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
 
 /// Reads a colour set's mask as a byte a pixel. A grey mask is taken as it
 /// is (its alpha, if any, ignored); a colour one by its luma.
-fn read_grey_png(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+pub(crate) fn read_grey_png(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
     let (w, h, colour, buf) = read_png8(path)?;
     let luma =
         |p: &[u8]| ((299 * p[0] as u32 + 587 * p[1] as u32 + 114 * p[2] as u32 + 500) / 1000) as u8;

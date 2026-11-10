@@ -6,6 +6,11 @@
 //! with the tiles sharing that corner, which softens type boundaries without
 //! any mask textures. Over that, each tile carries its type's grain
 //! (`detail.rs`): each corner names the texel of its type's layer it maps to.
+//!
+//! With the ground's textures (`ground.rs`) the same diamonds carry only
+//! light: [`build_all_textured`] puts the slope's shade in each vertex's
+//! colour, and the texture comes from the pixel's world position, which
+//! both renderers interpolate from the corners.
 
 use bytemuck::{Pod, Zeroable};
 use sim::{Terrain, TileMap};
@@ -102,16 +107,24 @@ pub fn tile_colour(map: &TileMap, x: i32, y: i32) -> [f32; 3] {
             *b += (d_c - *b) * d;
         }
     }
-    let [top, right, bottom, left] = map.tile_corners(x, y).map(|h| h as f32);
-    let slope = ((top + left) - (right + bottom)) * 0.5;
-    let shade = (1.0 + 0.16 * slope).clamp(0.6, 1.4);
-    let f = variation(x, y) * shade;
+    let f = variation(x, y) * tile_shade(map, x, y);
     [
         (base[0] * f).min(1.0),
         (base[1] * f).min(1.0),
         (base[2] * f).min(1.0),
     ]
 }
+
+/// A tile's slope shade, the light coming from the upper-left of the
+/// screen: 1 on flat ground.
+fn tile_shade(map: &TileMap, x: i32, y: i32) -> f32 {
+    let [top, right, bottom, left] = map.tile_corners(x, y).map(|h| h as f32);
+    let slope = ((top + left) - (right + bottom)) * 0.5;
+    (1.0 + 0.16 * slope).clamp(0.6, 1.4)
+}
+
+/// A shade byte's value: [`SHADE_ONE`] is 1.
+pub const SHADE_ONE: f32 = 128.0;
 
 /// Average colour of the in-bounds tiles touching corner `(cx, cy)`.
 fn corner_colour(map: &TileMap, cx: i32, cy: i32) -> [f32; 3] {
@@ -144,6 +157,35 @@ fn to_rgba(c: [f32; 3]) -> [u8; 4] {
 
 /// Builds the mesh for chunk `(cx, cy)`.
 pub fn build_chunk(map: &TileMap, cx: i32, cy: i32) -> ChunkMesh {
+    build_chunk_with(map, cx, cy, false)
+}
+
+/// Builds the mesh for chunk `(cx, cy)` to be painted with the ground's
+/// textures (`crate::ground`): each vertex's colour is a grey, the slope's
+/// shade with [`SHADE_ONE`] for flat ground, blended with the tiles
+/// sharing the corner as the colours are; no per-tile variation, which
+/// would show the grid through the textures.
+pub fn build_chunk_textured(map: &TileMap, cx: i32, cy: i32) -> ChunkMesh {
+    build_chunk_with(map, cx, cy, true)
+}
+
+/// The mean slope shade of the in-bounds tiles touching corner `(cx, cy)`.
+fn corner_shade(map: &TileMap, cx: i32, cy: i32) -> f32 {
+    let (mut sum, mut n) = (0.0, 0.0);
+    for (tx, ty) in [(cx - 1, cy - 1), (cx, cy - 1), (cx - 1, cy), (cx, cy)] {
+        if map.in_bounds(tx, ty) {
+            sum += tile_shade(map, tx, ty);
+            n += 1.0;
+        }
+    }
+    if n == 0.0 {
+        1.0
+    } else {
+        sum / n
+    }
+}
+
+fn build_chunk_with(map: &TileMap, cx: i32, cy: i32, textured: bool) -> ChunkMesh {
     let x0 = cx * CHUNK_TILES;
     let y0 = cy * CHUNK_TILES;
     let x1 = (x0 + CHUNK_TILES).min(map.width());
@@ -153,22 +195,32 @@ pub fn build_chunk(map: &TileMap, cx: i32, cy: i32) -> ChunkMesh {
     let mut bounds = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for y in y0..y1 {
         for x in x0..x1 {
-            let own = tile_colour(map, x, y);
             let terrain = map.terrain(x, y);
             let corners = [(x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1)];
             let base = vertices.len() as u32;
+            let own = if textured {
+                [tile_shade(map, x, y); 3]
+            } else {
+                tile_colour(map, x, y)
+            };
             for (k, (cxi, cyi)) in corners.into_iter().enumerate() {
                 let h = map.corner(cxi, cyi) as f32;
                 let (sx, sy) = iso::project(cxi as f32, cyi as f32, h);
-                let blend = corner_colour(map, cxi, cyi);
-                let colour = [
-                    own[0] * 0.55 + blend[0] * 0.45,
-                    own[1] * 0.55 + blend[1] * 0.45,
-                    own[2] * 0.55 + blend[2] * 0.45,
-                ];
+                let colour = if textured {
+                    let shade = own[0] * 0.55 + corner_shade(map, cxi, cyi) * 0.45;
+                    let s = (shade * SHADE_ONE).round().min(255.0) as u8;
+                    [s, s, s, 255]
+                } else {
+                    let blend = corner_colour(map, cxi, cyi);
+                    to_rgba([
+                        own[0] * 0.55 + blend[0] * 0.45,
+                        own[1] * 0.55 + blend[1] * 0.45,
+                        own[2] * 0.55 + blend[2] * 0.45,
+                    ])
+                };
                 vertices.push(TerrainVertex {
                     pos: [sx, sy],
-                    colour: to_rgba(colour),
+                    colour,
                     corner: [cxi as u16, cyi as u16],
                     detail: crate::detail::corner_texel(terrain, k),
                 });
@@ -191,12 +243,22 @@ pub fn build_chunk(map: &TileMap, cx: i32, cy: i32) -> ChunkMesh {
 
 /// Builds every chunk of a map.
 pub fn build_all(map: &TileMap) -> Vec<ChunkMesh> {
+    build_all_with(map, false)
+}
+
+/// Builds every chunk of a map to be painted with the ground's textures
+/// ([`build_chunk_textured`]).
+pub fn build_all_textured(map: &TileMap) -> Vec<ChunkMesh> {
+    build_all_with(map, true)
+}
+
+fn build_all_with(map: &TileMap, textured: bool) -> Vec<ChunkMesh> {
     let cols = (map.width() + CHUNK_TILES - 1) / CHUNK_TILES;
     let rows = (map.height() + CHUNK_TILES - 1) / CHUNK_TILES;
     let mut out = Vec::with_capacity((cols * rows) as usize);
     for cy in 0..rows {
         for cx in 0..cols {
-            out.push(build_chunk(map, cx, cy));
+            out.push(build_chunk_with(map, cx, cy, textured));
         }
     }
     out
@@ -264,6 +326,30 @@ mod tests {
         assert!(m.vertices[q + 1].colour[0] > m.vertices[q].colour[0]);
         assert!(m.overlaps((0.0, 0.0, 10.0, 10.0)));
         assert!(!m.overlaps((10_000.0, 10_000.0, 10_010.0, 10_010.0)));
+    }
+
+    /// For the textures, a vertex carries only the slope's shade: flat
+    /// ground is exactly one, a slope facing the light more, and the corner
+    /// is where it was.
+    #[test]
+    fn textured_vertices_carry_the_shade_alone() {
+        let mut map = TileMap::new(4, 4);
+        map.set_terrain(2, 1, Terrain::Desert);
+        let flat = build_chunk_textured(&map, 0, 0);
+        assert!(flat
+            .vertices
+            .iter()
+            .all(|v| v.colour == [SHADE_ONE as u8, SHADE_ONE as u8, SHADE_ONE as u8, 255]));
+        let plain = build_chunk(&map, 0, 0);
+        for (a, b) in flat.vertices.iter().zip(&plain.vertices) {
+            assert_eq!((a.pos, a.corner), (b.pos, b.corner));
+        }
+        map.set_corner(1, 1, 1);
+        map.set_corner(1, 2, 1);
+        let lit = build_chunk_textured(&map, 0, 0);
+        let q = (4 + 1) * 4;
+        assert!(lit.vertices[q].colour[0] > SHADE_ONE as u8);
+        assert_eq!(build_all_textured(&map).len(), 1);
     }
 
     #[test]
