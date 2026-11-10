@@ -3,7 +3,7 @@
     /usr/bin/python3.13 tools/look/export.py SET_NAME MODULE.FUNC \
         [--class MediumBuilding] [--tiles N] [--kwargs '{"variant": 1}'] \
         [--fit TILES [--model-tiles N]] [--samples 64] [--out assets/look] \
-        [--debug DIR]
+        [--sun-angle DEG] [--debug DIR]
 
 writes assets/look/SET_NAME/SET_NAME.ron, SET_NAME.png and (when anything on
 the subject takes player colour) SET_NAME.mask.png, plus SET_NAME.debug.png
@@ -103,6 +103,17 @@ GREY = (0.7013, 0.7013, 0.7013)   # beauty: a normally lit cloth lands mid-upper
 ODD = (0.2113, 0.8117, 0.3301)    # the second build, to find what player drives
 
 MARGIN = 8                         # px round the bounds, for the soft shadow
+SUN_ANGLE = None                   # --sun-angle: the sun's disc in degrees (None: lib's)
+
+
+def light():
+    """lib.light(), with the sun's disc widened by --sun-angle (a softer
+    shadow edge; small scenery wants a soft, short shadow)."""
+    lib.light()
+    if SUN_ANGLE is not None:
+        for ob in bpy.context.scene.objects:
+            if ob.type == "LIGHT" and ob.data.type == "SUN":
+                ob.data.angle = math.radians(SUN_ANGLE)
 
 
 def project(p, anchor):
@@ -401,7 +412,7 @@ def render_cell(builder, kwargs, scale, yaw, frame, anchor, tiles, samples, tmp,
     # 2. the GREY build, lit, over a shadow catcher
     build(builder, kwargs, GREY, scale, yaw)
     catcher()
-    lib.light()
+    light()
     cam = camera(frame, anchor)
     err, zpx = verify_camera(cam, frame, anchor, tiles)
     if err > 0.01:
@@ -534,8 +545,12 @@ def main():
                                                   "assets", "look"))
     ap.add_argument("--debug", default=os.path.join(tempfile.gettempdir(), "look-export"),
                     help="where the debug PNG goes")
+    ap.add_argument("--sun-angle", type=float, help="the sun's angular size in degrees, for "
+                    "a softer shadow edge (default: lib.light()'s 2.5)")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
+    global SUN_ANGLE
+    SUN_ANGLE = args.sun_angle
     os.makedirs(args.debug, exist_ok=True)
     if args.selftest:
         return selftest(args)
@@ -562,7 +577,7 @@ def main():
         yaw = FACINGS[facing] if turns else 0.0
         for f in frames:
             build(builder, kwargs, GREY, scale, yaw)
-            lib.light()
+            light()
             (w, h), (ax, ay) = frame_for(subject_points(), sun_direction(), tiles)
             lo = np.minimum(lo, (-ax, -ay))
             hi = np.maximum(hi, (w - ax, h - ay))
