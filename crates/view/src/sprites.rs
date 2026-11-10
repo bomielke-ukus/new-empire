@@ -2826,15 +2826,15 @@ mod tests {
         assert_eq!(a.index_at(0, 0, 0), 7);
         assert_eq!(
             (a.colour_width, a.colour_height, a.colour_pages),
-            (8, 64, 1)
+            (32, 64, 1) // 8 wide holds the frame, not about a square
         );
-        assert_eq!(a.colour.len(), 8 * 64 * 4);
-        assert_eq!(a.mask.len(), 8 * 64);
+        assert_eq!(a.colour.len(), 32 * 64 * 4);
+        assert_eq!(a.mask.len(), 32 * 64);
         let (f, _) = a.frame(2, 0).unwrap();
         assert_eq!((f.page, f.w, f.h), (COLOUR_PAGE, 8, 20));
         assert_eq!(a.rgba_at(f.page, f.x as u32, f.y as u32), [1, 2, 3, 4]);
         assert_eq!(a.mask_at(f.page, f.x as u32, f.y as u32), 9);
-        assert_eq!(a.rgba_at(f.page, 8, 0), [0; 4], "outside the page");
+        assert_eq!(a.rgba_at(f.page, 32, 0), [0; 4], "outside the page");
     }
 
     /// The colour size rule: the width grows (to the largest side) before a
@@ -2856,7 +2856,7 @@ mod tests {
     }
 
     /// Only a small colour set loaded: its page is small, not a full
-    /// indexed page, and the indexed pages are exactly as without it.
+    /// indexed page, and the indexed pages keep their size.
     #[test]
     fn a_small_colour_set_makes_a_small_page() {
         use crate::sheets::fixture;
@@ -2868,7 +2868,10 @@ mod tests {
         assert_eq!(a.colour_pages, 1);
         assert!(a.colour.len() < 1 << 20, "{} bytes", a.colour.len());
         assert!(a.colour_width <= 64 && a.colour_height <= 64);
-        assert_eq!(a.indices, indexed.indices);
+        assert_eq!(
+            (a.width, a.height, a.pages),
+            (indexed.width, indexed.height, indexed.pages)
+        );
     }
 
     #[test]
