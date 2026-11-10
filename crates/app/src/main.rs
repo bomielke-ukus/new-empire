@@ -3212,7 +3212,7 @@ impl ApplicationHandler for App {
         gpu.renderer
             .upload_detail(&gpu.device, &gpu.queue, &view::detail::Detail::find());
         // With the new art, the ground's textures instead
-        // (`docs/look/ground.md`): eight textures and their mips, 10.7 MB.
+        // (`docs/look/ground.md`): eight textures and their mips, 11 MB.
         if let Some(art) = &self.ground_art {
             gpu.renderer.upload_ground_art(&gpu.device, &gpu.queue, art);
         }
