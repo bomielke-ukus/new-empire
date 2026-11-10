@@ -262,7 +262,13 @@ fn a_colour_frame_draws_as_the_rasteriser_draws_it() {
     );
     let gpu = read_back(&device, &queue, &target, w, h);
     let mut cpu = view::raster::Image::new(w, h, clear);
-    view::raster::draw_sprites(&mut cpu, &camera, &atlas, &view::palette::texture(), &scene.ui);
+    view::raster::draw_sprites(
+        &mut cpu,
+        &camera,
+        &atlas,
+        &view::palette::texture(),
+        &scene.ui,
+    );
     // Compare the middle of every texel's 8 x 8 block, a step or two of
     // float rounding allowed.
     for i in 0..3 {

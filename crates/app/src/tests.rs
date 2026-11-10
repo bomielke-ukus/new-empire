@@ -3315,7 +3315,9 @@ fn the_new_art_is_kept_at_once_and_drawn_from_the_next_start() {
     );
     assert_eq!(
         next.atlas.colour_pages > 0,
-        sheets.iter().any(|s| s.colour && view::sprites::set_target(&s.name).is_some()),
+        sheets
+            .iter()
+            .any(|s| s.colour && view::sprites::set_target(&s.name).is_some()),
         "colour pages exactly when there are colour sets to draw"
     );
     app.shell_action(ShellAction::ToggleNewArt);
