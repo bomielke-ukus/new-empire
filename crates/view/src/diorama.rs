@@ -1,4 +1,4 @@
-//! The live picture behind the campaign screens: a Greek town and an
+//! The live picture behind the title and the campaign screens: a Greek town and an
 //! Egyptian one, each raided from its far side while its villagers work
 //! and its towers shoot, galleys fighting at sea. It is a scenario like any
 //! other (`assets/menu/diorama.ron`, drawn by `tools/campaigns/menu.py`),

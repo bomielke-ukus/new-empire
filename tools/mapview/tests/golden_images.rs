@@ -33,10 +33,12 @@ struct Scene {
 
 const SCENES: &[Scene] = &[
     Scene {
-        // The title screen, the cursor on NEW GAME.
+        // The title screen over the diorama, twenty seconds in, the
+        // cursor on NEW GAME.
         name: "title-screen",
         args: &[
-            "--screen", "title", "--width", "960", "--height", "540", "--hover", "480,240",
+            "--screen", "title", "--ticks", "400", "--width", "960", "--height", "540", "--hover",
+            "480,222",
         ],
     },
     Scene {

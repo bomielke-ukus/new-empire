@@ -2446,7 +2446,7 @@ Q9 answered (`docs/07` D37, `GD-A11Y-03`):
   the symbols over their selections, and `battle-symbols` shows the
   fight with ALWAYS.
 
-### Work record: the campaign screens' diorama, and the locked rows (2026-10-11)
+### Work record: the menu screens' diorama, and the locked rows (2026-10-11)
 
 From the owner's look at playtest-8:
 
@@ -2462,6 +2462,10 @@ From the owner's look at playtest-8:
   it. The ground and fog it puts on the GPU are swapped back when a
   match or the editor starts. `mapview --screen campaigns --ticks N`
   draws it; golden image `campaigns-screen`.
+- **The title screen too** (2026-10-12, at the owner's asking): the
+  same diorama behind it, carrying on into the campaigns; over it the
+  title and the menu stand on a panel and the line along the bottom on a
+  dark strip, so they read. Golden image `title-screen` recorded again.
 - **The locked rows overflowed the panel**: each printed "WIN THE
   SCENARIO BEFORE IT FIRST" beside it, past the panel's edge. A locked
   row now says LOCKED inside it, and the rule is said once inside the

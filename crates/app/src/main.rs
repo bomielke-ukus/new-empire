@@ -1596,8 +1596,11 @@ impl App {
     /// and on the setup screen the seed's map as the minimap will show it.
     fn frame_shell(&mut self, now: Instant, dt: f32) {
         self.hear_title();
-        // The campaigns and a briefing stand over the diorama.
-        let behind = matches!(self.shell, Shell::Campaigns | Shell::Briefing);
+        // The title, the campaigns and a briefing stand over the diorama.
+        let behind = matches!(
+            self.shell,
+            Shell::Title | Shell::Campaigns | Shell::Briefing
+        );
         if behind && self.diorama.is_none() {
             match view::diorama::Diorama::new() {
                 Ok(d) => self.diorama = Some(d),
