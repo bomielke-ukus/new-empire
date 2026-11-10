@@ -231,7 +231,7 @@ pub const fn source_facing(facing8: u8) -> (u8, bool) {
 pub const COLOUR_PAGE: u8 = 0x80;
 
 /// A texture atlas plus its frame table: indexed pages, and colour pages
-/// beside them for the colour sets, all the same size.
+/// beside them for the colour sets, which are sized by their own frames.
 pub struct Atlas {
     /// Texture width.
     pub width: u32,
@@ -241,8 +241,12 @@ pub struct Atlas {
     pub pages: u32,
     /// Palette indices, row-major, page after page.
     pub indices: Vec<u8>,
+    /// Width of each colour page; 0 without colour sets.
+    pub colour_width: u32,
+    /// Height of each colour page; 0 without colour sets.
+    pub colour_height: u32,
     /// Colour pages: layers of a second pair of texture arrays, each
-    /// `width` × `height`; none without colour sets.
+    /// `colour_width` × `colour_height`; none without colour sets.
     pub colour_pages: u32,
     /// The colour pages' pixels, RGBA8 with straight alpha, row-major,
     /// page after page.
@@ -348,8 +352,11 @@ impl Atlas {
     /// is a colour page and the pixel is on it.
     fn colour_offset(&self, page: u8, x: u32, y: u32) -> Option<usize> {
         let p = (page & !COLOUR_PAGE) as u32;
-        (page & COLOUR_PAGE != 0 && x < self.width && y < self.height && p < self.colour_pages)
-            .then(|| ((p * self.height + y) * self.width + x) as usize)
+        (page & COLOUR_PAGE != 0
+            && x < self.colour_width
+            && y < self.colour_height
+            && p < self.colour_pages)
+            .then(|| ((p * self.colour_height + y) * self.colour_width + x) as usize)
     }
 
     /// RGBA (straight alpha) at a pixel of a colour page; transparent
@@ -1028,6 +1035,8 @@ fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
         height,
         pages,
         indices,
+        colour_width: 0,
+        colour_height: 0,
         colour_pages: 0,
         colour: Vec::new(),
         mask: Vec::new(),
@@ -1039,35 +1048,43 @@ fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
     }
 }
 
-/// Shelf-packs colour frames, tallest first, onto colour pages the size of
-/// the atlas's indexed pages, and adds them to its frame table with
-/// [`COLOUR_PAGE`] set. When they need taller pages than the indexed
-/// frames did (one indexed page, shorter than `page_height`), the indexed
-/// page grows to match: every page of both kinds is the same size.
-/// Without colour frames the atlas is left exactly as it was.
-fn pack_colour(atlas: &mut Atlas, mut entries: Vec<ColourEntry>, page_height: u32) {
+/// The size of every colour page for frames of `sizes`, none wider or
+/// taller than `max_side`: the width is the smallest power of two that
+/// holds the widest frame and, growing before another page is added, lets
+/// the frames fill about a square; the height is what one page uses,
+/// rounded up to a multiple of 64. When one page of `max_side` is not
+/// enough, the pages are all `max_side` square. Also the page count.
+fn colour_size(sizes: &[(u32, u32)], max_side: u32) -> (u32, u32, u32) {
+    let widest = sizes.iter().map(|s| s.0).max().unwrap_or(1);
+    let mut width = widest.next_power_of_two().min(max_side);
+    loop {
+        let (_, pages, used) = shelve(sizes.iter().copied(), width, max_side);
+        if pages == 1 && (used <= width || width == max_side) {
+            return (width, used.div_ceil(64).max(1) * 64, 1);
+        }
+        if width == max_side {
+            return (width, max_side, pages);
+        }
+        width *= 2;
+    }
+}
+
+/// Shelf-packs colour frames, tallest first, onto colour pages sized by
+/// [`colour_size`] (not by the indexed pages), and adds them to its frame
+/// table with [`COLOUR_PAGE`] set. `max_side` is the most a page may
+/// measure either way. The indexed pages are not touched.
+fn pack_colour(atlas: &mut Atlas, mut entries: Vec<ColourEntry>, max_side: u32) {
     if entries.is_empty() {
         return;
     }
     entries.sort_by_key(|e| std::cmp::Reverse(e.canvas.h));
-    let width = atlas.width;
-    let (spots, pages, used) = shelve(
-        entries.iter().map(|e| (e.canvas.w, e.canvas.h)),
-        width,
-        page_height,
-    );
+    let sizes: Vec<(u32, u32)> = entries.iter().map(|e| (e.canvas.w, e.canvas.h)).collect();
+    let (width, height, pages) = colour_size(&sizes, max_side);
+    let (spots, _, _) = shelve(sizes.into_iter(), width, height);
     assert!(
         pages <= u32::from(!COLOUR_PAGE) + 1,
         "{pages} colour pages; the page bits hold 128"
     );
-    let height = atlas.height.max(page_height_for(pages, used, page_height));
-    if height > atlas.height {
-        // Only a single indexed page is ever shorter than a full one, so
-        // growing it is padding its foot.
-        debug_assert_eq!(atlas.pages, 1);
-        atlas.indices.resize((width * height) as usize, 0);
-        atlas.height = height;
-    }
     let mut rgba = vec![0u8; (width * height * pages * 4) as usize];
     let mut mask = vec![0u8; (width * height * pages) as usize];
     for (e, (pg, px, py)) in entries.into_iter().zip(spots) {
@@ -1097,6 +1114,8 @@ fn pack_colour(atlas: &mut Atlas, mut entries: Vec<ColourEntry>, page_height: u3
             mask[dst..dst + n].copy_from_slice(&c.mask[src..src + n]);
         }
     }
+    atlas.colour_width = width;
+    atlas.colour_height = height;
     atlas.colour_pages = pages;
     atlas.colour = rgba;
     atlas.mask = mask;
@@ -2731,8 +2750,9 @@ mod tests {
             "the indexed house is replaced, not drawn as well"
         );
         assert_eq!(a.colour_pages, 1);
-        assert_eq!(a.colour.len(), (a.width * a.height * 4) as usize);
-        assert_eq!(a.mask.len(), (a.width * a.height) as usize);
+        let area = (a.colour_width * a.colour_height) as usize;
+        assert_eq!(a.colour.len(), area * 4);
+        assert_eq!(a.mask.len(), area);
         let (f, flip) = a.frame(kinds::HOUSE, 3).unwrap();
         assert!(!flip);
         assert_eq!(f.page, COLOUR_PAGE);
@@ -2766,11 +2786,11 @@ mod tests {
         );
     }
 
-    /// Colour pages are the indexed pages' size: when the colour frames
-    /// need taller than a single short indexed page, it grows to match,
-    /// its frames where they were.
+    /// Colour pages are sized by their own frames, whatever the indexed
+    /// pages are: a power of two wide, about square, a multiple of 64 tall;
+    /// all alike, and the indexed page untouched.
     #[test]
-    fn colour_pages_match_the_indexed_pages_size() {
+    fn colour_pages_are_sized_by_their_own_frames() {
         let mut canvas = Canvas::new(10, 10, (5, 9));
         canvas.set(0, 0, 7);
         let mut a = pack(
@@ -2785,7 +2805,7 @@ mod tests {
             32,
             64,
         );
-        assert_eq!(a.height, 16);
+        assert_eq!((a.width, a.height), (32, 16));
         let mut c = ColourCanvas::new(8, 20, (4, 19));
         c.rgba[..4].copy_from_slice(&[1, 2, 3, 4]);
         c.mask[0] = 9;
@@ -2799,16 +2819,56 @@ mod tests {
                 scale: 2,
                 canvas: c,
             }],
-            64,
+            256,
         );
-        assert_eq!((a.height, a.pages, a.colour_pages), (32, 1, 1));
-        assert_eq!(a.indices.len(), 32 * 32);
-        assert_eq!(a.colour.len(), 32 * 32 * 4);
+        assert_eq!((a.width, a.height, a.pages), (32, 16, 1));
+        assert_eq!(a.indices.len(), 32 * 16);
         assert_eq!(a.index_at(0, 0, 0), 7);
+        assert_eq!(
+            (a.colour_width, a.colour_height, a.colour_pages),
+            (8, 64, 1)
+        );
+        assert_eq!(a.colour.len(), 8 * 64 * 4);
+        assert_eq!(a.mask.len(), 8 * 64);
         let (f, _) = a.frame(2, 0).unwrap();
         assert_eq!((f.page, f.w, f.h), (COLOUR_PAGE, 8, 20));
         assert_eq!(a.rgba_at(f.page, f.x as u32, f.y as u32), [1, 2, 3, 4]);
         assert_eq!(a.mask_at(f.page, f.x as u32, f.y as u32), 9);
+        assert_eq!(a.rgba_at(f.page, 8, 0), [0; 4], "outside the page");
+    }
+
+    /// The colour size rule: the width grows (to the largest side) before a
+    /// page is added, the height is the used height to a multiple of 64,
+    /// and only when one full page is not enough are there more.
+    #[test]
+    fn colour_size_grows_wide_before_it_adds_pages() {
+        // One frame: its width to a power of two, its height to 64.
+        assert_eq!(colour_size(&[(100, 70)], 1024), (128, 128, 1));
+        // 40 frames of 100 x 100 in a row of 128 would be 4000 tall; the
+        // width grows until the page is no taller than wide.
+        let sizes = vec![(100, 100); 40];
+        let (w, h, n) = colour_size(&sizes, 1024);
+        assert_eq!(n, 1);
+        assert!(w.is_power_of_two() && w >= 100 && h <= w && h % 64 == 0);
+        assert!(w * h < 2 * 40 * 100 * 100, "{w}x{h}");
+        // More than one 128 x 128 page of frames: all pages full size.
+        assert_eq!(colour_size(&[(100, 100); 3], 128), (128, 128, 3));
+    }
+
+    /// Only a small colour set loaded: its page is small, not a full
+    /// indexed page, and the indexed pages are exactly as without it.
+    #[test]
+    fn a_small_colour_set_makes_a_small_page() {
+        use crate::sheets::fixture;
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
+        let (mut sheets, _) = crate::sheets::load_all(&dir);
+        let indexed = Atlas::with_sheets(&sheets);
+        sheets.push(fixture::house("small"));
+        let a = Atlas::with_sheets(&sheets);
+        assert_eq!(a.colour_pages, 1);
+        assert!(a.colour.len() < 1 << 20, "{} bytes", a.colour.len());
+        assert!(a.colour_width <= 64 && a.colour_height <= 64);
+        assert_eq!(a.indices, indexed.indices);
     }
 
     #[test]

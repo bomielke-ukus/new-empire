@@ -507,16 +507,13 @@ fn run() -> Result<(), String> {
     }
     if let Some(path) = &a.atlas {
         let pal = view::palette::texture();
-        let mut rgba: Vec<u8> = atlas
+        let rgba: Vec<u8> = atlas
             .indices
             .iter()
             .flat_map(|&i| pal[256 + i as usize]) // player 0's row so the ramp shows
             .collect();
-        // The colour pages after them, as they are stored.
-        rgba.extend_from_slice(&atlas.colour);
         // The pages one under another.
-        let pages = atlas.pages + atlas.colour_pages;
-        save(path, atlas.width, atlas.height * pages, &rgba)?;
+        save(path, atlas.width, atlas.height * atlas.pages, &rgba)?;
         println!(
             "wrote atlas {path} ({}x{}, {} page(s), {} frames)",
             atlas.width,
@@ -525,7 +522,22 @@ fn run() -> Result<(), String> {
             atlas.frames().len()
         );
         if atlas.colour_pages > 0 {
-            println!("  and {} colour page(s) below them", atlas.colour_pages);
+            // The colour pages are their own size, so their own file.
+            let colour = std::path::Path::new(path).with_extension("colour.png");
+            let colour = colour.to_string_lossy();
+            save(
+                &colour,
+                atlas.colour_width,
+                atlas.colour_height * atlas.colour_pages,
+                &atlas.colour,
+            )?;
+            println!(
+                "wrote colour pages {colour} ({}x{}, {} page(s), {} KiB with masks)",
+                atlas.colour_width,
+                atlas.colour_height,
+                atlas.colour_pages,
+                (atlas.colour.len() + atlas.mask.len()) / 1024
+            );
         }
     }
 

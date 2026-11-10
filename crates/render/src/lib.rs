@@ -150,10 +150,10 @@ impl Renderer {
             1,
         );
         // The colour pages (`docs/look/colour-sets.md`): RGBA8 and an R8
-        // mask, a layer a page, the indexed pages' size. Without colour
+        // mask, a layer a page, of their own size. Without colour
         // sets, a single clear texel each, so the bind group is the same.
         let (colour_tex, mask_tex) = if atlas.colour_pages > 0 {
-            let size = (atlas.width, atlas.height, atlas.colour_pages);
+            let size = (atlas.colour_width, atlas.colour_height, atlas.colour_pages);
             let colour = layers_texture(
                 device,
                 "colour atlas",

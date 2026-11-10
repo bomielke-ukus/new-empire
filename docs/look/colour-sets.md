@@ -73,7 +73,11 @@ non-transparent bounds when packed, the anchor moving with the trim.
 
 ## In the atlas
 
-Colour frames are packed into their own pages: RGBA8 and an R8 mask, the
-same size as the indexed pages. `Frame::page` and `SpriteInstance::page`
+Colour frames are packed into their own pages: RGBA8 and an R8 mask, sized
+by the colour frames alone and not by the indexed pages. A page is as wide
+as the widest frame needs, rounded up to a power of two, and wider (up to
+8192) before there is a second page; as tall as its content, to a multiple
+of 64; and only when one 8192 x 8192 page is full is there another, all
+pages alike. `Frame::page` and `SpriteInstance::page`
 carry bit 7 (`0x80`) for a colour page, the page number in the low bits, so
 nothing that builds a sprite instance from a frame changes.
