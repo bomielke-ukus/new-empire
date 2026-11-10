@@ -331,7 +331,7 @@ class Body:
                 dark = mat((0.07, 0.05, 0.05))
                 for s in (1, -1):
                     b.ball((0.096, s * 0.045, 0.012), 0.025, dark, scale=(0.55, 1, 0.9), n=6)
-                b.cube((0.094, 0, 0.05), (0.035, 0.14, 0.012), hair if style != "bald" else _shade(sk.diffuse_color[:3] if hasattr(sk, "diffuse_color") else (0.4, 0.3, 0.2), 0.5))
+                b.cube((0.094, 0, 0.05), (0.035, 0.14, 0.012), hair if style != "bald" else mat((0.25, 0.15, 0.10)))
             if style == "short":
                 b.ball((-0.026, 0, 0.026), 0.124, hair, n=10)
             elif style == "wig":
@@ -592,8 +592,9 @@ def _dress_archer(bd, player, hair, rnd):
     bd.arms(sleeve=pm, sleeve_f=0.45)
     bd.head(hair, "short", beard=rnd.random() < 0.3)
     with b.at(bd.H, True):  # a soft pointed cap
-        cm = mat((0.90, 0.80, 0.58), rough=0.9)
+        cm = mat((0.58, 0.34, 0.18), rough=0.9)
         b.ball((-0.02, 0, 0.035), 0.127, cm, n=10)
+        b.loft([(-0.018, 0, 0.05, .132, .129), (-0.02, 0, 0.085, .125, .122)], pm, n=12, caps=False)
         b.seg((-0.03, 0, 0.11), (0.05, 0, 0.21), 0.07, 0.03, cm, n=8)
         b.ball((0.055, 0, 0.21), 0.034, cm, n=6)
     with b.at(bd.U, True):
@@ -994,7 +995,6 @@ def donkey(loc=(0, 0, 0), facing=0.0, player=BLUE, pose="stand", seed=0, parent=
     q = _quad(b, "donkey", "walk" if pose == "walk" else "stand", coat=coat, dark=(0.2, 0.17, 0.15))
     with b.at(q["Q"]):
         bz, rz, ry, L = q["bz"], q["rz"], q["ry"], q["L"]
-        b.ball((0.5 * L + 0.21, 0, bz + 0.19), 0.001, "white", n=4)
         if load:
             pm = mat(player, rough=0.7)
             b.loft([(0.0, 0, x, rz * 1.07, ry * 1.1) for x in (-0.17 * L, 0.2 * L)], pm, n=10,
@@ -1240,9 +1240,9 @@ def galley(loc=(0, 0, 0), facing=0.0, player=BLUE, pose="stand", seed=0, parent=
         for s in (1, -1):
             _, skin, hair = _people(seed * 31 + k * 2 + (s > 0))
             c = V((x, s * (w - 0.1), sh + 0.055))
-            b.ball(c, 0.06, skin, n=8)
-            b.ball(c + V((-0.012, 0, 0.014)), 0.064, hair, n=8)
-            b.ball(c + V((0, 0, -0.085)), 0.075, pm if (k + (s > 0)) % 2 else "linen", scale=(0.9, 1.2, 0.8), n=8)
+            b.ball(c, 0.06, skin, n=6)
+            b.ball(c + V((-0.012, 0, 0.014)), 0.064, hair, n=6)
+            b.ball(c + V((0, 0, -0.085)), 0.075, pm if (k + (s > 0)) % 2 else "linen", scale=(0.9, 1.2, 0.8), n=6)
     for k in (1, 3, 5, 7):
         x = -0.85 + 1.8 * (k + 0.5) / (no - 1)
         w, sh = at_x(x)
@@ -1407,13 +1407,16 @@ def skirmish():
         ("h", -0.55, -0.9, 0.0, "attack", 0), ("h", -0.45, 0.25, -0.25, "attack", 1),
         ("h", -0.75, 1.3, 0.15, "attack", 2), ("h", -1.35, -0.3, -0.1, "walk", 3),
         ("h", -1.5, 0.85, 0.1, "attack", 4), ("h", -2.1, -1.3, 0.0, "walk", 5),
-        ("h", -1.2, -1.9, -0.3, "stand", 6),
+        ("h", -1.2, -1.9, -0.75, "stand", 6),
         ("a", -2.3, 0.2, 0.05, "attack", 1), ("a", -2.5, 1.5, -0.1, "attack", 2),
         ("a", -2.9, -0.7, 0.1, "stand", 3),
     ]
     for kind, sx, sd, fo, pose, seed in blue:
-        fn = hoplite if kind == "h" else archer
-        fn(_sp(sx * 1.1, sd * 1.25), E + fo * 1.5 - 0.5, BLUE, pose, seed, parent=root)
+        if kind == "h":
+            hoplite(_sp(sx * 1.1, sd * 1.25), E + fo * 1.5 - 0.65, BLUE, pose, seed, parent=root,
+                    cloak=seed % 3 == 0)
+        else:
+            archer(_sp(sx * 1.1, sd * 1.25), E + fo * 1.5 - 0.4, BLUE, pose, seed, parent=root)
     red = [
         ("s", 0.5, -0.75, 0.1, "attack", 0, "spear"), ("s", 0.45, 0.45, -0.2, "attack", 1, "khopesh"),
         ("s", 0.65, 1.5, 0.2, "attack", 2, "spear"), ("s", 1.3, -1.6, 0.0, "walk", 3, "spear"),

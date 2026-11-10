@@ -689,6 +689,7 @@ def pier(x, y, h, parent=None, m=None, cap="terracotta", t=0.15, ball=None):
     """A gate or corner post for yard walls."""
     box((t, t, h), (x, y, h / 2), m or noisy("whitewash"), parent=parent, bevel=0.01)
     box((t + 0.04, t + 0.04, 0.05), (x, y, h + 0.02), cap, parent=parent, bevel=0.012)
+    box((t + 0.07, t + 0.07, 0.1), (x, y, 0.05), courses("limestone", 12.0), parent=parent)
     if ball:
         sphere(0.05, (x, y, h + 0.08), ball, parent=parent, segs=8)
 

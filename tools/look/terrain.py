@@ -251,7 +251,7 @@ def _paint(t=TEX):
 
     def edge(d, soft=0.28, wob=0.55, seed=30):
         """A soft, clumpy edge: 1 inside (d < 0), grass creeping in."""
-        w = (up(_fbm(x4, y4, 1.3, seed, 3)) - 0.5) * wob + (n4 - 0.5) * 0.5 + (grain - 0.5) * 0.25
+        w = (up(_fbm(x4, y4, 1.3, seed, 3)) - 0.5) * wob + ((n4 - 0.5) * 0.9 + (grain - 0.5) * 0.45) * wob
         return _ss(soft, -soft, d + w)
 
     def earth(m, light, mid, dark, seed):
@@ -286,9 +286,9 @@ def _paint(t=TEX):
     # the Greek plaza, the Egyptian plaza (sandier), the roads, the battle ground
     earth(edge(z["dg"], seed=30), (0.90, 0.78, 0.56), (0.80, 0.63, 0.41), (0.62, 0.45, 0.29), 60)
     earth(edge(z["de"], seed=33), (0.95, 0.84, 0.58), (0.86, 0.70, 0.44), (0.68, 0.50, 0.30), 70)
-    rm = edge(z["road"] - 0.40, soft=0.14, wob=0.30, seed=36)
+    rm = edge(z["road"] - 0.44, soft=0.10, wob=0.16, seed=36)
     earth(rm, (0.88, 0.75, 0.52), (0.76, 0.59, 0.38), (0.58, 0.42, 0.27), 80)
-    rm2 = edge(z["road2"] - 0.30, soft=0.14, wob=0.30, seed=38)
+    rm2 = edge(z["road2"] - 0.34, soft=0.10, wob=0.16, seed=38)
     earth(rm2, (0.90, 0.78, 0.54), (0.78, 0.62, 0.40), (0.60, 0.44, 0.28), 84)
     for d, hw in ((z["road"], 0.40), (z["road2"], 0.30)):          # ruts, grassy crown
         rut = np.exp(-((d - hw * 0.52) / 0.045) ** 2) * (0.5 + 0.5 * n4)
@@ -297,7 +297,7 @@ def _paint(t=TEX):
     earth(bm, (0.74, 0.62, 0.36), (0.56, 0.41, 0.25), (0.36, 0.25, 0.17), 90)
     churn = _fbm(x, y, 0.35, 95, 3)
     _mix(c, (0.72, 0.66, 0.30), bm * _ss(0.55, 0.75, up(_fbm(x4, y4, 0.9, 96, 3))) * 0.75)  # dry grass
-    _mix(c, (0.30, 0.21, 0.15), bm * _ss(0.62, 0.80, churn) * 0.75)                   # gouges
+    _mix(c, (0.36, 0.25, 0.17), bm * _ss(0.62, 0.80, churn) * 0.6)                   # gouges
     _mix(c, (0.70, 0.56, 0.36), bm * _ss(0.36, 0.22, churn) * 0.5)                    # scuffs
 
     # wheat field: stubble-gold ground with rows
@@ -677,12 +677,12 @@ def olive(loc=(0, 0, 0), seed=0, scale=1.0, parent=None):
                 bot = _c((0.13, 0.28, 0.17), 0.9 + 0.2 * hgt)
                 sc = (1.0, 1.0, r.uniform(0.62, 0.8))
                 b.blob(c, rad, top, bot, scale=sc, rough=0.2)
-                b.clumps(c, rad, 9, 0.13, (0.70, 0.80, 0.46), (0.26, 0.42, 0.24), scale=sc)
-                b.leaves(c, rad, 8, 0.13, (0.82, 0.88, 0.62), scale=sc, width=0.4)
+                b.clumps(c, rad, 12, 0.105, (0.70, 0.80, 0.46), (0.24, 0.40, 0.23), scale=sc, stretch=(1, 1, 0.6))
+                b.leaves(c, rad, 14, 0.12, (0.82, 0.88, 0.62), scale=sc, width=0.45)
         c = fork + np.array([0, 0, 1.05])                    # the crown's top
         b.blob(c, 0.5, (0.56, 0.70, 0.36), (0.20, 0.36, 0.22), scale=(1.1, 1.1, 0.7))
-        b.clumps(c, 0.5, 14, 0.14, (0.76, 0.84, 0.50), (0.30, 0.46, 0.26), scale=(1.1, 1.1, 0.7))
-        b.leaves(c, 0.5, 10, 0.13, (0.84, 0.90, 0.64), scale=(1.1, 1.1, 0.7), width=0.4)
+        b.clumps(c, 0.5, 18, 0.11, (0.76, 0.84, 0.50), (0.30, 0.46, 0.26), scale=(1.1, 1.1, 0.7), stretch=(1, 1, 0.6))
+        b.leaves(c, 0.5, 18, 0.12, (0.84, 0.90, 0.64), scale=(1.1, 1.1, 0.7), width=0.4)
         return True
     return _prop("olive", make, loc, seed, scale, parent)
 
@@ -1203,8 +1203,7 @@ def _scatter(root):
     b = _B(77)
     x, y = window(30000)
     zz = _zones(x, y)
-    ok = ~is_clear(x, y, -0.25) & (zz["s"] < -1.0 - 0.8 * nr.rand(len(x)))
-    ok &= (zz["dg"] > -0.25) & (zz["de"] > -0.25) & (zz["db"] > -0.6)
+    ok = ~is_clear(x, y, 0.05) & (zz["s"] < -1.0 - 0.8 * nr.rand(len(x)))
     dens = 0.25 + 0.75 * _fbm(x, y, 1.4, 61, 3)
     ok &= nr.rand(len(x)) < dens
     x, y = x[ok], y[ok]
