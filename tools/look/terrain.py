@@ -259,11 +259,10 @@ def _paint(t=TEX):
         e[:] = mid
         _mix(e, light, _ss(0.45, 0.80, up(_fbm(x4, y4, 2.2, seed, 3))) * 0.8)
         _mix(e, dark, _ss(0.50, 0.22, up(_fbm(x4, y4, 1.1, seed + 4, 3))) * 0.6)
-        e *= (0.90 + 0.20 * n4)[..., None]
-        e *= (0.92 + 0.16 * grain)[..., None]
-        peb = _fbm(x, y, 0.07, seed + 8, 1)
-        _mix(e, (0.93, 0.88, 0.74), _ss(0.90, 0.96, peb) * 0.4)   # pale pebbles
-        _mix(e, (0.46, 0.34, 0.24), _ss(0.10, 0.05, peb) * 0.4)   # dark flecks
+        e *= (0.92 + 0.16 * n4)[..., None]
+        e *= (0.97 + 0.06 * grain)[..., None]
+        peb = _fbm(x, y, 0.09, seed + 8, 1)
+        _mix(e, (0.95, 0.90, 0.76), _ss(0.93, 0.97, peb) * 0.55)  # a few pale pebbles
         # a thin dark lip where the turf stops
         c[:] = c * (1 - 0.30 * (_ss(0.05, 0.4, m) * _ss(0.75, 0.4, m)))[..., None]
         c[:] = c + (e - c) * m[..., None]
