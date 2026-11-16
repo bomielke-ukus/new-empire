@@ -685,24 +685,6 @@ def stone_lion(loc, rz=0.0, parent=None, s=1.0):
     return e
 
 
-# ---------------------------------------------------------------- test bed
-
-
-def test_hall(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
-    r = empty("test", loc, rot_z, parent)
-    pad(r, 2)
-    platform(1.7, 1.1, 0.18, (0, 0.3, 0.03), r, steps="y")
-    building(r, -0.7, 0.7, 0.0, 0.6, 0.21, 0.8, 0.45, over=0.2)
-    door((0, 0.0, 0.21), 0, r, curtain=player)
-    lattice((-0.45, 0.0, 0.62), 0, r)
-    lattice((0.7, 0.3, 0.62), pi / 2, r)
-    streamer((0.8, -0.7, 0.03), 1.7, player, r)
-    lantern((-0.3, -0.08, 1.0), r)
-    bamboo((-0.75, -0.6, 0.03), r)
-    person((0.2, -0.5, 0.03), 0, r)
-    return r
-
-
 def pavilion(parent, cx, cy, z, sx, sy, h, rh, over=0.14, ridge=None, lift=0.12, posts=VERMILION, r=0.04):
     """Four (or six) posts and a curled hip or pyramid roof, open sides."""
     pm = mat(posts, rough=0.45)
@@ -1876,7 +1858,7 @@ def gate(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, line=0, open=False)
     tx = reach - T
     for sx in (-1, 1):
         x = sx * tx
-        box((T * 2 + 0.03, D * 2 + 0.06, 0.12), (x - sx * 0.015, 0, 0.06), stone(STONE_DK, 9.0), parent=e, bevel=0.012)
+        box((T * 2 + 0.02, D * 2 + 0.06, 0.12), (x - sx * 0.012, 0, 0.06), stone(STONE_DK, 9.0), parent=e, bevel=0.012)
         box((T * 2, D * 2, PH), (x, 0, PH / 2), earth, parent=e, bevel=0.01)
         for sy in (-1, 1):
             f = face((x, sy * (D + 0.01), PH - 0.08), 0 if sy < 0 else pi, e)
