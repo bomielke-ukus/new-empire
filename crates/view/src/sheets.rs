@@ -16,6 +16,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 use crate::palette_table::ENTRIES;
+use crate::sprites::Architectures;
 
 /// Size classes from `docs/05` §2.3, mirrored from `tools/atlas`.
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -163,10 +164,29 @@ pub struct Sheet {
 impl Sheet {
     /// Loads a set from its manifest path.
     pub fn load(manifest_path: &Path) -> Result<Sheet, String> {
+        Sheet::load_if(manifest_path, &|_| true).map(|s| s.expect("every set is wanted"))
+    }
+
+    /// Loads a set from its manifest path if `wanted` says so of a colour
+    /// set's name, reading only the manifest otherwise: a colour set left
+    /// out is never decoded (`docs/look/buildings.md`, "Memory"). An
+    /// indexed set is always loaded.
+    pub fn load_if(
+        manifest_path: &Path,
+        wanted: &(dyn Fn(&str) -> bool + Sync),
+    ) -> Result<Option<Sheet>, String> {
         let text = std::fs::read_to_string(manifest_path)
             .map_err(|e| format!("{}: {e}", manifest_path.display()))?;
         let m: Manifest =
             ron::from_str(&text).map_err(|e| format!("{}: {e}", manifest_path.display()))?;
+        if m.colour && !wanted(&m.name) {
+            return Ok(None);
+        }
+        Sheet::from_manifest(manifest_path, m).map(Some)
+    }
+
+    /// Checks a manifest and decodes the images it names.
+    fn from_manifest(manifest_path: &Path, m: Manifest) -> Result<Sheet, String> {
         // A colour set's pixels are their own colours: no palette to match.
         if !m.colour && m.palette != crate::palette_table::NAME {
             return Err(format!(
@@ -511,15 +531,82 @@ pub fn find_sets(dir: &Path) -> Vec<PathBuf> {
 /// Loads every set under `dir`, reporting each failure by path rather than
 /// stopping at the first: a bad sheet should cost one sprite, not the game.
 pub fn load_all(dir: &Path) -> (Vec<Sheet>, Vec<String>) {
+    load_paths(&find_sets(dir), &|_| true)
+}
+
+/// Loads the sets at `paths`, in that order, leaving out the colour sets
+/// whose names `wanted` refuses. The images are decoded on as many
+/// threads as the machine has, which is most of the time a match's art
+/// takes to load.
+fn load_paths(
+    paths: &[PathBuf],
+    wanted: &(dyn Fn(&str) -> bool + Sync),
+) -> (Vec<Sheet>, Vec<String>) {
+    // The biggest first, so no thread is left decoding a Wonder alone at
+    // the end: by the bytes of the images beside each manifest.
+    let weight = |p: &PathBuf| -> u64 {
+        let Some(dir) = p.parent() else { return 0 };
+        std::fs::read_dir(dir).map_or(0, |files| {
+            files
+                .flatten()
+                .filter(|f| f.path().extension().is_some_and(|x| x == "png"))
+                .filter_map(|f| f.metadata().ok())
+                .map(|m| m.len())
+                .sum()
+        })
+    };
+    let mut order: Vec<(u64, usize)> = paths.iter().map(weight).zip(0..).collect();
+    order.sort_by(|a, b| b.cmp(a));
+    let mut loaded: Vec<(usize, Result<Option<Sheet>, String>)> =
+        par_map(&order, |&(_, i)| (i, Sheet::load_if(&paths[i], wanted)));
+    loaded.sort_by_key(|(i, _)| *i);
+    let loaded = loaded.into_iter().map(|(_, r)| r);
     let mut sheets = Vec::new();
     let mut errors = Vec::new();
-    for path in find_sets(dir) {
-        match Sheet::load(&path) {
-            Ok(s) => sheets.push(s),
+    for r in loaded {
+        match r {
+            Ok(Some(s)) => sheets.push(s),
+            Ok(None) => {}
             Err(e) => errors.push(e),
         }
     }
     (sheets, errors)
+}
+
+/// `f` of every item, in order, on up to as many threads as the machine
+/// has, each taking the next item as it finishes the last (a Wonder's
+/// sheet takes many times a house's).
+pub(crate) fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(items.len());
+    if threads <= 1 {
+        return items.iter().map(f).collect();
+    }
+    let next = AtomicUsize::new(0);
+    let mut done: Vec<(usize, R)> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut out = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(item) = items.get(i) else {
+                            break out;
+                        };
+                        out.push((i, f(item)));
+                    }
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().expect("a loading thread panicked"))
+            .collect()
+    });
+    done.sort_by_key(|(i, _)| *i);
+    done.into_iter().map(|(_, r)| r).collect()
 }
 
 /// The sets the game draws with: every indexed set under `sprites`, and
@@ -532,15 +619,27 @@ pub fn load_art(
     look: Option<&Path>,
     new_art: bool,
 ) -> (Vec<Sheet>, Vec<String>) {
-    let (mut sheets, mut errors) = sprites.map(load_all).unwrap_or_default();
+    load_art_for(sprites, look, new_art, Architectures::ALL)
+}
+
+/// [`load_art`] for a match whose sides build in `archs`
+/// (`docs/look/buildings.md`, "Memory"): the colour sets of the other
+/// architectures are not read beyond their manifests. Everything with no
+/// architecture (trees, scenery, units) and the first architecture's sets
+/// are always loaded.
+pub fn load_art_for(
+    sprites: Option<&Path>,
+    look: Option<&Path>,
+    new_art: bool,
+    archs: Architectures,
+) -> (Vec<Sheet>, Vec<String>) {
+    let mut paths = sprites.map(find_sets).unwrap_or_default();
     if new_art {
         if let Some(dir) = look {
-            let (colour, more) = load_all(dir);
-            sheets.extend(colour);
-            errors.extend(more);
+            paths.extend(find_sets(dir));
         }
     }
-    (sheets, errors)
+    load_paths(&paths, &|name| archs.keeps(name))
 }
 
 /// A tiny colour set for tests, written to disk and loaded as the game

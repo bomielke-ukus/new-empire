@@ -40,7 +40,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-MODULES = ("greek", "egyptian", "mesopotamian", "asian")
+MODULES = ("greek", "egyptian", "mesopotamian", "asian", "nature")
 KEYS = {"func", "cls", "tiles", "kwargs", "fit", "model_tiles", "stages", "anims", "sun_angle",
         "samples"}
 

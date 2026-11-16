@@ -422,6 +422,10 @@ impl Scene {
             }
             let top = sprite.y;
             sprites.push(sprite);
+            // A colour wall's or gate's shadow lies under the wall's pieces.
+            if (kinds::is_wall(kind) || kind == kinds::GATE) && standing {
+                push_shadow(atlas, frame, (gx, gy), row, depth, i as u32, &mut sprites);
+            }
             // Whose it is, by shape as well as colour (`GD-A11Y-03`): over
             // the selection, or over every unit and building but the walls.
             let marked = match symbols {
@@ -519,6 +523,14 @@ impl Scene {
                 );
                 s.light = fog::EXPLORED;
                 sprites.push(s);
+                if (kinds::is_wall(m.kind) || m.kind == kinds::GATE) && !m.site {
+                    let row = palette::row_for_owner(m.owner);
+                    let from = sprites.len();
+                    push_shadow(atlas, frame, (gx, gy), row, depth, u32::MAX, &mut sprites);
+                    for shadow in &mut sprites[from..] {
+                        shadow.light = fog::EXPLORED;
+                    }
+                }
                 if kinds::is_wall(m.kind) && !m.site {
                     let from = sprites.len();
                     push_arms(
@@ -608,6 +620,15 @@ impl Scene {
                     .flatten();
                 if let Some(frame) = gate.or_else(|| atlas.frame(look, 0).map(|(f, _)| f)) {
                     sprites.push(overlay(frame, gx, gy, g.row, depth + 0.5, u32::MAX));
+                    push_shadow(
+                        atlas,
+                        frame,
+                        (gx, gy),
+                        g.row,
+                        depth + 0.5,
+                        u32::MAX,
+                        &mut sprites,
+                    );
                 }
                 if kinds::is_wall(g.kind) {
                     push_arms(
@@ -885,7 +906,39 @@ fn push_arms(
         }
         if let Some(arm) = atlas.wall_arm(look, k as u8) {
             sprites.push(overlay(arm, gx, gy, row, depth + walls::arm_depth(k), slot));
+            push_shadow(atlas, arm, (gx, gy), row, depth, slot, sprites);
         }
+    }
+}
+
+/// How far behind its wall piece a colour wall's shadow is drawn
+/// ([`Atlas::shadow_of`]): behind the pieces of the tile behind it (its
+/// post at 1, the arm reaching back from it at 1.25) and in front of the
+/// ground and what lies on it further back, so a post's shadow falling
+/// along the wall darkens the ground under its neighbour's arm, not the
+/// arm.
+pub const WALL_SHADOW_DEPTH: f32 = 1.4;
+
+/// The shadow of a wall piece drawn with `frame` at `depth`, if it casts
+/// one apart (a colour wall or gate), anchored as the piece is.
+fn push_shadow(
+    atlas: &Atlas,
+    frame: &crate::sprites::Frame,
+    (gx, gy): (f32, f32),
+    row: u8,
+    depth: f32,
+    slot: u32,
+    sprites: &mut Vec<SpriteInstance>,
+) {
+    if let Some(shadow) = atlas.shadow_of(frame) {
+        sprites.push(overlay(
+            shadow,
+            gx,
+            gy,
+            row,
+            depth - WALL_SHADOW_DEPTH,
+            slot,
+        ));
     }
 }
 

@@ -271,6 +271,9 @@ pub struct Atlas {
     pub mask: Vec<u8>,
     frames: Vec<Frame>,
     lookup: HashMap<(KindId, u8, Anim, u8), usize>,
+    /// A wall's, a gate's or an arm's colour frame to its shadow on the
+    /// ground, drawn apart from it ([`Atlas::shadow_of`]).
+    shadows: HashMap<(KindId, u8, Anim, u8), usize>,
     anims: HashMap<(KindId, Anim), AnimInfo>,
     /// `(kind, age index, architecture index)` to the id its frames in that
     /// look are filed under.
@@ -490,34 +493,66 @@ impl Atlas {
             .filter(|(_, &first)| first != (0, 0))
             .map(|(&k, &(age, arch))| (k, look_id(k, age, arch)))
             .collect();
-        for sheet in sheets {
-            if replaced(sheet) {
-                continue;
-            }
-            // Scenery (`crate::scenery`) and the tree's other looks are
-            // filed under their own ids.
-            let kind = if let Some(id) =
-                decor_id_for_set(&sheet.name).or_else(|| tree_id_for_set(&sheet.name))
-            {
-                id
-            } else {
-                let Some((base, age, arch)) = set_target(&sheet.name) else {
-                    continue;
-                };
-                // The first architecture's Stone Age set is the kind
-                // itself; any other look is filed under its variant id, as
-                // the placeholders' are.
-                if age == 0 && arch == 0 {
-                    covered.push(base);
+        // Which id each set is filed under: scenery (`crate::scenery`) and
+        // the tree's other looks under their own ids; the first
+        // architecture's Stone Age set as the kind itself; any other look
+        // under its variant id, as the placeholders' are. With the id, a
+        // kind's look's (kind, age, architecture); `None` for a set left out.
+        type Filed = Option<(KindId, Option<(KindId, u8, u8)>)>;
+        let filed: Vec<Filed> = sheets
+            .iter()
+            .map(|sheet| {
+                if replaced(sheet) {
+                    return None;
+                }
+                if let Some(id) =
+                    decor_id_for_set(&sheet.name).or_else(|| tree_id_for_set(&sheet.name))
+                {
+                    return Some((id, None));
+                }
+                let (base, age, arch) = set_target(&sheet.name)?;
+                let id = if age == 0 && arch == 0 {
                     base
                 } else {
-                    let id = look_id(base, age, arch);
-                    variants.insert((base, age, arch), id);
-                    id
+                    look_id(base, age, arch)
+                };
+                Some((id, Some((base, age, arch))))
+            })
+            .collect();
+        // Every frame cut out of its sheet, the sets side by side on the
+        // machine's threads (most of the time an atlas takes to build), in
+        // the sets' order whatever the threads do.
+        // A colour wall's and gate's shadows are cut apart from them.
+        let casts_apart = |base: KindId| kinds::is_wall(base) || base == kinds::GATE;
+        let jobs: Vec<(&crate::sheets::Sheet, KindId, bool)> = sheets
+            .iter()
+            .zip(&filed)
+            .filter_map(|(sheet, f)| {
+                f.map(|(kind, target)| {
+                    let split = sheet.colour && target.is_some_and(|(b, _, _)| casts_apart(b));
+                    (sheet, kind, split)
+                })
+            })
+            .collect();
+        let cut = crate::sheets::par_map(&jobs, |&(sheet, kind, split)| {
+            cut_frames(sheet, kind, split)
+        });
+        for ((sheet, f), (indexed, coloured)) in sheets
+            .iter()
+            .zip(&filed)
+            .filter_map(|(sheet, f)| f.map(|f| (sheet, f)))
+            .zip(cut)
+        {
+            let (kind, target) = f;
+            match target {
+                Some((base, 0, 0)) => covered.push(base),
+                Some((base, age, arch)) => {
+                    variants.insert((base, age, arch), kind);
                 }
-            };
+                None => {}
+            }
             loaded_sets.push(sheet.name.clone());
-            for (ai, animation) in sheet.animations.iter().enumerate() {
+            for animation in &sheet.animations {
                 let Some(anim) = Anim::from_name(&animation.name) else {
                     continue;
                 };
@@ -529,57 +564,9 @@ impl Atlas {
                         loops: animation.loops,
                     },
                 );
-                for (fi, &facing) in sheet.facings().iter().enumerate() {
-                    for frame in 0..animation.frames {
-                        let (x, y, w, h) = sheet.frame_rect(ai, fi, frame);
-                        let (ax, ay) = sheet.anchor_for(ai, fi, frame);
-                        // Trimmed to what is drawn: a rendered frame is
-                        // mostly transparent, and the atlas has to fit the
-                        // GPU's texture limit (8192 a side by default). The
-                        // anchor moves with the trim, so it lands as before.
-                        let (bx, by, bw, bh) = drawn_bounds(sheet, x, y, w, h, sheet.scale);
-                        // A wall's arm is anchored on its post, outside it.
-                        let anchor = (ax as i32 - bx as i32, ay as i32 - by as i32);
-                        let anchor = (anchor.0 as i16, anchor.1 as i16);
-                        if sheet.colour {
-                            let mut c = ColourCanvas::new(bw, bh, anchor);
-                            for yy in 0..bh {
-                                for xx in 0..bw {
-                                    let (sx, sy) = (x + bx + xx, y + by + yy);
-                                    let i = (yy * bw + xx) as usize;
-                                    c.rgba[i * 4..i * 4 + 4]
-                                        .copy_from_slice(&sheet.rgba_at(sx, sy));
-                                    c.mask[i] = sheet.mask_at(sx, sy);
-                                }
-                            }
-                            colour.push(ColourEntry {
-                                kind,
-                                facing,
-                                anim,
-                                index: frame as u8,
-                                scale: sheet.scale as u8,
-                                canvas: c,
-                            });
-                            continue;
-                        }
-                        let mut c = Canvas::new(bw, bh, anchor);
-                        for yy in 0..bh {
-                            for xx in 0..bw {
-                                let idx = sheet.index_at(x + bx + xx, y + by + yy);
-                                c.set(xx as i32, yy as i32, idx);
-                            }
-                        }
-                        canvases.push(Entry {
-                            kind,
-                            facing,
-                            anim,
-                            index: frame as u8,
-                            scale: sheet.scale as u8,
-                            canvas: c,
-                        });
-                    }
-                }
             }
+            canvases.extend(indexed);
+            colour.extend(coloured);
         }
         let still = |kind: KindId, facing: u8, canvas: Canvas| Entry {
             kind,
@@ -851,6 +838,18 @@ impl Atlas {
             .map(|&i| &self.frames[i])
     }
 
+    /// The shadow `frame` casts on the ground, drawn apart from it, if it
+    /// is one of a colour wall's or gate's: a post's shadow falls along
+    /// the wall onto its neighbours' arms, and drawn with the post it would
+    /// darken them where they stand in front of it (`docs/look/buildings.md`,
+    /// "Walls and gates"). Drawn under every piece of the wall instead
+    /// ([`crate::scene::WALL_SHADOW_DEPTH`]), it falls on the ground.
+    pub fn shadow_of(&self, frame: &Frame) -> Option<&Frame> {
+        self.shadows
+            .get(&(frame.kind, frame.facing, frame.anim, frame.index))
+            .map(|&i| &self.frames[i])
+    }
+
     /// A building's own rubble, if its rendered set has one.
     pub fn own_rubble(&self, kind: KindId) -> Option<&Frame> {
         self.lookup
@@ -1013,6 +1012,148 @@ struct ColourEntry {
     index: u8,
     scale: u8,
     canvas: ColourCanvas,
+    /// The shadow split from the frame of this key, not the frame.
+    shadow: bool,
+}
+
+/// Every frame of `sheet` that draws an animation the view knows, filed
+/// under `kind`, cut out of the sheet and trimmed to what is drawn: an
+/// indexed set's to go on the indexed pages, a colour set's on the colour
+/// pages.
+///
+/// With `split` (a colour wall or gate), each frame's shadow on the ground
+/// is cut apart from it into a frame of its own ([`Atlas::shadow_of`]).
+fn cut_frames(
+    sheet: &crate::sheets::Sheet,
+    kind: KindId,
+    split: bool,
+) -> (Vec<Entry>, Vec<ColourEntry>) {
+    let mut canvases = Vec::new();
+    let mut colour = Vec::new();
+    for (ai, animation) in sheet.animations.iter().enumerate() {
+        let Some(anim) = Anim::from_name(&animation.name) else {
+            continue;
+        };
+        for (fi, &facing) in sheet.facings().iter().enumerate() {
+            for frame in 0..animation.frames {
+                let (x, y, w, h) = sheet.frame_rect(ai, fi, frame);
+                let (ax, ay) = sheet.anchor_for(ai, fi, frame);
+                // Trimmed to what is drawn: a rendered frame is mostly
+                // transparent, and the atlas has to fit the GPU's texture
+                // limit (8192 a side by default). The anchor moves with the
+                // trim, so it lands as before.
+                let (bx, by, bw, bh) = drawn_bounds(sheet, x, y, w, h, sheet.scale);
+                // A wall's arm is anchored on its post, outside it.
+                let anchor = (ax as i32 - bx as i32, ay as i32 - by as i32);
+                let anchor = (anchor.0 as i16, anchor.1 as i16);
+                if sheet.colour {
+                    let mut c = ColourCanvas::new(bw, bh, anchor);
+                    for yy in 0..bh {
+                        for xx in 0..bw {
+                            let (sx, sy) = (x + bx + xx, y + by + yy);
+                            let i = (yy * bw + xx) as usize;
+                            c.rgba[i * 4..i * 4 + 4].copy_from_slice(&sheet.rgba_at(sx, sy));
+                            c.mask[i] = sheet.mask_at(sx, sy);
+                        }
+                    }
+                    let shadow = split.then(|| split_shadow(&mut c, sheet.scale)).flatten();
+                    let entry = |canvas, shadow| ColourEntry {
+                        kind,
+                        facing,
+                        anim,
+                        index: frame as u8,
+                        scale: sheet.scale as u8,
+                        canvas,
+                        shadow,
+                    };
+                    colour.push(entry(c, false));
+                    if let Some(sh) = shadow {
+                        colour.push(entry(sh, true));
+                    }
+                    continue;
+                }
+                let mut c = Canvas::new(bw, bh, anchor);
+                for yy in 0..bh {
+                    for xx in 0..bw {
+                        let idx = sheet.index_at(x + bx + xx, y + by + yy);
+                        c.set(xx as i32, yy as i32, idx);
+                    }
+                }
+                canvases.push(Entry {
+                    kind,
+                    facing,
+                    anim,
+                    index: frame as u8,
+                    scale: sheet.scale as u8,
+                    canvas: c,
+                });
+            }
+        }
+    }
+    (canvases, colour)
+}
+
+/// Whether a colour pixel is shadow on the ground: translucent and black
+/// or nearly (`docs/look/colour-sets.md`: the shadow catcher's translucent
+/// black, and the soft edge where the thing meets it).
+fn is_shadow(p: &[u8]) -> bool {
+    p[3] < 255 && p[0].max(p[1]).max(p[2]) < 16
+}
+
+/// Takes the shadow out of a colour frame into a frame of its own with the
+/// same anchor, each then trimmed to what it draws on multiples of `scale`
+/// as [`drawn_bounds`] trims: `None`, the frame untouched, if it casts
+/// none.
+fn split_shadow(c: &mut ColourCanvas, scale: u32) -> Option<ColourCanvas> {
+    let mut sh = ColourCanvas::new(c.w, c.h, c.anchor);
+    let mut any = false;
+    for i in 0..(c.w * c.h) as usize {
+        let p = &mut c.rgba[i * 4..i * 4 + 4];
+        if p[3] != 0 && is_shadow(p) {
+            sh.rgba[i * 4..i * 4 + 4].copy_from_slice(p);
+            p.fill(0);
+            c.mask[i] = 0;
+            any = true;
+        }
+    }
+    if !any {
+        // Nothing moved: the frame is as it was.
+        return None;
+    }
+    *c = trim(c, scale);
+    Some(trim(&sh, scale))
+}
+
+/// A colour frame cut down to the pixels it draws, on multiples of `scale`,
+/// its anchor moved with the cut; one transparent pixel if it draws none.
+fn trim(c: &ColourCanvas, scale: u32) -> ColourCanvas {
+    let (w, h) = (c.w as usize, c.h as usize);
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if c.rgba[(y * w + x) * 4 + 3] != 0 {
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+            }
+        }
+    }
+    if x1 == 0 {
+        return ColourCanvas::new(1, 1, c.anchor);
+    }
+    let s = scale.max(1) as usize;
+    let (x0, y0) = (x0 / s * s, y0 / s * s);
+    let (x1, y1) = ((x1.div_ceil(s) * s).min(w), (y1.div_ceil(s) * s).min(h));
+    let mut out = ColourCanvas::new(
+        (x1 - x0) as u32,
+        (y1 - y0) as u32,
+        (c.anchor.0 - x0 as i16, c.anchor.1 - y0 as i16),
+    );
+    for y in y0..y1 {
+        let (src, dst) = (y * w + x0, (y - y0) * out.w as usize);
+        let n = x1 - x0;
+        out.rgba[dst * 4..(dst + n) * 4].copy_from_slice(&c.rgba[src * 4..(src + n) * 4]);
+        out.mask[dst..dst + n].copy_from_slice(&c.mask[src..src + n]);
+    }
+    out
 }
 
 /// The smallest rectangle of a sheet's frame at (`x`, `y`), `w` by `h`,
@@ -1142,6 +1283,7 @@ fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
         anims: HashMap::new(),
         variants: HashMap::new(),
         stand_ins: HashMap::new(),
+        shadows: HashMap::new(),
         loaded_sets: Vec::new(),
         trees: vec![kinds::TREE],
     }
@@ -1202,9 +1344,12 @@ fn pack_colour(atlas: &mut Atlas, mut entries: Vec<ColourEntry>, max_side: u32) 
             anchor_x: c.anchor.0,
             anchor_y: c.anchor.1,
         });
-        atlas
-            .lookup
-            .insert((e.kind, e.facing, e.anim, e.index), atlas.frames.len() - 1);
+        let table = if e.shadow {
+            &mut atlas.shadows
+        } else {
+            &mut atlas.lookup
+        };
+        table.insert((e.kind, e.facing, e.anim, e.index), atlas.frames.len() - 1);
         for row in 0..c.h {
             let src = (row * c.w) as usize;
             let dst = (((pg * height) + py + row) * width + px) as usize;
@@ -1238,6 +1383,76 @@ pub fn arch_index(arch: sim::civs::Architecture) -> u8 {
         Architecture::Egyptian => 1,
         Architecture::Mesopotamian => 2,
         Architecture::Asian => 3,
+    }
+}
+
+/// The architectures (by [`arch_index`]) whose colour sets an atlas holds
+/// (`docs/look/buildings.md`, "Memory"): those of the civilisations in a
+/// match. The first, the Greek, is always among them, as every other's
+/// fallback and the look of a side with no civilisation.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Architectures(u8);
+
+impl Architectures {
+    /// The first architecture alone.
+    pub const FIRST: Architectures = Architectures(1);
+    /// All four.
+    pub const ALL: Architectures = Architectures(0b1111);
+
+    /// These and `arch` too.
+    pub fn with(self, arch: u8) -> Architectures {
+        Architectures(self.0 | (1 << (arch & 3)))
+    }
+
+    /// Whether `arch` is among them.
+    pub fn contains(self, arch: u8) -> bool {
+        arch < 4 && self.0 & (1 << arch) != 0
+    }
+
+    /// The first architecture and those of `civs`.
+    pub fn of_civs(civs: impl IntoIterator<Item = sim::Civ>) -> Architectures {
+        civs.into_iter().fold(Architectures::FIRST, |a, c| {
+            a.with(arch_index(c.info().architecture))
+        })
+    }
+
+    /// Those of the sides of the match `sim` holds; a side with no
+    /// civilisation builds in the first.
+    pub fn of_match(sim: &sim::Simulation) -> Architectures {
+        Architectures::of_civs((0..sim.players().len()).filter_map(|p| sim.civ(p as sim::PlayerId)))
+    }
+
+    /// Whether a colour set of this name is loaded with these: one of a
+    /// kind in an architecture among them, or of no architecture at all
+    /// (the first's, the trees, the scenery).
+    pub fn keeps(self, set_name: &str) -> bool {
+        set_target(set_name).is_none_or(|(_, _, arch)| self.contains(arch))
+    }
+
+    /// Whether every one of `other` is among these.
+    pub fn covers(self, other: Architectures) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// How many there are.
+    pub fn len(self) -> usize {
+        self.0.count_ones() as usize
+    }
+
+    /// Never: the first is always there.
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl std::fmt::Display for Architectures {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let names = ["Greek", "Egyptian", "Mesopotamian", "Asian"];
+        let on: Vec<&str> = (0..4)
+            .filter(|&a| self.contains(a))
+            .map(|a| names[a as usize])
+            .collect();
+        f.write_str(&on.join(", "))
     }
 }
 
@@ -2964,6 +3179,7 @@ mod tests {
                 index: 0,
                 scale: 2,
                 canvas: c,
+                shadow: false,
             }],
             256,
         );
@@ -3439,5 +3655,205 @@ mod tests {
         let old = Atlas::placeholder();
         assert_eq!(old.tree_look(3, 4), kinds::TREE);
         assert_eq!(old.tree_offset(3, 4), (0.0, 0.0));
+    }
+
+    /// The building kinds the new art draws, by their sets' plain names.
+    const BUILDING_SETS: [&str; 18] = [
+        "academy",
+        "archery_range",
+        "barracks",
+        "dock",
+        "farm",
+        "gate",
+        "government_centre",
+        "house",
+        "market",
+        "palisade_wall",
+        "siege_workshop",
+        "stable",
+        "stone_wall",
+        "storehouse",
+        "temple",
+        "town_center",
+        "watch_tower",
+        "wonder",
+    ];
+
+    /// A look directory with every building kind in every architecture,
+    /// and a tree, as tiny fixtures.
+    fn four_architectures(test: &str) -> std::path::PathBuf {
+        let dir = crate::sheets::fixture::scratch(test);
+        for base in BUILDING_SETS {
+            for suffix in ["", "_egyptian", "_mesopotamian", "_asian"] {
+                crate::sheets::fixture::write_building(&dir, &format!("{base}{suffix}"));
+            }
+        }
+        crate::sheets::fixture::write_set(&dir, "tree_1");
+        dir
+    }
+
+    /// The atlas a match between `civs` gets, from the fixtures in `look`.
+    fn match_atlas(look: &std::path::Path, civs: &[sim::Civ]) -> Atlas {
+        let archs = Architectures::of_civs(civs.iter().copied());
+        let (sheets, errors) = crate::sheets::load_art_for(None, Some(look), true, archs);
+        assert!(errors.is_empty(), "{errors:?}");
+        Atlas::with_sheets(&sheets)
+    }
+
+    /// Whether the atlas has any frame of a look of architecture `arch`.
+    fn holds_architecture(atlas: &Atlas, arch: u8) -> bool {
+        atlas.frames().iter().any(|f| {
+            BUILDING_SETS.iter().any(|b| {
+                let k = kind_for_set(b).unwrap();
+                // The first architecture's first look is the kind itself.
+                (arch == 0 && f.kind == k) || (0..4).any(|age| f.kind == look_id(k, age, arch))
+            })
+        })
+    }
+
+    /// Per-match loading (`docs/look/buildings.md`, "Memory"): a Greek
+    /// against an Egyptian holds the Greek and Egyptian buildings and no
+    /// Mesopotamian or Asian ones, never decoded; every kind resolves for
+    /// both sides to its own architecture's colour frames; the trees are
+    /// there whoever plays.
+    #[test]
+    fn a_match_holds_only_the_buildings_of_its_architectures() {
+        use sim::Civ;
+        let look = four_architectures("per-match");
+        let atlas = match_atlas(&look, &[Civ::Greeks, Civ::Egyptians]);
+        assert!(atlas
+            .loaded_sets
+            .iter()
+            .all(|n| !n.ends_with("_mesopotamian") && !n.ends_with("_asian")));
+        assert_eq!(atlas.loaded_sets.len(), 18 * 2 + 1);
+        assert!(!holds_architecture(&atlas, 2) && !holds_architecture(&atlas, 3));
+        assert!(holds_architecture(&atlas, 1));
+        assert!(atlas.frame(TREE_LOOK + 1, 0).is_some());
+        for base in BUILDING_SETS {
+            let kind = kind_for_set(base).unwrap();
+            for civ in [Civ::Greeks, Civ::Egyptians] {
+                let arch = arch_index(civ.info().architecture);
+                for age in 0..4 {
+                    let id = atlas.variant(kind, age, arch);
+                    let want = if arch == 0 {
+                        kind
+                    } else {
+                        look_id(kind, 0, arch)
+                    };
+                    assert_eq!(id, want, "{base} for the {civ:?} in age {age}");
+                    for anim in [Anim::Idle, Anim::Construction, Anim::Rubble] {
+                        let (f, _) = atlas.frame_at(id, 0, anim, 0).unwrap();
+                        assert!(f.page & COLOUR_PAGE != 0, "{base} {anim:?}");
+                        assert_eq!(f.anim, anim, "{base} for the {civ:?}");
+                    }
+                }
+            }
+        }
+        // The colour pages hold about half of what all four would.
+        let all = match_atlas(&look, &Civ::ALL);
+        assert!(
+            atlas.colour.len() < all.colour.len() * 3 / 4,
+            "{} of {}",
+            atlas.colour.len(),
+            all.colour.len()
+        );
+        let _ = std::fs::remove_dir_all(&look);
+    }
+
+    /// Another match's atlas swaps the sets: what the last match had and
+    /// this one has not is gone, what it has is there. A match of all four
+    /// architectures holds them all, and a side with no civilisation
+    /// builds in the first.
+    #[test]
+    fn switching_matches_swaps_the_architectures_loaded() {
+        use sim::Civ;
+        let look = four_architectures("switch");
+        let first = match_atlas(&look, &[Civ::Greeks, Civ::Shang]);
+        assert!(holds_architecture(&first, 3) && !holds_architecture(&first, 1));
+        let second = match_atlas(&look, &[Civ::Babylonians, Civ::Egyptians]);
+        assert!(!holds_architecture(&second, 3));
+        assert!(holds_architecture(&second, 1) && holds_architecture(&second, 2));
+        let house = kinds::HOUSE;
+        assert_eq!(second.variant(house, 0, 2), look_id(house, 0, 2));
+        assert_eq!(
+            second.variant(house, 0, 3),
+            house,
+            "the first's, as a fallback"
+        );
+        assert_eq!(first.variant(house, 0, 3), look_id(house, 0, 3));
+
+        let all = match_atlas(
+            &look,
+            &[Civ::Greeks, Civ::Egyptians, Civ::Babylonians, Civ::Shang],
+        );
+        assert_eq!(all.loaded_sets.len(), 18 * 4 + 1);
+        assert!((0..4).all(|a| holds_architecture(&all, a)));
+        assert_eq!(Architectures::of_civs(Civ::ALL), Architectures::ALL);
+        assert_eq!(Architectures::of_civs([]), Architectures::FIRST);
+        assert_eq!(
+            Architectures::of_civs([Civ::Persians, Civ::Assyrians]).to_string(),
+            "Greek, Mesopotamian"
+        );
+        assert!(Architectures::ALL.covers(Architectures::FIRST.with(2)));
+        assert!(!Architectures::FIRST.covers(Architectures::FIRST.with(1)));
+        // The sides of a match, from its configuration.
+        let sim = sim::Simulation::new(
+            1,
+            sim::SimConfig {
+                civs: vec![Civ::Phoenicians, Civ::Egyptians],
+                ..sim::SimConfig::default()
+            },
+        );
+        assert_eq!(
+            Architectures::of_match(&sim),
+            Architectures::FIRST.with(1),
+            "the Phoenicians build as the Greeks do"
+        );
+        let none = sim::Simulation::new(1, sim::SimConfig::default());
+        assert_eq!(Architectures::of_match(&none), Architectures::FIRST);
+        let _ = std::fs::remove_dir_all(&look);
+    }
+
+    /// A colour wall's shadow on the ground is cut apart from it, the same
+    /// pixels at the same place against its anchor, so the scene can lay it
+    /// under the wall's other pieces; any other building keeps its shadow.
+    #[test]
+    fn a_colour_wall_casts_its_shadow_apart() {
+        use crate::sheets::fixture;
+        let wall = fixture::building("shadow", "stone_wall");
+        let house = fixture::building("shadow", "house");
+        let a = Atlas::with_sheets(&[wall, house]);
+        // Every drawn pixel of a frame, against its anchor.
+        let drawn = |f: &Frame| -> Vec<((i32, i32), [u8; 4])> {
+            let mut out = Vec::new();
+            for y in 0..f.h as u32 {
+                for x in 0..f.w as u32 {
+                    let p = a.rgba_at(f.page, f.x as u32 + x, f.y as u32 + y);
+                    if p[3] != 0 {
+                        let at = (x as i32 - f.anchor_x as i32, y as i32 - f.anchor_y as i32);
+                        out.push((at, p));
+                    }
+                }
+            }
+            out
+        };
+        let (post, _) = a.frame(kinds::STONE_WALL, 0).unwrap();
+        let body = drawn(post);
+        assert!(body.iter().all(|&(_, p)| p != fixture::SHADOW));
+        assert!(body.iter().any(|&(_, p)| p == fixture::CLOTH));
+        let shadow = a.shadow_of(post).expect("the post casts a shadow");
+        let (house, _) = a.frame(kinds::HOUSE, 0).unwrap();
+        let whole = drawn(house);
+        let cast: Vec<_> = whole
+            .iter()
+            .filter(|&&(_, p)| p == fixture::SHADOW)
+            .copied()
+            .collect();
+        assert_eq!(drawn(shadow), cast, "the same shadow, at the same place");
+        assert_eq!(body.len() + cast.len(), whole.len());
+        assert!(a.shadow_of(house).is_none());
+        // A stage with no shadow has none apart.
+        let site = a.stage_frame(kinds::STONE_WALL, 0).unwrap();
+        assert!(a.shadow_of(site).is_none());
     }
 }

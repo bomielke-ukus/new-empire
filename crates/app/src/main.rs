@@ -41,6 +41,7 @@ use view::hints::{self, Hints, Keys};
 use view::hud::{Action, BOTTOM_PANEL, TOP_BAR};
 use view::minimap::{Minimap, MinimapRect};
 use view::shell::{self, Results, Side};
+use view::sprites::Architectures;
 use view::{
     Atlas, Camera, Capture, Control, FogLights, Ghost, Hud, HudInput, LoadRow, Notice, NoticeKind,
     Notices, Scene, SceneOptions, Screen, Settings, SettingsPage, Setup, ShellAction, ShellInput,
@@ -169,6 +170,11 @@ struct App {
     window: Option<Arc<Window>>,
     gpu: Option<Gpu>,
     atlas: Atlas,
+    /// With the new art on (as the settings had it at the start), the
+    /// architectures whose buildings the atlas holds: those of the match,
+    /// the editor or the diorama on screen ([`App::ensure_art`]). `None`
+    /// with it off: then the atlas never changes.
+    art: Option<Architectures>,
     /// The ground's textures, with the new art on and the art found
     /// (`docs/look/ground.md`); the ground is drawn as before without.
     ground_art: Option<view::ground::GroundArt>,
@@ -464,24 +470,38 @@ fn random_seed() -> u64 {
 /// The atlas the game draws with: rendered sprite sets replace
 /// placeholders wherever they exist, and with the new art on
 /// (`Settings::new_art`) the colour sets under `assets/look` replace the
-/// indexed sets of their names.
-fn load_atlas(new_art: bool) -> Atlas {
+/// indexed sets of their names, of the architectures `archs` only
+/// (`docs/look/buildings.md`, "Memory").
+fn load_atlas(new_art: bool, archs: Architectures) -> Atlas {
+    let started = Instant::now();
     let sprites = view::sheets::default_dir();
     let look = if new_art {
         view::sheets::look_dir()
     } else {
         None
     };
-    let (sheets, errors) = view::sheets::load_art(sprites.as_deref(), look.as_deref(), new_art);
+    let (sheets, errors) =
+        view::sheets::load_art_for(sprites.as_deref(), look.as_deref(), new_art, archs);
     for e in &errors {
         eprintln!("warning: {e}");
     }
+    let decoded = started.elapsed();
     let atlas = Atlas::with_sheets(&sheets);
+    drop(sheets);
     if !atlas.loaded_sets.is_empty() {
         eprintln!("rendered sprite sets: {}", atlas.loaded_sets.join(", "));
     }
     if atlas.colour_pages > 0 {
-        eprintln!("new art: {} colour page(s)", atlas.colour_pages);
+        eprintln!(
+            "new art: {archs} buildings, {} colour page(s) of {}x{} ({} MiB with masks); \
+             read in {} ms, packed in {} ms",
+            atlas.colour_pages,
+            atlas.colour_width,
+            atlas.colour_height,
+            (atlas.colour.len() + atlas.mask.len()) >> 20,
+            decoded.as_millis(),
+            (started.elapsed() - decoded).as_millis()
+        );
     }
     atlas
 }
@@ -502,7 +522,7 @@ impl App {
         camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
         let prev_pos = sim.world().pos.clone();
         // The new art waits for the settings (`App::load_settings`).
-        let atlas = load_atlas(false);
+        let atlas = load_atlas(false, Architectures::ALL);
         // Recordings under assets/sounds replace the placeholder sounds by
         // cue name, as rendered sprite sets replace placeholder art.
         let mut library = audio::placeholder::library();
@@ -525,6 +545,7 @@ impl App {
             window: None,
             gpu: None,
             atlas,
+            art: None,
             ground_art: None,
             // No scenery sets in the atlas yet: none, until the new art
             // and a map come.
@@ -695,10 +716,37 @@ impl App {
         self.read_settings();
         self.hints = Hints::new(self.settings.hints, &self.settings.hints_shown);
         if self.settings.new_art {
-            self.atlas = load_atlas(true);
+            // The title's diorama first, whose sides have no civilisation:
+            // the first architecture's buildings.
+            self.atlas = load_atlas(true, Architectures::FIRST);
+            self.art = Some(Architectures::FIRST);
             self.ground_art = view::ground::GroundArt::find(view::sheets::look_dir().as_deref());
             self.scenery =
                 view::scenery::Scenery::new(self.sim.map(), self.sim.seed(), &self.atlas);
+        }
+    }
+
+    /// With the new art on, makes the atlas hold the buildings of the
+    /// architectures `want` and no others (`docs/look/buildings.md`,
+    /// "Memory"), rebuilding it and putting it on the GPU if it holds
+    /// another set: called as a match, a replay, a save or the editor is
+    /// entered, the moment the game already takes to set the world up. The
+    /// caller makes the world's scenery afresh after it (its sprites point
+    /// into the pages); the diorama's is made again here. Nothing with the
+    /// new art off.
+    fn ensure_art(&mut self, want: Architectures) {
+        if self.art.is_none_or(|have| have == want) {
+            return;
+        }
+        self.atlas = load_atlas(true, want);
+        self.art = Some(want);
+        if let Some(gpu) = &mut self.gpu {
+            gpu.renderer
+                .upload_atlas(&gpu.device, &gpu.queue, &self.atlas);
+        }
+        if let Some(d) = &self.diorama {
+            self.diorama_scenery =
+                view::scenery::Scenery::new(d.sim().map(), d.sim().seed(), &self.atlas);
         }
     }
 
@@ -1662,6 +1710,20 @@ impl App {
             }
         }
         let behind = behind && self.diorama.is_some();
+        // The diorama's buildings: any atlas holding its architectures will
+        // do, so coming back from a match keeps the match's rather than
+        // loading again with nothing to cover it (the first architecture,
+        // which its sides build in, is always there).
+        if let Some(want) = self
+            .diorama
+            .as_ref()
+            .filter(|_| behind)
+            .map(|d| Architectures::of_match(d.sim()))
+        {
+            if self.art.is_some_and(|have| !have.covers(want)) {
+                self.ensure_art(want);
+            }
+        }
         let mut input = self.shell_input();
         input.world_behind = behind;
         let screen = match self.shell {
@@ -2038,7 +2100,8 @@ impl App {
                 self.settings.player_symbols = self.settings.player_symbols.step(delta);
                 self.apply_and_save_settings();
             }
-            // Kept now, drawn from the next start: the atlas is built once.
+            // Kept now, drawn from the next start: the atlas is rebuilt for
+            // each match, but with the art the game started with (`App::art`).
             ShellAction::ToggleNewArt => {
                 self.settings.new_art = !self.settings.new_art;
                 self.apply_and_save_settings();
@@ -2219,6 +2282,8 @@ impl App {
         self.recording = None;
         self.shell = Shell::Match;
         self.diorama_shown = false;
+        // The buildings of the match's civilisations, and no others.
+        self.ensure_art(Architectures::of_match(&self.sim));
         self.scenery = view::scenery::Scenery::new(self.sim.map(), self.sim.seed(), &self.atlas);
         if let Some(gpu) = &mut self.gpu {
             gpu.upload_map(self.sim.map());

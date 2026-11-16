@@ -726,6 +726,32 @@ const SCENES: &[Scene] = &[
             "540",
         ],
     },
+    Scene {
+        // Every Greek building in the new art, finished (`--scenario
+        // town`): the Wonder, the Town Center and the tall buildings at the
+        // back, the training buildings, farms, a Watch Tower, a stone wall
+        // turning a corner with a gate in it, a palisade and a Dock on the
+        // water, with villagers and soldiers for scale. Only the Greek
+        // buildings are loaded (`docs/look/buildings.md`, "Memory"). The
+        // art is still being made: expect to re-record this as it changes.
+        name: "look-town",
+        args: &[
+            "--scenario",
+            "town",
+            "--civ",
+            "Greeks",
+            "--look",
+            "1",
+            "--fog",
+            "0",
+            "--zoom",
+            "1",
+            "--width",
+            "1600",
+            "--height",
+            "900",
+        ],
+    },
 ];
 
 fn golden_dir() -> PathBuf {

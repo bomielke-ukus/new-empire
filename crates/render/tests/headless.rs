@@ -240,52 +240,64 @@ fn a_colour_frame_draws_as_the_rasteriser_draws_it() {
         });
     }
     // Unorm, not sRGB, so the GPU writes and blends the bytes as the
-    // rasteriser does.
+    // rasteriser does. Twice: with the atlas the renderer was made with,
+    // and with it uploaded in place of another, as a match that brings
+    // other architectures' buildings does (`docs/look/buildings.md`,
+    // "Memory").
     let format = wgpu::TextureFormat::Rgba8Unorm;
-    let mut renderer = Renderer::new(&device, &queue, format, &atlas);
-    let clear = [51u8, 77, 102, 255];
-    renderer.clear = wgpu::Color {
-        r: 0.2,
-        g: 0.3,
-        b: 0.4,
-        a: 1.0,
-    };
-    let target = target(&device, format, w, h);
-    let camera = Camera::new(16, 16, (w as f32, h as f32));
-    renderer.render(
-        &device,
-        &queue,
-        &target.create_view(&Default::default()),
-        &camera,
-        &scene,
-        None,
-    );
-    let gpu = read_back(&device, &queue, &target, w, h);
-    let mut cpu = view::raster::Image::new(w, h, clear);
-    view::raster::draw_sprites(
-        &mut cpu,
-        &camera,
-        &atlas,
-        &view::palette::texture(),
-        &scene.ui,
-    );
-    // Compare the middle of every texel's 8 x 8 block, a step or two of
-    // float rounding allowed.
-    for i in 0..3 {
-        for ty in 0..2 {
-            for tx in 0..4 {
-                let (x, y) = (8 + i * 48 + tx * 8 + 4, 8 + ty * 8 + 4);
-                let g = gpu[(y * w + x) as usize];
-                let c = cpu.get(x as i32, y as i32);
-                assert!(
-                    (0..3).all(|k| (g[k] as i32 - c[k] as i32).abs() <= 2),
-                    "sprite {i} texel ({tx}, {ty}): GPU {g:?}, rasteriser {c:?}"
-                );
+    for swapped in [false, true] {
+        let mut renderer = if swapped {
+            let mut r = Renderer::new(&device, &queue, format, &Atlas::placeholder());
+            r.upload_atlas(&device, &queue, &atlas);
+            r
+        } else {
+            Renderer::new(&device, &queue, format, &atlas)
+        };
+        let clear = [51u8, 77, 102, 255];
+        renderer.clear = wgpu::Color {
+            r: 0.2,
+            g: 0.3,
+            b: 0.4,
+            a: 1.0,
+        };
+        let target = target(&device, format, w, h);
+        let camera = Camera::new(16, 16, (w as f32, h as f32));
+        renderer.render(
+            &device,
+            &queue,
+            &target.create_view(&Default::default()),
+            &camera,
+            &scene,
+            None,
+        );
+        let gpu = read_back(&device, &queue, &target, w, h);
+        let mut cpu = view::raster::Image::new(w, h, clear);
+        view::raster::draw_sprites(
+            &mut cpu,
+            &camera,
+            &atlas,
+            &view::palette::texture(),
+            &scene.ui,
+        );
+        // Compare the middle of every texel's 8 x 8 block, a step or two
+        // of float rounding allowed.
+        for i in 0..3 {
+            for ty in 0..2 {
+                for tx in 0..4 {
+                    let (x, y) = (8 + i * 48 + tx * 8 + 4, 8 + ty * 8 + 4);
+                    let g = gpu[(y * w + x) as usize];
+                    let c = cpu.get(x as i32, y as i32);
+                    assert!(
+                        (0..3).all(|k| (g[k] as i32 - c[k] as i32).abs() <= 2),
+                        "sprite {i} texel ({tx}, {ty}), atlas swapped {swapped}: \
+                         GPU {g:?}, rasteriser {c:?}"
+                    );
+                }
             }
         }
+        // And the owners differ where the mask is set.
+        assert_ne!(cpu.get(12, 12), cpu.get(60 + 24, 12));
     }
-    // And the owners differ where the mask is set.
-    assert_ne!(cpu.get(12, 12), cpu.get(60 + 24, 12));
 }
 
 /// The ground painted from its textures (`docs/look/ground.md`) by the GPU

@@ -2,7 +2,8 @@
 //! mapview [--seed N] [--size N] [--players N] [--ticks N] [--stockpile N]
 //!         [--zoom 0.5|1|1.5|2] [--width W] [--height H]
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
-//!         [--scenario gather|build|stages|ages|army|battle|siege|scout] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1] [--symbols off|selected|always]
+//!         [--scenario gather|build|stages|ages|army|battle|siege|walls|scout|town]
+//!         [--civ NAME] [--enemy-civ NAME] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1] [--symbols off|selected|always]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
 //!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0] [--look 1] [--time SECS]
@@ -24,7 +25,13 @@
 //! the ground is painted from its textures under `look/terrain` and
 //! scattered with scenery (`docs/look/ground.md`); `--time` is the
 //! ground's clock in seconds (the water's drift and the foam's breath),
-//! 0 by default.
+//! 0 by default. `--civ` gives player 0 a civilisation by the sim's name
+//! (`Greeks`, `Egyptians`, `Shang`, ...) and `--enemy-civ` player 1, in a
+//! plain start and in every `--scenario`; with either, `--look 1` loads
+//! only the buildings of their architectures, as a match in the game does
+//! (`docs/look/buildings.md`, "Memory"). `--scenario town` lays out one of
+//! every building, finished, for player 0 on a drawn map with a shore:
+//! `--look 1 --fog 0 --zoom 1 --width 1600 --height 900` shows it whole.
 
 use sim::kinds;
 use std::process::ExitCode;
@@ -88,6 +95,36 @@ struct Args {
     difficulty: Option<String>,
     /// Write the controls as Markdown here, and nothing else.
     keys: Option<String>,
+    /// Player 0's civilisation (`--civ`).
+    civ: Option<sim::Civ>,
+    /// Player 1's (`--enemy-civ`).
+    enemy_civ: Option<sim::Civ>,
+}
+
+/// A civilisation by its name in `sim::civs`, any case.
+fn civ_named(flag: &str, name: &str) -> Result<sim::Civ, String> {
+    sim::Civ::ALL
+        .into_iter()
+        .find(|c| c.name().eq_ignore_ascii_case(name))
+        .ok_or_else(|| {
+            let names: Vec<&str> = sim::Civ::ALL.iter().map(|c| c.name()).collect();
+            format!(
+                "{flag}: no civilisation called {name}; one of {}",
+                names.join(", ")
+            )
+        })
+}
+
+impl Args {
+    /// Each player's civilisation as `--civ` and `--enemy-civ` give them:
+    /// none without either; player 0 a Greek if only the enemy's is given.
+    fn civs(&self) -> Vec<sim::Civ> {
+        match (self.civ, self.enemy_civ) {
+            (None, None) => Vec::new(),
+            (Some(c), None) => vec![c],
+            (c, Some(e)) => vec![c.unwrap_or(sim::Civ::Greeks), e],
+        }
+    }
 }
 
 fn parse() -> Result<Args, String> {
@@ -132,6 +169,8 @@ fn parse() -> Result<Args, String> {
         difficulty: None,
         keys: None,
         map: sim::MapKind::Inland,
+        civ: None,
+        enemy_civ: None,
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -209,6 +248,8 @@ fn parse() -> Result<Args, String> {
             "--fog" => a.fog = val == "1" || val == "true",
             "--screen" => a.screen = Some(val.clone()),
             "--difficulty" => a.difficulty = Some(val.clone()),
+            "--civ" => a.civ = Some(civ_named(key, val)?),
+            "--enemy-civ" => a.enemy_civ = Some(civ_named(key, val)?),
             _ => return Err(format!("unknown flag {key}")),
         }
         i += 2;
@@ -218,10 +259,14 @@ fn parse() -> Result<Args, String> {
 
 /// The rendered sets to draw with: `--assets` (or the checkout's
 /// `assets/sprites`), and with `--look 1` the colour sets in `look` beside
-/// it, as the game loads them with the new art on.
-fn load_sheets(a: &Args) -> (Vec<view::sheets::Sheet>, Vec<String>) {
+/// it, as the game loads them with the new art on: of the architectures
+/// `archs` only.
+fn load_sheets(
+    a: &Args,
+    archs: view::sprites::Architectures,
+) -> (Vec<view::sheets::Sheet>, Vec<String>) {
     let sprites = a.assets.clone().or_else(view::sheets::default_dir);
-    view::sheets::load_art(sprites.as_deref(), look_dir(a).as_deref(), a.look)
+    view::sheets::load_art_for(sprites.as_deref(), look_dir(a).as_deref(), a.look, archs)
 }
 
 /// The new art's directory: `look` beside `--assets`, or the checkout's.
@@ -278,7 +323,7 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
     let behind = matches!(name, "title" | "campaigns" | "briefing");
     let sheet_dir = a.assets.clone().or_else(view::sheets::default_dir);
     let atlas = if behind {
-        let (sheets, _) = load_sheets(a);
+        let (sheets, _) = load_sheets(a, view::sprites::Architectures::ALL);
         Atlas::with_sheets(&sheets)
     } else {
         Atlas::placeholder()
@@ -463,6 +508,7 @@ fn run() -> Result<(), String> {
             players: a.players,
         },
         starting_stockpile: a.stockpile.map_or(sim::DEFAULT_STOCKPILE, |n| [n; 4]),
+        civs: a.civs(),
         ..sim::SimConfig::default()
     };
     // This is the front door a setup screen would use, so it runs the
@@ -510,6 +556,14 @@ fn run() -> Result<(), String> {
             }
         }
         (sim, seed)
+    } else if a.scenario.as_deref() == Some("town") {
+        let sc = town(&a)?;
+        let mut sim = sim::Simulation::new(a.seed, sc.config());
+        for _ in 0..a.ticks {
+            sim.step();
+            feedback.observe(&sim);
+        }
+        (sim, a.seed)
     } else {
         let mut sim = sim::Simulation::new(a.seed, config);
         if let Some(name) = &a.scenario {
@@ -556,7 +610,14 @@ fn run() -> Result<(), String> {
             })
         })
         .unwrap_or_else(view::detail::Detail::flat);
-    let (sheets, errors) = load_sheets(&a);
+    // Everything, unless the civilisations are named: then only their
+    // architectures' buildings, as the game loads a match's.
+    let archs = if a.civ.is_some() || a.enemy_civ.is_some() {
+        view::sprites::Architectures::of_match(&sim)
+    } else {
+        view::sprites::Architectures::ALL
+    };
+    let (sheets, errors) = load_sheets(&a, archs);
     for e in &errors {
         eprintln!("warning: {e}");
     }
@@ -815,6 +876,168 @@ fn run() -> Result<(), String> {
         println!("wrote minimap {path}");
     }
     Ok(())
+}
+
+/// The town (`--scenario town`): one of every building player 0 can
+/// have, finished, on a drawn map of meadow with the sea along one side,
+/// laid in rows across the screen so the whole of it fits 1600 x 900 at
+/// zoom 1: the Wonder, the Town Center and the tall buildings at the back,
+/// the training buildings in the middle, and in front the farms, a Watch
+/// Tower, a run of stone wall turning a corner with a gate in it, a run of
+/// palisade, and a Dock on the water; villagers and soldiers about them for
+/// scale. Player 1 has a house off in a corner. `--civ` and `--enemy-civ`
+/// pick their civilisations, so their architectures.
+fn town(a: &Args) -> Result<sim::Scenario, String> {
+    use sim::scenario::{Control, DrawnMap, Goal, Objective, Placement, ScenarioMap, Side};
+    const SIZE: i32 = 72;
+    /// Where the sea begins: tiles with `x - y` at least this.
+    const SHORE: i32 = 14;
+    /// The town's offset from the map's corner, so no edge of the map is in
+    /// the picture.
+    const AT: i32 = 12;
+    let terrain: Vec<String> = (0..SIZE)
+        .map(|y| {
+            (0..SIZE)
+                .map(|x| match x - y {
+                    d if d >= SHORE + 4 => 'W',
+                    d if d >= SHORE => 'w',
+                    _ => 'g',
+                })
+                .collect()
+        })
+        .collect();
+    // Screen coordinates to tiles: `u` across the screen (x - y), `v` down
+    // it (x + y), a building's anchor tile as `Placement::at` takes it.
+    let tile = |u: i32, v: i32| (AT + (u + v).div_euclid(2), AT + (v - u).div_euclid(2));
+    let mut placements: Vec<Placement> = Vec::new();
+    let mut taken: std::collections::HashSet<(i32, i32)> = Default::default();
+    let mut put = |kind: &str, owner: u8, at: (i32, i32), count: u16| -> Result<(), String> {
+        let id = kinds::by_name(kind).ok_or_else(|| format!("town: no kind {kind}"))?;
+        let info = kinds::info(id);
+        if !info.mobile {
+            // The footprint as the sim lays it from its anchor
+            // (`sim::nav::building_centre`): on its own ground, the Dock's
+            // all water and everything else's all land.
+            let fp = info.footprint.max(1) as i32;
+            let (x0, y0) = (at.0 - fp / 2, at.1 - fp / 2);
+            for y in y0..y0 + fp {
+                for x in x0..x0 + fp {
+                    let water = x - y >= SHORE;
+                    if !(0..SIZE).contains(&x) || !(0..SIZE).contains(&y) {
+                        return Err(format!("town: {kind} at {at:?} is off the map"));
+                    }
+                    if water != info.naval {
+                        return Err(format!("town: {kind} at {at:?} is not on its ground"));
+                    }
+                    if !taken.insert((x, y)) {
+                        return Err(format!("town: {kind} at {at:?} overlaps"));
+                    }
+                }
+            }
+        }
+        placements.push(Placement {
+            kind: kind.into(),
+            owner,
+            at,
+            count,
+            tag: None,
+        });
+        Ok(())
+    };
+    // The back row: the tall buildings.
+    for (kind, u) in [
+        ("Wonder", -22),
+        ("Town Center", -12),
+        ("Government Centre", -6),
+        ("Temple", -1),
+        ("Academy", 4),
+        ("Market", 9),
+    ] {
+        put(kind, 0, tile(u, 32), 1)?;
+    }
+    // The middle row: where soldiers and goods are made.
+    for (kind, u) in [
+        ("Barracks", -20),
+        ("Archery Range", -14),
+        ("Stable", -8),
+        ("Siege Workshop", -2),
+        ("Storehouse", 4),
+        ("House", 10),
+    ] {
+        put(kind, 0, tile(u, 42), 1)?;
+    }
+    // The front: fields and a tower, then the walls.
+    put("Farm", 0, tile(-26, 52), 1)?;
+    put("Farm", 0, tile(-21, 52), 1)?;
+    put("Watch Tower", 0, tile(-16, 50), 1)?;
+    // A stone wall along x turning a corner down y, a gate in its first leg.
+    let (wx, wy) = tile(-12, 50);
+    for i in 0..6 {
+        let kind = if i == 3 { "Gate" } else { "Stone Wall" };
+        put(kind, 0, (wx + i, wy), 1)?;
+    }
+    for j in 1..4 {
+        put("Stone Wall", 0, (wx + 5, wy + j), 1)?;
+    }
+    // A palisade along y.
+    let (px, py) = tile(8, 50);
+    for j in 0..6 {
+        put("Palisade Wall", 0, (px, py + j), 1)?;
+    }
+    // The dock just off the shore.
+    put("Dock", 0, tile(16, 47), 1)?;
+    // People for scale: villagers by the fields and the store, soldiers by
+    // the walls.
+    put("Villager", 0, tile(-20, 48), 3)?;
+    put("Villager", 0, tile(2, 47), 2)?;
+    put("Clubman", 0, tile(-8, 57), 2)?;
+    put("Bowman", 0, tile(-3, 58), 2)?;
+    put("Spearman", 0, tile(3, 55), 2)?;
+    // Theirs, out of the picture.
+    put("House", 1, (3, 3), 1)?;
+    let side = |name: &str, control, civ| Side {
+        name: name.into(),
+        control,
+        civ,
+        age: sim::Age::Iron,
+        stockpile: sim::DEFAULT_STOCKPILE,
+        techs: Vec::new(),
+        start: None,
+    };
+    let civs = a.civs();
+    let mut player = side("Town", Control::Player, civs.first().copied());
+    player.start = Some(tile(-4, 38));
+    let sc = sim::Scenario {
+        title: "Town".into(),
+        briefing: Vec::new(),
+        id: "mapview/town".into(),
+        seed: Some(a.seed),
+        map: ScenarioMap::Drawn(DrawnMap {
+            terrain,
+            heights: Vec::new(),
+        }),
+        sides: vec![
+            player,
+            side("Neighbours", Control::Scripted, civs.get(1).copied()),
+        ],
+        standard_start: false,
+        placements,
+        // Something to do, as a scenario must have.
+        objectives: vec![Objective {
+            id: "look".into(),
+            text: "Look around".into(),
+            goal: Goal::Scripted,
+            hidden: false,
+            optional: false,
+        }],
+        triggers: Vec::new(),
+        skirmish_victories: false,
+    };
+    let problems = sc.problems();
+    if !problems.is_empty() {
+        return Err(format!("town: {}", problems.join("; ")));
+    }
+    Ok(sc)
 }
 
 /// Canned command sets so frames show the economy in motion.

@@ -183,7 +183,27 @@ def _roofish(ob, dg):
     """Whether a mesh is mostly faces that look up or down (a roof's slopes,
     its tiles, a ceiling), by area, rather than walls."""
     f = _facing(ob, dg)
-    return f is not None and f[1] > 0.55
+    if f is None or f[1] <= 0.55:
+        return False
+    # A wide, squat block of wall (a ziggurat's stage) is mostly top and
+    # bottom too, but its sides stand straight right round: not a roof.
+    a, b = _world_bounds(ob, dg)
+    dx, dy, dz = b - a
+    if dz > 0.15:
+        me = ob.evaluated_get(dg).data
+        n = len(me.polygons)
+        nz = np.empty(n * 3)
+        me.polygons.foreach_get("normal", nz)
+        area = np.empty(n)
+        me.polygons.foreach_get("area", area)
+        M = np.array(ob.matrix_world)[:3, :3]
+        nw = nz.reshape(-1, 3) @ np.linalg.inv(M)
+        nw /= np.maximum(np.linalg.norm(nw, axis=1, keepdims=True), 1e-9)
+        s2 = abs(np.linalg.det(M)) ** (2 / 3)
+        side = (area[np.abs(nw[:, 2]) < 0.2].sum()) * s2
+        if side >= 0.6 * 2 * (dx + dy) * dz:
+            return False
+    return True
 
 
 def _colours(ob):
@@ -232,7 +252,17 @@ def cut_model(z, height, roof=None, cap=None):
             plan.append((ob, "drop"))
         elif b[2] > z + 1e-4:
             plan.append((ob, "cut" if ob.type == "MESH" and not small else "drop"))
+        elif (ob.type == "MESH" and b[2] >= 0.3 * height and b[2] - a[2] > 0.3
+              and (b[0] - a[0]) * (b[1] - a[1]) > 0.3):
+            # A wall mass whose own top is under the cut, its roof gone:
+            # that top would read as a finished flat roof. Open it up too.
+            plan.append((ob, "top"))
+    courses = []
     for ob, what in plan:
+        zc = z
+        if what == "top":
+            a, b = _world_bounds(ob, dg)
+            zc = b[2] - min(0.12, 0.25 * (b[2] - a[2]))
         if what == "drop":
             bpy.data.objects.remove(ob, do_unlink=True)
             continue
@@ -245,7 +275,7 @@ def cut_model(z, height, roof=None, cap=None):
             bpy.data.meshes.remove(old)
         M = ob.matrix_world
         Minv = M.inverted()
-        co = Minv @ Vector((0, 0, z))
+        co = Minv @ Vector((0, 0, zc))
         no = (M.to_3x3().transposed() @ Vector((0, 0, 1))).normalized()
         bm = bmesh.new()
         bm.from_mesh(me)
@@ -257,23 +287,159 @@ def cut_model(z, height, roof=None, cap=None):
             # Scanfill: nested loops (a hollow wall's outer and inner face)
             # fill as a ring, not as two discs.
             made = bmesh.ops.triangle_fill(bm, use_beauty=True, use_dissolve=False, edges=cut)
-            if cap_mat.name not in me.materials:
-                me.materials.append(cap_mat)
-            cap_index = list(me.materials).index(me.materials[cap_mat.name])
+
+            def slot(m):
+                if m.name not in me.materials:
+                    me.materials.append(m)
+                return list(me.materials).index(me.materials[m.name])
+            cap_index = slot(cap_mat)
             N = M.to_3x3().inverted().transposed()
-            for f in made["geom"]:
-                if not isinstance(f, bmesh.types.BMFace):
-                    continue
+            faces = [f for f in made["geom"] if isinstance(f, bmesh.types.BMFace)]
+            for f in faces:
                 f.normal_update()
                 # A cap at the cut looks up.
                 if (N @ f.normal).z < 0:
                     f.normal_flip()
                 f.material_index = cap_index
                 f.smooth = False
+            a_z = _world_bounds(ob, dg)[0][2]
+            for island in _islands(faces):
+                _hollow(bm, island, M, zc, a_z, cap_mat, slot, courses)
         bm.to_mesh(me)
         bm.free()
         if not me.polygons:
             bpy.data.objects.remove(ob, do_unlink=True)
+    _top_courses(courses, cap_mat)
+
+
+# A part-built wall is open at the top (docs/look/buildings.md): the cut
+# through a mass wide enough to be a room is a ring of wall with its
+# thickness showing, round a dark pit going down to the floor; the very
+# wide (a ziggurat's tier, a pyramid) is a solid core being filled, a
+# shallow sunken middle. A post, a column or a thin wall keeps a flat cap.
+HOLLOW_MIN = 0.20       # 2A/P of the cut (half a square's side) below which it stays solid
+SOLID_MASS = 1.0        # 2A/P above which it is a filled core, not a room
+INTERIOR = (0.16, 0.12, 0.09)   # the floor of a roofless room, in shade
+
+
+def _islands(faces):
+    """The cut's cap faces in connected groups (one per wall mass)."""
+    left = set(faces)
+    out = []
+    while left:
+        f = left.pop()
+        group, todo = [f], [f]
+        while todo:
+            g = todo.pop()
+            for e in g.edges:
+                for h in e.link_faces:
+                    if h in left:
+                        left.remove(h)
+                        group.append(h)
+                        todo.append(h)
+        out.append(group)
+    return out
+
+
+def _hollow(bm, faces, M, z, z_min, cap_mat, slot, courses):
+    """Turns one island of cap faces into a wall-top ring round a sunken
+    interior (see HOLLOW_MIN), and records its outer edge for the uneven top
+    course (world segments with their inward direction)."""
+    M3 = M.to_3x3()
+    s = (M3 @ Vector((1, 0, 0))).length
+    area = sum(f.calc_area() for f in faces) * s * s
+    fs = set(faces)
+    rim = [e for f in faces for e in f.edges if sum(1 for g in e.link_faces if g in fs) == 1]
+    perim = sum(e.calc_length() for e in rim) * s
+    if perim <= 0:
+        return
+    w = 2 * area / perim
+    if w < HOLLOW_MIN:
+        return
+    t = min(0.13, max(0.06, 0.16 * w))
+    # The outer edge, for the courses on top, before the inset moves things.
+    for e in rim:
+        f = next(g for g in e.link_faces if g in fs)
+        p0, p1 = M @ e.verts[0].co, M @ e.verts[1].co
+        c = M @ f.calc_center_median()
+        mid = (p0 + p1) / 2
+        d = Vector((p1.x - p0.x, p1.y - p0.y, 0))
+        if d.length < 1e-4:
+            continue
+        d.normalize()
+        n = Vector((-d.y, d.x, 0))
+        if n.dot(Vector((c.x - mid.x, c.y - mid.y, 0))) < 0:
+            n = -n
+        courses.append((p0.copy(), p1.copy(), n, t, w))
+    res = bmesh.ops.inset_region(bm, faces=faces, thickness=t / s, depth=0.0,
+                                 use_even_offset=True, use_boundary=True)
+    for f in res["faces"]:
+        f.material_index = slot(cap_mat)
+    inner = [f for f in faces if f.is_valid]
+    if not inner:
+        return
+    solid = w > SOLID_MASS
+    depth = 0.06 if solid else max(0.0, min(z - z_min - 0.03, 1.2))
+    if not solid:
+        # The floor no lower than anything else standing inside the walls
+        # (a skirting box, a floor slab, a pool): its top would show.
+        sc = bpy.context.scene
+        dg = bpy.context.evaluated_depsgraph_get()
+        for f in inner[:: max(1, len(inner) // 12)]:
+            c = M @ f.calc_center_median()
+            hit, loc, *_ = sc.ray_cast(dg, Vector((c.x, c.y, z - 0.005)), Vector((0, 0, -1)))
+            if hit and loc.z > z - depth:
+                depth = max(0.0, z - loc.z - 0.004)
+    if depth <= 0.01:
+        return
+    wall = cap_mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value
+    wall = tuple(v ** (1 / 2.2) for v in wall[:3])
+    side_m = lib.mat(tuple(v * 0.62 for v in wall), rough=0.97)
+    floor_m = lib.mat(tuple(v * 0.70 for v in wall) if solid else INTERIOR, rough=1.0)
+    ext = bmesh.ops.extrude_face_region(bm, geom=inner)
+    bmesh.ops.delete(bm, geom=inner, context="FACES_ONLY")
+    new_v = [v for v in ext["geom"] if isinstance(v, bmesh.types.BMVert)]
+    down = M3.inverted() @ Vector((0, 0, -depth))
+    bmesh.ops.translate(bm, vec=down, verts=new_v)
+    nv = set(new_v)
+    for f in ext["geom"]:
+        if isinstance(f, bmesh.types.BMFace):
+            f.smooth = False
+            f.material_index = slot(floor_m) if all(v in nv for v in f.verts) else slot(side_m)
+
+
+def _top_courses(courses, cap_mat):
+    """An unfinished top: blocks of the next courses laid along the walls'
+    outer edges here and there, one or two high, so the top steps rather
+    than ending in a clean plane."""
+    if not courses:
+        return
+    rnd = random.Random(len(courses) * 31 + 7)
+    wall = cap_mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value
+    wall = tuple(v ** (1 / 2.2) for v in wall[:3])
+    mats = [lib.mat(tuple(min(1.0, v * f) for v in wall), rough=0.95) for f in (0.92, 1.0, 1.06)]
+    phase = rnd.uniform(0, 6.28)
+    run = 0.0
+    for (p0, p1, n, t, w) in courses:
+        L = (p1 - p0).length
+        if L < 0.05:
+            continue
+        h = min(0.09, max(0.05, 0.06 * (w / 0.4) ** 0.3))
+        k = max(1, round(L / 0.2))
+        seg = L / k
+        d = (p1 - p0) / L
+        for i in range(k):
+            run += seg
+            # Stepped: a slow wave of 0, 1 or 2 courses along the perimeter.
+            lv = 0.9 + 1.2 * math.sin(phase + run * 2.1) + rnd.uniform(-0.5, 0.5)
+            lv = int(max(0, min(2, round(lv))))
+            for j in range(lv):
+                bl = seg * rnd.uniform(0.82, 0.96)
+                c = p0 + d * (seg * (i + 0.5)) + n * (t * 0.5)
+                ob = lib.box((bl, t * 0.96, h * 0.96),
+                             (c.x, c.y, p0.z + h * (j + 0.5)), mats[(i + j) % 3],
+                             name="stage_course")
+                ob.rotation_euler = (0, 0, math.atan2(d.y, d.x) + rnd.uniform(-0.03, 0.03))
 
 
 # ------------------------------------------------------------ pieces

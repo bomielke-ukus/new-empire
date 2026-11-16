@@ -38,10 +38,16 @@ from greek import (WALL_DIRECTIONS, _arm_outline, _along, _gate_line, _wall_link
 
 # ---------------------------------------------------------------- colours
 
-VERMILION = (0.80, 0.30, 0.14)    # cinnabar lacquer, orange of a red player's red
-VERM_DK = (0.50, 0.17, 0.09)
+# Lacquer is a dark oxblood, not cinnabar: at game size a bright vermilion
+# hall reads as a red player's. The player's cloth is the brightest
+# saturated thing on a building; the timber is plain brown.
+VERMILION = (0.44, 0.15, 0.11)    # oxblood lacquer: doors, beams, rails
+VERM_DK = (0.28, 0.10, 0.07)
+TIMBER = (0.46, 0.32, 0.20)       # posts and frames, oiled wood
 TILE = (0.33, 0.41, 0.39)          # grey-green glazed-less tile
 TILE_DK = (0.22, 0.28, 0.28)
+TEMPLE_TILE = (0.16, 0.38, 0.30)   # the round hall's green glaze
+THATCH = (0.74, 0.60, 0.32)
 RIDGE = (0.17, 0.20, 0.21)
 SOFFIT = (0.30, 0.20, 0.14)
 PLASTER = (0.95, 0.92, 0.84)
@@ -296,6 +302,8 @@ def door(loc, rz=0.0, parent=None, w=0.42, h=0.9, colour=VERMILION, studs=True, 
     if curtain is not None:
         cloth(w + 0.04, h * 0.32, mat(curtain, rough=0.75), (0, -0.075, h + 0.03), 0, e, hang=True,
               wave=0.01, nx=5)
+        box((w + 0.02, 0.006, 0.02), (0, -0.092, h + 0.03 - h * 0.26), mat((0.95, 0.78, 0.30), rough=0.5),
+            parent=e)
     return e
 
 
@@ -323,7 +331,7 @@ def hall(parent, x0, x1, y0, y1, z, h, wall=PLASTER, posts=None, bays=None, sill
     for k in range(1, ny):
         for xx in (x0, x1):
             pts.append((xx, y0 + k * sy / ny))
-    pm = mat(VERMILION, rough=0.45)
+    pm = mat(TIMBER, rough=0.6)
     for (px, py) in pts:
         cyl(0.055, h, (px, py, z + h / 2), pm, parent=parent, segs=10)
         cyl(0.075, 0.05, (px, py, z + 0.025), mat(STONE, rough=0.8), parent=parent, segs=10)
@@ -443,11 +451,19 @@ def valance(parent, p0, p1, z, player, drop=0.16, rz=0.0):
     L = d.length
     n = max(2, int(L / 0.42))
     pm = mat(player, rough=0.7)
+    gm = mat((0.95, 0.78, 0.30), rough=0.5)
+    em = mat(PAPER, rough=0.7)
     for i in range(n):
         x = -L / 2 + (i + 0.5) * L / n
         cloth(L / n - 0.02, drop, pm, (x, -0.01, 0), 0, e, hang=True, wave=0.012, nx=4, seed=i)
         lib.mesh([(x - L / n / 2 + 0.01, 0, -drop), (x + L / n / 2 - 0.01, 0, -drop), (x, 0, -drop - 0.07)],
                [(0, 1, 2)], pm, loc=(0, -0.012, 0), parent=e)
+        # a pattern, not a flat sheet: a gold hem and, on alternate
+        # panels, a pale roundel
+        box((L / n - 0.03, 0.006, 0.022), (x, -0.032, -drop * 0.78), gm, parent=e)
+        if i % 2 == 0 and drop >= 0.1:
+            cyl(min(0.045, drop * 0.26), 0.006, (x, -0.034, -drop * 0.38), em, rot=(pi / 2, 0, 0), parent=e,
+                segs=12)
     return e
 
 
@@ -465,11 +481,12 @@ def shield(loc, rz=0.0, parent=None, player=BLUE, s=1.0):
 
 
 def lantern(loc, parent=None, s=1.0, cord=0.12):
-    """A red paper lantern hanging on a cord, black caps, gold tassel."""
+    """A warm paper lantern hanging on a cord, black caps, gold tassel
+    (amber, not red: red is a player's colour)."""
     x, y, z = loc
     if cord:
         rod((x, y, z + cord), (x, y, z), 0.004, mat(LACQUER), parent, 4)
-    lm = mat((0.92, 0.26, 0.12), rough=0.6, emit=0.6)
+    lm = mat((0.98, 0.78, 0.42), rough=0.6, emit=0.5)
     sphere(0.07 * s, (x, y, z - 0.08 * s), lm, scale=(1, 1, 1.15), parent=parent, segs=10)
     for dz in (0.0, -0.165):
         cyl(0.035 * s, 0.025 * s, (x, y, z + dz * s), mat(LACQUER), parent=parent, segs=8)
@@ -685,7 +702,7 @@ def stone_lion(loc, rz=0.0, parent=None, s=1.0):
     return e
 
 
-def pavilion(parent, cx, cy, z, sx, sy, h, rh, over=0.14, ridge=None, lift=0.12, posts=VERMILION, r=0.04):
+def pavilion(parent, cx, cy, z, sx, sy, h, rh, over=0.14, ridge=None, lift=0.12, posts=TIMBER, r=0.04):
     """Four (or six) posts and a curled hip or pyramid roof, open sides."""
     pm = mat(posts, rough=0.45)
     xs = (cx - sx / 2, cx + sx / 2)
@@ -783,8 +800,11 @@ def house(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, variant=0):
     if variant == 0:
         x0, x1, y0, y1, h = -0.85, 0.3, 0.12, 0.78, 0.82
         platform(x1 - x0 + 0.1, y1 - y0 + 0.08, 0.08, ((x0 + x1) / 2, (y0 + y1) / 2, z), r)
-        building(r, x0, x1, y0, y1, z + 0.08, h, 0.42, over=0.14, ridge=(x1 - x0) / 2 - 0.02, wall=OCHRE,
-                 brackets=False, bays=2)
+        # a commoner's cottage: rammed earth under a thick thatched roof,
+        # no brackets, no tile (tile and lacquer are for the great halls)
+        hall(r, x0, x1, y0, y1, z + 0.08, h, wall=OCHRE, brackets=False, bays=2, beam=TIMBER)
+        roof(r, ((x0 + x1) / 2, (y0 + y1) / 2), z + 0.08 + h, x1 - x0, y1 - y0, 0.5, over=0.16,
+             ridge=(x1 - x0) / 2 - 0.12, lift=0.0, tile=THATCH, ornaments=False, thick=0.1)
         door((-0.27, y0, z + 0.08), 0, r, w=0.34, h=0.68, studs=False, curtain=player)
         valance(r, (x0, y0 - 0.07, 0), (x1, y0 - 0.07, 0), z + 0.08 + h - 0.08, player, 0.12)
         lattice((-0.64, y0, z + 0.52), 0, r, 0.2, 0.24)
@@ -792,8 +812,8 @@ def house(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, variant=0):
         # kitchen lean-to with a chimney
         kx0, kx1, ky0, ky1 = 0.3, 0.82, 0.3, 0.8
         box((kx1 - kx0, ky1 - ky0, 0.6), ((kx0 + kx1) / 2, (ky0 + ky1) / 2, z + 0.3), layered(), parent=r)
-        roof(r, ((kx0 + kx1) / 2, (ky0 + ky1) / 2), z + 0.6, kx1 - kx0, ky1 - ky0, 0.2, over=0.08, lift=0.06,
-             ornaments=False)
+        roof(r, ((kx0 + kx1) / 2, (ky0 + ky1) / 2), z + 0.6, kx1 - kx0, ky1 - ky0, 0.24, over=0.1, lift=0.0,
+             ornaments=False, tile=THATCH, thick=0.08)
         box((0.12, 0.12, 0.4), (0.7, 0.68, z + 0.85), layered(), parent=r)
         box((0.16, 0.16, 0.04), (0.7, 0.68, z + 1.06), mat(TILE_DK), parent=r)
         box((0.24, 0.03, 0.34), (0.56, ky0 - 0.005, z + 0.2), mat((0.16, 0.1, 0.08)), parent=r)
@@ -932,42 +952,81 @@ def barracks(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
 # ----------------------------------------------------------------- temple
 
 
+def round_roof(parent, c, z, R, h, over=0.16, tile=None, lift=0.05, ribs=24, thick=0.05):
+    """A round (conical, concave) tiled roof over a drum of radius R whose
+    top is at z: tile ribs down the slope, a dark soffit, a gilt knob."""
+    tile = tile or TEMPLE_TILE
+    cx, cy = c
+    k = 0.32
+    ze = z + 0.02 - lift
+    prof = [(R + over, ze - thick)]
+    for j in range(9):
+        t = j / 8
+        prof.append(((R + over) * (1 - t) + 0.01, ze + h * (t * (k + (1 - k) * t))))
+    g.lathe(prof, mat(tile, rough=0.6), (cx, cy, 0), segs=32, parent=parent, smooth=True, name="roof")
+    rm = mat(tint(tile, 0.62), rough=0.6)
+    for i in range(ribs):
+        a = 2 * pi * i / ribs
+        pts = [((R + over) * (1 - t) * cos(a) + cx, (R + over) * (1 - t) * sin(a) + cy,
+                ze + h * (t * (k + (1 - k) * t)) + 0.012) for t in (0.0, 0.3, 0.6, 0.9)]
+        for p, q in zip(pts, pts[1:]):
+            rod(p, q, 0.012, rm, parent, 4)
+    lathe_m = mat(SOFFIT, rough=0.8)
+    cyl(R + over - 0.02, 0.012, (cx, cy, ze - thick - 0.004), lathe_m, parent=parent, segs=32)
+    return ze + h
+
+
 def temple(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
-    """2 x 2. An ancestral temple: a double-roofed hall on a stepped stone
-    platform, a smoking bronze ding before it between stone lions, a bell."""
+    """2 x 2. A round hall of prayer: a two-eaved round pavilion with deep
+    green glazed tile and a gilt knob, its oxblood lattice drum on a
+    three-tiered round marble terrace; a smoking bronze ding between stone
+    lions before the stair, a bell, the owner's streamers."""
     r = empty("temple", loc, rot_z, parent)
     pad(r, 2, (0.82, 0.8, 0.74))
     z = 0.03
-    platform(1.62, 1.22, 0.14, (0, 0.28, z), r)
-    platform(1.46, 1.06, 0.14, (0, 0.32, z + 0.14), r, steps=None)
-    for i in range(3):
-        hh = 0.28 * (3 - i) / 4
-        box((0.62, 0.1, hh), (0, 0.28 - 0.61 - 0.05 - i * 0.1, z + hh / 2), mat(STONE, rough=0.85), parent=r, bevel=0.006)
-    zp = z + 0.28
-    x0, x1, y0, y1, h = -0.6, 0.6, 0.0, 0.66, 0.78
-    hall(r, x0, x1, y0, y1, zp, h, bays=3)
-    zt = zp + h + 0.18
-    roof(r, (0, (y0 + y1) / 2), zt, x1 - x0, y1 - y0, 0.24, over=0.17, lift=0.14)
-    ux0, ux1, uy0, uy1 = -0.4, 0.4, 0.14, 0.52
-    hall(r, ux0, ux1, uy0, uy1, zt + 0.08, 0.32, bays=2)
-    zu = zt + 0.08 + 0.32 + 0.18
-    roof(r, (0, (uy0 + uy1) / 2), zu, ux1 - ux0, uy1 - uy0, 0.4, over=0.17, lift=0.17)
-    door((0, y0, zp), 0, r, w=0.4, h=0.66)
-    for x in (-0.4, 0.4):
-        lattice((x, y0, zp + 0.42), 0, r, 0.2, 0.32)
-    lattice((x1, 0.33, zp + 0.42), pi / 2, r, 0.22, 0.32)
-    box((0.22, 0.03, 0.13), (0, uy0 - 0.02, zt + 0.25), mat(LACQUER), parent=r)
-    box((0.17, 0.035, 0.08), (0, uy0 - 0.02, zt + 0.25), gold(), parent=r)
-    valance(r, (x0, y0 - 0.07, 0), (x1, y0 - 0.07, 0), zp + h - 0.08, player, 0.14)
-    for x in (-0.25, 0.25):
-        lantern((x, y0 - 0.12, zp + h - 0.1), r, 0.9, 0.08)
-    # the court: incense ding, lions, a bell, standards
-    incense((0, -0.66, z), r, 0.95)
+    cx, cy = 0.0, 0.18
+    marble = mat((0.93, 0.91, 0.87), rough=0.7)
+    zz = z
+    for i, (rad, hh) in enumerate(((0.8, 0.1), (0.7, 0.1), (0.6, 0.1))):
+        cyl(rad, hh, (cx, cy, zz + hh / 2), marble, parent=r, segs=40)
+        cyl(rad + 0.012, 0.025, (cx, cy, zz + hh - 0.012), mat((0.80, 0.78, 0.74), rough=0.7), parent=r, segs=40)
+        zz += hh
+    # the stair up the front
+    for i in range(4):
+        hh = 0.3 * (4 - i) / 5
+        box((0.4, 0.12, hh), (cx, cy - 0.66 - i * 0.1, z + hh / 2), marble, parent=r, bevel=0.006)
+    # the drum: oxblood posts, lattice between them, painted bands
+    R1, h1 = 0.44, 0.5
+    cyl(R1 - 0.02, h1, (cx, cy, zz + h1 / 2), mat(LATTICE, rough=0.6), parent=r, segs=24)
+    for i in range(12):
+        a = 2 * pi * (i + 0.5) / 12
+        cyl(0.04, h1, (cx + R1 * cos(a), cy + R1 * sin(a), zz + h1 / 2), mat(VERMILION, rough=0.45), parent=r,
+            segs=8)
+    for i in range(12):
+        a = 2 * pi * i / 12
+        e = face((cx + (R1 - 0.01) * cos(a), cy + (R1 - 0.01) * sin(a), zz), a + pi / 2, r)
+        box((0.15, 0.012, 0.3), (0, -0.005, 0.28), mat(PAPER, rough=0.8), parent=e)
+        for k in range(3):
+            box((0.012, 0.02, 0.3), (-0.05 + k * 0.05, -0.012, 0.28), mat(LATTICE), parent=e)
+    cyl(R1 + 0.05, 0.06, (cx, cy, zz + h1 - 0.03), mat(TEAL, rough=0.6), parent=r, segs=32)
+    cyl(R1 + 0.06, 0.03, (cx, cy, zz + h1 + 0.01), mat(VERM_DK, rough=0.6), parent=r, segs=32)
+    door((cx, cy - R1 - 0.01, zz), 0, r, w=0.26, h=0.42)
+    z1 = round_roof(r, (cx, cy), zz + h1 + 0.03, R1 + 0.04, 0.22, over=0.18)
+    # the upper drum and roof
+    R2, h2 = 0.3, 0.26
+    zu = zz + h1 + 0.1
+    cyl(R2, h2 + 0.06, (cx, cy, zu + (h2 + 0.06) / 2), mat(VERMILION, rough=0.5), parent=r, segs=24)
+    cyl(R2 + 0.03, 0.05, (cx, cy, zu + h2 + 0.04), mat(TEAL, rough=0.6), parent=r, segs=24)
+    z2 = round_roof(r, (cx, cy), zu + h2 + 0.07, R2, 0.34, over=0.16)
+    sphere(0.07, (cx, cy, z2 + 0.06), gold(), parent=r, segs=12)
+    cyl(0.02, 0.16, (cx, cy, z2 + 0.18), gold(), parent=r, segs=6, r_top=0.004)
+    # the court
+    incense((0, -0.72, z), r, 0.9)
     for sx in (-1, 1):
-        stone_lion((sx * 0.42, -0.72, z), 0, r, 0.9)
-        streamer((sx * 0.84, -0.86, z), 1.75, player, r, seed=sx + 7)
-    bell((0.78, -0.2, z), r, 0.62, pi / 2)
-    pine((-0.82, -0.25, z), r, 0.7, seed=5)
+        stone_lion((sx * 0.4, -0.78, z), 0, r, 0.85)
+        streamer((sx * 0.86, -0.88, z), 1.7, player, r, seed=sx + 7)
+    bell((0.8, -0.2, z), r, 0.55, pi / 2)
+    pine((-0.84, -0.3, z), r, 0.65, seed=5)
     return r
 
 
@@ -1028,56 +1087,54 @@ def watch_tower(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
 
 
 def academy(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
-    """2 x 2. A scholars' court: a lecture hall with its lattice doors open,
-    shelves of bamboo books, a reading pavilion where scholars kneel at a
-    low table of scrolls, a pine, bamboo and a scholar's rock."""
+    """2 x 2. A scholars' court: a two-storey library (a skirt roof round
+    its ground floor, a hip-and-gable roof over the upper one) with its
+    lattice doors open on shelves of bamboo books, a square reading
+    pavilion, a lesson in the open court, a pine, bamboo, a scholar's rock."""
     r = empty("academy", loc, rot_z, parent)
     box((1.92, 1.92, 0.04), (0, 0, 0.015), stone((0.80, 0.78, 0.72), 4.0), parent=r, bevel=0.012)
     z = 0.035
-    x0, x1, y0, y1, h = -0.8, 0.62, 0.38, 0.8, 0.86
-    platform(x1 - x0 + 0.1, y1 - y0 + 0.08, 0.1, ((x0 + x1) / 2, (y0 + y1) / 2, z), r, steps="y", step_w=0.4)
-    building(r, x0, x1, y0, y1, z + 0.1, h, 0.4, over=0.15, wall=PLASTER, bays=4)
-    zz = z + 0.1
-    # four tall lattice door panels across the front, the middle two open
-    for i, x in enumerate((-0.62, -0.3, 0.06, 0.4)):
-        if i in (1, 2):
-            box((0.28, 0.02, 0.66), (x, y0 - 0.004, zz + 0.36), mat((0.14, 0.1, 0.08)), parent=r)
-            g.scroll_rack((x, y0 + 0.02, zz), 0, r, 0.24, 0.5, seed=i)
+    x0, x1, y0, y1, h1, h2 = -0.86, 0.14, 0.12, 0.86, 0.7, 0.5
+    platform(x1 - x0 + 0.12, y1 - y0 + 0.1, 0.12, ((x0 + x1) / 2, (y0 + y1) / 2, z), r, steps="y", step_w=0.36)
+    zz = z + 0.12
+    hall(r, x0, x1, y0, y1, zz, h1, wall=PLASTER, brackets=False, bays=3)
+    roof(r, ((x0 + x1) / 2, (y0 + y1) / 2), zz + h1, x1 - x0, y1 - y0, 0.14, over=0.16, lift=0.09, ornaments=False)
+    ux0, ux1, uy0, uy1 = x0 + 0.12, x1 - 0.12, y0 + 0.12, y1 - 0.08
+    hall(r, ux0, ux1, uy0, uy1, zz + h1 + 0.06, h2, wall=PLASTER, brackets=True, bays=2)
+    zt = zz + h1 + 0.06 + h2 + 0.18
+    roof(r, ((ux0 + ux1) / 2, (uy0 + uy1) / 2), zt, ux1 - ux0, uy1 - uy0, 0.36, over=0.18,
+         ridge=(ux1 - ux0) / 2 + 0.06, lift=0.15)
+    for i, x in enumerate((-0.7, -0.36, -0.02)):
+        if i == 1:
+            box((0.26, 0.02, 0.56), (x, y0 - 0.004, zz + 0.3), mat((0.14, 0.1, 0.08)), parent=r)
+            g.scroll_rack((x, y0 + 0.02, zz), 0, r, 0.22, 0.46, seed=i)
         else:
-            lattice((x, y0, zz + 0.38), 0, r, 0.24, 0.6, n=(3, 5))
-    lattice((x1, (y0 + y1) / 2, zz + 0.45), pi / 2, r, 0.22, 0.32)
-    box((0.36, 0.03, 0.12), (-0.12, y0 - 0.06, zz + h + 0.08), mat(LACQUER), parent=r)
-    box((0.3, 0.035, 0.07), (-0.12, y0 - 0.06, zz + h + 0.08), gold(), parent=r)
-    valance(r, (x0, y0 - 0.07, 0), (-0.42, y0 - 0.07, 0), zz + h - 0.08, player, 0.13)
-    valance(r, (0.2, y0 - 0.07, 0), (x1, y0 - 0.07, 0), zz + h - 0.08, player, 0.13)
-    # the reading pavilion on the left, a low table of books under it
-    px, py = -0.42, -0.42
-    box((0.74, 0.74, 0.08), (px, py, z + 0.04), stone(STONE, 8.0), parent=r, bevel=0.01)
-    pavilion(r, px, py, z + 0.08, 0.56, 0.56, 0.72, 0.36, over=0.12, ridge=0, lift=0.13)
-    box((0.36, 0.22, 0.03), (px, py, z + 0.25), mat(LACQUER, rough=0.4), parent=r)
-    for sx in (-1, 1):
-        box((0.03, 0.18, 0.15), (px + sx * 0.15, py, z + 0.16), mat(LACQUER), parent=r)
+            lattice((x, y0, zz + 0.34), 0, r, 0.22, 0.5, n=(3, 5))
+    lattice((x1, (y0 + y1) / 2, zz + 0.38), pi / 2, r, 0.22, 0.32)
+    for x in (-0.58, -0.16):
+        lattice((x, uy0, zz + h1 + 0.3), 0, r, 0.2, 0.22)
+    valance(r, (x0, y0 - 0.07, 0), (x1, y0 - 0.07, 0), zz + h1 - 0.08, player, 0.13)
+    # the reading pavilion at the back right, a low table of books under it
+    px, py = 0.52, 0.46
+    box((0.7, 0.7, 0.08), (px, py, z + 0.04), stone(STONE, 8.0), parent=r, bevel=0.01)
+    pavilion(r, px, py, z + 0.08, 0.52, 0.52, 0.66, 0.34, over=0.12, ridge=0, lift=0.13)
+    box((0.34, 0.2, 0.03), (px, py, z + 0.25), mat(LACQUER, rough=0.4), parent=r)
     slips((px - 0.06, py, z + 0.265), r, 0.3, 0.9)
-    box((0.16, 0.12, 0.006), (px + 0.08, py, z + 0.27), mat(BAMBOO_DRY), rot=(0, 0, 0.2), parent=r)
-    # the lesson in the open court: the master on a dais, scholars kneeling on mats
-    mx, my = 0.4, 0.02
+    # the lesson in the open court
+    mx, my = -0.3, -0.3
     box((0.34, 0.26, 0.06), (mx, my, z + 0.03), mat(LACQUER, rough=0.5), parent=r)
     person((mx, my, z + 0.06), 0.0, r, robe=(0.5, 0.32, 0.18), sit=True, s=0.95)
     box((0.18, 0.1, 0.12), (mx, my - 0.2, z + 0.06), mat(LACQUER, rough=0.4), parent=r)
     slips((mx, my - 0.2, z + 0.12), r, pi / 2, 0.7)
-    for i, (x, y) in enumerate(((0.2, -0.5), (0.48, -0.5), (0.76, -0.5), (0.34, -0.82), (0.62, -0.82))):
+    for i, (x, y) in enumerate(((-0.58, -0.62), (-0.3, -0.62), (-0.02, -0.62), (-0.44, -0.86), (-0.16, -0.86))):
         box((0.24, 0.2, 0.01), (x, y, z + 0.006), mat(player, rough=0.8) if i % 2 == 0 else mat(BAMBOO_DRY, rough=0.9),
             parent=r)
         person((x, y, z + 0.012), pi, r, robe=((0.30, 0.36, 0.55), (0.82, 0.78, 0.68), (0.45, 0.24, 0.2))[i % 3],
                sit=True, s=0.85)
-    for i in range(3):
-        slips((-0.66 + i * 0.1, y0 - 0.2, z), r, 0.0, 0.8)
-    slips((-0.61, y0 - 0.2, z + 0.07), r, 0.0, 0.8)
-    pine((0.82, -0.05, z), r, 0.75, seed=11)
-    bamboo((0.82, 0.25, z), r, 5, 1.3, seed=9)
-    blob(0.1, (-0.85, -0.85, z + 0.16), mat((0.62, 0.64, 0.62), rough=0.7), (0.8, 0.7, 1.9), r, 4, 0.35, 1)
+    pine((0.6, -0.4, z), r, 0.75, seed=11)
+    bamboo((0.84, 0.0, z), r, 5, 1.3, seed=9)
+    blob(0.1, (0.3, -0.82, z + 0.16), mat((0.62, 0.64, 0.62), rough=0.7), (0.8, 0.7, 1.9), r, 4, 0.35, 1)
     streamer((0.9, -0.92, z), 1.6, player, r, seed=5)
-    streamer((-0.9, 0.2, z), 1.5, player, r, seed=6)
     return r
 
 
@@ -1095,13 +1152,13 @@ def archery_range(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     for i in range(5):
         blob(0.16, (-0.8 + i * 0.27, 0.68, z + 0.05), ("grass", "earth", "grass_dry")[i % 3], (1.2, 0.9, 0.7), r, i,
              0.25, 1)
-    for i, x in enumerate((-0.7, -0.26, 0.16)):
-        g.target((x, 0.5, z + 0.56), 0.0, r, 0.24, 3, seed=i)
-        box((0.022, 1.2, 0.008), (x - 0.22, 0.0, z + 0.012), "whitewash", parent=r)
-    box((0.022, 1.2, 0.008), (0.38, 0.0, z + 0.012), "whitewash", parent=r)
+    for i, x in enumerate((-0.74, -0.34, 0.06)):
+        g.target((x, 0.5, z + 0.56), 0.0, r, 0.23, 3, seed=i)
+        box((0.022, 1.2, 0.008), (x - 0.2, 0.0, z + 0.012), "whitewash", parent=r)
+    box((0.022, 1.2, 0.008), (0.26, 0.0, z + 0.012), "whitewash", parent=r)
     box((1.3, 0.035, 0.008), (-0.25, -0.6, z + 0.012), "whitewash", parent=r)
-    for i, x in enumerate((-0.9, -0.48, -0.04, 0.3)):
-        flag((x, 0.66, z), 1.05 if i % 3 == 0 else 0.92, player, r, w=0.32, fh=0.18, pennant=True, seed=i)
+    for i, x in enumerate((-0.92, -0.54, -0.14, 0.26)):
+        flag((x, 0.7, z), 1.05 if i % 3 == 0 else 0.92, player, r, w=0.3, fh=0.16, pennant=True, seed=i)
     for x in (-0.9, -0.3, 0.3):
         box((0.05, 0.05, 0.4), (x, -0.76, z + 0.2), mat(VERMILION, rough=0.5), parent=r)
     rod((-0.92, -0.76, z + 0.36), (0.32, -0.76, z + 0.36), 0.02, mat(VERMILION, rough=0.5), r)
@@ -1109,19 +1166,19 @@ def archery_range(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     g.quiver((-0.02, -0.81, z), r, player, -0.15)
     g.bow((-0.45, -0.805, z + 0.28), 0.0, r, 0.42)
     g.bow((0.18, -0.805, z + 0.28), 0.0, r, 0.42, "leather")
-    # the pavilion on the +X side over a bow rack
-    sx0, sx1, sy0, sy1 = 0.54, 0.86, -0.12, 0.62
+    # the pavilion in the +X back corner, clear of the targets, over a bow rack
+    sx0, sx1, sy0, sy1 = 0.6, 0.88, 0.26, 0.86
     box((sx1 - sx0 + 0.12, sy1 - sy0 + 0.12, 0.07), ((sx0 + sx1) / 2, (sy0 + sy1) / 2, z + 0.035), stone(STONE, 8.0),
         parent=r)
     pavilion(r, (sx0 + sx1) / 2, (sy0 + sy1) / 2, z + 0.07, sx1 - sx0, sy1 - sy0, 0.8, 0.26, over=0.08, lift=0.1)
     valance(r, (sx1 + 0.05, sy0, 0), (sx1 + 0.05, sy1, 0), z + 0.07 + 0.72, player, 0.14, rz=pi / 2)
     rx, ry = (sx0 + sx1) / 2, (sy0 + sy1) / 2
-    for y in (ry - 0.26, ry + 0.26):
+    for y in (ry - 0.22, ry + 0.22):
         for sx in (-1, 1):
             rod((rx + sx * 0.1, y, z + 0.07), (rx, y, z + 0.6), 0.013, "wood_dark", r)
-    rod((rx, ry - 0.3, z + 0.58), (rx, ry + 0.3, z + 0.58), 0.015, "wood", r)
-    for i in range(4):
-        g.bow((rx - 0.03, ry - 0.22 + i * 0.15, z + 0.38), pi / 2, r, 0.44, ("wood_dark", "leather")[i % 2])
+    rod((rx, ry - 0.26, z + 0.58), (rx, ry + 0.26, z + 0.58), 0.015, "wood", r)
+    for i in range(3):
+        g.bow((rx - 0.03, ry - 0.16 + i * 0.15, z + 0.38), pi / 2, r, 0.44, ("wood_dark", "leather")[i % 2])
     g.quiver((0.7, -0.45, z), r, player, -0.1, rz=pi / 2)
     g.quiver((0.82, -0.35, z), r, player, 0.15, rz=pi / 2)
     g.hay_bale((-0.62, -0.38, z), 0.3, r)
@@ -1145,6 +1202,13 @@ def stall(loc, rz=0.0, parent=None, player=BLUE, w=0.66, d=0.46, goods=0, seed=0
     lib.mesh([(-w / 2 - 0.06, d / 2 + 0.05, zb + 0.04), (w / 2 + 0.06, d / 2 + 0.05, zb + 0.04),
               (w / 2 + 0.06, -d / 2 - 0.08, zf - 0.01), (-w / 2 - 0.06, -d / 2 - 0.08, zf - 0.01)], [(0, 1, 2, 3)], cm,
              parent=e)
+    # two pale stripes down the canopy, so it is a pattern, not a sheet
+    sm = mat(PAPER, rough=0.75)
+    for k in (-1, 1):
+        xa, xb = k * (w * 0.2) - 0.035, k * (w * 0.2) + 0.035
+        lib.mesh([(xa, d / 2 + 0.05, zb + 0.047), (xb, d / 2 + 0.05, zb + 0.047),
+                  (xb, -d / 2 - 0.08, zf - 0.003), (xa, -d / 2 - 0.08, zf - 0.003)], [(0, 1, 2, 3)], sm,
+                 parent=e)
     cloth(w + 0.12, 0.1, cm, (0, -d / 2 - 0.085, zf - 0.005), 0, e, hang=True, wave=0.01, nx=5)
     box((w + 0.12, 0.01, 0.02), (0, -d / 2 - 0.09, zf - 0.11), gold(), parent=e)
     box((w - 0.04, d * 0.6, 0.035), (0, -d * 0.12, 0.4), "cedar", parent=e)
@@ -1338,18 +1402,22 @@ def trebuchet(loc, rz=0.0, parent=None, player=BLUE, done=False):
     cyl(0.035, 0.6, (0, 0, 0.95), mat("wood_dark"), rot=(pi / 2, 0, 0), parent=e, segs=8)
     for sy in (-1, 1):
         cyl(0.05, 0.03, (0, sy * 0.3, 0.95), bronze(), rot=(pi / 2, 0, 0), parent=e, segs=8)
+    if True:
+        # the arm is up on its axle even half built: the long beam and its
+        # sling are what say "trebuchet"; ropes not yet on the short end
+        rod((-0.9, 0, 0.52), (0.55, 0, 1.2), 0.045, "wood_dark", e, 8, r_top=0.03)
+        rod((-0.9, 0, 0.52), (-0.95, 0, 0.18), 0.006, "wool", e, 4)
+        lib.mesh([(-0.08, 0, 0), (0.08, 0, 0), (0.05, 0, -0.1), (-0.05, 0, -0.1)], [(0, 1, 2, 3)], "leather",
+                 loc=(-0.95, 0, 0.26), parent=e)
     if done:
-        rod((-0.8, 0, 0.6), (0.6, 0, 1.15), 0.035, "wood", e, 8, r_top=0.024)
+        pass
     else:
         for x in (-0.3, 0.45):
             for sx in (-1, 1):
                 rod((x + sx * 0.08, -0.6, 0.0), (x, -0.6, 0.26), 0.014, "wood_dark", e)
-        rod((-0.7, -0.6, 0.3), (0.75, -0.6, 0.29), 0.04, "wood", e, 8, r_top=0.026)
+        rod((-0.3, -0.6, 0.3), (0.45, -0.6, 0.29), 0.035, "wood", e, 8, r_top=0.026)
         for k in range(4):
-            cyl(0.08 - k * 0.015, 0.025, (0.8, -0.6, 0.31 + k * 0.025), "wool", parent=e, segs=10)
-        rod((-0.72, -0.6, 0.3), (-0.72, -0.75, 0.02), 0.006, "wool", e, 4)
-        lib.mesh([(-0.08, 0, 0), (0.08, 0, 0), (0.05, 0, -0.1), (-0.05, 0, -0.1)], [(0, 1, 2, 3)], "leather",
-                 loc=(-0.72, -0.75, 0.12), parent=e)
+            cyl(0.08 - k * 0.015, 0.025, (0.6, -0.6, 0.31 + k * 0.025), "wool", parent=e, segs=10)
     cloth(0.32, 0.18, mat(player, rough=0.7), (0, 0.22, 0.98), pi / 4, e, taper=0.85, wave=0.04, seed=3)
     rod((0, 0.22, 0.95), (0, 0.22, 1.2), 0.01, "wood_dark", e)
     return e
@@ -1362,17 +1430,19 @@ def siege_workshop(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     r = empty("siege_workshop", loc, rot_z, parent)
     pad(r, 2, (0.6, 0.47, 0.32))
     z = 0.03
-    x0, x1, y0, y1, h = -0.82, 0.48, 0.12, 0.8, 1.05
-    box((x1 - x0, 0.12, h), ((x0 + x1) / 2, y1 - 0.06, z + h / 2), layered(), parent=r)
-    box((0.12, y1 - y0 - 0.12, h), (x0 + 0.06, (y0 + y1) / 2 - 0.06, z + h / 2), layered(), parent=r)
-    pm = mat(VERMILION, rough=0.5)
+    # an open shed of plain timber posts (no walls) at the back
+    x0, x1, y0, y1, h = -0.86, 0.4, 0.34, 0.86, 0.92
+    pm = mat(TIMBER, rough=0.6)
+    for x in (x0 + 0.06, (x0 + x1) / 2):
+        cyl(0.05, h, (x, y1 - 0.05, z + h / 2), pm, parent=r, segs=8)
+    cyl(0.05, h, (x0 + 0.06, (y0 + y1) / 2, z + h / 2), pm, parent=r, segs=8)
     for x in (x0 + 0.06, (x0 + x1) / 2, x1 - 0.05):
         cyl(0.05, h, (x, y0 + 0.05, z + h / 2), pm, parent=r, segs=8)
     for y in ((y0 + y1) / 2, y1 - 0.05):
         cyl(0.05, h, (x1 - 0.05, y, z + h / 2), pm, parent=r, segs=8)
     box((x1 - x0 + 0.1, 0.1, 0.1), ((x0 + x1) / 2, y0 + 0.05, z + h - 0.05), mat(VERM_DK), parent=r)
     box((0.1, y1 - y0 + 0.1, 0.1), (x1 - 0.05, (y0 + y1) / 2, z + h - 0.05), mat(VERM_DK), parent=r)
-    roof(r, ((x0 + x1) / 2, (y0 + y1) / 2), z + h, x1 - x0, y1 - y0, 0.4, over=0.14, lift=0.13)
+    roof(r, ((x0 + x1) / 2, (y0 + y1) / 2), z + h, x1 - x0, y1 - y0, 0.3, over=0.12, lift=0.1)
     valance(r, (x0, y0 - 0.03, 0), (x1, y0 - 0.03, 0), z + h - 0.1, player, 0.14)
     yb = y1 - 0.16
     box((0.7, 0.22, 0.04), (-0.35, yb - 0.06, z + 0.42), "cedar", parent=r)
@@ -1382,16 +1452,15 @@ def siege_workshop(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     for i in range(4):
         box((0.9, 0.12, 0.025), (-0.38, 0.32 + i * 0.002, z + 0.013 + i * 0.026), ("cedar", "wood")[i % 2],
             rot=(0, 0, 0.03 * i), parent=r)
-    trebuchet((0.12, -0.32, z), 0.0, r, player, done=False).scale = (1.0, 1.0, 1.0)
-    g.timber_stack((-0.72, -0.5, z), 0.0, r, (3, 2, 1), 0.7, 0.05)
+    trebuchet((0.24, -0.06, z), pi / 4, r, player, done=False).scale = (1.3, 1.3, 1.3)
+    g.timber_stack((-0.72, -0.62, z), 0.0, r, (3, 2, 1), 0.5, 0.05)
     for i in range(5):
         a = i * 1.25
         d = 0.0 if i == 0 else 0.1
         sphere(0.065, (0.78 + d * cos(a), 0.55 + d * sin(a), z + 0.065 + (0.09 if i == 0 else 0)), "rock", parent=r,
                segs=10)
-    g.wheel((0.82, -0.75, z + 0.03), r, 0.2, rot=(0, 0, 0))
-    g.sawhorse((-0.3, -0.05, z), 0.3, r)
-    streamer((0.9, 0.0, z), 1.5, player, r, seed=2)
+    g.wheel((-0.3, -0.8, z + 0.03), r, 0.2, rot=(0, 0, 0))
+    streamer((-0.92, 0.1, z), 1.5, player, r, seed=2)
     return r
 
 
@@ -1413,13 +1482,14 @@ def que(parent, x, y, z, w=0.3, h=1.1, player=BLUE):
 
 
 def government_centre(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
-    """2 x 2. An administrative hall on a high rammed-earth terrace up a
-    broad stair, a double roof, two que pillars and a petition drum at the
-    foot of the stair, standards."""
+    """2 x 2. Long and low: a single-eaved gallery hall the width of the
+    plot under a hip-and-gable roof, on a high rammed-earth terrace up a
+    broad stair with a white balustrade; two que pillars and a petition
+    drum at the stair's foot, the owner's valances and flag."""
     r = empty("government_centre", loc, rot_z, parent)
     pad(r, 2)
     z = 0.03
-    tx0, tx1, ty0, ty1, th = -0.88, 0.88, -0.2, 0.92, 0.36
+    tx0, tx1, ty0, ty1, th = -0.92, 0.92, -0.12, 0.92, 0.42
     box((tx1 - tx0, ty1 - ty0, th), ((tx0 + tx1) / 2, (ty0 + ty1) / 2, z + th / 2), layered(), parent=r, bevel=0.01)
     box((tx1 - tx0 + 0.04, ty1 - ty0 + 0.04, 0.05), ((tx0 + tx1) / 2, (ty0 + ty1) / 2, z + th - 0.02), mat(STONE),
         parent=r, bevel=0.01)
@@ -1428,36 +1498,34 @@ def government_centre(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     n = 5
     for i in range(n):
         hh = th * (n - i) / (n + 1)
-        box((0.7, 0.1, hh), (0, ty0 - 0.05 - i * 0.1, z + hh / 2), mat(STONE, rough=0.85), parent=r, bevel=0.006)
+        box((0.8, 0.1, hh), (0, ty0 - 0.05 - i * 0.1, z + hh / 2), mat(STONE, rough=0.85), parent=r, bevel=0.006)
     for sx in (-1, 1):
-        box((0.08, 0.5, th + 0.06), (sx * 0.39, ty0 - 0.25, z + (th + 0.06) / 2), mat(STONE), parent=r)
+        box((0.08, 0.5, th + 0.06), (sx * 0.44, ty0 - 0.25, z + (th + 0.06) / 2), mat(STONE), parent=r)
     zp = z + th
-    # balustrade along the terrace front
-    for x in [tx0 + 0.06 + i * 0.12 for i in range(5)] + [0.46 + i * 0.12 for i in range(4)]:
-        box((0.04, 0.04, 0.14), (x, ty0 + 0.04, zp + 0.07), mat((0.92, 0.9, 0.86)), parent=r)
-    for xa, xb in ((tx0 + 0.04, -0.36), (0.44, tx1 - 0.04)):
-        box((xb - xa, 0.035, 0.03), ((xa + xb) / 2, ty0 + 0.04, zp + 0.13), mat((0.92, 0.9, 0.86)), parent=r)
-    x0, x1, y0, y1, h = -0.66, 0.66, 0.16, 0.76, 0.82
-    hall(r, x0, x1, y0, y1, zp, h, bays=3)
+    white = mat((0.94, 0.92, 0.88))
+    for x in [tx0 + 0.06 + i * 0.12 for i in range(5)] + [0.5 + i * 0.12 for i in range(4)]:
+        box((0.04, 0.04, 0.14), (x, ty0 + 0.04, zp + 0.07), white, parent=r)
+    for xa, xb in ((tx0 + 0.04, -0.42), (0.48, tx1 - 0.04)):
+        box((xb - xa, 0.035, 0.03), ((xa + xb) / 2, ty0 + 0.04, zp + 0.13), white, parent=r)
+    # the gallery: nine bays, open front with lattice doors, one roof
+    x0, x1, y0, y1, h = -0.86, 0.86, 0.3, 0.84, 0.66
+    hall(r, x0, x1, y0, y1, zp, h, bays=6)
     zt = zp + h + 0.18
-    roof(r, (0, (y0 + y1) / 2), zt, x1 - x0, y1 - y0, 0.24, over=0.17, lift=0.14)
-    hall(r, -0.44, 0.44, 0.3, 0.62, zt + 0.08, 0.3, bays=2)
-    zu = zt + 0.08 + 0.3 + 0.18
-    roof(r, (0, 0.46), zu, 0.88, 0.32, 0.38, over=0.17, lift=0.16)
-    door((0, y0, zp), 0, r, w=0.42, h=0.7)
-    for x in (-0.42, 0.42):
-        lattice((x, y0, zp + 0.45), 0, r, 0.22, 0.32)
-    lattice((x1, 0.46, zp + 0.45), pi / 2, r, 0.22, 0.32)
-    box((0.26, 0.03, 0.14), (0, 0.28, zt + 0.25), mat(LACQUER), parent=r)
-    box((0.2, 0.035, 0.09), (0, 0.28, zt + 0.25), gold(), parent=r)
-    valance(r, (x0, y0 - 0.07, 0), (x1, y0 - 0.07, 0), zp + h - 0.08, player, 0.14)
+    roof(r, (0, (y0 + y1) / 2), zt, x1 - x0, y1 - y0, 0.3, over=0.18, ridge=(x1 - x0) / 2 + 0.08, lift=0.12)
+    door((0, y0, zp), 0, r, w=0.4, h=0.56)
+    for x in (-0.6, -0.32, 0.32, 0.6):
+        lattice((x, y0, zp + 0.36), 0, r, 0.2, 0.36, n=(3, 4))
+    lattice((x1, (y0 + y1) / 2, zp + 0.36), pi / 2, r, 0.22, 0.32)
+    box((0.3, 0.03, 0.14), (0, y0 - 0.12, zp + h + 0.02), mat(LACQUER), parent=r)
+    box((0.24, 0.035, 0.09), (0, y0 - 0.125, zp + h + 0.02), gold(), parent=r)
+    valance(r, (x0, y0 - 0.07, 0), (-0.22, y0 - 0.07, 0), zp + h - 0.08, player, 0.14)
+    valance(r, (0.22, y0 - 0.07, 0), (x1, y0 - 0.07, 0), zp + h - 0.08, player, 0.14)
     valance(r, (x1 + 0.07, y0, 0), (x1 + 0.07, y1, 0), zp + h - 0.08, player, 0.14, rz=pi / 2)
-    # que pillars, drum, standards at the foot
     for sx in (-1, 1):
-        que(r, sx * 0.72, -0.68, z, 0.26, 1.05, player)
-    drum((0.36, -0.82, z), r, 0.6, 0.0, player)
-    streamer((-0.38, -0.86, z), 1.5, player, r, w=0.2, bh=0.6, seed=4)
-    flag((0.0, 0.5, zu + 0.38), 0.8, player, r, w=0.6, fh=0.36, seed=6)
+        que(r, sx * 0.74, -0.7, z, 0.26, 1.0, player)
+    drum((0.3, -0.82, z), r, 0.55, 0.0, player)
+    streamer((-0.32, -0.88, z), 1.45, player, r, w=0.2, bh=0.6, seed=4)
+    flag((0.84, 0.0, zp), 1.1, player, r, w=0.5, fh=0.3, seed=6)
     return r
 
 
@@ -1757,7 +1825,7 @@ def wonder(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
 # model -Y), ending at the tile's edge or corner where the neighbour's arm
 # meets it; a gate stands across line l (docs/look/buildings.md).
 
-RAM_PIER, RAM_W, RAM_H, RAM_POST_H = 0.16, 0.3, 0.98, 1.1
+RAM_PIER, RAM_W, RAM_H, RAM_POST_H = 0.16, 0.3, 0.98, 1.04
 
 
 def stone_wall(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, arm=None, joins=0, post=True):
@@ -1772,10 +1840,10 @@ def stone_wall(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, arm=None, joi
     P, W, H = RAM_PIER, RAM_W, RAM_H
     if post:
         box((P * 2 + 0.1, P * 2 + 0.1, 0.12), (0, 0, 0.06), stone(STONE_DK, 9.0), parent=r, bevel=0.012)
-        box((P * 2 + 0.04, P * 2 + 0.04, RAM_POST_H), (0, 0, RAM_POST_H / 2), earth, parent=r, bevel=0.01)
+        box((P * 2 + 0.02, P * 2 + 0.02, RAM_POST_H), (0, 0, RAM_POST_H / 2), earth, parent=r, bevel=0.01)
         box((P * 2 + 0.06, P * 2 + 0.06, 0.04), (0, 0, RAM_POST_H - 0.05), mat(VERMILION, rough=0.5), parent=r)
-        lib.pyramid(P * 2 + 0.22, 0.16, (0, 0, RAM_POST_H - 0.01), mat(TILE_DK, rough=0.7), parent=r)
-        sphere(0.035, (0, 0, RAM_POST_H + 0.16), mat(RIDGE), parent=r, segs=6)
+        lib.pyramid(P * 2 + 0.14, 0.1, (0, 0, RAM_POST_H - 0.01), mat(TILE_DK, rough=0.7), parent=r)
+        sphere(0.03, (0, 0, RAM_POST_H + 0.1), mat(RIDGE), parent=r, segs=6)
         for rz, (x, y) in ((0, (0, -P - 0.032)), (pi / 2, (P + 0.032, 0))):
             f = face((x, y, RAM_POST_H - 0.09), rz, r)
             cloth(0.2, 0.4, mat(player, rough=0.7), (0, 0, 0), 0, f, hang=True, wave=0.008, nx=3)
