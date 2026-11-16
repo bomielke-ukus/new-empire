@@ -153,7 +153,7 @@ def mud_block(parent, x0, x1, y0, y1, h, z=0.0, c=MUD, ribs=True, pitch=0.3, rib
     sx, sy = x1 - x0, y1 - y0
     wm = wall_m or brick(c)
     box((sx, sy, h), (cx, cy, z + h / 2), wm, parent=parent, name="wall")
-    co = rib_d + 0.03 if ribs else 0.0
+    co = rib_d + 0.015 if ribs else 0.0
     if ribs:
         g = Geo()
         for (ax, ay), (bx, by), (nx, ny) in _edges(x0, x1, y0, y1):
@@ -203,7 +203,7 @@ def mud_block(parent, x0, x1, y0, y1, h, z=0.0, c=MUD, ribs=True, pitch=0.3, rib
             n = max(1, round(L / 0.2))
             for i in range(n):
                 s = L * (i + 0.5) / n
-                g.box((0.05, 0.11, 0.05), (ax + ux * s + nx * 0.05, ay + uy * s + ny * 0.05, zt - 0.13),
+                g.box((0.05, 0.09, 0.05), (ax + ux * s + nx * 0.03, ay + uy * s + ny * 0.03, zt - 0.13),
                       atan2(uy, ux))
         g.emit(mat(PALMWOOD_DK), parent, "beam_ends")
     if merlons:
@@ -283,7 +283,7 @@ def arch_door(loc, rz=0.0, parent=None, w=0.4, h=0.85, frame=LAPIS, inner=GLAZE_
             for k in (-2, -1, 1, 2):
                 g.box((0.02, 0.012, 0.02), (k * w * 0.19, -0.05, h * zf))
         g.emit(greek.bronze(), e, "studs")
-    box((w + 0.22, 0.14, 0.04), (0, -0.07, 0.02), plaster(MUD_LT), parent=e)
+    box((w + 0.2, 0.1, 0.04), (0, -0.05, 0.02), plaster(MUD_LT), parent=e)
     return e
 
 
@@ -315,7 +315,7 @@ def palm(parent, x, y, z=0.0, h=1.6, seed=0, lean=(0.08, 0.04), fronds=10, dates
     fm = [mat(c, rough=0.8) for c in FROND]
     for k in range(fronds):
         a = 2 * pi * k / fronds + rnd.uniform(-0.2, 0.2)
-        L = rnd.uniform(0.75, 0.95) * s
+        L = rnd.uniform(0.56, 0.72) * s
         up = rnd.uniform(0.15, 0.45)
         d = Vector((cos(a), sin(a), 0))
         side = Vector((-sin(a), cos(a), 0))
@@ -324,7 +324,7 @@ def palm(parent, x, y, z=0.0, h=1.6, seed=0, lean=(0.08, 0.04), fronds=10, dates
         for i in range(m_ + 1):
             t = i / m_
             c = top + d * (L * t) + Vector((0, 0, L * (up * sin(pi * t * 0.9) - 0.55 * t * t)))
-            wdt = 0.13 * s * sin(pi * min(1.0, t * 1.15)) ** 0.6 + 0.005
+            wdt = 0.115 * s * sin(pi * min(1.0, t * 1.15)) ** 0.6 + 0.005
             vs += [tuple(c - side * wdt + Vector((0, 0, -0.03 * s))), tuple(c + Vector((0, 0, 0.012 * s))),
                    tuple(c + side * wdt + Vector((0, 0, -0.03 * s)))]
         for i in range(m_):
@@ -616,10 +616,14 @@ def _shrine(r, x0, x1, y0, y1, z, h, player=BLUE, door_w=0.24):
     arched gold door to -Y."""
     mud_block(r, x0, x1, y0, y1, h, z, ribs=True, pitch=0.2, dado=0.0, band=0.8, band_c=GLAZE_Y,
               rosettes=True, merlons=False, roof=MUD_LT, wall_m=glaze())
-    box((x1 - x0 + 0.14, y1 - y0 + 0.14, 0.06), ((x0 + x1) / 2, (y0 + y1) / 2, z + h + 0.03), gold(), parent=r)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    box((x1 - x0 + 0.15, y1 - y0 + 0.15, 0.025), (cx, cy, z + h + 0.0125), gold(), parent=r)
+    box((x1 - x0 + 0.11, y1 - y0 + 0.11, 0.05), (cx, cy, z + h + 0.05), glaze(), parent=r)
+    box((x1 - x0 - 0.02, y1 - y0 - 0.02, 0.02), (cx, cy, z + h + 0.08), plaster(), parent=r)
+    lathe([(0.1, 0), (0.1, 0.06), (0.06, 0.1), (0.0, 0.24)], gold(), (cx, cy, z + h + 0.075), parent=r, segs=12)
     arch_door(((x0 + x1) / 2, y0 - 0.07, z), 0, r, door_w, h * 0.68, frame=GLAZE_Y, inner=GLAZE_W,
               door=(0.95, 0.72, 0.25))
-    _horns(r, x0 - 0.05, x1 + 0.05, y0 - 0.05, y1 + 0.05, z + h + 0.05)
+    _horns(r, x0 - 0.04, x1 + 0.04, y0 - 0.04, y1 + 0.04, z + h + 0.07)
 
 
 def temple(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
@@ -639,7 +643,8 @@ def temple(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
         greek.brazier((sx * 0.62, -0.38, t1), r, 0.75)
     jar(r, -0.72, -0.78, z, 0.34)
     jar(r, 0.7, -0.8, z, 0.3, band=TURQ)
-    palm(r, 0.78, -0.62, z, 1.3, seed=3, lean=(0.06, -0.02), s=0.8)
+    jar(r, 0.56, -0.86, z, 0.24)
+    _garden(r, [(0.78, -0.62 + i * 0.12, z) for i in range(3)] + [(-0.8, -0.62, z)], seed=5)
     return r
 
 
@@ -716,7 +721,7 @@ def house(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, variant=0):
     tannur(r, 0.55, -0.55, z)
     jar(r, -0.75, -0.6, z, 0.36)
     jar(r, -0.55, -0.72, z, 0.3, c=(0.7, 0.5, 0.34), band=TURQ)
-    palm(r, -0.74, -0.3, z, 1.5, seed=1, lean=(-0.03, -0.06), s=0.85)
+    palm(r, -0.5, -0.42, z, 1.5, seed=1, lean=(-0.03, -0.06), s=0.85)
     basket(( -0.05, -0.55, z), r, 0.11, 4, 3)
     sack((0.25, -0.35, z), r, 0.11, 2)
     box((0.42, 0.62, 0.012), (0.24, 0.42, zt + 0.032), mat(RUG[variant % 4], rough=0.9), parent=r)
@@ -735,24 +740,24 @@ def watch_tower(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     z = 0.05
     z1 = mud_block(r, -0.36, 0.36, -0.36, 0.36, 1.0, z, pitch=0.24, band=0.0, merlons=False, roof=None)
     zt = mud_block(r, -0.31, 0.31, -0.31, 0.31, 0.72, z1, pitch=0.21, band=0.72, band_h=0.08, mh=0.13,
-                   c=tint(MUD, 1.02))
+                   c=tint(MUD, 1.02), dado=0.0)
     box((0.8, 0.8, 0.06), (0, 0, z1 + 0.0), glaze(), parent=r)
-    arch_door((0, -0.401, z), 0, r, 0.26, 0.62)
+    arch_door((0, -0.36 - 0.05, z), 0, r, 0.26, 0.62)
     slit((0, -0.31 - 0.065, z1 + 0.2), 0, r)
     slit((0.31 + 0.065, 0, z1 + 0.2), pi / 2, r)
     slit((0.401, 0.0, z + 0.55), pi / 2, r)
     shield((0.43, -0.2, z1 - 0.32), pi / 2, r, 0.12, player, 0)
     # reed shade on four poles, the pennant above
     reed_roof(r, -0.24, 0.24, -0.24, 0.24, zt + 0.5, posts=True, z_post=zt, valance=player, beams=True)
-    flag((0.2, 0.2, zt + 0.52), 0.6, player, r, w=0.45, fh=0.22, pennant=True)
+    flag((0.08, 0.08, zt + 0.52), 0.6, player, r, w=0.4, fh=0.22, pennant=True)
     greek.brazier((-0.1, 0.05, zt), r, 0.6)
     # ladder up the +X face
     for t in (-0.09, 0.09):
-        rod((0.56, 0.12 + t, z), (0.44, 0.12 + t, z1), 0.014, PALMWOOD, r)
+        rod((0.5, 0.12 + t, z), (0.42, 0.12 + t, z1), 0.014, PALMWOOD, r)
     for i in range(8):
         f = (i + 0.6) / 8.5
-        rod((0.56 - 0.12 * f, 0.03, z + f * (z1 - z)), (0.56 - 0.12 * f, 0.21, z + f * (z1 - z)), 0.01, PALMWOOD, r)
-    jar(r, -0.3, -0.44, z, 0.24)
+        rod((0.5 - 0.08 * f, 0.03, z + f * (z1 - z)), (0.5 - 0.08 * f, 0.21, z + f * (z1 - z)), 0.01, PALMWOOD, r)
+    jar(r, -0.3, -0.42, z, 0.2)
     return r
 
 
@@ -816,12 +821,12 @@ def town_center(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     for sx in (-1, 1):
         lamassu((-0.25 + sx * 0.6, -0.5, z), 0, r, 0.62)
     # the east wing, lower, with a door and a stair up its court side
-    zw = mud_block(r, 0.9, 1.42, -0.8, 1.42, 1.02, z, band=0.78, pitch=0.28)
-    arch_door((1.16, -0.8 - 0.065, z), 0, r, 0.26, 0.66)
+    zw = mud_block(r, 0.9, 1.38, -0.8, 1.42, 1.02, z, band=0.78, pitch=0.28)
+    arch_door((1.14, -0.8 - 0.05, z), 0, r, 0.26, 0.66)
     for y in (-0.35, 0.3, 0.95):
-        slit((1.42 + 0.065, y, z + 0.5), pi / 2, r)
+        slit((1.38 + 0.05, y, z + 0.5), pi / 2, r)
     stair(r, 0.72, -0.78, 0.1, z, zw, 0.26, 9)
-    canopy(r, 1.0, 1.34, -0.72, -0.05, zw + 0.5, player, posts=zw, sag=0.03)
+    canopy(r, 1.0, 1.3, -0.72, -0.05, zw + 0.5, player, posts=zw, sag=0.03)
     # the court wall and its gate piers
     yard_wall(r, [(-0.55, -1.4), (-1.4, -1.4), (-1.4, 0.1)], h=0.42)
     yard_wall(r, [(0.05, -1.4), (0.86, -1.4)], h=0.42)
@@ -829,7 +834,7 @@ def town_center(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
         gate_pier(r, x, -1.4, 0.62)
         greek.brazier((x, -1.4, 0.645), r, 0.5)
     # the court
-    palm(r, -1.18, -1.12, z, 1.6, seed=4, lean=(0.03, 0.03), s=0.9)
+    palm(r, -1.0, -0.95, z, 1.6, seed=4, lean=(0.03, 0.03), s=0.9)
     tannur(r, -1.15, -0.15, z)
     jar(r, 0.55, -0.15, z, 0.36)
     jar(r, 0.38, -0.08, z, 0.3, band=TURQ)
@@ -845,7 +850,7 @@ def town_center(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     sack_pile((0.62, -0.5, z), r, seed=4, n=(3, 1), s=0.1)
     standard((-0.82, -0.12, z), 1.7, player, r, 0.26, 0.5, seed=1)
     standard((0.32, -0.12, z), 1.7, player, r, 0.26, 0.5, seed=2)
-    flag((-0.95, 0.97, zk), 1.15, player, r, w=0.95, fh=0.55, pole_r=0.03, seed=2)
+    flag((-1.2, 0.62, zk), 1.15, player, r, w=0.9, fh=0.52, pole_r=0.03, seed=2)
     return r
 
 
@@ -869,15 +874,15 @@ def barracks(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     mud_block(r, 0.3, 0.94, -0.94, -0.82, wh, z, band=0.0, pitch=0.3, rosettes=False, mh=0.12, roof=None)
     mud_block(r, 0.81, 0.93, -0.81, 0.44, wh, z, band=0.0, pitch=0.3, rosettes=False, mh=0.12, roof=None)
     for sx in (-1, 1):
-        mud_block(r, sx * 0.3 - 0.13, sx * 0.3 + 0.13, -0.98, -0.74, 1.08, z, band=0.82, rosettes=False, pitch=0.2,
+        mud_block(r, sx * 0.3 - 0.13, sx * 0.3 + 0.13, -0.94, -0.7, 1.08, z, band=0.82, rosettes=False, pitch=0.2,
                   mh=0.12)
-    box((0.36, 0.2, 0.22), (0, -0.86, z + 0.86), glaze(), parent=r)
-    box((0.38, 0.22, 0.04), (0, -0.86, z + 0.99), mat(GLAZE_Y, rough=0.35), parent=r)
-    cloth(0.26, 0.2, mat(player, rough=0.7), (0, -0.975, z + 0.84), 0, r, hang=True, wave=0.008, nx=4)
+    box((0.36, 0.2, 0.22), (0, -0.82, z + 0.86), glaze(), parent=r)
+    box((0.38, 0.22, 0.04), (0, -0.82, z + 0.99), mat(GLAZE_Y, rough=0.35), parent=r)
+    cloth(0.26, 0.2, mat(player, rough=0.7), (0, -0.935, z + 0.84), 0, r, hang=True, wave=0.008, nx=4)
     for x in (-0.68, 0.62):
-        shield((x, -1.0, 0.32), 0, r, 0.13, player, 0)
+        shield((x, -0.975, 0.32), 0, r, 0.12, player, 0)
     for y in (-0.45, 0.05):
-        shield((0.995, y, 0.32), pi / 2, r, 0.13, player, 0)
+        shield((0.97, y, 0.32), pi / 2, r, 0.12, player, 0)
     # spear rack against the hall, a dummy, a target, a standard
     rod((-0.3, 0.38, z + 0.6), (0.4, 0.38, z + 0.6), 0.016, PALMWOOD_DK, r)
     for i in range(5):
@@ -912,7 +917,7 @@ def academy(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     arch_door((0.0, 0.42 - 0.065, z), 0, r, 0.32, 0.8)
     tablet_shelf((-0.5, 0.42 - 0.07, z), 0, r, 0.6, 0.72, seed=1)
     tablet_shelf((0.52, 0.42 - 0.07, z), 0, r, 0.56, 0.72, seed=2)
-    slit((0.94 + 0.065, 0.68, z + 0.7), pi / 2, r)
+    slit((0.94 + 0.05, 0.68, z + 0.7), pi / 2, r)
     zw = mud_block(r, -0.94, -0.52, -0.94, 0.5, 0.92, z, band=0.78, pitch=0.28)
     for y in (-0.6, -0.05):
         slit((-0.52 + 0.065, y, z + 0.5), pi / 2, r)
@@ -936,7 +941,7 @@ def academy(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     jar(r, 0.58, 0.18, z, 0.3)
     jar(r, 0.75, 0.05, z, 0.26, band=TURQ)
     tablet_stack(r, 0.72, 0.26, z, 4, 0.3)
-    palm(r, 0.8, 0.3, z, 1.35, seed=5, lean=(0.03, -0.04), s=0.75)
+    _garden(r, [(0.84, 0.3, z), (0.84, 0.12, z), (0.84, -0.06, z)], seed=6)
     standard((-0.42, -0.86, z), 1.5, player, r, 0.24, 0.44, seed=4)
     return r
 
@@ -1009,7 +1014,7 @@ def government_centre(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     glazed_gate(r, -0.34, 0.34, -0.02, 0.3, 1.6, zp, door_w=0.3, door_h=0.82)
     for sx in (-1, 1):
         lamassu((sx * 0.62, -0.1, zp), 0, r, 0.54)
-        standard((sx * 0.84, -0.7, z), 1.75, player, r, 0.26, 0.56, seed=sx + 5)
+        standard((sx * 0.78, -0.7, z), 1.75, player, r, 0.26, 0.56, seed=sx + 5)
         greek.brazier((sx * 0.4, -0.35, zp), r, 0.6)
     flag((0.55, 0.62, zt), 0.8, player, r, w=0.62, fh=0.36, pole_r=0.025, seed=6)
     return r
@@ -1067,7 +1072,7 @@ def market(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     _stall(r, 0.58, -0.34, z, pi / 2, player, 0.62, 0.42, goods=1, seed=2)
     _stall(r, -0.5, -0.72, z, 0.0, player, 0.6, 0.38, goods=2, seed=3)
     import figures
-    figures.donkey((0.12, -0.72, z), -0.4, player, parent=r)
+    figures.donkey((0.14, -0.62, z), -0.4, player, parent=r)
     # a balance on a post
     bxp, byp = 0.05, 0.02
     box((0.05, 0.05, 0.62), (bxp, byp, z + 0.31), mat(PALMWOOD_DK), parent=r)
@@ -1081,7 +1086,7 @@ def market(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     jar(r, 0.64, 0.1, z, 0.24, band=TURQ)
     sack_pile((0.82, -0.82, z), r, seed=3, n=(2, 1), s=0.1)
     basket((-0.86, -0.4, z), r, 0.1, 2, 4)
-    flag((0.0, 0.8, zt), 0.7, player, r, w=0.5, fh=0.3, seed=4)
+    flag((-0.4, 0.62, zt), 0.7, player, r, w=0.5, fh=0.3, seed=4)
     return r
 
 
@@ -1173,11 +1178,11 @@ def stable(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
         cloth(0.3, 0.2, mat(player, rough=0.7), (0, -0.02, 0.0), 0, e, hang=True, wave=0.01, nx=4)
         cloth(0.3, 0.2, mat(player, rough=0.7), (0, 0.02, 0.0), pi, e, hang=True, wave=0.01, nx=4)
         box((0.3, 0.05, 0.02), (0, 0, 0.0), gold(), parent=e)
-    greek._horse((0.36, -0.48, z), -1.1, r, coat=(0.62, 0.38, 0.2), cloth=[gold(), mat(player, rough=0.7), gold()])
+    greek._horse((0.36, -0.36, z), -1.1, r, coat=(0.62, 0.38, 0.2), cloth=[gold(), mat(player, rough=0.7), gold()])
     greek.trough((-0.45, -0.6, z), 0, r, 0.55)
     greek.hay_bale((-0.62, -0.2, z), 0.4, r)
     blob(0.12, (-0.28, -0.22, z + 0.02), "straw", (1.4, 1, 0.5), r, 5, 0.3, 1)
-    standard((-0.92, 0.28, z), 1.5, player, r, 0.24, 0.44, seed=7)
+    standard((-0.78, 0.2, z), 1.5, player, r, 0.24, 0.44, seed=7)
     return r
 
 
@@ -1205,13 +1210,13 @@ def storehouse(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     greek.timber_stack((0.62, 0.42, z), 0, r, (4, 3, 2), 0.86, 0.06, tarp=None)
     greek.stone_pile((0.6, -0.48, z), r, seed=3)
     # the yard
-    sack_pile((-0.62, -0.1, z), r, seed=2)
+    sack_pile((-0.56, -0.1, z), r, seed=2)
     sack_pile((-0.7, -0.52, z), r, seed=7, n=(3, 2), s=0.11, colours=("linen", "wool"))
     greek.gold_pile((-0.05, -0.6, z), r, seed=4)
     for i, (x, y) in enumerate(((-0.12, -0.06), (0.08, -0.12), (-0.02, 0.08), (0.2, 0.02))):
         jar(r, x, y, z, 0.34, band=(LAPIS, TURQ)[i % 2])
     crate((-0.32, -0.84, z), 0.2, r, 0.22)
-    standard((-0.9, -0.88, z), 1.45, player, r, 0.24, 0.44, seed=5)
+    standard((-0.8, -0.8, z), 1.45, player, r, 0.24, 0.44, seed=5)
     return r
 
 
@@ -1269,7 +1274,7 @@ def farm(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, ripe=True):
         fs.append((2 * i, 2 * i + 1, 2 * i + 3, 2 * i + 2))
     mesh(vs, fs, noisy(REED, 0.14, 12.0), parent=r, smooth=True, name="hut")
     box((0.12, 0.012, 0.16), (hx, hy - 0.23, 0.11), mat((0.1, 0.07, 0.05)), parent=r)
-    palm(r, -0.84, 0.28, 0.03, 1.2, seed=11, lean=(0.03, -0.03), s=0.62)
+    palm(r, -0.62, 0.22, 0.03, 1.2, seed=11, lean=(0.03, -0.03), s=0.62)
     # the shaduf on the canal bank
     qx, qy = 0.62, -0.62
     rod((qx, qy, 0.03), (qx, qy, 0.68), 0.025, PALMWOOD_DK, r)
@@ -1471,7 +1476,7 @@ def wonder(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
         greek.brazier((sx * 0.38, -2.38, z), r, 0.8)
         standard((sx * 0.48, -1.42, t1), 1.5, player, r, 0.26, 0.5, seed=sx + 4)
         standard((sx * 0.4, -0.38, t2), 1.3, player, r, 0.24, 0.44, seed=sx + 8)
-        standard((sx * 2.3, -2.3, z), 2.0, player, r, 0.3, 0.6, seed=sx + 12)
+        standard((sx * 2.2, -2.2, z), 2.0, player, r, 0.3, 0.6, seed=sx + 12)
         # gardens on the terraces and palms on the corners
         _garden(r, [(sx * (0.62 + i * 0.22), -0.86 + (i % 2) * 0.1, t1) for i in range(5)], seed=sx + 20)
         _garden(r, [(sx * 1.85, -0.6 + i * 0.25, t1) for i in range(10)], seed=sx + 22)
@@ -1479,7 +1484,7 @@ def wonder(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
         _garden(r, [(sx * 1.3, 0.0 + i * 0.25, t2) for i in range(7)], seed=sx + 26)
         palm(r, sx * 1.75, -0.78, t1, 1.5, seed=sx + 30, lean=(sx * 0.06, -0.04), s=0.9)
         palm(r, sx * 1.22, -0.12, t2, 1.4, seed=sx + 32, lean=(sx * 0.05, -0.03), s=0.8)
-        palm(r, sx * 2.25, 0.2 + (sx + 1) * 0.6, z, 1.7, seed=sx + 34, lean=(0.03, -0.04))
+        palm(r, sx * 1.98, 0.2 + (sx + 1) * 0.6, z, 1.7, seed=sx + 34, lean=(0.0, -0.02))
         _garden(r, [(sx * (1.0 + i * 0.25), -2.3, z) for i in range(5)], seed=sx + 40)
     flag((0.0, 1.02, t3 + 0.78 + 0.06), 1.0, player, r, w=1.0, fh=0.56, pole_r=0.035, seed=7)
     return r
@@ -1626,9 +1631,9 @@ def gate(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, line=0, open=False)
     gm = glaze()
     for sx in (-1, 1):
         x = sx * tx
-        box((T * 2 + 0.05, D * 2 + 0.05, 0.14), (x, 0, 0.07), noisy(BITUMEN, 0.25, 6.0, 0.6), parent=e)
+        box((T * 2 + 0.025, D * 2 + 0.05, 0.14), (x - sx * 0.0125, 0, 0.07), noisy(BITUMEN, 0.25, 6.0, 0.6), parent=e)
         box((T * 2, D * 2, TH), (x, 0, TH / 2), gm, parent=e)
-        box((T * 2 + 0.03, D * 2 + 0.03, 0.08), (x, 0, TH - 0.2), mat(GLAZE_Y, rough=0.35), parent=e)
+        box((T * 2 + 0.015, D * 2 + 0.03, 0.08), (x - sx * 0.0075, 0, TH - 0.2), mat(GLAZE_Y, rough=0.35), parent=e)
         box((T * 2 - 0.06, D * 2 - 0.06, 0.02), (x, 0, TH + 0.01), plaster(), parent=e)
         crenels(e, x - T, x + T, -D, D, TH, mat(GLAZE_W, rough=0.35), w=0.1, h=0.15, t=0.07, pitch=0.15)
         for sy in (-1, 1):
@@ -1691,3 +1696,108 @@ def gate(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, line=0, open=False)
                     gb.box((0.022, 0.012, 0.022), (-sx * (0.035 + k * (lw - 0.07) / 2), sy * 0.038, zz))
         gb.emit(greek.bronze(), f, "studs")
     return r
+
+
+# --------------------------------------------------------------- showcase
+
+
+def wall_layout(at, kind="stone_wall", origin=(0, 0, 0), player=BLUE, parent=None, open_gates=False):
+    """Walls and gates on game tiles {(x, y): "wall" | "gate"}, joined as the
+    game joins them (greek.wall_layout, with this module's pieces)."""
+    fn = globals()[kind]
+    for t, p in at.items():
+        loc = (origin[0] + t[0], origin[1] - t[1], origin[2])
+        if p == "gate":
+            gate(loc, player=player, parent=parent, line=greek._gate_line(t, at), open=open_gates)
+        else:
+            fn(loc, player=player, parent=parent, joins=greek._wall_links(t, at))
+
+
+def showcase_all():
+    """Every Mesopotamian building set together on plain ground, two players."""
+    r = empty("mesopotamian_all")
+
+    def at(u, v):       # u: screen-right, v: away from the camera
+        return (u - v, u + v, 0)
+
+    box((80, 80, 0.02), (0, 0, -0.01), noisy((0.42, 0.64, 0.24), 0.16, 0.5, 1.0), parent=r)
+    wonder(at(-7.0, 7.0), parent=r)
+    temple(at(-2.4, 6.6), parent=r)
+    town_center(at(1.4, 6.6), parent=r)
+    dock(at(5.4, 6.6), parent=r)
+    for u, fn in ((-9.0, academy), (-6.0, government_centre), (-3.0, market), (0.0, storehouse),
+                  (3.0, siege_workshop), (6.0, stable)):
+        fn(at(u, 2.6), parent=r)
+    archery_range(at(-9.0, -0.6), player=RED, parent=r)
+    barracks(at(-6.0, -0.6), player=RED, parent=r)
+    house(at(-3.0, -0.6), player=RED, parent=r)
+    farm(at(0.0, -0.6), player=RED, parent=r)
+    farm(at(1.0, -1.6), player=RED, parent=r)
+    watch_tower(at(3.4, -0.4), player=RED, parent=r)
+    house(at(6.0, -0.6), player=RED, parent=r, variant=1)
+    at_ = {(x, 0): "wall" for x in range(0, 7)}
+    at_[(3, 0)] = "gate"
+    at_.update({(6, y): "wall" for y in range(1, 4)})
+    o = at(-8.5, -3.8)
+    wall_layout(at_, "stone_wall", (round(o[0]), round(o[1]), 0), BLUE, r)
+    at_ = {(i, -i): "wall" for i in range(0, 6)}
+    at_.update({(5 + i, -5): "wall" for i in range(1, 4)})
+    at_[(2, -2)] = "gate"
+    o = at(1.5, -4.6)
+    wall_layout(at_, "palisade_wall", (round(o[0]), round(o[1]), 0), RED, r, open_gates=True)
+    for i, (u, v) in enumerate(((-11.2, 4.8), (8.2, 4.4), (8.6, -2.0), (-1.5, 4.6), (-11.2, -2.6), (4.6, 1.0))):
+        x, y, _ = at(u, v)
+        palm(r, x, y, 0.0, 1.8, seed=i + 50, lean=(0.05, -0.04))
+    return r
+
+
+def render_showcase_all(out, samples=32, res=(1800, 1125)):
+    """/usr/bin/python3.13 -c 'import sys; sys.path.insert(0, "tools/look");
+    import mesopotamian; mesopotamian.render_showcase_all("out.png")'"""
+    lib.reset()
+    showcase_all()
+    c = (-1.0 - 1.9, -1.0 + 1.9, 0)
+    lib.camera((c[0], c[1], 1.2), 22.5, res)
+    lib.light()
+    lib.render(out, samples)
+
+
+# ------------------------------------------------- sets (tools/look/export_all.py)
+# The colour sets this module draws (docs/look/buildings.md, "SETS"): the
+# same kinds, footprints and classes as greek.SETS, each modelled on its own
+# footprint (no fit).
+_ARMS = {"arm": [{"arm": k} for k in range(8)]}
+SETS = {
+    "house_mesopotamian": dict(func="mesopotamian.house", cls="MediumBuilding", tiles=2, kwargs={"variant": 0},
+                               fit=None),
+    "town_center_mesopotamian": dict(func="mesopotamian.town_center", cls="LargeBuilding", tiles=3, kwargs={},
+                                     fit=None),
+    "temple_mesopotamian": dict(func="mesopotamian.temple", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
+    "barracks_mesopotamian": dict(func="mesopotamian.barracks", cls="MediumBuilding", tiles=2, kwargs={},
+                                  fit=None),
+    "watch_tower_mesopotamian": dict(func="mesopotamian.watch_tower", cls="SmallBuilding", tiles=1, kwargs={},
+                                     fit=None),
+    "academy_mesopotamian": dict(func="mesopotamian.academy", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
+    "archery_range_mesopotamian": dict(func="mesopotamian.archery_range", cls="MediumBuilding", tiles=2,
+                                       kwargs={}, fit=None),
+    "government_centre_mesopotamian": dict(func="mesopotamian.government_centre", cls="MediumBuilding", tiles=2,
+                                           kwargs={}, fit=None),
+    "market_mesopotamian": dict(func="mesopotamian.market", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
+    "siege_workshop_mesopotamian": dict(func="mesopotamian.siege_workshop", cls="MediumBuilding", tiles=2,
+                                        kwargs={}, fit=None),
+    "stable_mesopotamian": dict(func="mesopotamian.stable", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
+    "storehouse_mesopotamian": dict(func="mesopotamian.storehouse", cls="MediumBuilding", tiles=2, kwargs={},
+                                    fit=None),
+    "farm_mesopotamian": dict(func="mesopotamian.farm", cls="MediumBuilding", tiles=2, kwargs={}, fit=None,
+                              stages="flat"),
+    "dock_mesopotamian": dict(func="mesopotamian.dock", cls="LargeBuilding", tiles=3, kwargs={}, fit=None,
+                              stages="flat"),
+    "wonder_mesopotamian": dict(func="mesopotamian.wonder", cls="Wonder", tiles=5, kwargs={}, fit=None),
+    "stone_wall_mesopotamian": dict(func="mesopotamian.stone_wall", cls="SmallBuilding", tiles=1, kwargs={},
+                                    fit=None, anims=_ARMS),
+    "palisade_wall_mesopotamian": dict(func="mesopotamian.palisade_wall", cls="SmallBuilding", tiles=1,
+                                       kwargs={}, fit=None, anims=_ARMS),
+    "gate_mesopotamian": dict(func="mesopotamian.gate", cls="SmallBuilding", tiles=1, kwargs={}, fit=None,
+                              anims={"shut": [{"line": k, "open": False} for k in range(4)],
+                                     "open": [{"line": k, "open": True} for k in range(4)]}),
+}

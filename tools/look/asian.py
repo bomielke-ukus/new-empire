@@ -38,8 +38,8 @@ from greek import (WALL_DIRECTIONS, _arm_outline, _along, _gate_line, _wall_link
 
 # ---------------------------------------------------------------- colours
 
-VERMILION = (0.82, 0.22, 0.12)
-VERM_DK = (0.56, 0.13, 0.08)
+VERMILION = (0.80, 0.30, 0.14)    # cinnabar lacquer, orange of a red player's red
+VERM_DK = (0.50, 0.17, 0.09)
 TILE = (0.33, 0.41, 0.39)          # grey-green glazed-less tile
 TILE_DK = (0.22, 0.28, 0.28)
 RIDGE = (0.17, 0.20, 0.21)
@@ -323,13 +323,15 @@ def hall(parent, x0, x1, y0, y1, z, h, wall=PLASTER, posts=None, bays=None, sill
         cyl(0.055, h, (px, py, z + h / 2), pm, parent=parent, segs=10)
         cyl(0.075, 0.05, (px, py, z + 0.025), mat(STONE, rough=0.8), parent=parent, segs=10)
     bm_ = mat(beam, rough=0.55)
-    box((sx + 0.13, sy + 0.13, 0.08), (cx, cy, z + h - 0.04), bm_, parent=parent)
+    # (its top a hair under the wall's: coplanar faces render black once a
+    # construction stage cuts the roof away)
+    box((sx + 0.13, sy + 0.13, 0.08), (cx, cy, z + h - 0.046), bm_, parent=parent)
     box((sx + 0.14, sy + 0.14, 0.035), (cx, cy, z + h - 0.11), mat(band, rough=0.6), parent=parent)
     if brackets:
         tm, gm = mat(band, rough=0.6), mat(tint(OCHRE, 0.9), rough=0.7)
         for (px, py) in pts:
             # a block, a bracket arm outward, a top block: the dougong in miniature
-            box((0.1, 0.1, 0.06), (px, py, z + h + 0.03), gm, parent=parent)
+            box((0.1, 0.1, 0.06), (px, py, z + h + 0.033), gm, parent=parent)
             ox = 0.06 if px >= x1 - 1e-6 else (-0.06 if px <= x0 + 1e-6 else 0)
             oy = 0.06 if py >= y1 - 1e-6 else (-0.06 if py <= y0 + 1e-6 else 0)
             box((0.1 + abs(ox) * 2.6, 0.1 + abs(oy) * 2.6, 0.05), (px + ox, py + oy, z + h + 0.085), tm,
@@ -797,6 +799,7 @@ def house(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, variant=0):
         building(r, x0, x1, y0, y1, z + 0.08, h, 0.42, over=0.14, ridge=(x1 - x0) / 2 - 0.02, wall=OCHRE,
                  brackets=False, bays=2)
         door((-0.27, y0, z + 0.08), 0, r, w=0.34, h=0.68, studs=False, curtain=player)
+        valance(r, (x0, y0 - 0.07, 0), (x1, y0 - 0.07, 0), z + 0.08 + h - 0.08, player, 0.12)
         lattice((-0.64, y0, z + 0.52), 0, r, 0.2, 0.24)
         lattice((x1, (y0 + y1) / 2, z + 0.52), pi / 2, r, 0.2, 0.24)
         # kitchen lean-to with a chimney
@@ -1795,7 +1798,11 @@ def stone_wall(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, arm=None, joi
             continue
         _, ang, reach = wall_dir(k)
         dx, dy = WALL_DIRECTIONS[k]
-        plan_prism(_arm_outline(k, P, W, 0.045, 0.003), 0.0, 0.11, stone(STONE_DK, 9.0), r, "arm_base")
+        # the footing starts a hair further out than the wall so no end face of
+        # it lies in the wall's (coplanar faces render black)
+        ft = plan_prism(_arm_outline(k, P, W, 0.045, 0.008), 0.0, 0.11, stone(STONE_DK, 9.0), r, "arm_base")
+        u = wall_dir(k)[0]
+        ft.location = (u[0] * 0.005, u[1] * 0.005, 0)
         plan_prism(_arm_outline(k, P, W), 0.0, H, earth, r, "arm")
         s0 = P * 0.6
         a, b = _along(k, s0), _along(k, reach - 0.003)
@@ -1864,7 +1871,7 @@ def gate(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, line=0, open=False)
     tx = reach - T
     for sx in (-1, 1):
         x = sx * tx
-        box((T * 2 + 0.06, D * 2 + 0.06, 0.12), (x, 0, 0.06), stone(STONE_DK, 9.0), parent=e, bevel=0.012)
+        box((T * 2 + 0.03, D * 2 + 0.06, 0.12), (x - sx * 0.015, 0, 0.06), stone(STONE_DK, 9.0), parent=e, bevel=0.012)
         box((T * 2, D * 2, PH), (x, 0, PH / 2), earth, parent=e, bevel=0.01)
         for sy in (-1, 1):
             f = face((x, sy * (D + 0.01), PH - 0.08), 0 if sy < 0 else pi, e)
