@@ -47,6 +47,22 @@ SpriteSet(
   colour; 255 takes the owner's colour; between, a blend (antialiased
   edges).
 
+## Trees
+
+The forest tree has several looks: the set `tree` and the sets `tree_1`,
+`tree_2`, ... (any of 1 to 99 present), each one idle frame. With more than
+one, each tree wears one picked by a hash of its tile, the same every frame
+and every run, and is drawn up to 0.16 tile off its tile's centre each way
+(by another hash of the tile), its depth moving with it, so a forest is a
+mix and its rows do not line up. The tree in the simulation does not move:
+only its picture. A tree remembered out of sight, and a tree falling, are
+drawn in the same look at the same place. With only `tree` (the old art),
+every tree is it, at its tile's centre.
+
+The looks now (`tools/look/decor.py`, `TREES`): 0 a round broadleaf, 1 a
+tall oval, about 20% taller and cooler green, 2 a low spreading oak, warmer,
+3 a two-headed tree, deep green, 4 an olive, silvery grey-green.
+
 ## Player colour
 
 Where the mask is set, the sheet's RGB is a grey: how brightly that cloth,

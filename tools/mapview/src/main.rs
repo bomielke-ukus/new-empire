@@ -427,7 +427,7 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
             &mut scene,
             d.sim(),
             None,
-            Some(cam.visible_rect()),
+            Some(&cam),
         );
         raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.sprites);
     }
@@ -694,7 +694,7 @@ fn run() -> Result<(), String> {
         &mut scene,
         &sim,
         viewer,
-        Some(cam.visible_rect()),
+        Some(&cam),
     );
     if a.hud {
         let settings = Settings::default();

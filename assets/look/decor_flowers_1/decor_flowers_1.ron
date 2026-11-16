@@ -6,12 +6,12 @@ SpriteSet(
     scale: 2,
     palette: "rgba",
     sheet: "decor_flowers_1.png",
-    anchor: (72, 43),
+    anchor: (72, 42),
     animations: [
         (name: "idle", frames: 1, frame_ms: 160, loops: true, impact: None),
     ],
     anchor_overrides: [],
     colour: true,
     mask: None,
-    frame: Some((144, 84)),
+    frame: Some((144, 82)),
 )

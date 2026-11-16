@@ -41,6 +41,23 @@ pub const BREATH: f32 = 4.0;
 pub const BREATH_DEPTH: f32 = 0.04;
 /// The foam's colour, sRGB 0 to 1.
 pub const FOAM: [f32; 3] = [0.97, 0.99, 1.0];
+/// The foam at its thickest: never opaque, the water shows through.
+pub const FOAM_MAX: f32 = 0.6;
+/// The foam follows the water smoothed over this far, tiles: the mean of
+/// the blend at four points this far off diagonally, so a coast's corners
+/// round off instead of stepping with the tiles.
+pub const FOAM_BLUR: f32 = 0.45;
+/// The foam's line wanders this far besides the edge's own wobble, tiles,
+/// on a scale of several tiles.
+pub const FOAM_SWAY: f32 = 0.3;
+/// The noise read for the foam's sway, the land's tint and the foam's
+/// break-up, as multiples of [`NOISE_PER_TILE`]: below 1, broader than
+/// the noise's own 8 tiles; above, finer.
+pub const SWAY_SCALE: f32 = 0.27;
+/// The land's broad tint: two reads of the noise, ~18 and ~60 tiles across.
+pub const TINT_SCALES: [f32; 2] = [0.45, 0.13];
+/// How much the broad tint brightens or darkens the land, at most.
+pub const TINT_DEPTH: f32 = 0.07;
 /// Mip levels of a ground texture, 512 down to 1.
 pub const LEVELS: u32 = 10;
 /// The file names under `assets/look/terrain`, in [`Terrain`]'s order.
@@ -331,6 +348,7 @@ impl Ground<'_> {
             x * TEX_PER_TILE / TEX_SIZE as f32,
             y * TEX_PER_TILE / TEX_SIZE as f32,
         );
+        let tint = self.tint(x, y);
         let mut col = [0.0f32; 3];
         for i in 0..4 {
             let w = b.weights[i];
@@ -353,13 +371,16 @@ impl Ground<'_> {
                     (p[2] + q[2]) * 0.5,
                 ]
             } else {
-                self.art.sample(t, u, v, lod)
+                // The land, brightened and darkened over tens of tiles so
+                // the texture's repeat does not show from afar.
+                let s = self.art.sample(t, u, v, lod);
+                [s[0] * tint[0], s[1] * tint[1], s[2] * tint[2]]
             };
             for k in 0..3 {
                 col[k] += c[k] * w;
             }
         }
-        let f = foam(self.art, b.water(), x, y, time);
+        let f = self.foam(x, y, b.water(), time);
         if f > 0.0 {
             for k in 0..3 {
                 col[k] += (FOAM[k] - col[k]) * f;
@@ -367,6 +388,69 @@ impl Ground<'_> {
         }
         col
     }
+
+    /// How much foam at world `(x, y)`, 0 to [`FOAM_MAX`], where the blend
+    /// there gives the water `water`: on the water side of the shore, soft
+    /// at both edges, broken into patches by two scales of the noise,
+    /// moving a little toward the land and back as it breathes. It follows
+    /// the water smoothed over [`FOAM_BLUR`] around a point pushed by the
+    /// edge's wobble and a broader sway, so it rounds a coast's corners
+    /// and does not trace the tile grid.
+    pub fn foam(&self, x: f32, y: f32, water: f32, time: f32) -> f32 {
+        // Only where the blend has water: never on dry sand.
+        let wet = smoothstep(0.2, 0.55, water);
+        if wet <= 0.0 {
+            return 0.0;
+        }
+        let art = self.art;
+        let (ox, oy) = art.wobble(x, y);
+        let s = NOISE_PER_TILE * SWAY_SCALE;
+        let sx = art.noise_at(x * s + 41.0, y * s + 13.0) - 0.5;
+        let sy = art.noise_at(y * s + 77.0, x * s + 29.0) - 0.5;
+        let (px, py) = (x + ox + sx * 2.0 * FOAM_SWAY, y + oy + sy * 2.0 * FOAM_SWAY);
+        let d = FOAM_BLUR;
+        let smooth = (blend_at(self.types, px - d, py - d).water()
+            + blend_at(self.types, px + d, py - d).water()
+            + blend_at(self.types, px - d, py + d).water()
+            + blend_at(self.types, px + d, py + d).water())
+            * 0.25;
+        let shift = BREATH_DEPTH * (time * std::f32::consts::TAU / BREATH).sin();
+        // Rising sharply just past the shore, fading out to sea.
+        let band = smoothstep(0.44 - shift, 0.53 - shift, smooth)
+            * (1.0 - smoothstep(0.66 - shift, 0.9 - shift, smooth));
+        if band <= 0.0 {
+            return 0.0;
+        }
+        let fine = art.noise_at(
+            x * NOISE_PER_TILE * 3.1 + 17.0,
+            y * NOISE_PER_TILE * 3.1 + 5.0,
+        );
+        let broad = art.noise_at(
+            y * NOISE_PER_TILE * 0.9 + 93.0,
+            x * NOISE_PER_TILE * 0.9 + 61.0,
+        );
+        let breakup = smoothstep(0.42, 0.66, fine * 0.6 + broad * 0.4);
+        band * wet * breakup * FOAM_MAX
+    }
+
+    /// The land's broad tint at world `(x, y)`: a factor per channel
+    /// within [`TINT_DEPTH`] of 1, warmer where brighter.
+    pub fn tint(&self, x: f32, y: f32) -> [f32; 3] {
+        let n = |k: usize, ox: f32, oy: f32| {
+            let s = NOISE_PER_TILE * TINT_SCALES[k];
+            self.art.noise_at(x * s + ox, y * s + oy)
+        };
+        let m = (n(0, 7.0, 211.0) * 0.6 + n(1, 151.0, 37.0) * 0.4 - 0.5) * 2.0;
+        let l = 1.0 + m * TINT_DEPTH;
+        [l + m * 0.02, l, l - m * 0.03]
+    }
+}
+
+/// `smoothstep` as WGSL has it: 0 below `lo`, 1 above `hi`, smooth between.
+#[inline]
+pub fn smoothstep(lo: f32, hi: f32, v: f32) -> f32 {
+    let t = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// The types of the four tile centres around world `(x, y)` (already
@@ -401,24 +485,6 @@ pub fn blend_at(types: &TypeMap, x: f32, y: f32) -> Blend {
         }
     }
     b
-}
-
-/// How much foam at world `(x, y)`, 0 to 1, for `water`, the blended
-/// weight of the water there: a line where it is between about 0.35 and
-/// 0.6, the shore, broken where the finer noise is low, the band moving a
-/// little toward the land and back as it breathes.
-pub fn foam(art: &GroundArt, water: f32, x: f32, y: f32, time: f32) -> f32 {
-    let shift = BREATH_DEPTH * (time * std::f32::consts::TAU / BREATH).sin();
-    let (lo, hi) = (0.35 - shift, 0.6 - shift);
-    let band = ((water - lo) / 0.05).clamp(0.0, 1.0) * ((hi - water) / 0.05).clamp(0.0, 1.0);
-    if band <= 0.0 {
-        return 0.0;
-    }
-    let breakup = art.noise_at(
-        x * NOISE_PER_TILE * 3.1 + 17.0,
-        y * NOISE_PER_TILE * 3.1 + 5.0,
-    );
-    band * ((breakup - 0.3) / 0.25).clamp(0.0, 1.0) * 0.85
 }
 
 #[cfg(test)]
@@ -556,13 +622,8 @@ pub(crate) mod tests {
         let along = |x: f32, t: f32| -> f32 {
             (0..64)
                 .map(|i| {
-                    foam(
-                        &art,
-                        g.blend(x, 0.5 + i as f32 * 0.05).water(),
-                        x,
-                        0.5 + i as f32 * 0.05,
-                        t,
-                    )
+                    let y = 0.5 + i as f32 * 0.05;
+                    g.foam(x, y, g.blend(x, y).water(), t)
                 })
                 .sum::<f32>()
         };

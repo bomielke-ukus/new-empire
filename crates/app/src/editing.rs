@@ -579,12 +579,8 @@ impl App {
                 symbols: self.settings.player_symbols,
             },
         );
-        self.scenery.decorate(
-            &mut scene,
-            &self.sim,
-            None,
-            Some(self.camera.visible_rect()),
-        );
+        self.scenery
+            .decorate(&mut scene, &self.sim, None, Some(&self.camera));
         let marks = self.brush_tiles();
         if !marks.is_empty() {
             scene.sprites.extend(view::scene::tile_marks(

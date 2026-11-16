@@ -7,7 +7,8 @@ writes OUT_DIR/ground_iso.png: a 12 x 8 tile-diamond view of a test map (a
 few patches of every ground type) drawn with numpy the way docs/look/ground.md
 says (texture at the pixel's own world position, the four surrounding tile
 centres' types blended bilinearly after a noise wobble of up to 0.35 tile,
-foam where the water weight is 0.35..0.6, static water at time 0), and
+the land's broad tint, soft foam on the water side of the shore, static
+water at time 0), and
 OUT_DIR/ground_flat_NAME.png: each texture tiled 2 x 2, flat, to check the
 seams (with the seam error printed: the mean step across the wrap edge over
 the mean step between neighbouring texels inside).
@@ -84,6 +85,26 @@ def bil(img, u, v):
     return a * (1 - fv) + b * fv
 
 
+def _ss(lo, hi, x):
+    t = np.clip((x - lo) / (hi - lo), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def _water_at(m, px, py):
+    """The bilinear weight of the water among the four tile centres
+    around (px, py) (already pushed)."""
+    n = m.shape[0]
+    qx, qy = px - 0.5, py - 0.5
+    i0, j0 = np.floor(qx).astype(np.int64), np.floor(qy).astype(np.int64)
+    fx, fy = qx - i0, qy - j0
+    out = np.zeros(px.shape, _F)
+    for di, dj, k in ((0, 0, (1 - fx) * (1 - fy)), (1, 0, fx * (1 - fy)), (0, 1, (1 - fx) * fy),
+                      (1, 1, fx * fy)):
+        t = m[np.clip(j0 + dj, 0, n - 1), np.clip(i0 + di, 0, n - 1)]
+        out += np.where((t == SH) | (t == DP), k, 0)
+    return out
+
+
 def ground(tex, nz, m, wx, wy):
     """Colour of the ground at world points (wx, wy), per docs/look/ground.md."""
     n = m.shape[0]
@@ -98,18 +119,36 @@ def ground(tex, nz, m, wx, wy):
                       (1, 1, fx * fy)):
         t = m[np.clip(j0 + dj, 0, n - 1), np.clip(i0 + di, 0, n - 1)]
         np.add.at(w.reshape(-1, 8), (np.arange(t.size), t.ravel()), k.ravel())
+    # the land's broad tint
+    tm = (bil(nz, wx * 32 * 0.45 + 7, wy * 32 * 0.45 + 211) * 0.6
+          + bil(nz, wx * 32 * 0.13 + 151, wy * 32 * 0.13 + 37) * 0.4 - 0.5) * 2
+    lum = 1 + tm * 0.07
+    tint = np.stack([lum + tm * 0.02, lum, lum - tm * 0.03], -1)
     col = np.zeros(wx.shape + (3,), _F)
     u, v = wx * 128, wy * 128
     for k in range(8):
         sel = w[..., k] > 1e-4
         if sel.any():
-            col[sel] += bil(tex[k], u[sel], v[sel]) * w[..., k][sel][..., None]
-    # foam at the shore
+            c = bil(tex[k], u[sel], v[sel])
+            if k not in (SH, DP):
+                c = c * tint[sel]
+            col[sel] += c * w[..., k][sel][..., None]
+    # foam on the water side of the shore: the water smoothed over 0.45
+    # tile round a point pushed by the wobble and a broader sway, broken
+    # by two scales of the noise, at most 0.6
     ww = w[..., SH] + w[..., DP]
-    br = bil(nz, wx * 32 * 3.1 + 17, wy * 32 * 3.1 + 5)
-    foam = np.clip((ww - 0.35) / 0.05, 0, 1) * np.clip((0.6 - ww) / 0.05, 0, 1)
-    foam *= np.clip((br - 0.3) / 0.25, 0, 1)
-    col += (np.array([0.97, 0.99, 1.0], _F) - col) * (foam * 0.85)[..., None]
+    wet = _ss(0.2, 0.55, ww)
+    s = 32 * 0.27
+    fx_ = wx + ox + (bil(nz, wx * s + 41, wy * s + 13) - 0.5) * 0.6
+    fy_ = wy + oy + (bil(nz, wy * s + 77, wx * s + 29) - 0.5) * 0.6
+    d = 0.45
+    calm = (_water_at(m, fx_ - d, fy_ - d) + _water_at(m, fx_ + d, fy_ - d)
+            + _water_at(m, fx_ - d, fy_ + d) + _water_at(m, fx_ + d, fy_ + d)) * 0.25
+    band = _ss(0.44, 0.53, calm) * (1 - _ss(0.66, 0.9, calm))
+    fine = bil(nz, wx * 32 * 3.1 + 17, wy * 32 * 3.1 + 5)
+    broad = bil(nz, wy * 32 * 0.9 + 93, wx * 32 * 0.9 + 61)
+    foam = band * wet * _ss(0.42, 0.66, fine * 0.6 + broad * 0.4) * 0.6
+    col += (np.array([0.97, 0.99, 1.0], _F) - col) * foam[..., None]
     return col
 
 

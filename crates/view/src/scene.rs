@@ -227,6 +227,11 @@ impl Scene {
                 .player(world.owner[i])
                 .map_or(0, |p| p.age.index() as u8);
             let look = atlas.variant(kind, age, arch_of(sim, world.owner[i]));
+            // A tree wears one of the tree's looks, by its tile, and stands
+            // a little off the tile's centre (nothing, with no other looks).
+            let tree_tile = (kind == kinds::TREE)
+                .then(|| sim::nav::anchor_tile(world.pos[i], info.footprint as i32));
+            let look = tree_tile.map_or(look, |(x, y)| atlas.tree_look(x, y));
             // What the unit is doing decides which animation plays; the clock
             // is game time plus a per-slot phase so a crowd does not march in
             // lockstep. Presentation only: nothing here feeds the simulation.
@@ -337,6 +342,13 @@ impl Scene {
                     (ax + (bx - ax) * alpha, ay + (by - ay) * alpha)
                 }
                 _ => (fx_to_f32(cur.x), fx_to_f32(cur.y)),
+            };
+            let (px, py) = match tree_tile {
+                Some((x, y)) => {
+                    let (ox, oy) = atlas.tree_offset(x, y);
+                    (px + ox, py + oy)
+                }
+                None => (px, py),
             };
             let h = iso::ground_height(map, px, py);
             let (gx, gy) = iso::project(px, py, h);
@@ -467,7 +479,11 @@ impl Scene {
             for ((x, y), m) in f.memories() {
                 let info = kinds::info(m.kind);
                 let fp = info.footprint.max(1) as i32;
-                let look = atlas.variant(m.kind, m.age, arch_of(sim, m.owner));
+                let look = if m.kind == kinds::TREE {
+                    atlas.tree_look(x, y)
+                } else {
+                    atlas.variant(m.kind, m.age, arch_of(sim, m.owner))
+                };
                 let at = piece_of(m.owner);
                 let gate = (m.kind == kinds::GATE && !m.site)
                     .then(|| atlas.gate_frame(look, walls::gate_line((x, y), &at), false))
@@ -484,6 +500,12 @@ impl Scene {
                 };
                 let centre = sim::nav::building_centre(x, y, fp);
                 let (cx, cy) = (fx_to_f32(centre.x), fx_to_f32(centre.y));
+                let (cx, cy) = if m.kind == kinds::TREE {
+                    let (ox, oy) = atlas.tree_offset(x, y);
+                    (cx + ox, cy + oy)
+                } else {
+                    (cx, cy)
+                };
                 let h = iso::ground_height(map, cx, cy);
                 let (gx, gy) = iso::project(cx, cy, h);
                 let depth = cx + cy + (fp as f32 - 1.0) * 0.5;

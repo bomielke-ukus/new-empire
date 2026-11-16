@@ -1458,12 +1458,8 @@ impl App {
         self.feedback
             .decorate(&mut scene, &self.sim, &self.atlas, self.viewer);
         // Scenery over the ground, with the new art (`docs/look/ground.md`).
-        self.scenery.decorate(
-            &mut scene,
-            &self.sim,
-            self.viewer,
-            Some(self.camera.visible_rect()),
-        );
+        self.scenery
+            .decorate(&mut scene, &self.sim, self.viewer, Some(&self.camera));
         // An attack on the player's own out of view: a mark at the edge.
         scene.ui.extend(self.feedback.edge_indicators(
             &self.sim,
@@ -1722,7 +1718,7 @@ impl App {
             let cam = d.camera(self.camera.viewport, self.camera.dpi);
             let mut scene = d.scene(&self.atlas);
             self.diorama_scenery
-                .decorate(&mut scene, d.sim(), None, Some(cam.visible_rect()));
+                .decorate(&mut scene, d.sim(), None, Some(&cam));
             sprites = scene.sprites;
             camera = Some(cam);
             if let Some(gpu) = &mut self.gpu {

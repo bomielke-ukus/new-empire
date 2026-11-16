@@ -46,6 +46,14 @@ pub const UI_GLYPH_GOLD: KindId = 62_000;
 pub const DECOR: KindId = 63_000;
 /// The kinds of scenery, by the middle of their sets' names.
 pub const DECOR_KINDS: [&str; 5] = ["flowers", "tuft", "rock", "bush", "reeds"];
+/// The forest tree's other looks (`docs/look/colour-sets.md`, "Trees"):
+/// the set `tree_<n>` (`n` 1 to 99) is filed under `TREE_LOOK + n`; the
+/// set `tree` is the kind itself. Which one a tree wears is
+/// [`Atlas::tree_look`].
+pub const TREE_LOOK: KindId = 63_500;
+/// How far a tree with variants is moved off its tile's centre, tiles at
+/// most along each axis, so the rows of a forest do not line up.
+pub const TREE_JITTER: f32 = 0.16;
 /// A kind's looks for an age or an architecture live above this:
 /// `AGE_VARIANT_BASE + (architecture * 4 + age) * 500 + kind`, below the
 /// UI's ids. See [`Atlas::variant`].
@@ -269,6 +277,9 @@ pub struct Atlas {
     variants: HashMap<(KindId, u8, u8), KindId>,
     /// Names of the rendered sets that replaced placeholders.
     pub loaded_sets: Vec<String>,
+    /// The tree's looks, [`kinds::TREE`] first then each `tree_<n>` set's
+    /// id: one entry when there are no others.
+    trees: Vec<KindId>,
 }
 
 impl Atlas {
@@ -334,6 +345,35 @@ impl Atlas {
             .rev()
             .find_map(|a| self.variants.get(&(kind, a, 0)).copied())
             .unwrap_or(kind)
+    }
+
+    /// The look a tree on tile `(x, y)` wears: one of [`Atlas`]'s tree
+    /// sets, picked by a hash of the tile, so the same tree is the same
+    /// every frame and every run and a forest is a mix. The kind itself
+    /// when there are no other looks (the new art off).
+    pub fn tree_look(&self, x: i32, y: i32) -> KindId {
+        if self.trees.len() <= 1 {
+            return kinds::TREE;
+        }
+        self.trees[(tile_hash(x, y, 0x7EE) % self.trees.len() as u32) as usize]
+    }
+
+    /// How far a tree on tile `(x, y)` is drawn off the tile's centre, in
+    /// tiles, each axis within [`TREE_JITTER`]: by a hash of the tile, and
+    /// nothing without other looks (the new art off). The tree stands where
+    /// it stands; only its picture moves, and its depth with it.
+    pub fn tree_offset(&self, x: i32, y: i32) -> (f32, f32) {
+        if self.trees.len() <= 1 {
+            return (0.0, 0.0);
+        }
+        let h = tile_hash(x, y, 0x0FF5);
+        let unit = |b: u32| (b & 0xFFFF) as f32 / 65535.0 * 2.0 - 1.0;
+        (unit(h) * TREE_JITTER, unit(h >> 16) * TREE_JITTER)
+    }
+
+    /// Every look of the tree, the kind itself first.
+    pub fn tree_looks(&self) -> &[KindId] {
+        &self.trees
     }
 
     /// Timing of an animation, if the kind has it.
@@ -420,8 +460,11 @@ impl Atlas {
             if replaced(sheet) {
                 continue;
             }
-            // Scenery (`crate::scenery`) is filed under its own ids.
-            let kind = if let Some(id) = decor_id_for_set(&sheet.name) {
+            // Scenery (`crate::scenery`) and the tree's other looks are
+            // filed under their own ids.
+            let kind = if let Some(id) =
+                decor_id_for_set(&sheet.name).or_else(|| tree_id_for_set(&sheet.name))
+            {
                 id
             } else {
                 let Some((base, age, arch)) = set_target(&sheet.name) else {
@@ -680,6 +723,13 @@ impl Atlas {
         }
         let mut atlas = pack(canvases, ATLAS_WIDTH, ATLAS_PAGE_HEIGHT);
         pack_colour(&mut atlas, colour, ATLAS_PAGE_HEIGHT);
+        // The tree's other looks count only beside a drawn tree.
+        let mut trees: Vec<KindId> = (1..100)
+            .map(|n| TREE_LOOK + n)
+            .filter(|&id| atlas.frame(id, 0).is_some())
+            .collect();
+        trees.insert(0, kinds::TREE);
+        atlas.trees = trees;
         atlas.anims = anims;
         atlas.variants = variants;
         atlas.loaded_sets = loaded_sets;
@@ -1057,6 +1107,7 @@ fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
         anims: HashMap::new(),
         variants: HashMap::new(),
         loaded_sets: Vec::new(),
+        trees: vec![kinds::TREE],
     }
 }
 
@@ -1179,6 +1230,23 @@ pub fn decor_id_for_set(name: &str) -> Option<KindId> {
     let k = DECOR_KINDS.iter().position(|&d| d == kind)?;
     let n: KindId = n.parse().ok().filter(|&n| n < 100)?;
     Some(decor_id(k, n))
+}
+
+/// The id a look of the tree (`tree_1`, `tree_2`, ...) is filed under, or
+/// `None` if the name is not one. `tree` itself is the kind.
+pub fn tree_id_for_set(name: &str) -> Option<KindId> {
+    let n: KindId = name.strip_prefix("tree_")?.parse().ok()?;
+    (1..100).contains(&n).then_some(TREE_LOOK + n)
+}
+
+/// A well-mixed hash of a tile and a salt, for picking a tree's look.
+fn tile_hash(x: i32, y: i32, salt: u32) -> u32 {
+    let mut h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77) ^ salt;
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x7FEB_352D);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x846C_A68B);
+    h ^ (h >> 16)
 }
 
 /// The id variant `n` of scenery kind `kind` (an index into
@@ -3148,5 +3216,49 @@ mod tests {
         };
         assert_ne!(pixels(1), pixels(3));
         assert_ne!(pixels(2), pixels(5));
+    }
+
+    /// The committed tree sets give a forest a mix of looks, the same for a
+    /// tile every time, each a little off its tile's centre; with only the
+    /// old tree, every tree is it, at the centre.
+    #[test]
+    fn a_forest_is_a_mix_of_tree_looks() {
+        let look = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/look");
+        let sheets: Vec<_> = crate::sheets::find_sets(&look)
+            .into_iter()
+            .filter(|p| {
+                let n = p.file_stem().unwrap().to_string_lossy().to_string();
+                n == "tree" || tree_id_for_set(&n).is_some()
+            })
+            .map(|p| crate::sheets::Sheet::load(&p).unwrap())
+            .collect();
+        let atlas = Atlas::with_sheets(&sheets);
+        assert_eq!(tree_id_for_set("tree_3"), Some(TREE_LOOK + 3));
+        assert_eq!(tree_id_for_set("tree"), None);
+        assert_eq!(tree_id_for_set("tree_iron"), None);
+        assert!(atlas.tree_looks().len() >= 4, "{:?}", atlas.tree_looks());
+        assert_eq!(atlas.tree_looks()[0], kinds::TREE);
+        let mut seen = std::collections::HashMap::new();
+        for y in 0..20 {
+            for x in 0..20 {
+                let id = atlas.tree_look(x, y);
+                assert_eq!(id, atlas.tree_look(x, y));
+                assert!(atlas.frame(id, 0).is_some());
+                *seen.entry(id).or_insert(0) += 1;
+                let (ox, oy) = atlas.tree_offset(x, y);
+                assert!(ox.abs() <= TREE_JITTER && oy.abs() <= TREE_JITTER);
+            }
+        }
+        assert_eq!(seen.len(), atlas.tree_looks().len(), "every look is used");
+        assert!(seen
+            .values()
+            .all(|&n| n > 400 / atlas.tree_looks().len() / 3));
+        let moved = (0..50)
+            .filter(|&i| atlas.tree_offset(i, 7).0.abs() > 0.02)
+            .count();
+        assert!(moved > 30, "rows do not line up");
+        let old = Atlas::placeholder();
+        assert_eq!(old.tree_look(3, 4), kinds::TREE);
+        assert_eq!(old.tree_offset(3, 4), (0.0, 0.0));
     }
 }

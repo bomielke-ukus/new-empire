@@ -18,6 +18,7 @@
 use sim::entity::KindId;
 use sim::{kinds, Simulation, Terrain, TileMap};
 
+use crate::camera::Camera;
 use crate::fog;
 use crate::iso;
 use crate::scene::{overlay, Scene, SpriteInstance};
@@ -38,12 +39,17 @@ const REEDS: usize = 4;
 const DEPTH_BIAS: f32 = 0.25;
 /// Tiles across a drift of flowers.
 const DRIFT_TILES: f32 = 6.0;
+/// Below this zoom the smallest things (flowers, tufts, pebbles and small rocks) are left
+/// out: from afar they are a few pixels each, confetti over the meadow.
+pub const SMALL_ZOOM: f32 = 0.75;
 
 /// One thing scattered on the ground.
 #[derive(Clone, Copy, PartialEq, Debug)]
 struct Item {
     /// The tile it stands on.
     tile: (i32, i32),
+    /// Too small to draw from afar (below [`SMALL_ZOOM`]).
+    small: bool,
     /// Its sprite, in full light.
     sprite: SpriteInstance,
 }
@@ -226,8 +232,10 @@ impl Scenery {
                     let wy = y as f32 + 0.2 + 0.6 * unit(hash(seed, x, y, 2));
                     let (gx, gy) = iso::project(wx, wy, iso::ground_height(map, wx, wy));
                     let sprite = overlay(frame, gx, gy, 0, wx + wy - DEPTH_BIAS, u32::MAX);
+                    let n = id - decor_id(kind, 0);
                     items.push(Item {
                         tile: (x, y),
+                        small: kind == FLOWERS || kind == TUFT || (kind == ROCK && n < 2),
                         sprite,
                     });
                 }
@@ -262,14 +270,17 @@ impl Scenery {
 
     /// The sprites to draw this frame, in depth order: what is scattered
     /// over the world-screen rectangle `view` (everything, with `None`),
-    /// less what stands under a building, a site, rubble or a node, in the
+    /// less what stands under a building, a site, rubble or a node, and
+    /// less the smallest things when `zoom` is below [`SMALL_ZOOM`], in the
     /// light of `viewer`'s fog (`None`: all of it, lit).
     pub fn sprites(
         &mut self,
         sim: &Simulation,
         viewer: Option<u8>,
         view: Option<(f32, f32, f32, f32)>,
+        zoom: f32,
     ) -> Vec<SpriteInstance> {
+        let far = zoom < SMALL_ZOOM;
         if self.items.is_empty() {
             return Vec::new();
         }
@@ -307,6 +318,9 @@ impl Scenery {
         }
         let mut out = Vec::new();
         for item in &self.items {
+            if far && item.small {
+                continue;
+            }
             let s = &item.sprite;
             if let Some((l, t, r, b)) = view {
                 if s.x + s.w < l || s.x > r || s.y + s.h < t || s.y > b {
@@ -329,15 +343,21 @@ impl Scenery {
     }
 
     /// Adds this frame's scenery ([`Scenery::sprites`]) to a scene's world
-    /// sprites, keeping them in depth order.
+    /// sprites, keeping them in depth order: what `camera` sees at its zoom level (display scale aside)
+    /// (everything, at 1x, with `None`).
     pub fn decorate(
         &mut self,
         scene: &mut Scene,
         sim: &Simulation,
         viewer: Option<u8>,
-        view: Option<(f32, f32, f32, f32)>,
+        camera: Option<&Camera>,
     ) {
-        let more = self.sprites(sim, viewer, view);
+        let more = self.sprites(
+            sim,
+            viewer,
+            camera.map(|c| c.visible_rect()),
+            camera.map_or(1.0, |c| c.zoom_level()),
+        );
         if more.is_empty() {
             return;
         }
@@ -417,8 +437,8 @@ mod tests {
         let none = Scenery::new(sim.map(), sim.seed(), &Atlas::placeholder());
         assert!(none.is_empty());
         let mut a = a;
-        let one = a.sprites(&sim, None, None);
-        let two = a.sprites(&sim, None, None);
+        let one = a.sprites(&sim, None, None, 1.0);
+        let two = a.sprites(&sim, None, None, 1.0);
         assert_eq!(one, two, "the same picture every frame");
         assert!(one.iter().all(|s| s.slot == u32::MAX && !s.screen));
         assert!(one.windows(2).all(|w| w[0].depth <= w[1].depth));
@@ -517,7 +537,7 @@ mod tests {
                 stood.extend(sim::nav::footprint_tiles(ax, ay, fp));
             }
         }
-        let drawn = s.sprites(&sim, None, None);
+        let drawn = s.sprites(&sim, None, None, 1.0);
         let tiles: Vec<(i32, i32)> = s
             .items
             .iter()
@@ -550,7 +570,7 @@ mod tests {
             sim.step();
         }
         let under = sim::nav::footprint_tiles(target.0, target.1, fp);
-        let after = s.sprites(&sim, None, None);
+        let after = s.sprites(&sim, None, None, 1.0);
         assert!(after.len() < drawn.len());
         assert!(!s
             .items
@@ -564,8 +584,8 @@ mod tests {
     fn scenery_respects_the_fog() {
         let (sim, atlas) = (sim(), atlas());
         let mut s = Scenery::new(sim.map(), sim.seed(), &atlas);
-        let all = s.sprites(&sim, None, None).len();
-        let seen = s.sprites(&sim, Some(0), None);
+        let all = s.sprites(&sim, None, None, 1.0).len();
+        let seen = s.sprites(&sim, Some(0), None, 1.0);
         let f = sim.fog(0).unwrap();
         assert!(seen.len() < all / 4, "{} of {all} at the start", seen.len());
         for item in &s.items {
@@ -579,8 +599,14 @@ mod tests {
             }
         }
         // Culled to the view.
-        let some = s.sprites(&sim, None, Some((0.0, 0.0, 200.0, 200.0)));
+        let some = s.sprites(&sim, None, Some((0.0, 0.0, 200.0, 200.0)), 1.0);
         assert!(some.len() < all);
+        // From afar, the smallest things are left out, the rest kept.
+        let far = s.sprites(&sim, None, None, 0.5);
+        assert!(far.len() < all / 2, "{} of {all} from afar", far.len());
+        assert!(!far.is_empty());
+        let near = s.sprites(&sim, None, None, SMALL_ZOOM);
+        assert_eq!(near.len(), all);
     }
 
     /// One frame's work on a large map, for the record.
@@ -604,7 +630,12 @@ mod tests {
         let t = std::time::Instant::now();
         let n = 20;
         for _ in 0..n {
-            std::hint::black_box(s.sprites(&sim, Some(0), Some((-1500.0, 2000.0, 1500.0, 3000.0))));
+            std::hint::black_box(s.sprites(
+                &sim,
+                Some(0),
+                Some((-1500.0, 2000.0, 1500.0, 3000.0)),
+                1.0,
+            ));
         }
         let frame = t.elapsed() / n;
         eprintln!(

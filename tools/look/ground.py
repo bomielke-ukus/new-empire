@@ -626,6 +626,26 @@ def snow():
     return c
 
 
+def flatten_low(c, keep=0.3, lo=1.0, hi=4.5):
+    """Damp what varies over more than about a tile: the frequencies under
+    `hi` cycles across the texture (4 cycles is one tile) kept at `keep`,
+    rising smoothly from `lo`; the mean stays. A texture repeats every 4
+    tiles, and its broad light and dark patches are what show the repeat
+    as a checkerboard from afar; the renderer's broad tint
+    (docs/look/ground.md, "Broad tint") does that variation instead,
+    without a period."""
+    f = np.fft.fftfreq(N) * N
+    r = np.sqrt(f[None, :] ** 2 + f[:, None] ** 2)
+    t = np.clip((r - lo) / (hi - lo), 0, 1)
+    gain = keep + (1 - keep) * t * t * (3 - 2 * t)
+    gain[0, 0] = 1.0
+    out = np.real(np.fft.ifft2(np.fft.fft2(c, axes=(0, 1)) * gain[..., None], axes=(0, 1)))
+    return out.astype(c.dtype)
+
+
+LAND = {"grass", "dirt", "desert", "sand", "forest", "snow"}
+
+
 def noise_png():
     n = noise(91, 70, n=256, octaves=3, gain=0.45)
     return (np.clip(n, 0, 1) * 255 + 0.5).astype(np.uint8)
@@ -653,6 +673,8 @@ def main():
             Image.fromarray(noise_png(), "L").save(path, optimize=True)
         else:
             c = PAINTERS[name]()
+            if name in LAND:
+                c = flatten_low(c)
             save_rgb(c, path)
             m = np.clip(c, 0, 1).reshape(-1, 3).mean(0) * 255
             print("%-8s mean RGB %3d %3d %3d" % (name, *m))

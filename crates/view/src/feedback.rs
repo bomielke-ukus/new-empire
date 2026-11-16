@@ -367,12 +367,20 @@ impl CombatFeedback {
             if age >= FALL_TICKS || !visible(f.pos) {
                 continue;
             }
-            let Some((frame, _)) = atlas.frame(f.kind, 0) else {
+            // The look it stood in, where it stood (`Atlas::tree_look`).
+            let (tx, ty) = (f.pos.0.floor() as i32, f.pos.1.floor() as i32);
+            let look = if f.kind == kinds::TREE {
+                atlas.tree_look(tx, ty)
+            } else {
+                f.kind
+            };
+            let Some((frame, _)) = atlas.frame(look, 0) else {
                 continue;
             };
             let t = age as f32 / FALL_TICKS as f32;
             let keep = 1.0 - 0.9 * t * t;
-            let (gx, gy) = ground(f.pos);
+            let (ox, oy) = atlas.tree_offset(tx, ty);
+            let (gx, gy) = ground((f.pos.0 + ox, f.pos.1 + oy));
             let (ax, ay) = frame.draw_anchor();
             let (w0, h0) = (frame.draw_w(), frame.draw_h());
             let (sx, _) = iso::direction(f.dir.0, f.dir.1);
@@ -389,7 +397,7 @@ impl CombatFeedback {
                 vh: frame.h,
                 row: 0,
                 flip: false,
-                depth: f.pos.0 + f.pos.1 + 0.5,
+                depth: f.pos.0 + ox + f.pos.1 + oy + 0.5,
                 slot: u32::MAX,
                 screen: false,
                 light: fog::VISIBLE,

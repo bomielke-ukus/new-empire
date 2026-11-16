@@ -18,10 +18,16 @@ One 8-bit RGB PNG per ground type, named for `sim::Terrain` in its order:
   drawn twice as wide as tall; paint for that.
 - **Lit as flat ground in the sun**, in the colours of the target picture
   (`docs/look/target-picture.png`). The renderer multiplies by the slope's
-  shade and the fog's light and adds nothing else.
+  shade, the fog's light and, on land, the broad tint (below).
+- **Even at the scale of its repeat**: a land texture has little variation
+  over more than about a tile (`tools/look/ground.py` damps what varies
+  over more than a tile to 30%), so its 4-tile repeat does not show as a
+  checkerboard from afar. The broad tint gives the land that variation
+  instead, without a period.
 - `noise.png`: 256 x 256, 8-bit grey, tiling, covering 8 x 8 tiles; smooth
-  cloudy noise spanning the full range. It wobbles the edges between types
-  and breaks up the foam.
+  cloudy noise spanning the full range. It wobbles the edges between types,
+  tints the land broadly, and sways and breaks up the foam. Read at other
+  scales, it is the same texture stretched (0.13 x is 61 tiles across).
 
 ## Blending
 
@@ -31,6 +37,16 @@ the position is pushed about by the noise (up to 0.35 of a tile), so the
 edge between grass and sand wanders instead of following the tile grid.
 Each type's colour is its texture at the pixel's own (unwobbled) position.
 
+## Broad tint
+
+Every land type's colour (not the water's) is multiplied by a tint that
+wanders over tens of tiles: `m`, from -1 to 1, is the noise read at 0.45 x
+(18 tiles across) weighted 0.6 plus the noise at 0.13 x (61 tiles) weighted
+0.4, centred; the tint is `1 + 0.07 m` on green, `+ 0.02 m` more on red and
+`0.03 m` less on blue, so the brighter stretches are a little warmer. At
+most about 7% either way: enough to break the textures' repeat from afar,
+too little to read as patches up close.
+
 ## Water
 
 `shallow` and `deep` are ground types like the others, and blend the same
@@ -38,9 +54,18 @@ way, so the shallows shade into the deep. Over them:
 
 - **Movement**: the water textures are sampled twice, drifting slowly in
   two directions with time, and averaged.
-- **Foam**: where water meets land (the blended weight of the two water
-  types between about 0.35 and 0.6), a white line, broken by the noise and
-  breathing in and out with time.
+- **Foam**: soft, broken patches of white on the water side of the shore,
+  never more than 60% opaque. It follows the water *smoothed*: the mean of
+  the water's blended weight at four points 0.45 tile off diagonally,
+  around the point the edge's wobble pushes this one to, swayed a further
+  0.3 tile at most by the noise read at 0.27 x (30 tiles across). So a
+  coast's corners round off and the foam does not trace the tile grid. It
+  rises over smoothed water 0.44 to 0.53 and fades out from 0.66 to 0.9
+  (seaward), is kept off dry ground (it fades in as the pixel's own water
+  goes from 0.2 to 0.55), and is broken into patches by the noise at two
+  scales (3.1 x and 0.9 x, mixed 0.6 to 0.4, kept from 0.42 to 0.66). The
+  band breathes in and out by 0.04 of water weight every 4 seconds. Ramps
+  are `smoothstep`.
 
 Time is the frame's, in seconds; pictures for tests are drawn at time 0.
 
@@ -51,3 +76,14 @@ Colour sets named `decor_<kind>_<n>` (`flowers`, `tuft`, `rock`, `bush`,
 right type from the map's seed. They are pictures only: not in the
 simulation, not selectable, drawn in depth order with everything else, and
 left out where a building, a tree or a resource stands.
+
+- **Quiet**: the flowers are dusty, muted colours (faded brick, straw,
+  cream, lilac, slate blue), a step darker than pure, so they sit in the
+  grass and do not compete with the units' player colours.
+- **Not food**: the `bush` sets are low, flat, dull scrub (grey-green sage,
+  dry maquis, dark juniper) with bare twigs and no flowers or dots, unlike
+  the berry bush, a round bright green ball dotted red, which is a resource.
+- **Not confetti**: below zoom level 0.75 (the 0.5 x zoom, display scale
+  aside) the smallest things, flowers, tufts, pebbles and small rocks, are
+  left out; the boulders, scrub and reeds stay. The view decides this when
+  it adds the scenery to a frame (`Scenery::decorate`, from the camera).

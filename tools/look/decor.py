@@ -8,12 +8,14 @@ and returns its root; export with tools/look/export.py:
     flowers(variant)  0 red poppies, 1 yellow, 2 white, 3 mauve, 4 blue
     tuft(variant)     0 lush, 1 tall light, 2 dry
     rock(variant)     0 pebble cluster, 1 small rock, 2 mossy boulder
-    bush(variant)     0 plain, 1 pink oleander, 2 yellow broom, 3 white blossom
+    bush(variant)     low scrub: 0 grey-green sage, 1 dry maquis, 2 dark juniper
     reeds(variant)    0 reeds and cattails, 1 papyrus
-    tree(variant)     a broadleaf with a full, layered crown, ~1.3 x 2 tiles
+    tree(variant)     the forest tree, exported as `tree` (0) and `tree_1`..`tree_4`:
+                      0 round broadleaf, 1 tall oval, 2 spreading oak,
+                      3 two-headed, 4 olive (TREES)
 
 They are seen small (a tile is 128 x 64 px), so they are drawn bigger and
-bolder than life: few, large, saturated blooms; chunky leaf clumps lit on
+bolder than life, but the flowers are muted (not the units' player colours); chunky leaf clumps lit on
 top and dark beneath (vertex colours, as tools/look/terrain.py's props).
 Everything is seeded: the same variant always builds the same mesh.
 """
@@ -52,12 +54,14 @@ def _blades(b, x, y, n, h, cb, ct, spread=0.06, w=0.035, lean=(0.15, 0.55), z=0.
 
 # --------------------------------------------------------------- flowers
 
-BLOOMS = [  # petal, petal shade, eye
-    ((0.96, 0.12, 0.08), (0.62, 0.04, 0.04), (0.10, 0.06, 0.06)),     # poppy
-    ((1.00, 0.84, 0.10), (0.86, 0.56, 0.04), (0.92, 0.46, 0.06)),     # crown daisy
-    ((1.00, 0.99, 0.96), (0.80, 0.80, 0.84), (1.00, 0.78, 0.12)),     # chamomile
-    ((0.78, 0.46, 0.92), (0.50, 0.24, 0.66), (0.98, 0.92, 0.60)),     # mallow
-    ((0.24, 0.46, 1.00), (0.12, 0.24, 0.70), (0.98, 0.96, 0.80)),     # cornflower, flax
+BLOOMS = [  # petal, petal shade, eye: muted, so the meadow does not compete
+    # with the units' player colours (blue, red, yellow, ...): dusty, a step
+    # darker than pure, closer to the grass than to a banner
+    ((0.74, 0.38, 0.30), (0.46, 0.22, 0.18), (0.20, 0.14, 0.12)),     # poppy, faded brick
+    ((0.84, 0.76, 0.42), (0.62, 0.54, 0.26), (0.72, 0.50, 0.22)),     # crown daisy, straw
+    ((0.80, 0.80, 0.72), (0.58, 0.60, 0.56), (0.80, 0.66, 0.30)),     # chamomile, cream
+    ((0.66, 0.54, 0.70), (0.42, 0.32, 0.48), (0.86, 0.82, 0.60)),     # mallow, dusty lilac
+    ((0.50, 0.58, 0.76), (0.30, 0.36, 0.54), (0.86, 0.84, 0.72)),     # flax, slate blue
 ]
 
 
@@ -102,7 +106,7 @@ def flowers(variant=0):
         ox, oy = r.uniform(-0.03, 0.03), r.uniform(-0.03, 0.03)
         b.blade((x, y, -0.01), (x + ox, y + oy, h), 0.022, (0.16, 0.40, 0.12), (0.34, 0.60, 0.18))
         kk = kind if r.random() < 0.85 else (kind + 2) % 5
-        _bloom(b, (x + ox, y + oy, h), r.uniform(0.075, 0.095), kk, r.uniform(0.92, 1.06))
+        _bloom(b, (x + ox, y + oy, h), r.uniform(0.060, 0.078), kk, r.uniform(0.86, 0.98))
     for i in range(7):                     # leaves and grass at the feet
         a = r.uniform(0, 2 * math.pi)
         o = r.uniform(0.0, 0.22)
@@ -185,45 +189,47 @@ def rock(variant=0):
 
 # --------------------------------------------------------------- bushes
 
-BUSHES = [  # leaf top, leaf bottom, bloom (or None)
-    ((0.42, 0.68, 0.22), (0.08, 0.28, 0.12), None),
-    ((0.36, 0.62, 0.26), (0.08, 0.28, 0.14), ((1.00, 0.46, 0.66), (0.80, 0.22, 0.44))),
-    ((0.52, 0.70, 0.20), (0.14, 0.34, 0.10), ((1.00, 0.86, 0.10), (0.88, 0.58, 0.04))),
-    ((0.34, 0.60, 0.24), (0.07, 0.26, 0.14), ((1.00, 1.00, 0.97), (0.78, 0.80, 0.86))),
+SCRUB = [  # leaf top, leaf bottom, twig: dry Mediterranean scrub, no flowers or berries
+    ((0.60, 0.64, 0.46), (0.22, 0.26, 0.20), (0.46, 0.40, 0.32)),   # sage: grey-green
+    ((0.56, 0.56, 0.34), (0.24, 0.24, 0.14), (0.50, 0.42, 0.30)),   # dry olive-brown maquis
+    ((0.38, 0.48, 0.30), (0.12, 0.20, 0.14), (0.40, 0.32, 0.24)),   # low dark juniper
 ]
 
 
 def bush(variant=0):
-    """A round shrub ~0.8 across and ~0.55 tall: 0 plain myrtle, 1 pink
-    oleander, 2 yellow broom, 3 white blossom."""
-    v = variant % 4
+    """A low, open mound of scrub ~0.6 across and ~0.3 tall, flattened and
+    ragged, with bare twigs poking out: 0 grey-green sage, 1 dry olive
+    maquis, 2 dark juniper. Deliberately unlike the berry bush (a round,
+    bright green ball dotted with red, a resource): dull, flat, no dots."""
+    v = variant % len(SCRUB)
     b = _B(930 + variant)
     r = b.rnd
-    top, bot, bloom = BUSHES[v]
-    lobes = [(0.0, 0.0, 0.26, 0.27)]
-    for i in range(5):
-        a = i * 2 * math.pi / 5 + r.uniform(-0.3, 0.3)
-        o = r.uniform(0.17, 0.24)
-        lobes.append((math.cos(a) * o, math.sin(a) * o * 0.85, r.uniform(0.15, 0.22), r.uniform(0.17, 0.21)))
+    top, bot, twig = SCRUB[v]
+    lobes = []
+    n = 6
+    for i in range(n):
+        a = i * 2 * math.pi / n + r.uniform(-0.4, 0.4)
+        o = r.uniform(0.08, 0.22) if i else 0.0
+        lobes.append((math.cos(a) * o * 1.2, math.sin(a) * o * 0.9, r.uniform(0.07, 0.13),
+                      r.uniform(0.10, 0.16)))
     for x, y, z, rad in lobes:
-        kk = r.uniform(0.92, 1.08)
-        sc = (1, 1, 0.9)
-        b.blob((x, y, z), rad, _c(top, kk), _c(bot, kk), scale=sc, rough=0.18)
-        b.clumps((x, y, z), rad, 9, rad * 0.42, _c(top, kk * 1.06), _c(bot, kk * 1.2), scale=sc,
-                 stretch=(1, 1, 0.85))
-        b.leaves((x, y, z), rad, 10, 0.08, _c(top, 1.12), scale=sc, width=0.6)
-        if bloom:
-            for _ in range(6):
-                d = b.np.randn(3)
-                d[2] = abs(d[2]) + 0.4
-                d /= np.linalg.norm(d)
-                p = np.array((x, y, z)) + d * rad * np.array(sc) * 1.02
-                br = 0.042 if v != 2 else 0.036
-                b.blob(p, br, _c(bloom[0], r.uniform(0.95, 1.05)), _c(bloom[1]), sub=1, rough=0.12,
-                       scale=(1, 1, 0.8))
-    for i in range(6):
+        kk = r.uniform(0.9, 1.08)
+        sc = (1.25, 1.1, 0.62)
+        b.blob((x, y, z), rad, _c(top, kk), _c(bot, kk), scale=sc, rough=0.32)
+        b.clumps((x, y, z), rad, 7, rad * 0.4, _c(top, kk * 1.04), _c(bot, kk * 1.1), scale=sc,
+                 stretch=(1, 1, 0.7))
+        b.leaves((x, y, z), rad, 12, 0.06, _c(top, 1.08), scale=sc, width=0.35, jit=0.25)
+    for i in range(9):                                     # bare twigs through the top
         a = r.uniform(0, 2 * math.pi)
-        _blades(b, math.cos(a) * 0.36, math.sin(a) * 0.30, 4, 0.15, GRASS_B, GRASS_T)
+        o = r.uniform(0.0, 0.2)
+        p0 = (math.cos(a) * o, math.sin(a) * o * 0.8, 0.02)
+        tip = (p0[0] + math.cos(a) * r.uniform(0.05, 0.14), p0[1] + math.sin(a) * r.uniform(0.04, 0.1),
+               r.uniform(0.20, 0.32))
+        b.blade(p0, tip, 0.016, _c(twig, 0.7), _c(twig, 1.1))
+    for i in range(3):
+        a = r.uniform(0, 2 * math.pi)
+        _blades(b, math.cos(a) * 0.28, math.sin(a) * 0.22, 3, 0.10, (0.40, 0.42, 0.20),
+                (0.78, 0.76, 0.42))
     return _finish(b, "bush")
 
 
@@ -280,58 +286,112 @@ def reeds(variant=0):
 
 # --------------------------------------------------------------- the tree
 
+# Each variant of the forest tree (docs/look/colour-sets.md, "Trees"): the
+# view picks one per tree from its tile, so a forest is a mix, not a quilt.
+#   crown:  lower-ring reach, crown height (centre), ring masses' size,
+#           vertical squash of each mass, lobes (1 round, 2 two-headed)
+#   greens: the two top colours masses are drawn from, and the leaf cards'
+#   trunk:  height of the fork, bark light and dark, twist (lump)
+TREES = [
+    # 0 the round broadleaf (plane / lime): full, even, gold-green
+    dict(reach=(0.50, 0.60), cz=1.30, rad=(0.28, 0.34), squash=0.80, lobes=1, core=0.56,
+         greens=((0.26, 0.48, 0.10), (0.20, 0.44, 0.14)), leaf=(0.46, 0.68, 0.20),
+         fork=0.70, bark=((0.58, 0.44, 0.32), (0.26, 0.18, 0.13)), lump=0.08, seed=950),
+    # 1 a tall oval (poplar / beech): narrow, ~20% taller, cooler green
+    dict(reach=(0.36, 0.44), cz=1.58, rad=(0.25, 0.30), squash=1.05, lobes=1, core=0.46,
+         greens=((0.17, 0.42, 0.15), (0.14, 0.38, 0.17)), leaf=(0.38, 0.62, 0.26),
+         fork=0.80, bark=((0.50, 0.45, 0.38), (0.24, 0.21, 0.18)), lump=0.04, seed=961, rings=3),
+    # 2 a spreading oak: low, wide, flat-topped, ~15% shorter, warm olive-green
+    dict(reach=(0.62, 0.70), cz=1.00, rad=(0.27, 0.32), squash=0.62, lobes=1, core=0.58,
+         greens=((0.32, 0.50, 0.10), (0.27, 0.45, 0.10)), leaf=(0.52, 0.66, 0.20),
+         fork=0.56, bark=((0.52, 0.40, 0.30), (0.22, 0.15, 0.11)), lump=0.14, seed=972),
+    # 3 a ragged two-headed tree: two crowns side by side, deep green
+    dict(reach=(0.30, 0.40), cz=1.36, rad=(0.24, 0.30), squash=0.85, lobes=2, core=0.40,
+         greens=((0.16, 0.38, 0.11), (0.19, 0.40, 0.09)), leaf=(0.36, 0.58, 0.18),
+         fork=0.62, bark=((0.56, 0.42, 0.30), (0.24, 0.16, 0.12)), lump=0.10, seed=983),
+    # 4 an olive: twisted grey trunk, an open silvery grey-green crown
+    dict(reach=(0.48, 0.60), cz=1.02, rad=(0.22, 0.30), squash=0.62, lobes=1, core=0.34,
+         greens=((0.40, 0.50, 0.30), (0.36, 0.47, 0.30)), leaf=(0.62, 0.70, 0.50),
+         fork=0.56, bark=((0.56, 0.52, 0.46), (0.26, 0.23, 0.20)), lump=0.22, seed=994,
+         under=(0.08, 0.16, 0.10), gaps=True, rings=1),
+]
+
+
 def tree(variant=0):
-    """A broadleaf for the forests (one per tile, in dense stands): a short
-    trunk, a full crown of layered leaf masses ~1.3 tiles wide, ~2 tall,
-    lit gold-green on top and deep green underneath, slightly irregular."""
-    b = _B(950 + variant)
+    """A tree for the forests (one per tile, in dense stands): a short
+    trunk, a crown of layered leaf masses ~1.1-1.4 tiles wide, ~1.7-2.4 tall,
+    lit on top and deep green underneath, slightly irregular. The variants
+    differ in silhouette, height and green (TREES)."""
+    p = TREES[variant % len(TREES)]
+    b = _B(p["seed"])
     r = b.rnd
-    bark_l, bark_d = (0.58, 0.44, 0.32), (0.26, 0.18, 0.13)
+    bark_l, bark_d = p["bark"]
     lean = r.uniform(0, 2 * math.pi)
-    top = np.array([math.cos(lean) * 0.05, math.sin(lean) * 0.05, 0.70])
-    b.tube([(0, 0, -0.05), (0.01, -0.01, 0.30), top], [0.13, 0.10, 0.085], bark_l, bark_d, segs=8,
-           lump=0.08)
+    fz = p["fork"]
+    top = np.array([math.cos(lean) * 0.05, math.sin(lean) * 0.05, fz])
+    tw = p["lump"]
+    b.tube([(0, 0, -0.05), (0.01 + (tw - 0.08) * 0.5, -0.01, fz * 0.43), top], [0.13, 0.10, 0.085],
+           bark_l, bark_d, segs=8, lump=tw)
     for k in range(4):                                   # root flare
         a = k * 1.57 + r.uniform(0, 0.5)
         b.tube([(math.cos(a) * 0.22, math.sin(a) * 0.22, -0.03),
                 (math.cos(a) * 0.10, math.sin(a) * 0.10, 0.06), (0, 0, 0.22)],
                [0.025, 0.05, 0.04], bark_l, bark_d, segs=5)
+    cz = p["cz"]
+    heads = [np.zeros(2)]
+    if p["lobes"] == 2:                                  # two crowns, one a little higher
+        d = np.array([math.cos(lean), math.sin(lean)]) * 0.30
+        heads = [d, -d]
     for k in range(3):                                   # limbs into the crown
         a = lean + k * 2.1 + r.uniform(-0.3, 0.3)
-        end = top + (math.cos(a) * 0.32, math.sin(a) * 0.32, 0.38)
+        h0 = heads[k % len(heads)]
+        end = top + (math.cos(a) * 0.32 + h0[0], math.sin(a) * 0.32 + h0[1], cz - fz - 0.22)
         b.tube([top, (top + end) / 2 + (0, 0, -0.03), end], [0.07, 0.05, 0.035], bark_l, bark_d,
-               segs=5)
+               segs=5, lump=tw * 0.5)
     # the crown: a lower skirt of masses, a middle ring, a top, a little
     # lopsided; each mass a lumpy ball studded with smaller clumps and a
-    # fringe of leaf cards, lit gold-green on top and deep green beneath
-    cz = 1.30
+    # fringe of leaf cards, lit on top and deep green beneath
     sk = np.array([math.cos(lean + 1.0), math.sin(lean + 1.0)]) * 0.06      # lopsided
     masses = []
-    for i in range(7):                                   # lower ring
-        a = i * 2 * math.pi / 7 + r.uniform(-0.25, 0.25)
-        o = r.uniform(0.50, 0.60)
-        masses.append((math.cos(a) * o + sk[0], math.sin(a) * o + sk[1], cz - 0.30 + r.uniform(-0.08, 0.06),
-                       r.uniform(0.28, 0.34)))
-    for i in range(5):                                   # upper ring
-        a = i * 2 * math.pi / 5 + 0.6 + r.uniform(-0.3, 0.3)
-        o = r.uniform(0.30, 0.40)
-        masses.append((math.cos(a) * o, math.sin(a) * o, cz + 0.16 + r.uniform(-0.05, 0.08),
-                       r.uniform(0.28, 0.34)))
-    masses.append((r.uniform(-0.08, 0.08), r.uniform(-0.08, 0.08), cz + 0.46, 0.30))   # top
-    masses.append((0, 0, cz - 0.02, 0.56))               # the core, filling gaps
+    for hi, h0 in enumerate(heads):
+        hz = cz + (0.14 if hi == 1 else 0.0)
+        n_low = 7 if len(heads) == 1 else 5
+        for i in range(n_low):                           # lower ring
+            a = i * 2 * math.pi / n_low + r.uniform(-0.25, 0.25)
+            o = r.uniform(*p["reach"])
+            masses.append((math.cos(a) * o + sk[0] + h0[0], math.sin(a) * o + sk[1] + h0[1],
+                           hz - 0.30 + r.uniform(-0.08, 0.06), r.uniform(*p["rad"])))
+        for ring in range(p.get("rings", 2) - 1):        # upper rings, narrowing
+            n_up = 5 if len(heads) == 1 else 4
+            f = 1.0 - 0.32 * ring
+            for i in range(n_up):
+                a = i * 2 * math.pi / n_up + 0.6 + ring + r.uniform(-0.3, 0.3)
+                o = r.uniform(0.30, 0.40) * f * (p["reach"][1] / 0.60) ** 0.5
+                masses.append((math.cos(a) * o + h0[0], math.sin(a) * o + h0[1],
+                               hz + 0.16 + 0.30 * ring * p["squash"] + r.uniform(-0.05, 0.08),
+                               r.uniform(*p["rad"]) * f ** 0.5))
+        rings_up = p.get("rings", 2) - 1
+        masses.append((r.uniform(-0.08, 0.08) + h0[0], r.uniform(-0.08, 0.08) + h0[1],
+                       hz + 0.46 + 0.30 * (rings_up - 1) * p["squash"],
+                       0.30 if len(heads) == 1 else 0.26))                                # top
+        masses.append((h0[0], h0[1], hz - 0.02 + 0.1 * (rings_up - 1), p["core"]))       # core
+    gaps = p.get("gaps", False)
+    under = p.get("under", (0.02, 0.10, 0.05))
+    span = 0.9 + 0.3 * (p.get("rings", 2) - 2)
     for x, y, z, rad in masses:
-        h = min(1.0, max(0.0, (z - (cz - 0.40)) / 0.9))  # 0 low .. 1 top
+        h = min(1.0, max(0.0, (z - (cz - 0.40)) / span))  # 0 low .. 1 top
         kk = r.uniform(0.86, 1.1)
-        hue = r.random()                                 # some masses yellower, some bluer
-        tc = (0.26, 0.48, 0.10) if hue < 0.5 else (0.20, 0.44, 0.14)
+        tc = p["greens"][0] if r.random() < 0.5 else p["greens"][1]
         topc = _c(tc, (0.75 + 0.45 * h) * kk)
-        botc = _c((0.02, 0.10, 0.05), (0.80 + 0.4 * h) * kk)
-        sc = (1.0, 1.0, 0.80)
-        b.blob((x, y, z), rad, topc, botc, scale=sc, rough=0.18, shade=0.95)
+        botc = _c(under, (0.80 + 0.4 * h) * kk)
+        sc = (1.0, 1.0, p["squash"])
+        if gaps and r.random() < 0.3:                    # an open crown: some masses smaller
+            rad *= 0.75
+        b.blob((x, y, z), rad, topc, botc, scale=sc, rough=0.18 if not gaps else 0.26, shade=0.95)
         b.clumps((x, y, z), rad, 14, rad * 0.36, _c(topc, 1.08), _c(botc, 1.0), scale=sc,
                  stretch=(1, 1, 0.8))
-        b.leaves((x, y, z), rad, 14, 0.10, _c((0.46, 0.68, 0.20), 0.7 + 0.35 * h), scale=sc,
-                 width=0.55)
+        b.leaves((x, y, z), rad, 14 if not gaps else 20, 0.10, _c(p["leaf"], 0.7 + 0.35 * h),
+                 scale=sc, width=0.55 if not gaps else 0.4)
     return _finish(b, "tree")
 
 
@@ -340,7 +400,7 @@ def tree(variant=0):
 def pv_all():
     """Every decor prop in a row, and a tree, for preview.py."""
     root = empty("decor")
-    items = [(flowers, 5), (tuft, 3), (rock, 3), (bush, 4), (reeds, 2)]
+    items = [(flowers, 5), (tuft, 3), (rock, 3), (bush, len(SCRUB)), (reeds, 2)]
     x = -5.0
     for fn, n in items:
         for v in range(n):
@@ -356,9 +416,9 @@ def pv_all():
 SETS = ([("decor_flowers_%d" % v, "flowers", v) for v in range(5)]
         + [("decor_tuft_%d" % v, "tuft", v) for v in range(3)]
         + [("decor_rock_%d" % v, "rock", v) for v in range(3)]
-        + [("decor_bush_%d" % v, "bush", v) for v in range(4)]
+        + [("decor_bush_%d" % v, "bush", v) for v in range(len(SCRUB))]
         + [("decor_reeds_%d" % v, "reeds", v) for v in range(2)]
-        + [("tree", "tree", 0)])
+        + [("tree" if v == 0 else "tree_%d" % v, "tree", v) for v in range(len(TREES))])
 SUN_ANGLE = 12        # degrees: a soft shadow edge for the small things
 
 

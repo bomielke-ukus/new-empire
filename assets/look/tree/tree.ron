@@ -6,12 +6,12 @@ SpriteSet(
     scale: 2,
     palette: "rgba",
     sheet: "tree.png",
-    anchor: (91, 176),
+    anchor: (95, 180),
     animations: [
         (name: "idle", frames: 1, frame_ms: 160, loops: true, impact: None),
     ],
     anchor_overrides: [],
     colour: true,
     mask: None,
-    frame: Some((226, 216)),
+    frame: Some((236, 220)),
 )
