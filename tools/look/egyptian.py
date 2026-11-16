@@ -54,8 +54,23 @@ def gold():
     return mat(PAL["gold"], rough=0.32, metal=0.75, emit=0.35)
 
 
+_names = {}
+
+
 def _key(prefix, *parts):
-    return (prefix + "_" + "%08x" % (hash(repr(parts)) & 0xFFFFFFFF))
+    """A material's name for these parameters: the cached one while it exists,
+    else the next in sequence. Names follow build order, not the parameters,
+    so two builds with different player colours name their materials alike
+    (export.py lines the builds up by material name to find the mask)."""
+    k = (prefix, repr(parts))
+    name = _names.get(k)
+    if name is not None and bpy.data.materials.get(name) is not None:
+        return name
+    if _names and not any(bpy.data.materials.get(n) is not None for n in list(_names.values())[:8]):
+        _names.clear()      # a new scene (lib.reset): start the sequence again
+    name = "%s_%04d" % (prefix, len(_names))
+    _names[k] = name
+    return name
 
 
 def _scale(rgb, k):
@@ -1003,6 +1018,17 @@ def temple(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
     jar(r, 1.02, -0.30, z0, 0.8, "white", "blue")
     jar(r, 1.34, -1.05, z0, 0.9, "terracotta", "white")
     basket(r, 1.20, -1.22, z0, 0.9, "flower_red")
+    return r
+
+
+def temple2(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
+    """2x2: the pylon temple drawn into the game's two-tile footprint: its
+    plan taken in to two thirds, its height to 0.85, so the pylons still
+    stand well above the houses round it."""
+    r = empty("eg_temple2", loc, rot_z, parent)
+    e = empty("eg_temple2_s", (0, 0, 0), 0.0, r)
+    e.scale = (0.664, 0.664, 0.85)
+    temple(player=player, parent=e)
     return r
 
 
@@ -1965,10 +1991,10 @@ def stable(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
     reed_roof(r, -0.90, yf - 0.10, 0.92, 0.90, 1.02, 1.14, axis="y", edge=player)
     box((1.82, 0.04, 0.10), (0.01, yf - 0.02, 0.98), M("wood_dark"), parent=r)
     # a horse in a stall, head out; mangers
-    horse(r, (-0.03, 0.62, 0), -math.pi / 2, coat=(0.93, 0.90, 0.84))
-    for x in (-0.57, 0.51):
-        box((0.36, 0.14, 0.12), (x, 0.80, 0.42), M("wood"), parent=r)
-        hay(r, x, 0.80, 0.42, 0.45, seed=int(x * 10))
+    horse(r, (-0.03, 0.66, 0), -math.pi / 2, coat=(0.93, 0.90, 0.84))
+    horse(r, (-0.57, 0.68, 0), -math.pi / 2 - 0.08, coat=(0.36, 0.22, 0.13))
+    box((0.36, 0.14, 0.12), (0.51, 0.80, 0.42), M("wood"), parent=r)
+    hay(r, 0.51, 0.80, 0.42, 0.45, seed=5)
     hay(r, 0.50, 0.58, 0.0, 0.8, 2)
     # tack on the left wall: harness pegs, saddle cloths in the owner's colour
     for i, y in enumerate((-0.05, 0.12)):
@@ -1979,8 +2005,7 @@ def stable(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
           r, segs=12, rot=(0, math.pi / 2, 0), closed=True)
     wheel(_sub(r, (-0.80, -0.20, 0.0), math.pi / 2, 1.0, "wheel"), 0.0, 0.22)
     # the yard: horses, trough, rails
-    horse(r, (0.25, -0.30, 0), math.pi * 0.98, coat="cedar", cloth=M(player))
-    horse(r, (-0.32, -0.15, 0), -0.25, coat=(0.36, 0.22, 0.13))
+    horse(r, (0.12, -0.42, 0), math.pi * 0.98, coat="cedar", cloth=M(player))
     trough(r, 0.45, 0.02, 0.0, 0.62)
     basket(r, -0.55, -0.62, 0.0, 0.9, "straw")
     jar(r, 0.86, 0.10, 0.0, 0.8, "terracotta", "white")
@@ -2000,21 +2025,1188 @@ def stable(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
     return r
 
 
+# --- siege workshop ----------------------------------------------------------------
+
+def stone_thrower(root, loc, rz=0.0, player=RED, s=1.0, done=0.6):
+    """A torsion stone-thrower on its timber bed, part built, arm toward -Y."""
+    e = _sub(root, loc, rz, s, "engine")
+    w, wd = M("cedar"), M("wood_dark")
+    for sx in (-1, 1):
+        box((0.08, 1.0, 0.10), (sx * 0.20, 0.0, 0.25), w, parent=e)
+    for y in (-0.44, 0.0, 0.42):
+        box((0.48, 0.08, 0.07), (0, y, 0.27), wd, parent=e)
+    rod((-0.30, -0.30, 0.18), (0.30, -0.30, 0.18), 0.022, wd, e, segs=6)
+    rod((-0.30, 0.30, 0.18), (0.30, 0.30, 0.18), 0.022, wd, e, segs=6)
+    _sub_wheel = _sub(e, (0, -0.30, 0.0), 0.0, 1.0, "wh")
+    wheel(_sub_wheel, 0.29, 0.18)
+    _sub_wheel = _sub(e, (0, 0.30, 0.0), 0.0, 1.0, "wh")
+    wheel(_sub_wheel, 0.29, 0.18)
+    # uprights and the padded crossbar
+    for sx in (-1, 1):
+        box((0.07, 0.07, 0.56), (sx * 0.18, -0.02, 0.58), w, parent=e)
+        rod((sx * 0.18, 0.12, 0.30), (sx * 0.18, -0.02, 0.70), 0.02, wd, e, segs=5)
+    box((0.46, 0.09, 0.08), (0, -0.02, 0.88), w, parent=e)
+    box((0.30, 0.12, 0.08), (0, -0.04, 0.95), M(player), parent=e, bevel=0.03)
+    # the twisted skein and the arm, resting on the bar
+    rod((-0.22, 0.30, 0.34), (0.22, 0.30, 0.34), 0.07, stripemat(("leather", (0.62, 0.42, 0.24)), 0.025,
+                                                              "x"), e, segs=10)
+    p0, p1 = Vector((0, 0.32, 0.34)), Vector((0, -0.42, 1.25))
+    rod(p0, p1, 0.04, w, e, r_top=0.03, segs=8)
+    lathe([(0.0, -0.04), (0.10, 0.0), (0.11, 0.03), (0.08, 0.03)], "leather", tuple(p1), e, segs=10)
+    # unfinished: a frame of ribs with no planks yet at the back
+    for sx in (-1, 1):
+        rod((sx * 0.20, 0.42, 0.30), (sx * 0.12, 0.50, 0.62), 0.02, w, e, segs=5)
+    return e
+
+
+def siege_workshop(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
+    """2x2: a timber yard: a half-built stone-thrower under a shear-leg hoist,
+    log stacks and planks, a mudbrick workroom and a reed shed."""
+    r = empty("eg_siege_workshop", loc, rot_z, parent)
+    pad(r, 2, 2)
+    mud = brickmat("mud", 0.2, 0.07, 0.09, 0.78)
+    # workroom at the back left
+    ax, ay, aw, ad, ah = -0.52, 0.50, 0.88, 0.90, 1.12
+    box((aw, ad, ah), (ax, ay, ah / 2), mud, parent=r)
+    band(r, aw, ad, 0, 0.13, "mud_dk", (ax, ay))
+    band(r, aw, ad, ah - 0.20, 0.08, "white", (ax, ay))
+    band(r, aw, ad, ah - 0.17, 0.025, player, (ax, ay), out=0.014)
+    parapet(r, aw, ad, ah, 0.10, 0.06, mud, (ax, ay), cap="white")
+    door(r, "y", ay - ad / 2, ax - 0.12, 0.34, 0.86, "wood", "white", "wood_dark")
+    window(r, "x", ax + aw / 2, ay + 0.15, 0.66, 0.18, 0.14)
+    # tools on the wall: saw, adze, mallet
+    slab(r, "x", ax + aw / 2, ay - 0.22, 0.52, 0.32, 0.06, 0.012, "iron")
+    slab(r, "x", ax + aw / 2, ay - 0.22, 0.58, 0.32, 0.03, 0.02, "wood")
+    rod((ax + aw / 2 + 0.03, ay + 0.38, 0.40), (ax + aw / 2 + 0.03, ay + 0.38, 0.70), 0.016, "wood", r)
+    box((0.03, 0.12, 0.05), (ax + aw / 2 + 0.03, ay + 0.43, 0.70), M("bronze"), parent=r)
+    # reed shed at the back right over the timber store
+    x0, x1, y0, y1 = 0.02, 0.94, 0.30, 0.94
+    for x in (x0 + 0.04, x1 - 0.04):
+        for y in (y0 + 0.04, y1 - 0.04):
+            post(r, x, y, 1.20, 0.045)
+    reed_roof(r, x0 - 0.04, y0 - 0.06, x1 + 0.04, y1 + 0.02, 1.18, 1.30, axis="y", edge=player)
+    logs(r, 0.48, 0.62, 0.0, (5, 4, 3, 2), L=0.80, r=0.055)
+    planks(r, 0.52, 0.42, 0.0, 6, 0.74, 0.20)
+    # the engine, and a timber gantry behind it hoisting a beam
+    stone_thrower(r, (0.02, -0.40, 0), 0.42, player, 1.05)
+    gy, gz = -0.02, 1.80
+    for gx in (-0.62, 0.62):
+        rod((gx, gy, 0), (gx, gy, gz), 0.045, "wood", r, r_top=0.04, segs=8)
+        rod((gx, gy + 0.40, 0), (gx, gy, gz * 0.75), 0.03, "wood_dark", r, segs=6)
+    rod((-0.72, gy, gz), (0.72, gy, gz), 0.045, "cedar", r, segs=8)
+    for gx in (-0.62, 0.62):
+        box((0.12, 0.12, 0.10), (gx, gy, gz), M("wood_dark"), parent=r)
+    cyl(0.06, 0.04, (0.05, gy, gz - 0.08), M("wood_dark"), rot=(math.pi / 2, 0, 0), parent=r, segs=10)
+    rod((0.05, gy, gz - 0.12), (0.05, gy, 0.98), 0.006, "linen", r, segs=4)
+    rod((-0.30, gy, 0.96), (0.40, gy, 0.96), 0.035, "cedar", r, segs=8)
+    for sx in (-1, 1):
+        rod((0.05, gy, 1.0), (0.05 + sx * 0.25, gy, 0.97), 0.005, "linen", r, segs=3)
+    hangings(r, -0.55, 0.55, gy - 0.05, gz - 0.03, player, 2, 0.30)
+    flagpole(r, -0.62, gy, 0.55, player, gz + 0.02, 0.022, (0.42, 0.14), seed=2)
+    # sawhorse with a log, rope coils, a pile of wheels
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            rod((0.62 + sx * 0.22, -0.55 + sy * 0.10, 0), (0.62 + sx * 0.22, -0.55, 0.30), 0.016, "wood_dark",
+                r, segs=5)
+    rod((0.30, -0.55, 0.36), (0.95, -0.55, 0.36), 0.065, "wood", r, segs=8)
+    box((0.02, 0.18, 0.12), (0.62, -0.55, 0.43), M("iron", metal=0.6), parent=r)
+    for i in range(2):
+        lathe([(0.08, -0.025), (0.12, -0.025), (0.12, 0.025), (0.08, 0.025)], "straw",
+              (0.20 + 0.03 * i, -0.85, 0.025 + 0.05 * i), r, segs=12, closed=True)
+    whl = _sub(r, (0.88, -0.10, 0.0), 0.0, 1.0, "lean")
+    whl.rotation_euler = (0.0, -0.32, 0.0)
+    wheel(whl, 0.0, 0.18)
+    logs(r, -0.62, -0.62, 0.0, (3, 2), L=0.62, r=0.05, rz=0.2)
+    return r
+
+
+# --- academy -------------------------------------------------------------------------
+
+def scribe_statue(root, loc, s=1.0, rot_z=0.0):
+    """A seated scribe, cross-legged, papyrus on his lap, facing -Y."""
+    e = _sub(root, loc, rot_z, s, "scribe")
+    box((0.46, 0.46, 0.26), (0, 0, 0.13), brickmat("stone", 0.2, 0.08), parent=e)
+    box((0.47, 0.47, 0.04), (0, 0, 0.22), M("blue"), parent=e)
+    box((0.48, 0.48, 0.03), (0, 0, 0.27), M("stone_lt"), parent=e)
+    z = 0.285
+    box((0.40, 0.28, 0.11), (0, -0.03, z + 0.055), M("white"), parent=e, bevel=0.04)
+    for sx in (-1, 1):
+        sphere(0.07, (sx * 0.15, -0.10, z + 0.06), M("skin"), parent=e, segs=10, scale=(1.2, 1, 0.8))
+    box((0.24, 0.13, 0.012), (0, -0.10, z + 0.12), M((0.98, 0.93, 0.74)), parent=e)
+    box((0.24, 0.14, 0.32), (0, 0.05, z + 0.26), M("skin"), parent=e, bevel=0.05)
+    box((0.25, 0.145, 0.04), (0, 0.05, z + 0.38), M("yellow"), parent=e)
+    box((0.252, 0.147, 0.016), (0, 0.05, z + 0.36), M("blue"), parent=e)
+    for sx in (-1, 1):
+        rod((sx * 0.13, 0.05, z + 0.36), (sx * 0.13, -0.04, z + 0.20), 0.032, "skin", e, segs=6)
+        rod((sx * 0.13, -0.04, z + 0.20), (sx * 0.05, -0.12, z + 0.15), 0.028, "skin", e, segs=6)
+    sphere(0.085, (0, 0.04, z + 0.50), M("skin"), parent=e, segs=12, scale=(0.9, 1, 1.05))
+    box((0.19, 0.17, 0.13), (0, 0.075, z + 0.52), M("hair_black"), parent=e, bevel=0.04)
+    for sx in (-1, 1):
+        box((0.03, 0.01, 0.015), (sx * 0.035, -0.04, z + 0.51), M("dark"), parent=e)
+    rod((0.06, -0.12, z + 0.13), (0.10, -0.20, z + 0.16), 0.006, "dark", e, segs=3)
+    return e
+
+
+def scroll_rack(root, x, y, z=0.0, rz=0.0, cols=4, rows=4):
+    """Pigeonholes full of rolled papyri, open to -Y before rz."""
+    e = _sub(root, (x, y, z), rz, 1.0, "rack")
+    w, h, d = cols * 0.13 + 0.04, rows * 0.13 + 0.08, 0.22
+    wd = M("cedar")
+    box((w, d, 0.04), (0, 0, h - 0.02), wd, parent=e)
+    box((w, 0.02, h), (0, d / 2, h / 2), M("wood_dark"), parent=e)
+    for i in range(cols + 1):
+        box((0.025, d, h), (-w / 2 + 0.02 + i * 0.13, 0, h / 2), wd, parent=e)
+    for j in range(rows + 1):
+        box((w, d, 0.02), (0, 0, 0.04 + j * 0.13), wd, parent=e)
+    pap = M((0.96, 0.90, 0.70))
+    k = 0
+    for i in range(cols):
+        for j in range(rows):
+            cx = -w / 2 + 0.02 + 0.065 + i * 0.13
+            cz = 0.05 + j * 0.13
+            for q in range(2 + (i + j) % 2):
+                px = cx - 0.03 + 0.03 * q
+                cyl(0.024, d - 0.02, (px, -0.01, cz + 0.026 + 0.04 * (q % 2)), pap, rot=(math.pi / 2, 0, 0),
+                    parent=e, segs=8)
+                cyl(0.025, 0.006, (px, -d / 2 + 0.006, cz + 0.026 + 0.04 * (q % 2)),
+                    M(("red", "blue", "yellow", "green")[k % 4]), rot=(math.pi / 2, 0, 0), parent=e, segs=8)
+                k += 1
+    return e
+
+
+def academy(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
+    """2x2: a House of Life: a columned hall, a scribes' court with mats, desks
+    and papyri under a linen awning, a seated-scribe statue."""
+    r = empty("eg_academy", loc, rot_z, parent)
+    pad(r, 2, 2, "stone_lt")
+    white = brickmat("white", 0.26, 0.09, 0.03, 0.90, blotch=0.05)
+    # the hall
+    ax, ay, aw, ad, ah = -0.12, 0.52, 1.66, 0.84, 1.30
+    box((aw + 0.06, ad + 0.40, 0.08), (ax, ay - 0.18, 0.04), brickmat("stone_lt", 0.3, 0.08), parent=r)
+    z0 = 0.08
+    box((aw, ad, ah), (ax, ay, z0 + ah / 2), white, parent=r)
+    dado(r, aw, ad, z0, (ax, ay), "blue", "yellow", 0.15)
+    band(r, aw, ad, z0 + ah - 0.24, 0.20, stripemat(("blue", "white", "red", "white", "green", "white"),
+                                                    0.10, "h"), (ax, ay))
+    band(r, aw, ad, z0 + ah - 0.27, 0.03, "red", (ax, ay))
+    zt = cavetto(r, aw, ad, z0 + ah, 0.15, 0.06, (ax, ay), 0.09)
+    yA, xA = ay - ad / 2, ax + aw / 2
+    door(r, "y", yA, ax, 0.36, 0.94, "green", "yellow", z=z0)
+    for dx in (-0.52, 0.52):
+        window(r, "y", yA, ax + dx, z0 + 0.66, 0.20, 0.20)
+    p = Paint((xA, ay, z0), (0, 1, 0), (0, 0, 1), r)
+    p.rect(-0.30, 0.30, 0.30, 0.95, "white")
+    p.rect(-0.30, 0.30, 0.30, 0.33, "blue", 1)
+    p.rect(-0.30, 0.92, 0.30, 0.95, "blue", 1)
+    figure(p, -0.10, 0.36, 0.52, facing=1, crown="god", layer=1)
+    glyphs(p, 0.10, 0.40, 0.90, 0.06, 81, 1)
+    glyphs(p, 0.21, 0.40, 0.90, 0.06, 82, 1)
+    p.done()
+    # portico of lotus columns, banners hung between them
+    py = yA - 0.30
+    for i, dx in enumerate((-0.62, -0.21, 0.21, 0.62)):
+        column(r, ax + dx, py, 1.02, 0.075, z0, style=i)
+    box((aw - 0.12, 0.42, 0.08), (ax, yA - 0.20, z0 + 1.06), M("white"), parent=r)
+    box((aw - 0.116, 0.424, 0.035), (ax, yA - 0.20, z0 + 1.05), M("red"), parent=r)
+    cavetto(r, aw - 0.12, 0.42, z0 + 1.10, 0.10, 0.045, (ax, yA - 0.20), 0.085)
+    hangings(r, ax - 0.62, ax - 0.21, py, z0 + 1.02, player, 1, 0.36)
+    hangings(r, ax + 0.21, ax + 0.62, py, z0 + 1.02, player, 1, 0.36)
+    # roof: a little observatory kiosk and jars
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            rod((ax + 0.45 + sx * 0.18, ay + sy * 0.18, zt), (ax + 0.45 + sx * 0.18, ay + sy * 0.18, zt + 0.5),
+                0.025, "yellow", r, segs=6)
+    box((0.46, 0.46, 0.06), (ax + 0.45, ay, zt + 0.53), M("white"), parent=r)
+    box((0.464, 0.464, 0.025), (ax + 0.45, ay, zt + 0.52), M("blue"), parent=r)
+    jar(r, ax - 0.55, ay + 0.1, zt, 0.6, "white", "blue")
+    # the court: reed mats, desks, papyri, a linen awning in the owner's colours
+    mat_reed(r, 0.18, -0.55, 0.0, 0.70, 0.56, ("straw", "thatch", "straw", "green"))
+    awning(r, -0.08, -0.86, 0.86, -0.26, 0.0, 0.92, player, sag=0.05, lean=0.06)
+    desk(r, 0.08, -0.62, 0.012, 0.0)
+    desk(r, 0.50, -0.45, 0.012, 0.2)
+    scrolls(r, 0.40, -0.80, 0.012, 5, 0.3)
+    basket(r, 0.72, -0.72, 0.012, 0.7, (0.96, 0.90, 0.70))
+    jar(r, -0.10, -0.38, 0.0, 0.6, "terracotta", "white")
+    scroll_rack(r, 0.86, 0.30, 0.0, math.pi / 2, 3, 5)
+    scribe_statue(r, (-0.62, -0.60, 0), 1.0)
+    palm(r, 0.80, 0.80, 1.55, seed=8, lean=(0.04, -0.02))
+    return r
+
+
+# --- market ---------------------------------------------------------------------------
+
+def balance(root, x, y, z=0.0, s=1.0):
+    """The scales: a post, a beam, two pans."""
+    e = _sub(root, (x, y, z), 0.0, s, "scales")
+    box((0.24, 0.16, 0.06), (0, 0, 0.03), M("stone_lt"), parent=e)
+    rod((0, 0, 0.06), (0, 0, 0.86), 0.025, "cedar", e, segs=8)
+    box((0.06, 0.06, 0.08), (0, 0, 0.86), gold(), parent=e)
+    rod((-0.30, 0, 0.84), (0.30, 0, 0.80), 0.014, "wood_dark", e, segs=6)
+    for sx, zz in ((-1, 0.84), (1, 0.80)):
+        for a in range(3):
+            q = (sx * 0.30 + 0.05 * math.cos(a * 2.1), 0.05 * math.sin(a * 2.1), zz - 0.30)
+            rod((sx * 0.30, 0, zz), q, 0.003, "linen", e, segs=3)
+        lathe([(0, -0.02), (0.08, 0.0), (0.085, 0.01)], M("bronze", metal=0.7, rough=0.35),
+              (sx * 0.30, 0, zz - 0.32), e, segs=10)
+    for i in range(3):
+        sphere(0.025, (-0.30 + 0.03 * (i - 1), 0, 0.53), gold(), parent=e, segs=6)
+    box((0.06, 0.05, 0.05), (0.30, 0, 0.51), M("iron", metal=0.5), parent=e)
+    return e
+
+
+def linen_bolts(root, x, y, z=0.0, rz=0.0):
+    e = _sub(root, (x, y, z), rz, 1.0, "bolts")
+    for i, (c, yy, zz) in enumerate((("linen", -0.07, 0.05), ("white", 0.07, 0.05), ("blue", 0.0, 0.14),
+                                     ((0.95, 0.80, 0.40), 0.14, 0.14))):
+        rod((-0.16, yy, zz), (0.16, yy, zz), 0.05, c, e, segs=10)
+    return e
+
+
+def market(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
+    """2x2: stalls under linen awnings, produce on mats, a weighing scale,
+    a mudbrick shop and a laden donkey."""
+    r = empty("eg_market", loc, rot_z, parent)
+    pad(r, 2, 2)
+    box((1.86, 1.86, 0.03), (0, 0, 0.03), brickmat("stone_lt", 0.45, 0.45, 0.05, 0.86, blotch=0.06),
+        parent=r)
+    z0 = 0.045
+    mud = brickmat("mud", 0.2, 0.07, 0.09, 0.78)
+    white = brickmat("white", 0.24, 0.085, 0.03, 0.9)
+    # the shop at the back left
+    ax, ay, aw, ad, ah = -0.52, 0.52, 0.86, 0.84, 1.10
+    box((aw, ad, ah), (ax, ay, z0 + ah / 2), white, parent=r)
+    dado(r, aw, ad, z0, (ax, ay), "red", "blue", 0.15)
+    band(r, aw, ad, z0 + ah - 0.10, 0.05, "yellow", (ax, ay))
+    zr = parapet(r, aw, ad, z0 + ah, 0.10, 0.06, "white", (ax, ay), cap="blue")
+    yA, xA = ay - ad / 2, ax + aw / 2
+    door(r, "y", yA, ax - 0.15, 0.30, 0.84, "blue", "red", z=z0)
+    window(r, "y", yA, ax + 0.22, z0 + 0.62, 0.18, 0.15)
+    window(r, "x", xA, ay, z0 + 0.62, 0.18, 0.15)
+    awning(r, ax - 0.40, yA - 0.34, ax + 0.40, yA, z0, 0.82, player, sag=0.03, lean=0.10)
+    for i, (jx, jy) in enumerate(((ax - 0.25, ay + 0.15), (ax + 0.05, ay + 0.22), (ax + 0.22, ay - 0.1))):
+        jar(r, jx, jy, zr - 0.10, 0.65, ("terracotta", "white", "terracotta")[i], ("white", "blue", None)[i])
+    # a stall at the back right: fish on a rack, bread
+    sx0, sx1, sy0, sy1 = 0.18, 0.90, 0.30, 0.86
+    awning(r, sx0, sy0, sx1, sy1, z0, 0.98, player, sag=0.04, lean=0.10)
+    box((0.62, 0.26, 0.04), ((sx0 + sx1) / 2, sy0 + 0.20, z0 + 0.42), M("cedar"), parent=r)
+    for x in (sx0 + 0.06, sx1 - 0.06):
+        box((0.04, 0.22, 0.42), (x, sy0 + 0.20, z0 + 0.21), M("wood_dark"), parent=r)
+    for i in range(5):
+        sphere(0.04, (sx0 + 0.12 + 0.11 * i, sy0 + 0.16, z0 + 0.47), M((0.86, 0.62, 0.30)), parent=r,
+               segs=8, scale=(1.3, 1, 0.6))
+    rod((sx0 + 0.04, sy1 - 0.10, z0 + 0.80), (sx1 - 0.04, sy1 - 0.10, z0 + 0.80), 0.012, "wood", r)
+    for i in range(5):
+        x = sx0 + 0.14 + 0.12 * i
+        sphere(0.04, (x, sy1 - 0.10, z0 + 0.66), mat((0.62, 0.70, 0.76), rough=0.3), parent=r, segs=8,
+               scale=(0.45, 0.35, 2.2))
+    basket(r, sx1 - 0.10, sy0 - 0.06, z0, 0.8, (0.86, 0.62, 0.30))
+    # produce on a mat at the front left, a second awning
+    mat_reed(r, -0.48, -0.42, z0, 0.80, 0.62, ("straw", "red", "straw", "thatch"))
+    awning(r, -0.90, -0.78, -0.08, -0.12, z0, 0.88, player, sag=0.05, lean=0.08)
+    for i, (bx, by, fill) in enumerate(((-0.72, -0.60, "flower_red"), (-0.48, -0.66, (0.42, 0.20, 0.10)),
+                                        (-0.24, -0.58, "wheat"), (-0.66, -0.30, (0.30, 0.55, 0.18)),
+                                        (-0.40, -0.30, (0.95, 0.55, 0.10)))):
+        basket(r, bx, by, z0 + 0.012, 0.85, fill)
+    jar(r, -0.18, -0.26, z0, 0.8, "terracotta", "white")
+    linen_bolts(r, -0.80, -0.08, z0, 0.3)
+    # the scales and a scribe's mat, a donkey with panniers in the owner's colour
+    balance(r, 0.30, -0.18, z0, 1.0)
+    mat_reed(r, 0.30, -0.18, z0, 0.36, 0.30, ("straw", "thatch"))
+    gold_heap(r, 0.08, -0.30, z0 + 0.012, 0.55)
+    import figures as F
+    F.donkey((0.58, -0.66, z0), math.pi * 0.98, player, parent=r, seed=1, load=True)
+    for i in range(3):
+        sack(r, 0.85, -0.40 + 0.12 * i, z0, 0.75, ("linen", "wool", "linen")[i], "red")
+    return r
+
+
+# --- storehouse ------------------------------------------------------------------------
+
+def storehouse(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
+    """2x2: domed silos on a platform, a reed shed of sacks, and the yard's
+    stacks of timber, dressed stone and gold."""
+    r = empty("eg_storehouse", loc, rot_z, parent)
+    pad(r, 2, 2)
+    mud = brickmat("mud", 0.2, 0.07, 0.09, 0.78)
+    # silo platform at the back left
+    px, py, pw, pd, ph = -0.46, 0.46, 1.02, 1.02, 0.28
+    box((pw, pd, ph), (px, py, ph / 2), mud, parent=r)
+    band(r, pw, pd, ph - 0.07, 0.05, "white", (px, py))
+    band(r, pw, pd, ph - 0.05, 0.02, "red", (px, py), out=0.012)
+    silo(r, px - 0.18, py + 0.20, 0.27, 1.08, "white", "y", ph, 0)
+    silo(r, px + 0.24, py + 0.24, 0.22, 0.92, "cream", "y", ph, 1)
+    silo(r, px - 0.22, py - 0.24, 0.20, 0.82, "cream", "y", ph, 2)
+    stairs(r, (px + 0.30, py - pd / 2 - 0.30, 0), (px + 0.30, py - pd / 2, ph), 0.24, mud, 3)
+    ladder(r, (px + 0.10, py - 0.06, ph), (px - 0.08, py + 0.02, ph + 0.98), 0.14)
+    flagpole(r, px + 0.42, py - 0.05, 1.45, player, ph, 0.025, (0.42, 0.14), seed=4)
+    # reed shed at the back right with sacks
+    x0, x1, y0, y1 = 0.18, 0.94, 0.12, 0.94
+    for x in (x0 + 0.04, x1 - 0.04):
+        for y in (y0 + 0.04, y1 - 0.04):
+            post(r, x, y, 1.05, 0.045)
+    box((x1 - x0, 0.08, 0.70), ((x0 + x1) / 2, y1 - 0.02, 0.35), mud, parent=r)
+    reed_roof(r, x0 - 0.04, y0 - 0.06, x1 + 0.04, y1 + 0.02, 1.02, 1.14, axis="y", edge=player)
+    for i in range(7):
+        sx_, sy_ = x0 + 0.16 + 0.17 * (i % 4), y1 - 0.20 - 0.18 * (i // 4)
+        sack(r, sx_, sy_, 0.0, 1.0, ("linen", "wool", "linen", (0.86, 0.80, 0.62))[i % 4], "red")
+    for i in range(3):
+        sack(r, x0 + 0.24 + 0.17 * i, y1 - 0.30, 0.25, 0.9, "linen", "red")
+    # the yard
+    logs(r, -0.40, -0.58, 0.0, (4, 3, 2), L=0.86, r=0.06)
+    blocks(r, 0.18, -0.50, 0.0, 0.1)
+    gold_heap(r, 0.60, -0.42, 0.0, 1.0)
+    crate(r, 0.75, -0.80, 0.0, 0.9, 0.3, "wheat")
+    basket(r, 0.22, -0.88, 0.0, 0.8, "wheat")
+    jar(r, -0.88, -0.20, 0.0, 0.8, "terracotta", "white")
+    return r
+
+
+# --- farm -------------------------------------------------------------------------------
+
+def _crop_rows(root, x0, x1, y0, y1, kind, z=0.05, axis="x", seed=0):
+    """Rows of a crop filling a basin."""
+    rnd = random.Random(seed)
+    if kind == "wheat":
+        cols, hgt, wd, step = ((0.95, 0.78, 0.30), (0.90, 0.70, 0.24)), 0.24, 0.10, 0.12
+    elif kind == "green":
+        cols, hgt, wd, step = ((0.40, 0.66, 0.22), (0.32, 0.58, 0.18)), 0.20, 0.10, 0.12
+    elif kind == "flax":
+        cols, hgt, wd, step = ((0.36, 0.60, 0.30), (0.30, 0.52, 0.26)), 0.26, 0.09, 0.11
+    else:  # low leafy rows
+        cols, hgt, wd, step = ((0.20, 0.50, 0.18), (0.26, 0.56, 0.20)), 0.10, 0.11, 0.14
+    span = (y1 - y0) if axis == "x" else (x1 - x0)
+    n = max(1, int(span / step))
+    for i in range(n):
+        c = (i + 0.5) / n
+        if axis == "x":
+            yy = y0 + (y1 - y0) * c
+            secs = [(x1 - x0, wd, 0, 0, 0), (x1 - x0 - 0.02, wd * 0.8, hgt * 0.75, 0, 0),
+                    (x1 - x0 - 0.05, wd * 0.25, hgt, 0, 0)]
+            loc = ((x0 + x1) / 2, yy, z)
+        else:
+            xx = x0 + (x1 - x0) * c
+            secs = [(wd, y1 - y0, 0, 0, 0), (wd * 0.8, y1 - y0 - 0.02, hgt * 0.75, 0, 0),
+                    (wd * 0.25, y1 - y0 - 0.05, hgt, 0, 0)]
+            loc = (xx, (y0 + y1) / 2, z)
+        loft(secs, mottle(cols[i % 2], 0.18, 14.0 + seed), loc, root)
+        if kind == "flax":
+            for k in range(6):
+                t = (k + rnd.uniform(0.1, 0.9)) / 6
+                if axis == "x":
+                    p = (x0 + (x1 - x0) * t, yy, z + hgt)
+                else:
+                    p = (xx, y0 + (y1 - y0) * t, z + hgt)
+                sphere(0.022, p, M((0.45, 0.62, 0.95)), parent=root, segs=6, scale=(1, 1, 0.6))
+        if kind == "low":
+            for k in range(5):
+                t = (k + 0.5) / 5
+                p = (x0 + (x1 - x0) * t, yy, z + 0.06) if axis == "x" else (xx, y0 + (y1 - y0) * t, z + 0.06)
+                sphere(0.06, p, M(cols[(i + k) % 2]), parent=root, segs=8, scale=(1, 1, 0.7))
+
+
+def shaduf(root, x, y, z=0.0, rz=0.0, player=None, lift=0.35):
+    """A well sweep: two uprights, a pole on a pivot, a mud counterweight and a
+    bucket on a rope. The bucket end is toward +X before rz."""
+    e = _sub(root, (x, y, z), rz, 1.0, "shaduf")
+    zp = 0.98
+    for sy in (-1, 1):
+        rod((0, sy * 0.10, 0), (0, sy * 0.07, zp), 0.035, "wood_dark", e, segs=6)
+        box((0.14, 0.12, 0.16), (0, sy * 0.10, 0.08), mottle("mud", 0.1, 5.0), parent=e, bevel=0.03)
+    rod((0, -0.12, zp), (0, 0.12, zp), 0.022, "wood", e, segs=6)
+    a, b = Vector((-0.46, 0, zp - lift)), Vector((0.42, 0, zp + lift * 1.2))
+    rod(a, b, 0.022, "wood", e, segs=6)
+    sphere(0.10, tuple(a - Vector((0.02, 0, 0.04))), mottle("mud_dk", 0.1, 6.0), parent=e, segs=10,
+           scale=(1, 1, 0.85))
+    rod(b, (b.x, 0, 0.22), 0.004, "linen", e, segs=3)
+    lathe([(0.05, 0), (0.075, 0.07), (0.07, 0.10)], M("leather"), (b.x, 0, 0.14), e, segs=8)
+    if player is not None:
+        box((0.012, 0.16, 0.20), (0.02, 0.0, zp - 0.20), M(player), parent=e)
+    return e
+
+
+def farm(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
+    """2x2: an irrigated plot: basins between earth dykes, crops in rows, a
+    canal on the +X side with a shaduf, a reed shade-shed in the back corner."""
+    r = empty("eg_farm", loc, rot_z, parent)
+    earth = mottle((0.50, 0.33, 0.20), 0.12, 3.0)
+    box((1.94, 1.94, 0.05), (0, 0, 0.025), earth, parent=r, bevel=0.02)
+    dyke = mottle((0.58, 0.40, 0.25), 0.10, 4.0)
+    z = 0.05
+
+    def ridge(x0, y0, x1, y1, w=0.10, h=0.07):
+        if abs(x1 - x0) > abs(y1 - y0):
+            loft([(x1 - x0, w, 0), (x1 - x0, w * 0.4, h)], dyke, ((x0 + x1) / 2, y0, z), r)
+        else:
+            loft([(w, y1 - y0, 0), (w * 0.4, y1 - y0, h)], dyke, (x0, (y0 + y1) / 2, z), r)
+
+    E = 0.92
+    cx0 = 0.64  # the canal runs from here to the +X edge
+    ridge(-E, -E, cx0, -E)
+    ridge(-E, E, cx0, E)
+    ridge(-E, -E, -E, E)
+    ridge(cx0, -E, cx0, E, 0.12, 0.09)
+    ridge(-E, 0.0, cx0, 0.0)
+    ridge(-0.16, -E, -0.16, E)
+    # the canal
+    box((0.24, 1.86, 0.02), (0.79, 0.0, z + 0.004), mat(PAL["water"], rough=0.12, emit=0.06), parent=r)
+    box((0.04, 1.88, 0.07), (0.93, 0.0, z + 0.035), dyke, parent=r)
+    for k, (lx, ly) in enumerate(((0.80, 0.55), (0.76, 0.30), (0.84, -0.20))):
+        cyl(0.04, 0.005, (lx, ly, z + 0.018), M("leaf"), parent=r, segs=8)
+    # little sluice gaps in the dyke into each basin, water in the furrows
+    for yy in (-0.45, 0.45):
+        box((0.14, 0.10, 0.02), (cx0, yy, z + 0.012), mat(PAL["water"], rough=0.12), parent=r)
+    # the crops
+    _crop_rows(r, -0.86, -0.22, 0.06, 0.86, "wheat", z, "x", 1)
+    _crop_rows(r, -0.10, 0.58, 0.06, 0.86, "flax", z, "y", 2)
+    _crop_rows(r, -0.86, -0.22, -0.86, -0.06, "green", z, "x", 3)
+    _crop_rows(r, -0.10, 0.58, -0.86, -0.06, "low", z, "y", 4)
+    # the shaduf on the canal bank
+    shaduf(r, 0.40, -0.62, z, 0.0, player, 0.30)
+    # a reed shade at the back left over a mat, baskets and a sickle
+    x0, x1, y0, y1 = -0.92, -0.42, 0.42, 0.92
+    for xx in (x0 + 0.04, x1 - 0.04):
+        for yy in (y0 + 0.04, y1 - 0.04):
+            post(r, xx, yy, 0.90, 0.035, z)
+    reed_roof(r, x0 - 0.03, y0 - 0.05, x1 + 0.03, y1 + 0.02, z + 0.88, z + 0.98, axis="y", edge=player)
+    mat_reed(r, (x0 + x1) / 2, (y0 + y1) / 2, z, 0.44, 0.44, ("straw", "thatch"))
+    basket(r, x0 + 0.15, y0 + 0.16, z + 0.012, 0.8, "wheat")
+    jar(r, x1 - 0.12, y1 - 0.14, z + 0.012, 0.7, "terracotta", "white")
+    lathe([(0.14, -0.01), (0.15, 0.01), (0.13, 0.01), (0.12, -0.01)], "iron", (x1 - 0.12, y0 + 0.10, z + 0.03),
+          r, segs=10, closed=True, rot=(0.0, 0.0, 0.0))
+    # sheaves at the field corner
+    for k, (sx_, sy_) in enumerate(((-0.30, 0.28), (-0.30, 0.45))):
+        lathe([(0.0, 0), (0.07, 0.0), (0.05, 0.12), (0.09, 0.30), (0.0, 0.33)], mottle("wheat", 0.1, 10.0),
+              (sx_, sy_, z), r, segs=8)
+        lathe([(0.055, 0.10), (0.055, 0.13)], "leather", (sx_, sy_, z), r, segs=8)
+    return r
+
+
+# --- dock -------------------------------------------------------------------------------
+
+def boat(root, loc, rz=0.0, L=1.3, w=0.36, h=0.16, rise=0.20, player=RED, sail=True, hull="cedar"):
+    """A planked river boat with upturned ends and a painted eye, its bow
+    toward +X before rz; the hull bottom at z=0 (the waterline)."""
+    e = _sub(root, loc, rz, 1.0, "boat")
+    n = 14
+    secs = []
+    for i in range(n + 1):
+        t = -1 + 2 * i / n
+        hw = w / 2 * max(0.03, 1 - t * t) ** 0.6
+        zb = rise * t ** 4
+        zt = h + rise * 1.25 * t ** 4
+        secs.append([(t * L / 2, -hw, zt), (t * L / 2, -hw * 0.92, zb + (zt - zb) * 0.35),
+                     (t * L / 2, 0.0, zb), (t * L / 2, hw * 0.92, zb + (zt - zb) * 0.35),
+                     (t * L / 2, hw, zt)])
+    vs = [p for s in secs for p in s]
+    fs = []
+    for i in range(n):
+        for j in range(4):
+            a = i * 5 + j
+            fs.append((a, a + 1, a + 6, a + 5))
+    mesh(vs, fs, stripemat((hull, (0.70, 0.46, 0.26), hull, "red"), 0.028, "z"), parent=e, smooth=True,
+         name="hull")
+    for side in (0, 4):
+        for i in range(n):
+            rod(secs[i][side], secs[i + 1][side], 0.014, "yellow" if side == 0 else "wood_dark", e, segs=4)
+    # the eye on the bow, both sides
+    for sy in (-1, 1):
+        pt = secs[n - 2][0 if sy < 0 else 4]
+        sphere(0.035, (pt[0] - 0.02, pt[1] * 1.02, pt[2] - 0.05), M("white"), parent=e, segs=8,
+               scale=(1.4, 0.3, 1.0))
+        sphere(0.018, (pt[0] - 0.015, pt[1] * 1.06, pt[2] - 0.05), M("dark"), parent=e, segs=6,
+               scale=(1, 0.3, 1))
+    for x in (-0.25, 0.0, 0.25):
+        box((0.05, w * 0.85, 0.02), (x * L / 1.3, 0, h * 0.75), M("wood"), parent=e)
+    # a cabin of reed mats and a steering oar
+    box((0.24, w * 0.7, 0.16), (-0.30 * L / 1.3, 0, h + 0.03), stripemat(("straw", "thatch"), 0.03, "x"),
+        parent=e)
+    box((0.27, w * 0.76, 0.03), (-0.30 * L / 1.3, 0, h + 0.12), M(player), parent=e)
+    rod((-L * 0.42, 0.10, h + 0.25), (-L * 0.56, 0.18, -0.02), 0.014, "wood", e, segs=5)
+    if sail:
+        zm = 1.25
+        rod((0.08, 0, 0.05), (0.08, 0, zm), 0.02, "wood", e, segs=6)
+        rod((0.08, -0.34, zm - 0.06), (0.08, 0.34, zm - 0.06), 0.012, "wood", e, segs=5)
+        rod((0.08, -0.30, zm - 0.58), (0.08, 0.30, zm - 0.58), 0.010, "wood", e, segs=5)
+        cloth(e, [(0.09, -0.33, zm - 0.07), (0.09, 0.33, zm - 0.07), (0.09, 0.30, zm - 0.57),
+                  (0.09, -0.30, zm - 0.57)], player, 0.0, stripes=(player, "linen"), period=0.11)
+        for sy in (-1, 1):
+            rod((0.08, 0, zm), (L * 0.48, sy * 0.02, h + rise * 1.2), 0.003, "linen", e, segs=3)
+    return e
+
+
+def net(root, p0, p1, z0, z1):
+    """A fishing net hung to dry between two poles."""
+    rod((p0[0], p0[1], z0), (p0[0], p0[1], z1 + 0.05), 0.02, "wood", root, segs=5)
+    rod((p1[0], p1[1], z0), (p1[0], p1[1], z1 + 0.05), 0.02, "wood", root, segs=5)
+    vs, fs = [], []
+    n = 6
+    for i in range(n + 1):
+        t = i / n
+        x, y = p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t
+        sag = 0.06 * math.sin(math.pi * t)
+        vs += [(x, y, z1 - sag), (x, y, z0 + 0.10 + 0.05 * math.sin(t * 9))]
+    for i in range(n):
+        fs.append((2 * i, 2 * i + 2, 2 * i + 3, 2 * i + 1))
+    mesh(vs, fs, stripemat(((0.30, 0.26, 0.20), "linen", "linen"), 0.04, "h", rough=0.9), parent=root,
+         name="net")
+
+
+def dock(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
+    """3x3: a timber pier on palm-log piles over the water round an open berth
+    with a moored boat; a reed boat-shed on the back, nets, fish, a flag.
+    Built to stand wholly on the water (the game draws the water)."""
+    r = empty("eg_dock", loc, rot_z, parent)
+    zd, td = 0.24, 0.06
+    pl_ = ((0.80, 0.58, 0.36), (0.74, 0.52, 0.31), (0.84, 0.63, 0.40), (0.70, 0.49, 0.30), (0.78, 0.56, 0.34))
+    deck = stripemat(pl_, 0.075, "x")
+    deck2 = stripemat(pl_, 0.075, "y")
+    E = 1.46
+    bx = 0.78   # half the berth's width
+    by = 0.28   # the berth's back
+    parts = [(-E, E, by, E, deck), (-E, -bx, -E, by, deck2), (bx, E, -E, by, deck2)]
+    piles = set()
+    for (x0, x1, y0, y1, m) in parts:
+        box((x1 - x0, y1 - y0, td), ((x0 + x1) / 2, (y0 + y1) / 2, zd - td / 2), m, parent=r)
+        for (xa, ya, xb, yb) in ((x0, y0, x1, y0), (x1, y0, x1, y1), (x0, y1, x1, y1), (x0, y0, x0, y1)):
+            if abs(xb - xa) > 0.01:
+                box((xb - xa + 0.04, 0.06, 0.08), ((xa + xb) / 2, ya, zd - 0.05), M("wood_dark"), parent=r)
+            else:
+                box((0.06, yb - ya + 0.04, 0.08), (xa, (ya + yb) / 2, zd - 0.05), M("wood_dark"), parent=r)
+        nx, ny = max(2, int((x1 - x0) / 0.55) + 1), max(2, int((y1 - y0) / 0.55) + 1)
+        for i in range(nx):
+            for j in range(ny):
+                if 0 < i < nx - 1 and 0 < j < ny - 1:
+                    continue
+                px = x0 + 0.05 + (x1 - x0 - 0.10) * i / (nx - 1)
+                py = y0 + 0.05 + (y1 - y0 - 0.10) * j / (ny - 1)
+                piles.add((round(px, 3), round(py, 3)))
+    for (px, py) in piles:
+        rod((px, py, 0.0), (px, py, zd - 0.05), 0.05, (0.50, 0.33, 0.19), r, r_top=0.045, segs=8)
+    # mooring posts at the berth's mouth, rope rings
+    for sx in (-1, 1):
+        for yy in (-E + 0.10, -0.50):
+            rod((sx * (bx + 0.07), yy, zd), (sx * (bx + 0.07), yy, zd + 0.30), 0.045, "wood_dark", r, segs=8)
+            lathe([(0.05, -0.012), (0.075, 0.0), (0.05, 0.012)], "straw", (sx * (bx + 0.07), yy, zd + 0.20), r,
+                  segs=10, closed=True)
+    # the boat in its berth, bow toward the open water
+    boat(r, (0.0, -0.55, 0.0), -math.pi / 2, 1.40, 0.42, 0.17, 0.22, player)
+    for sx in (-1, 1):
+        rod((sx * (bx + 0.07), -0.50, zd + 0.22), (sx * 0.17, -0.20, 0.17), 0.005, "straw", r, segs=3)
+    # the boat shed on the back of the pier
+    x0, x1, y0, y1 = -1.30, 0.60, by + 0.12, E - 0.06
+    for xx in (x0 + 0.05, -0.35, x1 - 0.05):
+        for yy in (y0 + 0.05, y1 - 0.05):
+            post(r, xx, yy, 1.20, 0.05, zd)
+    box((x1 - x0, 0.08, 0.80), ((x0 + x1) / 2, y1 - 0.02, zd + 0.40), stripemat(("straw", "thatch"), 0.04, "x"),
+        parent=r)
+    reed_roof(r, x0 - 0.05, y0 - 0.08, x1 + 0.05, y1 + 0.03, zd + 1.16, zd + 1.30, axis="y", edge=player)
+    # a reed skiff being lashed on trestles under it
+    for xx in (-0.95, -0.15):
+        for sy in (-1, 1):
+            rod((xx, 0.85 + sy * 0.12, zd), (xx, 0.85, zd + 0.28), 0.015, "wood_dark", r, segs=5)
+    sk = boat(r, (-0.55, 0.85, zd + 0.26), 0.0, 1.05, 0.30, 0.10, 0.18, player, sail=False, hull="straw")
+    for k in range(4):
+        rod((-1.20 + 0.05 * k, 1.30, zd), (-1.15 + 0.06 * k, 1.20, zd + 0.95), 0.012, "wood", r, segs=4)  # oars
+    lathe([(0.10, -0.03), (0.17, -0.03), (0.17, 0.03), (0.10, 0.03)], "straw", (0.30, 0.70, zd + 0.03), r,
+          segs=14, closed=True)
+    # nets on the right arm, fish baskets and jars
+    net(r, (1.10, -1.10), (1.10, -0.10), zd, zd + 0.85)
+    for i, (fx, fy) in enumerate(((1.30, -0.70), (1.30, -0.40), (0.98, 0.70), (1.20, 0.95))):
+        basket(r, fx, fy, zd, 0.8, (0.62, 0.70, 0.76) if i % 2 == 0 else "wheat")
+    jar(r, 1.30, 0.60, zd, 0.8, "terracotta", "white")
+    jar(r, 1.32, 0.38, zd, 0.65, "white", "blue")
+    crate(r, -1.15, -0.10, zd, 0.9, 0.2, (0.62, 0.70, 0.76))
+    sack(r, -1.20, 0.12, zd, 0.8, "linen", "red")
+    # a derrick at the end of the left arm, the flag at the end of the right
+    rod((-1.12, -1.20, zd), (-1.12, -1.20, zd + 1.45), 0.035, "wood", r, segs=6)
+    rod((-1.12, -1.20, zd + 1.15), (-0.62, -1.05, zd + 1.40), 0.025, "wood", r, segs=6)
+    rod((-0.62, -1.05, zd + 1.40), (-0.62, -1.05, zd + 0.55), 0.004, "linen", r, segs=3)
+    crate(r, -0.62, -1.05, zd + 0.32, 0.8, 0.0)
+    box((0.12, 0.12, 0.12), (1.20, -1.30, zd + 0.06), M("stone_lt"), parent=r)
+    flagpole(r, 1.20, -1.30, 1.75, player, zd + 0.10, 0.03, (0.60, 0.20), seed=6)
+    return r
+
+
+# --- government centre -------------------------------------------------------------------
+
+def government_centre(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
+    """2x2: a palace behind a pair of bannered pylons: the Window of Appearances
+    on its front, a pavilion on the roof, sphinxes on the approach."""
+    r = empty("eg_government_centre", loc, rot_z, parent)
+    pad(r, 2, 2, "stone_lt")
+    white = brickmat("white", 0.26, 0.09, 0.03, 0.90, blotch=0.05)
+    stone = brickmat("stone", 0.30, 0.12, 0.06, 0.84)
+    box((1.92, 1.92, 0.08), (0, 0, 0.04), brickmat("stone_lt", 0.4, 0.4, 0.05, 0.86), parent=r)
+    z0 = 0.08
+    # the palace
+    ax, ay, aw, ad, ah = -0.06, 0.40, 1.70, 1.06, 1.72
+    box((aw, ad, ah), (ax, ay, z0 + ah / 2), white, parent=r)
+    dado(r, aw, ad, z0, (ax, ay), "red", "blue", 0.16)
+    band(r, aw, ad, z0 + ah - 0.26, 0.22, stripemat(("red", "white", "blue", "white", "green", "white"),
+                                                    0.10, "h"), (ax, ay))
+    band(r, aw, ad, z0 + ah - 0.29, 0.03, "yellow", (ax, ay))
+    zt = cavetto(r, aw, ad, z0 + ah, 0.16, 0.06, (ax, ay), 0.09)
+    yA, xA = ay - ad / 2, ax + aw / 2
+    # the Window of Appearances: a balcony with the owner's cloth over its rail
+    wz = z0 + 0.92
+    slab(r, "y", yA, ax, wz - 0.10, 0.62, 0.10, 0.26, "stone_lt")
+    slab(r, "y", yA, ax, wz - 0.10, 0.64, 0.035, 0.27, "red")
+    slab(r, "y", yA, ax, wz, 0.44, 0.52, 0.03, "red")
+    slab(r, "y", yA, ax, wz, 0.34, 0.46, 0.04, "dark")
+    for sx in (-1, 1):
+        column(r, ax + sx * 0.27, yA - 0.20, 0.50, 0.035, wz, style=1, abacus=True)
+    box((0.66, 0.30, 0.05), (ax, yA - 0.13, wz + 0.53), M("white"), parent=r)
+    cavetto(r, 0.66, 0.30, wz + 0.555, 0.07, 0.03, (ax, yA - 0.13), 0.07)
+    box((0.60, 0.03, 0.12), (ax, yA - 0.24, wz + 0.06), M("gold"), parent=r)
+    box((0.36, 0.012, 0.30), (ax, yA - 0.255, wz - 0.12), M(player), parent=r)
+    box((0.36, 0.014, 0.03), (ax, yA - 0.256, wz - 0.255), gold(), parent=r)
+    pl = Paint((ax, yA - 0.03, wz + 0.64), (1, 0, 0), (0, 0, 1), r)
+    winged_disc(pl, 0, 0.08, 0.05, 0.30, 0)
+    pl.done()
+    for dx in (-0.62, 0.62):
+        window(r, "y", yA, ax + dx, z0 + 1.15, 0.18, 0.20)
+    p = Paint((xA, ay, z0), (0, 1, 0), (0, 0, 1), r)
+    p.rect(-0.36, 0.40, 0.36, 1.30, "white")
+    p.rect(-0.36, 0.40, 0.36, 0.43, "red", 1)
+    p.rect(-0.36, 1.27, 0.36, 1.30, "red", 1)
+    figure(p, -0.18, 0.46, 0.68, facing=1, crown="blue", layer=1)
+    figure(p, 0.16, 0.46, 0.60, facing=-1, crown="god", layer=1, staff=False)
+    p.done()
+    # roof pavilion with an awning
+    awning(r, ax - 0.55, ay - 0.30, ax + 0.20, ay + 0.35, zt, 0.62, player, sag=0.04, lean=0.08)
+    malqaf(r, ax + 0.55, ay + 0.18, zt - 0.02, 0.34, 0.40, 0.36)
+    # the two pylons before it, hung with long banners
+    yP, pw, pd, H = -0.58, 0.56, 0.40, 1.40
+    for sx in (-1, 1):
+        cx = sx * 0.58
+        loft([(pw, pd, 0), (pw - 0.12, pd - 0.08, H)], stone, (cx, yP, z0), r)
+        for ex in (-1, 1):
+            for ey in (-1, 1):
+                rod((cx + ex * pw / 2, yP + ey * pd / 2, z0), (cx + ex * (pw - 0.12) / 2, yP + ey * (pd - 0.08) / 2,
+                                                             z0 + H), 0.016, "yellow", r, segs=5)
+        cavetto(r, pw - 0.12, pd - 0.08, z0 + H, 0.14, 0.05, (cx, yP), 0.09)
+        v = Vector((0, 0.04, H))
+        p = Paint((cx, yP - pd / 2, z0), (1, 0, 0), v, r)
+        p.rect(-0.24, 0.10, 0.24, 0.17, "blue")
+        p.rect(-0.24, 0.18, 0.24, 0.20, "yellow")
+        p.done()
+        # the banner: hung from a gilded rod under the cornice
+        yb = yP - (pd - 0.08) / 2 - 0.05
+        rod((cx - 0.17, yb, z0 + H - 0.06), (cx + 0.17, yb, z0 + H - 0.06), 0.014, gold(), r, segs=5)
+        vs, fs = [], []
+        for i in range(7):
+            t = i / 6
+            zz = z0 + H - 0.06 - t * 1.02
+            yy = yb + 0.005 - 0.02 * t
+            vs += [(cx - 0.15, yy, zz), (cx + 0.15, yy, zz)]
+        for i in range(6):
+            fs.append((2 * i, 2 * i + 1, 2 * i + 3, 2 * i + 2))
+        vs += [(cx - 0.15, yb - 0.015, z0 + H - 1.08), (cx, yb - 0.02, z0 + H - 1.18),
+               (cx + 0.15, yb - 0.015, z0 + H - 1.08)]
+        fs.append((12, 13, 14))
+        mesh(vs, fs, M(player, rough=0.7), parent=r, name="banner")
+        box((0.30, 0.012, 0.04), (cx, yb - 0.018, z0 + H - 0.30), gold(), parent=r)
+        box((0.30, 0.012, 0.04), (cx, yb - 0.026, z0 + H - 0.92), gold(), parent=r)
+        cyl(0.07, 0.012, (cx, yb - 0.025, z0 + H - 0.60), gold(), rot=(math.pi / 2, 0, 0), parent=r, segs=12)
+        flagpole(r, cx + sx * 0.12, yP + 0.10, 2.15, player, z0, 0.03, (0.55, 0.17), seed=sx + 3)
+    # a gateway between them
+    box((0.62, 0.30, 1.02), (0, yP, z0 + 0.51), M("stone_lt"), parent=r)
+    slab(r, "y", yP - 0.15, 0, z0, 0.36, 0.84, 0.01, "dark")
+    slab(r, "y", yP - 0.15, 0, z0 + 0.84, 0.62, 0.18, 0.04, "white")
+    pl = Paint((0, yP - 0.195, z0 + 0.84), (1, 0, 0), (0, 0, 1), r)
+    winged_disc(pl, 0, 0.09, 0.04, 0.22, 0)
+    pl.done()
+    cavetto(r, 0.62, 0.30, z0 + 1.02, 0.10, 0.04, (0, yP), 0.08)
+    # sphinxes on the approach
+    for sx in (-1, 1):
+        e = _sub(r, (sx * 0.34, -0.86, z0 - 0.01), 0.0, 0.26, "sph")
+        sphinx(parent=e, player=player)
+    return r
+
+
+# --- the wonder: the great pyramid ----------------------------------------------------------
+
+def wonder(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
+    """5x5: the Great Pyramid, cased white with a gilded capstone, in its
+    walled court: a mortuary chapel, a sphinx-lined causeway out through a
+    pylon gate between obelisks, queens' pyramids, flags."""
+    r = empty("eg_wonder", loc, rot_z, parent)
+    pad(r, 5, 5)
+    box((4.86, 4.86, 0.05), (0, 0, 0.025), brickmat("sand", 0.6, 0.6, 0.03, 0.9), parent=r)
+    cx, cy, B, H = -0.40, 0.42, 3.55, 2.95
+    z0 = 0.10
+    box((B + 0.36, B + 0.36, z0), (cx, cy, z0 / 2), brickmat("stone_lt", 0.45, 0.10, 0.05), parent=r)
+    box((B + 0.38, B + 0.38, 0.03), (cx, cy, z0 - 0.02), M("red"), parent=r)
+    warm = brickmat((0.97, 0.925, 0.82), 0.62, 0.20, 0.03, 0.86, rough=0.55, blotch=0.035, msize=0.008)
+    cool = brickmat((0.93, 0.94, 1.0), 0.62, 0.20, 0.022, 0.90, rough=0.55, blotch=0.035, msize=0.008)
+    back = brickmat((0.97, 0.93, 0.86), 0.62, 0.20, 0.022, 0.90, rough=0.6, blotch=0.035)
+    _pyr_faces(r, cx, cy, B, H, z0, (warm, cool, back, back))
+    k = 0.075
+    loft([(B + 0.05, B + 0.05, 0), (B * (1 - k) + 0.035, B * (1 - k) + 0.035, H * k)],
+         brickmat("granite", 0.55, 0.11, 0.05, 0.85, rough=0.5), (cx, cy, z0), r)
+    t = 0.80
+    cb = B * (1 - t) + 0.03
+    loft([(cb, cb, 0), (0, 0, H * (1 - t) + 0.025)],
+         mat(PAL["gold"], rough=0.22, metal=0.75, emit=0.65), (cx, cy, z0 + H * t), r)
+    loft([(cb + 0.06, cb + 0.06, 0), (cb + 0.025, cb + 0.025, 0.045)], M("blue"),
+         (cx, cy, z0 + H * t - 0.04), r)
+    b = B / 2
+    for ex, ey in ((-1, -1), (1, -1), (1, 1)):
+        rod((cx + ex * b, cy + ey * b, z0), (cx, cy, z0 + H), 0.014, (1.0, 0.98, 0.93), r, segs=4)
+    # a painted band of the king's names across the sunlit face, low down
+    v = Vector((0, b, H))
+    ln = v.length
+    p = Paint((cx, cy - b, z0), (1, 0, 0), v, r, off=0.008)
+    hw = lambda bb: b * (1 - bb / ln) - 0.06  # noqa: E731
+    p.rect(-hw(0.40), 0.40, hw(0.40), 0.43, "blue")
+    p.rect(-hw(0.44), 0.44, hw(0.44), 0.455, "yellow")
+    p.done()
+
+    # the enclosure, whitewashed, round-topped, a pylon gate on the causeway
+    E, wh, wt = 2.36, 0.30, 0.10
+    wm = brickmat("white", 0.3, 0.09, 0.03, 0.9)
+
+    def wall(x0, y0, x1, y1):
+        sx, sy = abs(x1 - x0) + wt, abs(y1 - y0) + wt
+        if sy > sx:
+            sy -= 2 * wt + 0.002
+        mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+        box((sx, sy, wh), (mx, my, wh / 2), wm, parent=r)
+        box((sx + 0.02, sy + 0.02, 0.05), (mx, my, 0.08), M("red"), parent=r)
+        if sx > sy:
+            cyl(wt / 2, sx - 0.006, (mx, my, wh), M("white"), rot=(0, math.pi / 2, 0), parent=r, segs=10)
+        else:
+            cyl(wt / 2, sy - 0.006, (mx, my, wh), M("white"), rot=(math.pi / 2, 0, 0), parent=r, segs=10)
+
+    gx = cx
+    wall(-E, -E, gx - 0.50, -E)
+    wall(gx + 0.50, -E, E, -E)
+    wall(E, -E, E, E)
+    wall(-E, E, E, E)
+    wall(-E, -E, -E, E)
+    # the gap in the wall: two gate piers with the owner's cloth hung between
+    for sx in (-1, 1):
+        px = gx + sx * 0.50
+        box((0.18, 0.18, 0.62), (px, -E, 0.31), brickmat("white", 0.2, 0.08), parent=r)
+        box((0.20, 0.20, 0.05), (px, -E, 0.645), M("red"), parent=r)
+        lathe([(0.07, 0), (0.05, 0.07), (0.0, 0.12)], gold(), (px, -E, 0.67), r, segs=4, rot=(0, 0, math.pi / 4))
+        box((0.012, 0.012, 0.012), (px, -E, 0.0), M("white"), parent=r)
+    rod((gx - 0.42, -E - 0.09, 0.56), (gx + 0.42, -E - 0.09, 0.56), 0.008, "wood", r, segs=4)
+    hangings(r, gx - 0.40, gx + 0.40, -E - 0.09, 0.56, player, 3, 0.20)
+
+    # the mortuary chapel against the sunlit face
+    cw, cd, ch = 1.30, 0.52, 0.86
+    yb = cy - B / 2
+    ycen = yb - cd / 2 + 0.18
+    box((cw + 0.6, cd + 0.72, 0.08), (cx, ycen - 0.20, 0.04 + z0 / 2), brickmat("stone_lt", 0.25, 0.07),
+        parent=r)
+    zc = 0.13
+    loft([(cw, cd, 0), (cw - 0.06, cd - 0.04, ch)], brickmat("white", 0.28, 0.11, 0.035, 0.9),
+         (cx, ycen, zc), r)
+    band(r, cw - 0.005, cd, zc + 0.02, 0.07, "blue", (cx, ycen))
+    band(r, cw - 0.012, cd, zc + 0.10, 0.025, "yellow", (cx, ycen), out=0.004)
+    cavetto(r, cw - 0.06, cd - 0.04, zc + ch, 0.14, 0.05, (cx, ycen), 0.09)
+    yf = ycen - cd / 2
+    p = Paint((cx, yf, zc), (1, 0, 0), (0, 0.02, ch), r)
+    p.rect(-0.18, 0, 0.18, 0.70, "red")
+    p.rect(-0.13, 0, 0.13, 0.65, "dark", 1)
+    winged_disc(p, 0, 0.74, 0.04, 0.24, 1)
+    for s in (-1, 1):
+        figure(p, s * 0.44, 0.16, 0.46, facing=-s, crown="white" if s < 0 else "god", layer=0)
+    p.done()
+    yp = yf - 0.30
+    for i, dx in enumerate((-0.48, -0.16, 0.16, 0.48)):
+        column(r, cx + dx, yp, 0.80, 0.07, zc, style=i)
+    box((cw + 0.02, 0.50, 0.08), (cx, yf - 0.19, zc + 0.84), M("stone_lt"), parent=r)
+    box((cw + 0.024, 0.504, 0.03), (cx, yf - 0.19, zc + 0.84), M("red"), parent=r)
+    cavetto(r, cw + 0.02, 0.50, zc + 0.88, 0.10, 0.045, (cx, yf - 0.19), 0.08)
+    for s in (-1, 1):
+        flagpole(r, cx + s * 0.84, yp - 0.04, 2.05, player, zc, 0.028, (0.48, 0.15), seed=s)
+        box((0.11, 0.11, 0.10), (cx + s * 0.84, yp - 0.04, zc + 0.03), M("stone_lt"), parent=r)
+
+    # the causeway, lined with sphinxes, and two obelisks at its foot
+    y_c0, y_c1 = yp - 0.18, -E + 0.16
+    box((0.40, y_c0 - y_c1, 0.07), (cx, (y_c0 + y_c1) / 2, 0.065), brickmat("stone_lt", 0.2, 0.2, 0.05),
+        parent=r)
+    for i, yy in enumerate((-1.05, -1.70)):
+        for s in (-1, 1):
+            e = _sub(r, (cx + s * 0.40, yy, 0.03), 0.0, 0.30, "sph")
+            e.rotation_euler = (0, 0, s * math.pi / 2)
+            sphinx(parent=e, player=player)
+    for s in (-1, 1):
+        _obelisk(r, cx + s * 0.95, -1.95, 1.65, 0.15, 0.03, seed=17 + s)
+
+    # the +X strip: queens' pyramids, offering tables, palms
+    for (qx, qy, qb, qh) in ((1.86, 1.55, 0.80, 0.66), (1.86, 0.60, 0.66, 0.54)):
+        box((qb + 0.10, qb + 0.10, 0.06), (qx, qy, 0.08), M("stone_lt"), parent=r)
+        _pyr_faces(r, qx, qy, qb, qh, 0.11, (warm, cool, back, back))
+        loft([(qb * 0.22, qb * 0.22, 0), (0, 0, qh * 0.22)], gold(), (qx, qy, 0.11 + qh * 0.80), r)
+    palm(r, 1.80, -0.40, 1.55, seed=4)
+    palm(r, 1.95, -1.55, 1.25, seed=9, lean=(-0.06, 0.05))
+    palm(r, -2.0, 1.2, 1.35, seed=13, lean=(0.05, -0.04))
+    box((0.30, 0.20, 0.13), (1.30, -1.95, 0.115), M("stone_lt"), parent=r)
+    box((0.302, 0.202, 0.03), (1.30, -1.95, 0.16), M("red"), parent=r)
+    basket(r, 1.25, -1.95, 0.18, 0.6, "flower_red")
+    jar(r, 1.38, -1.95, 0.18, 0.5, "white", "blue")
+    jar(r, -1.60, -2.05, 0.05, 0.8, "terracotta", "white")
+    jar(r, -1.78, -1.95, 0.05, 0.65, "white", "red")
+    return r
+
+
+# --- walls and the gate ----------------------------------------------------------------------
+#
+# The game draws a wall tile as its post plus an arm toward each wall beside
+# it (crates/view/src/walls.rs): eight arm frames in WALL_DIRECTIONS order,
+# each anchored on the post. The game's tile +x is Blender's +X, its +y is
+# Blender's -Y (screen right-down and left-down). An arm reaches the tile's
+# edge (or its corner, for a diagonal), where the neighbour's arm meets it.
+# The gate stands across its walls' line, one of four orientations (the first
+# four directions), shut or open.
+
+WALL_DIRECTIONS = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]
+
+
+def wall_dir(k):
+    """Direction k as a unit vector in Blender XY, its angle, and the reach
+    of an arm along it (to the edge, or the corner)."""
+    dx, dy = WALL_DIRECTIONS[k]
+    x, y = float(dx), float(-dy)
+    n = math.hypot(x, y)
+    return (x / n, y / n), math.atan2(y, x), 0.5 * n
+
+
+def _along(u, s, v=0.0):
+    return (u[0] * s - u[1] * v, u[1] * s + u[0] * v)
+
+
+def arm_plan(k, pier, width, reach=None):
+    """The plan of an arm `width` wide from a square pier of half-size `pier`
+    to the edge; a diagonal one's inner end follows the pier's two faces."""
+    u, _, edge = wall_dir(k)
+    reach = edge if reach is None else reach
+    h = width / 2
+    dx, dy = WALL_DIRECTIONS[k]
+    if dx and dy:
+        c = pier * math.sqrt(2)
+        pts = [(c - h, -h), (reach, -h), (reach, h), (c - h, h), (c, 0.0)]
+    else:
+        pts = [(pier, -h), (reach, -h), (reach, h), (pier, h)]
+    return [_along(u, s, v) for s, v in pts]
+
+
+def plan_prism(root, pts, z0, h, m, name="plan"):
+    n = len(pts)
+    vs = [(x, y, z0) for x, y in pts] + [(x, y, z0 + h) for x, y in pts]
+    fs = [tuple(range(n))[::-1], tuple(range(n, 2 * n))]
+    fs += [(i, (i + 1) % n, n + (i + 1) % n, n + i) for i in range(n)]
+    return mesh(vs, fs, M(m), parent=root, name=name)
+
+
+def _round_merlon(root, x, y, z, ang, w, h, t, m):
+    box((w, t, h), (x, y, z + h / 2), m, parent=root, rot=(0, 0, ang))
+    cyl(w / 2, t + 0.004, (x, y, z + h), m, rot=(math.pi / 2, 0, ang), parent=root, segs=10)
+
+
+S_PIER, S_W, S_H = 0.19, 0.34, 1.06     # the stone wall's pier half-size, arm width, arm height
+
+
+def _stone_arm(r, k):
+    u, ang, reach = wall_dir(k)
+    dx, dy = WALL_DIRECTIONS[k]
+    body = brickmat("stone", 0.34, 0.12, 0.06, 0.84)
+    plan_prism(r, arm_plan(k, S_PIER, S_W), 0.0, S_H, body, "wall")
+    rr = reach - 0.004   # decoration stops a hair short of the edge: no coplanar faces where arms meet
+    plan_prism(r, arm_plan(k, S_PIER + 0.004, S_W + 0.024, rr), 0.0, 0.11, brickmat("stone_dk", 0.34, 0.11), "foot")
+    plan_prism(r, arm_plan(k, S_PIER + 0.004, S_W + 0.012, rr), S_H - 0.20, 0.07, M("white"), "band")
+    plan_prism(r, arm_plan(k, S_PIER + 0.006, S_W + 0.016, rr - 0.002), S_H - 0.175, 0.025, M("red"), "band")
+    plan_prism(r, arm_plan(k, S_PIER + 0.004, S_W + 0.05, rr), S_H, 0.045, M("stone_lt"), "coping")
+    inner = S_PIER * (math.sqrt(2) if dx and dy else 1.0)
+    mm = brickmat("stone_lt", 0.2, 0.06)
+    s = reach - 0.09
+    while s - 0.06 >= inner + 0.02:
+        x, y = _along(u, s)
+        _round_merlon(r, x, y, S_H + 0.045, ang, 0.13, 0.11, 0.10, mm)
+        s -= 0.19
+
+
+def _stone_post(r, player):
+    """A buttress a little proud of the wall and a little above it, banded in
+    the owner's colour under its cornice."""
+    body = brickmat("stone", 0.30, 0.12, 0.06, 0.84)
+    P, h = S_PIER, 1.16
+    box((2 * P + 0.05, 2 * P + 0.05, 0.12), (0, 0, 0.06), brickmat("stone_dk", 0.3, 0.12), parent=r)
+    box((2 * P, 2 * P, h), (0, 0, h / 2), body, parent=r)
+    for ex, ey in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+        rod((ex * P, ey * P, 0), (ex * P, ey * P, h), 0.014, "yellow", r, segs=5)
+    w = 2 * P + 0.004
+    band(r, w, w, h - 0.40, 0.22, player, (0, 0), out=0.006)
+    band(r, w, w, h - 0.43, 0.025, "yellow", (0, 0), out=0.008)
+    band(r, w, w, h - 0.18, 0.025, "yellow", (0, 0), out=0.008)
+    zt = cavetto(r, 2 * P, 2 * P, h, 0.12, 0.045, (0, 0), 0.08)
+    lathe([(0.07, 0), (0.05, 0.06), (0.0, 0.10)], gold(), (0, 0, zt), r, segs=4, rot=(0, 0, math.pi / 4))
+
+
+def stone_wall(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None, arm=None, joins=()):
+    """1x1, a tile of a fortress wall in sandstone: part="post" is the square
+    buttress (banded in the owner's colour, under a cavetto) when arm is None;
+    arm=k (0..7) is the crenellated stretch of wall alone toward neighbour k
+    (WALL_DIRECTIONS); joins=(k, ...) adds those arms to the post (previews)."""
+    r = empty("eg_stone_wall", loc, rot_z, parent)
+    if arm is None:
+        _stone_post(r, player)
+    else:
+        _stone_arm(r, arm)
+    for j in joins:
+        _stone_arm(r, j)
+    return r
+
+
+P_POST, P_STEP, P_LOG = 0.10, 0.12, 0.052
+
+
+def _palm_log(r, x, y, z0, h, rad, seed=0, tip=0.10):
+    rnd = random.Random(seed)
+    n = 4
+    for i in range(n):
+        za, zb = z0 + h * i / n, z0 + h * (i + 1) / n
+        rod((x, y, za), (x, y, zb + 0.004), rad * (1.0 - 0.04 * i), (0.60, 0.42, 0.24) if (i + seed) % 2 else
+            (0.50, 0.33, 0.19), r, r_top=rad * (0.96 - 0.04 * i), segs=7)
+    lean = rnd.uniform(-0.01, 0.01)
+    rod((x, y, z0 + h), (x + lean, y, z0 + h + tip), rad * 0.85, (0.72, 0.54, 0.32), r, r_top=0.0, segs=7)
+
+
+def _palisade_arm(r, k):
+    u, ang, reach = wall_dir(k)
+    dx, dy = WALL_DIRECTIONS[k]
+    inner = P_POST * (1.0 if not (dx and dy) else 1.0) + P_LOG
+    # a packed-mud footing
+    pts = arm_plan(k, P_POST * (0.75 if dx and dy else 1.0), 0.20, reach - 0.003)
+    plan_prism(r, pts, 0.0, 0.10, mottle("mud", 0.1, 5.0), "foot")
+    s, i = reach - P_STEP / 2, 0
+    while s - P_LOG >= inner - 0.03:
+        x, y = _along(u, s)
+        _palisade_log = 0.90 + (0.05 if i % 2 else 0.0) + 0.03 * ((i * 7 + k) % 3)
+        _palm_log(r, x, y, 0.0, _palisade_log, P_LOG, i + k)
+        s -= P_STEP
+        i += 1
+    s0, s1 = P_POST + 0.02, reach
+    for z in (0.28, 0.70):
+        a, b = _along(u, s0), _along(u, s1)
+        rod((a[0], a[1], z), (b[0], b[1], z), P_LOG + 0.012, stripemat(("straw", "thatch"), 0.03, "h"), r,
+            segs=6)
+
+
+def _palisade_post(r, player):
+    box((0.30, 0.30, 0.10), (0, 0, 0.05), mottle("mud", 0.1, 5.0), parent=r, bevel=0.03)
+    _palm_log(r, 0, 0, 0.0, 1.12, P_POST, 3, tip=0.0)
+    lathe([(P_POST * 1.05, 0), (P_POST * 1.25, 0.05), (0, 0.10)], "wood_dark", (0, 0, 1.12), r, segs=8)
+    lathe([(P_POST * 1.02, 0.0), (P_POST * 1.02, 0.14)], M(player), (0, 0, 0.84), r, segs=10)
+    lathe([(P_POST * 1.04, 0.0), (P_POST * 1.04, 0.025)], gold(), (0, 0, 0.98), r, segs=10)
+    lathe([(P_POST * 1.04, 0.0), (P_POST * 1.04, 0.025)], gold(), (0, 0, 0.815), r, segs=10)
+    # palm-leaf tufts tied at the top
+    for i in range(5):
+        a = i * 2 * math.pi / 5
+        rod((0, 0, 1.18), (0.16 * math.cos(a), 0.16 * math.sin(a), 1.32), 0.012, "palm", r, r_top=0.0, segs=4)
+
+
+def palisade_wall(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None, arm=None, joins=()):
+    """1x1, a tile of palm-log stockade: a stout banded log when arm is None;
+    arm=k (0..7) the row of sharpened logs lashed with reed rope alone,
+    toward neighbour k; joins=(k, ...) adds arms to the post (previews)."""
+    r = empty("eg_palisade_wall", loc, rot_z, parent)
+    if arm is None:
+        _palisade_post(r, player)
+    else:
+        _palisade_arm(r, arm)
+    for j in joins:
+        _palisade_arm(r, j)
+    return r
+
+
+def gate(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None, line=0, open=False):
+    """1x1: a pylon gate across the line of its walls (line 0..3, the first
+    four WALL_DIRECTIONS): two battered towers, a corniced portal, doors shut
+    or swung back, banners in the owner's colour on both faces."""
+    r = empty("eg_gate", loc, rot_z, parent)
+    u, ang, reach = wall_dir(line)
+    L = 2 * reach
+    th = ang
+    if math.sin(th) + math.cos(th) < -1e-6:
+        th += math.pi
+    e = _sub(r, (0, 0, 0), th, 1.0, "gate")
+    stone = brickmat("stone", 0.30, 0.12, 0.06, 0.84)
+    pw = 0.40                       # the passage
+    tl = (L - 0.03 - pw) / 2        # each tower along the line (a hair inside the tile)
+    D, H = 0.66, 1.78
+    box((L - 0.04, D + 0.08, 0.06), (0, 0, 0.03), brickmat("stone_lt", 0.3, 0.06), parent=e)
+    for sx in (-1, 1):
+        cx = sx * (pw / 2 + tl / 2)
+        loft([(tl, D, 0), (tl - 0.10, D - 0.14, H)], stone, (cx, 0, 0.0), e)
+        for ex in (-1, 1):
+            for ey in (-1, 1):
+                rod((cx + ex * tl / 2, ey * D / 2, 0), (cx + ex * (tl - 0.10) / 2, ey * (D - 0.14) / 2, H), 0.016,
+                    "yellow", e, segs=5)
+        cavetto(e, tl - 0.10, D - 0.14, H, 0.15, 0.05, (cx, 0), 0.085)
+        for fy in (-1, 1):
+            v = Vector((0, -fy * 0.07, H))
+            p = Paint((cx, fy * D / 2, 0), (fy * -1, 0, 0) if fy > 0 else (1, 0, 0), v, e)
+            ln = v.length
+            hw = lambda b: tl / 2 - 0.05 * (b / ln) - 0.02  # noqa: E731
+            p.rect(-hw(0.10), 0.10, hw(0.10), 0.17, "blue")
+            p.rect(-hw(0.18), 0.18, hw(0.18), 0.20, "yellow")
+            p.rect(-hw(0.21), 0.21, hw(0.21), 0.24, "red")
+            p.rect(-hw(ln), ln - 0.20, hw(ln), ln - 0.03, "white")
+            for i in range(3):
+                a = (i - 1) * (tl - 0.16) / 3
+                p.rect(a - 0.025, ln - 0.18, a + 0.025, ln - 0.06, ("blue", "red", "green")[i], 1)
+            p.done()
+            # a long banner on each face
+            yb = fy * ((D - 0.14) / 2 + 0.05)
+            bw = min(0.20, tl - 0.12)
+            rod((cx - bw / 2 - 0.02, yb, H - 0.24), (cx + bw / 2 + 0.02, yb, H - 0.24), 0.012, gold(), e, segs=5)
+            vs = [(cx - bw / 2, yb + fy * 0.004, H - 0.25), (cx + bw / 2, yb + fy * 0.004, H - 0.25),
+                  (cx + bw / 2, yb + fy * 0.03, H - 1.12), (cx, yb + fy * 0.034, H - 1.22),
+                  (cx - bw / 2, yb + fy * 0.03, H - 1.12)]
+            mesh(vs, [(0, 1, 2, 3, 4)], M(player, rough=0.7), parent=e, name="banner")
+            cyl(0.05, 0.01, (cx, yb + fy * 0.02, H - 0.62), gold(), rot=(math.pi / 2, 0, 0), parent=e, segs=10)
+    # the portal: jambs, a lintel with the winged disc, its own cornice
+    ph = 1.18
+    for sx in (-1, 1):
+        box((0.05, D - 0.18, ph), (sx * (pw / 2 - 0.025), 0, ph / 2), M("stone_lt"), parent=e)
+    box((pw, D - 0.18, 0.26), (0, 0, ph + 0.13), M("stone_lt"), parent=e)
+    for fy in (-1, 1):
+        pl = Paint((0, fy * ((D - 0.18) / 2 + 0.002), ph), (1, 0, 0) if fy < 0 else (-1, 0, 0), (0, 0, 1), e)
+        pl.rect(-pw / 2, 0, pw / 2, 0.26, "white")
+        winged_disc(pl, 0, 0.13, 0.035, 0.17, 1)
+        pl.done()
+    cavetto(e, pw, D - 0.18, ph + 0.26, 0.09, 0.035, (0, 0), 0.07)
+    box((pw - 0.10, D - 0.20, 0.02), (0, 0, 0.065), M("stone_dk"), parent=e)
+    # doors: two cedar leaves with bronze studs
+    dw, dh, dt = pw / 2 - 0.05, ph - 0.08, 0.05
+    leaf = stripemat(("cedar", (0.56, 0.32, 0.18)), 0.045, "x" if not open else "y")
+    for sx in (-1, 1):
+        if not open:
+            c = (sx * dw / 2, 0.0, 0.06 + dh / 2)
+            box((dw, dt, dh), c, leaf, parent=e)
+            for zz in (0.25, 0.60, 0.95):
+                for fy in (-1, 1):
+                    box((dw - 0.03, 0.01, 0.025), (c[0], fy * dt / 2, zz), M("bronze", metal=0.6, rough=0.4),
+                        parent=e)
+        else:
+            hx = sx * (pw / 2 - 0.05)
+            c = (hx - sx * dt / 2, -dw / 2, 0.06 + dh / 2)
+            box((dt, dw, dh), c, leaf, parent=e)
+            for zz in (0.25, 0.60, 0.95):
+                box((0.012, dw - 0.03, 0.025), (hx - sx * dt - 0.004 * sx, -dw / 2, zz),
+                    M("bronze", metal=0.6, rough=0.4), parent=e)
+    return r
+
+
+def _wall_links(t, at):
+    """walls.rs's joining rules: which arms the wall at game tile t shows, and
+    the line of a gate; `at` maps game tiles to "wall" / "gate"."""
+    def has(q, k):
+        dx, dy = WALL_DIRECTIONS[k]
+        return (q[0] + dx, q[1] + dy) in at
+
+    def line(q):
+        for o in (0, 2, 1, 3):
+            if has(q, o) and has(q, o + 4):
+                return o
+        for o in (0, 2, 1, 3):
+            if has(q, o) or has(q, o + 4):
+                return o
+        return 0
+
+    if at.get(t) == "gate":
+        return line(t)
+    out = []
+    for k, (dx, dy) in enumerate(WALL_DIRECTIONS):
+        q = (t[0] + dx, t[1] + dy)
+        if q not in at:
+            continue
+        if dx and dy and ((t[0] + dx, t[1]) in at or (t[0], t[1] + dy) in at):
+            continue
+        if at[q] == "gate" and line(q) != k % 4:
+            continue
+        out.append(k)
+    return tuple(out)
+
+
+def wall_run(root, kind, walls, gates=(), origin=(0, 0), player=RED, opened=()):
+    """Walls (game tiles) joined as the game joins them, with gates in them."""
+    at = {t: "wall" for t in walls}
+    at.update({t: "gate" for t in gates})
+    f = globals()[kind]
+    for t in walls:
+        f((origin[0] + t[0], origin[1] - t[1], 0), player=player, parent=root, joins=_wall_links(t, at))
+    for t in gates:
+        gate((origin[0] + t[0], origin[1] - t[1], 0), player=player, parent=root, line=_wall_links(t, at),
+             open=t in opened)
+
+
 def showcase():
-    """All of them, laid out in screen rows (u = screen-right, d = away)."""
+    """All of them on plain ground, in screen rows (u = screen-right, d = away)."""
     def at(u, d):
         k = math.sqrt(2)
         return ((u - d) / k, (u + d) / k, 0)
 
     r = empty("eg_showcase")
-    town_center(at(-6.8, 5.6), player=BLUE, parent=r)
-    temple(at(-1.4, 6.0), parent=r)
-    pyramid(at(5.0, 5.6), player=BLUE, parent=r)
-    barracks(at(-6.6, -1.0), parent=r)
-    house(at(-2.6, -1.0), variant=0, parent=r)
-    house(at(1.4, -1.0), variant=1, player=BLUE, parent=r)
-    house(at(5.4, -1.0), variant=2, parent=r)
-    obelisk(at(-4.6, -6.0), parent=r)
-    granary(at(-1.0, -6.0), player=BLUE, parent=r)
-    sphinx(at(2.8, -6.0), parent=r)
+    wonder(at(-8.6, 9.6), parent=r)
+    town_center(at(-0.6, 8.8), player=BLUE, parent=r)
+    dock(at(6.2, 8.8), parent=r)
+    row = (temple2, government_centre, academy, market, storehouse, siege_workshop)
+    for i, f in enumerate(row):
+        f(at(-8.25 + 3.3 * i, 3.6), player=(RED, BLUE)[i % 2], parent=r)
+    row = (barracks, archery_range, stable, farm)
+    for i, f in enumerate(row):
+        f(at(-9.9 + 3.3 * i, -0.6), player=(BLUE, RED)[i % 2], parent=r)
+    for i, v in enumerate((0, 1, 2)):
+        house(at(3.3 + 3.3 * i, -0.6), variant=v, player=(RED, BLUE)[i % 2], parent=r)
+    watch_tower(at(-0.9, -4.6), parent=r)
+    o = at(-6.6, -5.0)
+    wall_run(r, "stone_wall", [(0, 0), (1, 0), (2, 0), (4, 0), (5, 0), (5, 1)], [(3, 0)],
+             (round(o[0]), round(o[1])), RED)
+    o = at(4.0, -5.0)
+    wall_run(r, "palisade_wall", [(0, 0), (1, 0), (3, 0), (4, 0), (0, 1), (0, 2)], [(2, 0)],
+             (round(o[0]), round(o[1])), BLUE, opened=((2, 0),))
     return r
+
+
+# --- the sets the batch exporter makes (docs/look/buildings.md) ---------------------------
+
+_ARMS = {"arm": [{"arm": k} for k in range(8)]}
+
+SETS = {
+    "town_center_egyptian": dict(func="egyptian.town_center", cls="LargeBuilding", tiles=3, kwargs={},
+                                 fit=None),
+    "house_egyptian": dict(func="egyptian.house", cls="MediumBuilding", tiles=2, kwargs={"variant": 0},
+                           fit=None),
+    "barracks_egyptian": dict(func="egyptian.barracks", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
+    "temple_egyptian": dict(func="egyptian.temple2", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
+    "watch_tower_egyptian": dict(func="egyptian.watch_tower", cls="SmallBuilding", tiles=1, kwargs={},
+                                 fit=None),
+    "academy_egyptian": dict(func="egyptian.academy", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
+    "archery_range_egyptian": dict(func="egyptian.archery_range", cls="MediumBuilding", tiles=2, kwargs={},
+                                   fit=None),
+    "dock_egyptian": dict(func="egyptian.dock", cls="LargeBuilding", tiles=3, kwargs={}, fit=None,
+                          stages="flat"),
+    "farm_egyptian": dict(func="egyptian.farm", cls="MediumBuilding", tiles=2, kwargs={}, fit=None,
+                          stages="flat"),
+    "government_centre_egyptian": dict(func="egyptian.government_centre", cls="MediumBuilding", tiles=2,
+                                       kwargs={}, fit=None),
+    "market_egyptian": dict(func="egyptian.market", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
+    "siege_workshop_egyptian": dict(func="egyptian.siege_workshop", cls="MediumBuilding", tiles=2,
+                                    kwargs={}, fit=None),
+    "stable_egyptian": dict(func="egyptian.stable", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
+    "storehouse_egyptian": dict(func="egyptian.storehouse", cls="MediumBuilding", tiles=2, kwargs={},
+                                fit=None),
+    "wonder_egyptian": dict(func="egyptian.wonder", cls="Wonder", tiles=5, kwargs={}, fit=None),
+    "palisade_wall_egyptian": dict(func="egyptian.palisade_wall", cls="SmallBuilding", tiles=1, kwargs={},
+                                   fit=None, anims=_ARMS),
+    "stone_wall_egyptian": dict(func="egyptian.stone_wall", cls="SmallBuilding", tiles=1, kwargs={},
+                                fit=None, anims=_ARMS),
+    "gate_egyptian": dict(func="egyptian.gate", cls="SmallBuilding", tiles=1, kwargs={}, fit=None,
+                          anims={"shut": [{"line": n, "open": False} for n in range(4)],
+                                 "open": [{"line": n, "open": True} for n in range(4)]}),
+}

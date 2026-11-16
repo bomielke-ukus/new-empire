@@ -3,7 +3,8 @@
     /usr/bin/python3.13 tools/look/export.py SET_NAME MODULE.FUNC \
         [--class MediumBuilding] [--tiles N] [--kwargs '{"variant": 1}'] \
         [--fit TILES [--model-tiles N]] [--samples 64] [--out assets/look] \
-        [--sun-angle DEG] [--debug DIR]
+        [--sun-angle DEG] [--debug DIR] [--stages] \
+        [--anims '{"arm": [{"arm": 0}, ...]}'] [--hash H]
 
 writes assets/look/SET_NAME/SET_NAME.ron, SET_NAME.png and (when anything on
 the subject takes player colour) SET_NAME.mask.png, plus SET_NAME.debug.png
@@ -45,9 +46,20 @@ alpha that takes the owner's colour; the beauty RGB is turned to its own
 luma (BT.601, as the game's tint uses) in proportion to the mask.
 
 Layout: cells are laid out one row per (animation, facing), one column per
-frame (spec "sheet"). Only static subjects are exported now (one "idle"
-frame, facing S, building unturned), but `cells()` and `FACINGS` are where
-animations and facings go.
+frame (spec "sheet"). A static subject is one "idle" frame, facing S,
+unturned. With --stages (a building, docs/look/buildings.md) the sheet is
+"construction" (3 frames), "idle", "rubble" (1 frame), all made from the
+one idle model by stages.py; --anims adds animations whose every frame is
+the same builder called with more keyword arguments (a wall's arms, a
+gate's orientations). The idle frame is rendered first: its colours colour
+the site, the scaffold's blocks and the rubble (stages.palette()).
+
+Trim: every cell shares one size and anchor; after rendering, the cell is
+cut down to the union of every frame's drawn pixels (on even pixels, so
+the 2x grid is kept) and the anchor moved with it.
+
+--hash writes "// export-hash: H" into the manifest's header, for
+export_all.py to tell an up-to-date set.
 """
 import os
 import sys
@@ -60,6 +72,7 @@ if os.environ.get("PYTHONHASHSEED") != "0":
 
 import argparse  # noqa: E402
 import importlib  # noqa: E402
+import zlib  # noqa: E402
 import json  # noqa: E402
 import math  # noqa: E402
 import shutil  # noqa: E402
@@ -73,8 +86,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import bpy  # noqa: E402
 import lib  # noqa: E402
+import stages  # noqa: E402
 
 # ------------------------------------------------------------------ scale
+
+# Bumped when what export.py writes changes, so export_all.py re-exports.
+EXPORT_VERSION = 2
 
 SCALE = 2                                   # authored scale
 TILE_W, TILE_H = 64 * SCALE, 32 * SCALE     # 128 x 64
@@ -130,16 +147,22 @@ def load_builder(target):
     return getattr(importlib.import_module(mod), fn)
 
 
-def build(builder, kwargs, player, scale=1.0, yaw_deg=0.0):
+def build(builder, kwargs, player, scale=1.0, yaw_deg=0.0, spec=None):
     """A fresh scene with the subject at the origin, under a turntable empty
-    that carries the export's fit scale and the facing."""
+    that carries the export's fit scale and the facing. `spec` is a cell's
+    frame (see cells()): more keyword arguments for the builder, and a
+    construction stage or the rubble to turn the model into."""
     lib.reset()
     turn = lib.empty("export_turntable")
-    root = builder(player=player, **kwargs) if _takes_player(builder) else builder(**kwargs)
+    kw = dict(kwargs, **(spec or {}).get("kw", {}))
+    root = builder(player=player, **kw) if _takes_player(builder) else builder(**kw)
     root.parent = turn
     turn.scale = (scale, scale, scale)
     turn.rotation_euler = (0, 0, math.radians(yaw_deg))
     bpy.context.view_layer.update()
+    if spec and spec.get("stage"):
+        stages.apply(spec["stage"], spec["tiles"], spec.get("palette"), spec.get("seed", 0),
+                     spec.get("mode", "building"))
     return turn
 
 
@@ -238,9 +261,9 @@ def _attr(ca):
     return get, put
 
 
-def player_slots(builder, kwargs, scale, yaw):
+def player_slots(builder, kwargs, scale, yaw, spec=None):
     """Values of a build with the ODD player colour, by slot key."""
-    build(builder, kwargs, ODD, scale, yaw)
+    build(builder, kwargs, ODD, scale, yaw, spec)
     catcher()             # as the GREY build will have it, so the slots line up
     return {k: g() for k, (g, _) in colour_slots().items()}
 
@@ -397,20 +420,38 @@ def frame_for(points, shadow_dir, tiles):
 
 # ------------------------------------------------------------------ cells
 
-def cells(class_name):
-    """The sheet's rows and columns: [(animation, facing, [frame, ...]), ...].
-    Static subjects only for now: one idle frame, the S view (a building is
-    rendered as modelled, square to the grid)."""
-    return [("idle", "S", [0])]
+# Timing of each animation in the manifest: (frame_ms, loops), as the old
+# sets have them.
+TIMING = {"idle": (160, True), "construction": (200, False), "rubble": (200, False)}
 
 
-def render_cell(builder, kwargs, scale, yaw, frame, anchor, tiles, samples, tmp, tag):
+def cells(class_name, with_stages=False, anims=None, tiles=1, seed=0, mode="building"):
+    """The sheet's rows and columns: [(animation, facing, [spec, ...]), ...],
+    a spec per frame: {"kw": more builder kwargs, "stage": None or
+    ("construction", i) / ("rubble", 0), "tiles", "seed"}. A static subject
+    is one idle frame, the S view (a building is rendered as modelled,
+    square to the grid); with stages, a building's construction stages and
+    rubble round it; `anims` adds {name: [kwargs per frame]}."""
+    def spec(stage=None, kw=None):
+        return {"kw": kw or {}, "stage": stage, "tiles": tiles, "seed": seed, "mode": mode}
+    out = []
+    if with_stages:
+        out.append(("construction", "S", [spec(("construction", i)) for i in range(3)]))
+    out.append(("idle", "S", [spec()]))
+    if with_stages:
+        out.append(("rubble", "S", [spec(("rubble", 0))]))
+    for name, frames in (anims or {}).items():
+        out.append((name, "S", [spec(kw=kw) for kw in frames]))
+    return out
+
+
+def render_cell(builder, kwargs, scale, yaw, frame, anchor, tiles, samples, tmp, tag, spec=None):
     """Beauty RGBA (straight, 0..1) and mask (0..1) of one cell."""
     t0 = time.time()
     # 1. the ODD build: which colour values the player drives
-    odd = player_slots(builder, kwargs, scale, yaw)
+    odd = player_slots(builder, kwargs, scale, yaw, spec)
     # 2. the GREY build, lit, over a shadow catcher
-    build(builder, kwargs, GREY, scale, yaw)
+    build(builder, kwargs, GREY, scale, yaw, spec)
     catcher()
     light()
     cam = camera(frame, anchor)
@@ -476,10 +517,11 @@ def finish(beauty, mask):
 
 # ------------------------------------------------------------------ output
 
-def manifest(name, cls, anchor, frame, anims, has_mask, source):
+def manifest(name, cls, anchor, frame, anims, has_mask, source, digest=None):
     lines = [
         "// Generated by tools/look/export.py from %s." % source,
         "// A colour set (docs/look/colour-sets.md): re-export rather than edit.",
+    ] + (["// export-hash: %s" % digest] if digest else []) + [
         "SpriteSet(",
         '    name: "%s",' % name,
         "    class: %s," % cls,
@@ -490,8 +532,9 @@ def manifest(name, cls, anchor, frame, anims, has_mask, source):
         "    animations: [",
     ]
     for a, n in anims:
-        lines.append('        (name: "%s", frames: %d, frame_ms: 160, loops: true, impact: None),'
-                     % (a, n))
+        ms, loops = TIMING.get(a, (1000, False))
+        lines.append('        (name: "%s", frames: %d, frame_ms: %d, loops: %s, impact: None),'
+                     % (a, n, ms, "true" if loops else "false"))
     lines += [
         "    ],",
         "    anchor_overrides: [],",
@@ -504,9 +547,22 @@ def manifest(name, cls, anchor, frame, anims, has_mask, source):
     return "\n".join(lines)
 
 
-def debug_png(path, rgba, anchor, tiles, frame):
-    """The sprite over grass with its footprint diamond (and the tile grid
-    under it) drawn at the anchor, 2x, for checking by eye."""
+def debug_png(path, sheet, anchor, tiles, frame):
+    """Every cell of the sheet over grass with its footprint diamond (and
+    the tile grid under it) drawn at the anchor, 2x, for checking by eye."""
+    w, h = frame
+    rows, cols = sheet.shape[0] // h, sheet.shape[1] // w
+    out = Image.new("RGBA", (w * cols * 2, h * rows * 2), (40, 40, 40, 255))
+    for j in range(rows):
+        for i in range(cols):
+            cell = sheet[j * h:(j + 1) * h, i * w:(i + 1) * w]
+            if cell[..., 3].max() == 0:
+                continue
+            out.paste(_debug_cell(cell, anchor, tiles, frame), (i * w * 2, j * h * 2))
+    out.save(path)
+
+
+def _debug_cell(rgba, anchor, tiles, frame):
     w, h = frame
     bg = Image.new("RGBA", (w, h), (86, 140, 60, 255))
     d = ImageDraw.Draw(bg)
@@ -525,8 +581,27 @@ def debug_png(path, rgba, anchor, tiles, frame):
     d.line(poly + [poly[0]], fill=(255, 255, 0, 110), width=1)   # the diamond again, on top
     d.line([(ax - 4, ay), (ax + 4, ay)], fill=(255, 0, 0, 255))
     d.line([(ax, ay - 4), (ax, ay + 4)], fill=(255, 0, 0, 255))
-    over = over.resize((w * 2, h * 2), Image.NEAREST)
-    over.save(path)
+    return over.resize((w * 2, h * 2), Image.NEAREST)
+
+
+def union_trim(rows, frame, anchor):
+    """Cuts every cell down to the union of the drawn pixels of all of
+    them, the cut on even pixels (the sheet is 2x: its 1x grid is kept);
+    returns the cut rows, the new cell size and anchor."""
+    w, h = frame
+    x0, y0, x1, y1 = w, h, 0, 0
+    for row in rows:
+        for rgba, _ in row:
+            ys, xs = np.nonzero(rgba[..., 3])
+            if len(xs):
+                x0, y0 = min(x0, xs.min()), min(y0, ys.min())
+                x1, y1 = max(x1, xs.max() + 1), max(y1, ys.max() + 1)
+    if x1 <= x0:
+        return rows, frame, anchor
+    x0, y0 = x0 // 2 * 2, y0 // 2 * 2
+    x1, y1 = min(w, -(-x1 // 2) * 2), min(h, -(-y1 // 2) * 2)
+    rows = [[(rgba[y0:y1, x0:x1], m[y0:y1, x0:x1]) for rgba, m in row] for row in rows]
+    return rows, (int(x1 - x0), int(y1 - y0)), (int(anchor[0] - x0), int(anchor[1] - y0))
 
 
 def main():
@@ -547,6 +622,12 @@ def main():
                     help="where the debug PNG goes")
     ap.add_argument("--sun-angle", type=float, help="the sun's angular size in degrees, for "
                     "a softer shadow edge (default: lib.light()'s 2.5)")
+    ap.add_argument("--stages", nargs="?", const="building", choices=["building", "flat"],
+                    help="add construction stages and rubble (docs/look/buildings.md); "
+                    "'flat' for a farm or a dock")
+    ap.add_argument("--anims", default="{}", help='JSON {"name": [kwargs per frame, ...]}: '
+                    "more animations, each frame the builder with those kwargs added")
+    ap.add_argument("--hash", help="written into the manifest's header (export_all.py)")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
     global SUN_ANGLE
@@ -570,13 +651,15 @@ def main():
         scale = args.fit / model
         print("fit: model %.2f tiles -> %.2f tiles, scale %.4f" % (model, args.fit, scale))
 
-    layout = cells(args.cls)
+    seed = zlib.crc32(args.name.encode()) & 0xFFFF
+    layout = cells(args.cls, bool(args.stages), json.loads(args.anims), tiles, seed,
+                   args.stages or "building")
     # One cell size and anchor for the whole sheet: the union of every cell's.
     lo, hi = np.array([1e9, 1e9]), np.array([-1e9, -1e9])
     for anim, facing, frames in layout:
         yaw = FACINGS[facing] if turns else 0.0
         for f in frames:
-            build(builder, kwargs, GREY, scale, yaw)
+            build(builder, kwargs, GREY, scale, yaw, f)
             light()
             (w, h), (ax, ay) = frame_for(subject_points(), sun_direction(), tiles)
             lo = np.minimum(lo, (-ax, -ay))
@@ -594,22 +677,38 @@ def main():
         print("ground-level reach %.3f (footprint half-width %.3f)%s"
               % (reach, tiles / 2, "  ** OUTSIDE **" if reach > tiles / 2 + 1e-3 else ""))
 
-    rows = []
     tmp = tempfile.mkdtemp(prefix="look-export-")
     any_player = False
+    done = {}
+    # The idle frame first: its colours colour the stages and the rubble.
+    order = sorted(((j, i) for j, (_, _, frames) in enumerate(layout) for i in range(len(frames))),
+                   key=lambda ji: layout[ji[0]][0] != "idle")
+    pal = None
     try:
-        for anim, facing, frames in layout:
+        for j, i in order:
+            anim, facing, frames = layout[j]
             yaw = FACINGS[facing] if turns else 0.0
-            row = []
-            for f in frames:
-                beauty, mask, driven = render_cell(builder, kwargs, scale, yaw, frame, anchor,
-                                                   tiles, args.samples, tmp,
-                                                   "%s_%s_%d" % (anim, facing, f))
-                any_player |= bool(driven)
-                row.append(finish(beauty, mask))
-            rows.append(row)
+            spec = dict(frames[i], palette=pal)
+            beauty, mask, driven = render_cell(builder, kwargs, scale, yaw, frame, anchor,
+                                               tiles, args.samples, tmp,
+                                               "%s_%s_%d" % (anim, facing, i), spec)
+            any_player |= bool(driven)
+            done[j, i] = finish(beauty, mask)
+            if anim == "idle" and pal is None:
+                pal = stages.palette(beauty, mask)
+                print("  palette: " + ", ".join("%s %s" % (k, "#%02x%02x%02x" % tuple(
+                    int(round(v * 255)) for v in c)) for k, c in pal.items()))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    rows = [[done[j, i] for i in range(len(frames))] for j, (_, _, frames) in enumerate(layout)]
+    for j, row in enumerate(rows):
+        for i, (rgba, m) in enumerate(row):
+            edge = np.concatenate([rgba[0, :, 3], rgba[-1, :, 3], rgba[:, 0, 3], rgba[:, -1, 3]])
+            if edge.max() > 2:
+                print("  ** cell %d,%d touches its edge (alpha %d)" % (j, i, edge.max()))
+    before = frame
+    rows, frame, anchor = union_trim(rows, frame, anchor)
+    print("trimmed %s -> %s, anchor %s" % (before, frame, anchor))
 
     ncols = max(len(r) for r in rows)
     w, h = frame
@@ -619,9 +718,6 @@ def main():
         for i, (rgba, m) in enumerate(row):
             sheet[j * h:(j + 1) * h, i * w:(i + 1) * w] = rgba
             msheet[j * h:(j + 1) * h, i * w:(i + 1) * w] = m
-            edge = np.concatenate([rgba[0, :, 3], rgba[-1, :, 3], rgba[:, 0, 3], rgba[:, -1, 3]])
-            if edge.max() > 2:
-                print("  ** cell %d,%d touches its edge (alpha %d)" % (j, i, edge.max()))
 
     out = os.path.join(args.out, args.name)
     os.makedirs(out, exist_ok=True)
@@ -638,7 +734,8 @@ def main():
     source = args.target + ("(%s)" % args.kwargs if kwargs else "") + \
         (" fitted to %g tiles" % args.fit if args.fit else "")
     with open(os.path.join(out, args.name + ".ron"), "w") as fh:
-        fh.write(manifest(args.name, args.cls, anchor, frame, anims, any_player, source))
+        fh.write(manifest(args.name, args.cls, anchor, frame, anims, any_player, source,
+                          args.hash))
     dbg = os.path.join(args.debug, args.name + ".debug.png")
     debug_png(dbg, sheet, anchor, tiles, frame)
     print("wrote %s (%.1fs); debug %s" % (out, time.time() - t_start, dbg))

@@ -3120,7 +3120,10 @@ mod tests {
         let a = Atlas::with_sheets(&[fixture::building("stages", "house")]);
         for stage in 0..3u8 {
             let f = a.stage_frame(kinds::HOUSE, stage).unwrap();
-            assert_eq!((f.anim, f.index, f.page), (Anim::Construction, stage, COLOUR_PAGE));
+            assert_eq!(
+                (f.anim, f.index, f.page),
+                (Anim::Construction, stage, COLOUR_PAGE)
+            );
             // A row of stage + 1 pixels at (2, 4): trimmed to (2, 4), the
             // anchor (4, 5) moves to (2, 1); the width rounds to the scale.
             assert_eq!((f.anchor_x, f.anchor_y), (2, 1));
@@ -3132,9 +3135,15 @@ mod tests {
         let r = a.own_rubble(kinds::HOUSE).unwrap();
         assert_eq!((r.anim, r.page), (Anim::Rubble, COLOUR_PAGE));
         assert_eq!((r.anchor_x, r.anchor_y), (2, 1));
-        assert_eq!(a.rgba_at(r.page, r.x as u32 + 1, r.y as u32), fixture::RUBBLE);
+        assert_eq!(
+            a.rgba_at(r.page, r.x as u32 + 1, r.y as u32),
+            fixture::RUBBLE
+        );
         let (idle, _) = a.frame(kinds::HOUSE, 0).unwrap();
-        assert_eq!((idle.anim, idle.anchor_x, idle.anchor_y), (Anim::Idle, 2, 3));
+        assert_eq!(
+            (idle.anim, idle.anchor_x, idle.anchor_y),
+            (Anim::Idle, 2, 3)
+        );
         assert_eq!(a.mask_at(idle.page, idle.x as u32, idle.y as u32), 255);
         let c = a.anim_info(kinds::HOUSE, Anim::Construction).unwrap();
         assert_eq!((c.frames, c.loops), (3, false));

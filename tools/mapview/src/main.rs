@@ -2,7 +2,7 @@
 //! mapview [--seed N] [--size N] [--players N] [--ticks N] [--stockpile N]
 //!         [--zoom 0.5|1|1.5|2] [--width W] [--height H]
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
-//!         [--scenario gather|build|ages|army|battle|siege|scout] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1] [--symbols off|selected|always]
+//!         [--scenario gather|build|stages|ages|army|battle|siege|scout] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1] [--symbols off|selected|always]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
 //!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0] [--look 1] [--time SECS]
@@ -865,6 +865,136 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
                     kind: kinds::VILLAGER,
                 }));
             }
+        }
+        "stages" => {
+            // A building's life in one row (`docs/look/buildings.md`): a
+            // house site at its pegs, one a third built, one two thirds
+            // built (their builders sent off as each stage is reached), a
+            // finished house, and theirs brought down to rubble by our
+            // clubmen, who walk away from it. Run `--ticks 0` from here,
+            // with `--fog 0` to see the rubble.
+            let house = kinds::HOUSE;
+            let row = (0..12)
+                .flat_map(|k| [-6 - k, 6 + k])
+                .find_map(|dy| {
+                    let tiles: Vec<(i32, i32)> =
+                        (0..5).map(|k| (sx - 5 + 3 * k, sy + dy)).collect();
+                    tiles
+                        .iter()
+                        .all(|&(x, y)| sim.can_place(0, house, x, y).is_ok())
+                        .then_some(tiles)
+                })
+                .ok_or("no room for the row")?;
+            eprintln!("stages: row at {:?}", row[0]);
+            let spawn = |sim: &mut sim::Simulation, player, kind, (x, y): (i32, i32)| {
+                let fp = kinds::info(kind).footprint.max(1) as i32;
+                sim.issue(Command {
+                    player,
+                    kind: CommandKind::Spawn {
+                        kind,
+                        pos: sim::nav::building_centre(x, y, fp),
+                    },
+                });
+            };
+            let (rx, ry) = row[0];
+            let side = if ry < sy { -2 } else { 2 };
+            for k in 0..6 {
+                spawn(sim, 0, kinds::VILLAGER, (rx + 2 + k, ry + side));
+            }
+            for _ in 0..3 {
+                sim.step();
+            }
+            let world = sim.world();
+            let mine: Vec<_> = world
+                .slots()
+                .filter(|s| world.owner[s.index()] == 0 && world.kind[s.index()] == kinds::VILLAGER)
+                .map(|s| world.id_at(s))
+                .filter(|id| !villagers.contains(id))
+                .collect();
+            let (one, two) = (mine[..3].to_vec(), mine[3..6].to_vec());
+            for (k, ids) in [vec![], one.clone(), two.clone()].into_iter().enumerate() {
+                sim.issue(cmd(CommandKind::Build {
+                    kind: house,
+                    x: row[k].0,
+                    y: row[k].1,
+                    ids,
+                }));
+            }
+            spawn(sim, 0, house, row[3]);
+            spawn(sim, 1, house, row[4]);
+            for _ in 0..3 {
+                sim.step();
+            }
+            let at = |sim: &sim::Simulation, t: (i32, i32)| {
+                let w = sim.world();
+                let fp = kinds::info(house).footprint as i32;
+                let c = sim::nav::building_centre(t.0, t.1, fp);
+                w.slots()
+                    .find(|s| w.kind[s.index()] == house && w.pos[s.index()] == c)
+                    .map(|s| s.index())
+                    .ok_or_else(|| format!("no house at {t:?}"))
+            };
+            let total = kinds::info(house).build_work().max(1);
+            let stage = |sim: &sim::Simulation, i: usize| {
+                sim.world().construction[i].map_or(3, |d| (d / (total / 3).max(1)).min(2))
+            };
+            let (s1, s2) = (at(sim, row[1])?, at(sim, row[2])?);
+            let (mut stop1, mut stop2) = (false, false);
+            for _ in 0..20_000 {
+                if stop1 && stop2 {
+                    break;
+                }
+                sim.step();
+                if !stop1 && stage(sim, s1) >= 1 {
+                    sim.issue(cmd(CommandKind::Stop { ids: one.clone() }));
+                    stop1 = true;
+                }
+                if !stop2 && stage(sim, s2) >= 2 {
+                    sim.issue(cmd(CommandKind::Stop { ids: two.clone() }));
+                    stop2 = true;
+                }
+            }
+            // Theirs, brought down.
+            let theirs = at(sim, row[4])?;
+            let target = sim
+                .world()
+                .id_at(sim.world().slots().find(|s| s.index() == theirs).unwrap());
+            for k in 0..8 {
+                spawn(
+                    sim,
+                    0,
+                    kinds::CLUBMAN,
+                    (row[4].0 - 1 + k % 4, row[4].1 + side * (1 + k / 4)),
+                );
+            }
+            for _ in 0..3 {
+                sim.step();
+            }
+            let world = sim.world();
+            let clubs: Vec<_> = world
+                .slots()
+                .filter(|s| world.owner[s.index()] == 0 && world.kind[s.index()] == kinds::CLUBMAN)
+                .map(|s| world.id_at(s))
+                .collect();
+            sim.issue(cmd(CommandKind::Attack {
+                ids: clubs.clone(),
+                target,
+            }));
+            for _ in 0..20_000 {
+                sim.step();
+                if sim.world().dying[theirs] > 0 {
+                    break;
+                }
+            }
+            sim.issue(cmd(CommandKind::Move {
+                ids: clubs,
+                target: sim::nav::centre((row[4].0 + 4, row[4].1 + side * 4)),
+            }));
+            // Past the collapse: only the rubble is left.
+            for _ in 0..u32::from(view::scene::COLLAPSE_TICKS) + 60 {
+                sim.step();
+            }
+            let _ = tc;
         }
         "waypoints" => {
             // One villager with three jobs queued (`UX-CMD-04`): a walk, a

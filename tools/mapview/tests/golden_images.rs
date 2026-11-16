@@ -701,6 +701,31 @@ const SCENES: &[Scene] = &[
             "540",
         ],
     },
+    Scene {
+        // A building's life in the new art (`docs/look/buildings.md`): a
+        // house site at its pegs, one a third built in its scaffold, one
+        // two thirds built with its roof not yet on, a finished house, and
+        // theirs fallen to its own rubble on its footprint.
+        name: "look-stages",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "stages",
+            "--ticks",
+            "0",
+            "--look",
+            "1",
+            "--fog",
+            "0",
+            "--at",
+            "45,32",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
 ];
 
 fn golden_dir() -> PathBuf {

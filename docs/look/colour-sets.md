@@ -8,9 +8,11 @@ live beside the old indexed sets and replace them one name at a time.
 `assets/look/<name>/<name>.ron`, with its images beside it. `<name>` is a
 set name exactly as in `assets/sprites` (`house`, `town_center_bronze`,
 `tree`, `hoplite`, ...). When the new art is switched on, a colour set
-replaces the indexed set of the same name; every other set is drawn as
-before. Switched off (the default until the art is complete), `assets/look`
-is not read at all.
+replaces the indexed set of the same name, and a kind with any colour set
+loses all its indexed sets, of every age and architecture: it is drawn from
+its colour sets only (`docs/look/buildings.md`, "Which look"). Every other
+kind is drawn as before. Switched off (the default until the art is
+complete), `assets/look` is not read at all.
 
 ## The manifest
 
@@ -37,8 +39,13 @@ SpriteSet(
 - **`sheet`**: an 8-bit RGBA PNG, straight (not premultiplied) alpha. Laid
   out as an indexed sheet is: one row per (animation, facing) with the
   animations in manifest order and, for a class that turns, the five facings
-  S, SW, W, NW, N within each; one column per frame; every cell `frame`
-  pixels.
+  S, SW, W, NW, N within each; one column per frame, as many columns as the
+  longest animation (a shorter one's other cells transparent); every cell
+  `frame` pixels, one anchor for all. A building's animations are
+  `construction` (3), `idle`, `rubble` (1), and a wall's `arm` (8) or a
+  gate's `shut` and `open` (4 each): `docs/look/buildings.md`.
+- A comment line `// export-hash: H` in the header is `export_all.py`'s
+  record of what the set was exported from; the game ignores it.
 - **`frame`**: the cell size in authored pixels, when the class's size
   (`docs/05` §2.3) times `scale` is too small (a building with a flag).
   `anchor` is in the cell, in authored pixels, as before.

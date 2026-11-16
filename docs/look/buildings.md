@@ -1,0 +1,193 @@
+# Buildings in the new look (phase 3)
+
+Binding for every building colour set (`docs/look/colour-sets.md` holds
+the format; this file says what a building set contains, how the game
+picks one, and how the art kit makes it).
+
+## Which look
+
+Set names are as for the old art: `<kind>` is the first architecture's
+(Greek), `<kind>_egyptian`, `<kind>_mesopotamian`, `<kind>_asian` the
+others; an age suffix (`_tool`, `_bronze`, `_iron`) after the
+architecture's makes a look for that age and later.
+
+With the new art on (`Settings::new_art`, `mapview --look 1`):
+
+1. A kind with **any** colour set is drawn from colour sets only. Every
+   indexed set of that kind, of every age and architecture, is left out
+   (`Atlas::with_sheets`). There is no placeholder for it either.
+2. For an owner of architecture A in age G the look is, in order: A's
+   colour set of the latest age up to G; else the first architecture's
+   colour set of the latest age up to G; else the kind's first colour set
+   (by architecture, then age) as a stand-in, so a kind whose only colour
+   set is `temple_egyptian` is that temple for everyone.
+3. A kind with no colour set at all is drawn as before, from its indexed
+   sets, ages and architectures included.
+
+Phase 3 makes one look per kind per architecture and no age sets, so a
+building looks the same in every age. An age set added later (`temple_iron`)
+wins from that age on, exactly as the old art's do. With the new art off no
+colour set is loaded and none of this changes anything (tested:
+`with_the_new_art_a_kind_with_a_colour_set_never_falls_back_to_old_art`).
+
+## What a building set holds
+
+One cell size and one anchor for every frame; the class is not turning, so
+one row per animation, one column per frame, in this order:
+
+| animation      | frames | ms   | loops | what                                        |
+|----------------|--------|------|-------|---------------------------------------------|
+| `construction` | 3      | 200  | no    | the site, the building at ~35%, at ~70%     |
+| `idle`         | 1      | 160  | yes   | the building                                |
+| `rubble`       | 1      | 200  | no    | what is left when it falls                  |
+| (walls) `arm`  | 8      | 1000 | no    | one arm per neighbour, see Walls            |
+| (gate) `shut`, `open` | 4 each | 1000 | no | one per line, see Walls                 |
+
+Unused cells (the idle and rubble rows' columns 2 and 3) are transparent.
+The view uses these exactly as an indexed set's: construction stage
+`done / (work / 3)` picks the frame (`Atlas::stage_frame`), uncropped;
+`Atlas::own_rubble` while the building lies fallen; for its first
+`COLLAPSE_TICKS` the idle frame sinks into the rubble. A building set
+without them falls back to the generic pegs, the idle frame cropped, and
+the footprint's indexed rubble, so a set must have all three.
+
+Player colour: the mask is made per frame from the model, so whatever is
+player-coloured in a stage keeps its mask. Flags and awnings may be absent
+from the stages and rubble.
+
+## How the kit makes them (`tools/look`)
+
+The art agent writes only the idle model function. `export.py --stages`
+renders, from that one model, with no per-model work (`stages.py`):
+
+- **construction 0**: the model removed; the footprint pegged out with
+  string at knee height, a levelled earth patch, a trench along the walls'
+  line (the model's ground rectangle), a pile of squared blocks in the
+  wall's colour and a stack of timber.
+- **construction 1, 2**: the model cut by a horizontal plane at 35% and 70%
+  of its height (of its mass: thin poles and flags do not count), each cut
+  capped. A roof is never half there: any part wholly above 40% of the
+  height that mostly faces up, or is the roof's colour, goes; small things
+  (plants, pots) crossing the cut go rather than being sliced. Timber
+  scaffolding round the ground rectangle up to the cut: posts, ledgers,
+  braces on the two sides the camera sees, planks along the top; a few
+  blocks waiting in front.
+- **rubble**: the model removed; on its ground rectangle a dust stain, a
+  low mound, broken blocks in the wall colour, charred beams, broken tiles
+  in the roof colour and two stubs of wall.
+- Colours: the idle frame is rendered first and its colours clustered
+  (`stages.palette`): the wall is the commonest colour in the picture's
+  lower half, the roof the commonest clearly different one in its upper
+  part. A Greek ruin comes out white and terracotta, an Egyptian one
+  sandstone.
+- After rendering, every cell is trimmed to the union of all frames' drawn
+  pixels (on even pixels) and the anchor moved with it.
+
+`export.py --anims '{"arm": [{"arm": 0}, ...]}'` adds animations whose
+frames are the same builder called with more keyword arguments.
+
+### `SETS` and the batch export
+
+Each architecture module (`greek.py`, `egyptian.py`, `mesopotamian.py`,
+`asian.py`) declares its sets:
+
+```python
+SETS = {
+    "barracks_egyptian": dict(
+        func="egyptian.barracks",   # required: MODULE.FUNC
+        cls="MediumBuilding",       # required: size class (docs/05 2.3)
+        tiles=2,                    # the game's footprint (default: the class's)
+        kwargs={},                  # builder keyword arguments
+        fit=None,                   # scale the model to this many tiles
+        model_tiles=None,           # the model's own footprint, for fit
+        stages=True,                # True: building stages; "flat": farm; False: idle only
+        anims={},                   # {"arm": [{"arm": k} for k in range(8)]}
+        sun_angle=None, samples=None,
+    ),
+}
+```
+
+`/usr/bin/python3.13 tools/look/export_all.py [--only NAME ...] [--jobs N]
+[--force] [--list] [--debug DIR]` exports every declared set and checks it
+with `check_set.py`. A set is skipped when its manifest's
+`// export-hash:` line matches the hash of: the entry, the source of the
+module that draws it and every `tools/look` module it imports, `lib.py`,
+`stages.py`, and `export.py`'s `EXPORT_VERSION`.
+
+## Walls and gates
+
+Today (`crates/view/src/walls.rs`, `scene.rs::push_arms`) a wall tile is
+its **post** (the `idle` frame) plus one **arm** frame per neighbour it
+joins, drawn on the post's anchor: `arm` frame k reaches toward
+`WALL_DIRECTIONS[k]` = (1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1),
+(1,-1) in game tiles, ending at the shared edge (orthogonal) or corner
+(diagonal), where the neighbour's arm meets it. Arms are depth-sorted
+against the post by `arm_depth`. A gate is not a post: it is `shut` or
+`open` frame l (0 to 3), standing across line l, the line of
+`WALL_DIRECTIONS[l]`; its `idle` frame is its look in memory and ghosts.
+There is one frame per direction, not per neighbour mask.
+
+Game axes to the kit's: game +x is the model's +X, game +y the model's -Y
+(the camera looks from (+X, -Y)). So arm k points along
+`(dx, -dy)` of `WALL_DIRECTIONS[k]` in the model.
+
+A colour wall supplies: `func(arm=None)` drawing the post alone when `arm`
+is None and the arm k alone (no post) otherwise, both centred on the tile;
+declared with `anims={"arm": [{"arm": k} for k in range(8)]}`. A gate:
+`func(line=0, open=False)`, declared with `anims={"shut": [{"line": l,
+"open": False} ...], "open": [... True]}`, its idle being line 0 shut. The
+exporter renders these now; the stages and rubble are made from the idle
+(the post), which is what a wall site shows.
+
+## Farms
+
+A farm is one `idle` frame today: the view has no sown, growing or
+exhausted states (a farm is reseeded in place, and is not drawn smaller as
+it is worked). A colour farm declares `stages="flat"`: construction 0 is the
+pegged site, 1 and 2 the field cut at 35% and 70% of its crop height with
+no scaffolding, the rubble a trampled stain with a few broken fence rails.
+Field states, if wanted later, would be more `idle`-like animations chosen
+by `resource / base`; not built.
+
+## Docks
+
+The dock stands on the shore with water under it. The new water is drawn by
+the ground (`docs/look/ground.md`), so the dock's sprite must be
+transparent wherever water should show: the model has no water, sea bed or
+ground of its own, its piles end at z = 0 (the water's surface), and the
+shadow catcher at z = 0 gives its shadow on the water as translucent black.
+Its rubble should be floating planks rather than a heap: a dock declares
+`stages="flat"` until stages.py has a water rubble.
+
+## Smoke, flags and fire (designed, not built)
+
+A building declares attachment points in its manifest, in authored pixels
+in the cell like the anchor, one list per animation frame they apply to:
+
+```ron
+    attach: [
+        (kind: Smoke, at: (148, 60)),        // a chimney's mouth
+        (kind: Flag, at: (120, 12)),         // a pole's top: the cloth hangs from it
+        (kind: Fire, at: (100, 150)),        // where it burns when damaged
+    ],
+```
+
+`export.py` would find them from empties named `attach_smoke`,
+`attach_flag`, `attach_fire_<n>` in the model (projected with `project()`,
+then moved by the trim). Effects are small colour sets of their own,
+`fx_smoke`, `fx_flag`, `fx_fire` (a looping `idle` of 8 to 12 frames, the
+flag's cloth masked for player colour), filed under ids of their own as the
+scenery is. The scene pushes one sprite per attachment of a standing,
+finished building, anchored at the building's ground point plus the
+attachment's offset from the building's anchor, at the building's depth
+plus a small epsilon, its clock offset by the slot so they do not breathe
+in step: smoke always, the flag always (its frames replace a modelled
+flag, so the model draws only the pole), fire at the first `n` points as
+health falls below 75%, 50%, 25%. Nothing of this is built.
+
+## Memory
+
+Measured on the five Greek sets after re-export with stages (see the
+report in this phase's notes for the numbers); the projection for 18 kinds x
+4 architectures x 5 frames and the plan if it is too big are recorded under
+"Memory" in `docs/look/colour-sets.md`.

@@ -684,7 +684,12 @@ pub(crate) mod fixture {
         for y in 0..h {
             for x in 0..w {
                 let i = (y * w + x) as usize;
-                let c = [idle[i * 4], idle[i * 4 + 1], idle[i * 4 + 2], idle[i * 4 + 3]];
+                let c = [
+                    idle[i * 4],
+                    idle[i * 4 + 1],
+                    idle[i * 4 + 2],
+                    idle[i * 4 + 3],
+                ];
                 put((0, 1), x, y, c, idle_mask[i]);
             }
         }
