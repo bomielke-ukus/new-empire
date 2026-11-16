@@ -104,3 +104,6 @@ of 64; and only when one 8192 x 8192 page is full is there another, all
 pages alike. `Frame::page` and `SpriteInstance::page`
 carry bit 7 (`0x80`) for a colour page, the page number in the low bits, so
 nothing that builds a sprite instance from a frame changes.
+
+What the buildings cost there, and the plan if the pages grow too big, is
+in `docs/look/buildings.md`, "Memory".

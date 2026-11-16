@@ -187,7 +187,33 @@ health falls below 75%, 50%, 25%. Nothing of this is built.
 
 ## Memory
 
-Measured on the five Greek sets after re-export with stages (see the
-report in this phase's notes for the numbers); the projection for 18 kinds x
-4 architectures x 5 frames and the plan if it is too big are recorded under
-"Memory" in `docs/look/colour-sets.md`.
+Colour frames are trimmed one by one in the atlas, so a set costs the sum
+of its frames' drawn rectangles at 5 bytes a pixel (RGBA and mask).
+Measured on the five Greek sets with their stages (phase 3):
+
+| set          | class  | cell (trimmed) | 5 frames |
+|--------------|--------|----------------|----------|
+| house        | 2 x 2  | 326 x 284      | 1.42 MiB |
+| barracks     | 2 x 2  | 340 x 272      | 1.49 MiB |
+| temple       | 2 x 2  | 326 x 264      | 1.39 MiB |
+| watch_tower  | 1 x 1  | 276 x 308      | 0.99 MiB |
+| town_center  | 3 x 3  | 530 x 434      | 3.30 MiB |
+
+The colour pages for everything in `assets/look` went from 2048 x 768
+(7.5 MiB, the five buildings with one frame each, the trees and the
+scenery) to 2048 x 1408 (13.8 MiB).
+
+Projection for 18 kinds in one architecture: eleven 2 x 2 kinds at about
+1.45 MiB, two 3 x 3 (Town Center, Dock) at 3.3, the Watch Tower at 1.0, the
+two walls (8 arm frames more) and the gate (8 gate frames more) at about
+1.8 each,
+the 5 x 5 Wonder at about 9: some 38 MiB. Four architectures: about
+155 MiB of frames, about 180 MiB of pages once shelf packing and page
+rounding are counted (one 8192-wide page some 4500 tall). Below the
+250 MiB line, but the units' colour sets will add to it. If it is crossed,
+the plan (not built) is per-match loading: `load_art` takes the
+architectures in play (from the match's civs) and skips colour sets whose
+architecture suffix is not among them, the first architecture's always
+being loaded as the fallback. A two-player match then holds at most two
+architectures' buildings, about half. The atlas would be rebuilt when a
+match starts or a save loads, before the match is shown.
