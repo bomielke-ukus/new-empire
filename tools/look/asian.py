@@ -307,8 +307,13 @@ def hall(parent, x0, x1, y0, y1, z, h, wall=PLASTER, posts=None, bays=None, sill
     cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
     sx, sy = x1 - x0, y1 - y0
     box((sx, sy, h), (cx, cy, z + h / 2), noisy(wall, 0.07, 5.0), parent=parent, name="wall")
-    box((sx + 0.02, sy + 0.02, sill), (cx, cy, z + sill / 2), base_m or mat(tint(OCHRE, 0.82), rough=0.9),
-        parent=parent)
+    # the sill as four skirts on the wall's faces, not a block inside it: a
+    # construction stage's cut would cap both at one height (black)
+    sm = base_m or mat(tint(OCHRE, 0.82), rough=0.9)
+    for yy in (y0 - 0.008, y1 + 0.008):
+        box((sx + 0.03, 0.014, sill), (cx, yy, z + sill / 2), sm, parent=parent)
+    for xx in (x0 - 0.008, x1 + 0.008):
+        box((0.014, sy + 0.002, sill), (xx, cy, z + sill / 2), sm, parent=parent)
     nx = bays or max(1, int(round(sx / 0.55)))
     ny = max(1, int(round(sy / 0.55)))
     pts = []

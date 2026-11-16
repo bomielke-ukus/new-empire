@@ -37,7 +37,7 @@ import bmesh  # noqa: F401  (after bpy)
 from mathutils import Vector
 
 import lib
-from lib import BLUE, PAL, RED, blob, box, cyl, empty, mat, mesh, sphere
+from lib import BLUE, RED, blob, box, cyl, empty, mat, mesh, sphere
 import greek
 from greek import (arc_rod, banner, basket, bow, cloth, courses, crate, face, fence, flag,
                    gold, horse_head, lathe, noisy, quiver, rod, sack, sack_pile, shield, target,
@@ -634,7 +634,7 @@ def temple(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     box((1.92, 1.92, 0.03), (0, 0, 0.015), brick(MUD_LT, 4.0), parent=r, bevel=0.01)
     z = 0.03
     t1 = mud_block(r, -0.88, 0.88, -0.5, 0.92, 0.58, z, band=0.78, mh=0.12)
-    t2 = mud_block(r, -0.6, 0.6, -0.12, 0.84, 0.46, t1, c=MUD_DK, band=0.72, mh=0.11, pitch=0.24)
+    t2 = mud_block(r, -0.6, 0.6, -0.12, 0.84, 0.46, t1, c=MUD_DK, band=0.72, mh=0.11, pitch=0.24, dado=0.0)
     _shrine(r, -0.32, 0.32, 0.18, 0.7, t2, 0.5, player)
     stair(r, 0.0, -0.93, -0.5, z, t1, 0.36, 7)
     stair(r, 0.0, -0.5 + 0.004, -0.12, t1, t2, 0.3, 6)
@@ -700,7 +700,7 @@ def house(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, variant=0):
     _parapet(r, x0, x1, y0, y1, zt)
     # the upper room at the back
     ux0, ux1, uy0 = -0.94, -0.2, 0.36
-    mud_block(r, ux0, ux1, uy0, y1, 0.55, zt, ribs=False, band=0.8, band_h=0.05, rosettes=False, beams=True,
+    mud_block(r, ux0, ux1, uy0, y1, 0.55, zt, ribs=False, band=0.8, band_h=0.05, rosettes=False, beams=True, dado=0.0,
               merlons=False)
     _parapet(r, ux0, ux1, uy0, y1, zt + 0.55)
     arch_door(((ux0 + ux1) / 2 + 0.1, uy0, zt), 0, r, 0.2, 0.42, frame=TURQ, inner=GLAZE_W)
@@ -1646,7 +1646,7 @@ def gate(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, line=0, open=False)
                     for kx in (-1, 1):
                         g.box((0.05, 0.008, 0.05), (kx * 0.09, -0.004, zz), pi / 4 * 0)
                     g.emit(mat(GLAZE_W, rough=0.35), f, "rosette")
-            cloth(0.16, 0.42, mat(player, rough=0.7), (0, -0.075 if False else -0.03, TH - 0.28), 0, f, hang=True,
+            cloth(0.16, 0.42, mat(player, rough=0.7), (0, -0.03, TH - 0.28), 0, f, hang=True,
                   wave=0.008, nx=4)
             box((0.22, 0.04, 0.035), (0, -0.02, TH - 0.27), mat(PALMWOOD_DK), parent=f)
     # the arched passage between the towers
