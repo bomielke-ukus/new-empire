@@ -649,6 +649,95 @@ pub(crate) mod fixture {
         manifest
     }
 
+    /// A construction stage's colour in the building fixture: stage `s`
+    /// is a row of `s + 1` pixels of this at (2, 4).
+    pub fn stage_colour(s: u32) -> [u8; 4] {
+        [40 + 60 * s as u8, 90, 10, 255]
+    }
+    /// The building fixture's rubble: two pixels at (3, 4).
+    pub const RUBBLE: [u8; 4] = [150, 140, 120, 255];
+
+    /// Writes the colour building `name` under `dir/name/` as
+    /// `tools/look/export.py` lays one out (`docs/look/buildings.md`):
+    /// three construction stages, the idle frame (as [`pixels`]) and its
+    /// rubble, one row each, every cell [`FRAME`] with one anchor. Returns
+    /// the manifest's path.
+    pub fn write_building(dir: &Path, name: &str) -> PathBuf {
+        let set = dir.join(name);
+        std::fs::create_dir_all(&set).unwrap();
+        let (w, h) = FRAME;
+        let (cols, rows) = (3, 3);
+        let sw = w * cols;
+        let mut rgba = vec![0u8; (sw * h * rows * 4) as usize];
+        let mut mask = vec![0u8; (sw * h * rows) as usize];
+        let mut put = |cell: (u32, u32), x: u32, y: u32, c: [u8; 4], m: u8| {
+            let i = ((cell.1 * h + y) * sw + cell.0 * w + x) as usize;
+            rgba[i * 4..i * 4 + 4].copy_from_slice(&c);
+            mask[i] = m;
+        };
+        for s in 0..3 {
+            for x in 0..=s {
+                put((s, 0), 2 + x, 4, stage_colour(s), 0);
+            }
+        }
+        let (idle, idle_mask) = pixels();
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                let c = [idle[i * 4], idle[i * 4 + 1], idle[i * 4 + 2], idle[i * 4 + 3]];
+                put((0, 1), x, y, c, idle_mask[i]);
+            }
+        }
+        put((0, 2), 3, 4, RUBBLE, 0);
+        put((0, 2), 4, 4, RUBBLE, 0);
+        write_png(
+            &set.join(format!("{name}.png")),
+            sw,
+            h * rows,
+            png::ColorType::Rgba,
+            &rgba,
+        );
+        write_png(
+            &set.join(format!("{name}.mask.png")),
+            sw,
+            h * rows,
+            png::ColorType::Grayscale,
+            &mask,
+        );
+        let manifest = set.join(format!("{name}.ron"));
+        std::fs::write(
+            &manifest,
+            format!(
+                r#"SpriteSet(
+    name: "{name}",
+    class: MediumBuilding,
+    scale: 2,
+    palette: "rgba",
+    sheet: "{name}.png",
+    anchor: ({}, {}),
+    animations: [
+        (name: "construction", frames: 3, frame_ms: 200, loops: false, impact: None),
+        (name: "idle", frames: 1, frame_ms: 160, loops: true, impact: None),
+        (name: "rubble", frames: 1, frame_ms: 200, loops: false, impact: None),
+    ],
+    anchor_overrides: [],
+    colour: true,
+    mask: Some("{name}.mask.png"),
+    frame: Some(({w}, {h})),
+)"#,
+                ANCHOR.0, ANCHOR.1
+            ),
+        )
+        .unwrap();
+        manifest
+    }
+
+    /// The building fixture `name`, loaded.
+    pub fn building(test: &str, name: &str) -> super::Sheet {
+        let dir = scratch(&format!("{test}-{name}"));
+        super::Sheet::load(&write_building(&dir, name)).unwrap()
+    }
+
     /// The fixture `house`, loaded.
     pub fn house(test: &str) -> super::Sheet {
         let dir = scratch(test);

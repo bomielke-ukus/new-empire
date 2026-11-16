@@ -54,18 +54,25 @@ way, so the shallows shade into the deep. Over them:
 
 - **Movement**: the water textures are sampled twice, drifting slowly in
   two directions with time, and averaged.
-- **Foam**: soft, broken patches of white on the water side of the shore,
-  never more than 60% opaque. It follows the water *smoothed*: the mean of
-  the water's blended weight at four points 0.45 tile off diagonally,
-  around the point the edge's wobble pushes this one to, swayed a further
-  0.3 tile at most by the noise read at 0.27 x (30 tiles across). So a
-  coast's corners round off and the foam does not trace the tile grid. It
-  rises over smoothed water 0.44 to 0.53 and fades out from 0.66 to 0.9
-  (seaward), is kept off dry ground (it fades in as the pixel's own water
-  goes from 0.2 to 0.55), and is broken into patches by the noise at two
-  scales (3.1 x and 0.9 x, mixed 0.6 to 0.4, kept from 0.42 to 0.66). The
-  band breathes in and out by 0.04 of water weight every 4 seconds. Ramps
-  are `smoothstep`.
+- **Foam**: surf on the water side of the shore, up to 85% opaque at its
+  core (a slightly blue white, 0.90 0.96 0.99), with a thin brighter line
+  of white along its leading edge, nearest the shore, broken into lace by
+  fine noise. It follows the water *smoothed*: the mean of the water's
+  blended weight at four points 0.45 tile off diagonally, around the point
+  the edge's wobble pushes this one to, swayed a further 0.3 tile at most
+  by the noise read at 0.27 x (30 tiles across). So a coast's corners
+  round off and the foam does not trace the tile grid. With `calm` that
+  smoothed water: the body rises over 0.44 to 0.52 and fades out from 0.70
+  to 1.00 (seaward); the edge line rises over 0.40 to 0.46 and is gone by
+  0.52 to 0.62. The body is kept off dry ground (it fades in as the pixel's
+  own water goes from 0.2 to 0.55), is broken into patches by the noise at
+  two scales (3.1 x and 0.9 x, mixed 0.6 to 0.4, kept from 0.22 to 0.46)
+  and thinned a third by lace (the noise at 7 x, 0.25 to 0.6); the edge
+  line is kept where lace (0.7) and the broad noise (0.3) mix above 0.12
+  to 0.36. Alpha is the larger of body x 0.85 and edge x 0.95; the colour
+  runs from the core's to white as the edge line takes over. The band
+  breathes in and out by 0.04 of water weight every 4 seconds. Ramps are
+  `smoothstep`.
 
 Time is the frame's, in seconds; pictures for tests are drawn at time 0.
 

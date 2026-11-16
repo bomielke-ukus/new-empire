@@ -328,13 +328,11 @@ def grass():
             for k in range(3):
                 a = k * 2.09 + rng.uniform(0, 1)
                 L.ellipse(cx + math.cos(a) * 2.2, cy + math.sin(a) * 2.2, 2.1, 2.1, col)
-    blooms = [(rgb(252, 250, 240), rgb(250, 204, 50), 0.40),       # daisy
-              (rgb(252, 214, 36), None, 0.25),                     # buttercup
-              (rgb(130, 156, 246), None, 0.15),                    # speedwell
-              (rgb(232, 52, 40), None, 0.10),                      # poppy
-              (rgb(196, 140, 236), None, 0.10)]                    # mallow
+    # (muted and few: the scenery's flowers supply the colour now)
+    blooms = [(rgb(206, 204, 184), rgb(196, 176, 96), 0.6),         # faded daisy
+              (rgb(196, 176, 96), None, 0.4)]                       # straw
     fl = ss(0.3, 0.9, noise(8, 70))
-    for x, y in scatter(rng, 130, 0.15 + 0.85 * fl):
+    for x, y in scatter(rng, 40, 0.15 + 0.85 * fl):
         r = rng.random()
         for petal, eye, p in blooms:
             if r < p:

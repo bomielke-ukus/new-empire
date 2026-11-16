@@ -1256,6 +1256,500 @@ def props(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     return r
 
 
+# ------------------------------------------------------- more helpers, props
+
+
+def _pad(r, side, m="sand", inset=0.08):
+    """The yard under a building: a soft-edged slab `side` tiles across."""
+    box((side - inset, side - inset, 0.035), (0, 0, 0.012), noisy(m, 0.1, 3.0, 1.0), parent=r, bevel=0.012)
+
+
+def _band(sx, sy, z, loc, parent, m, h=0.07, out=0.04):
+    """A painted band round a block at height z (its centre)."""
+    box((sx + out, sy + out, h), (loc[0], loc[1], z), m, parent=parent)
+
+
+def arc_rod(c, rad, a0, a1, parent, r=0.012, m="wood", plane="xz", n=6, r_end=None):
+    """A bent rod: an arc of radius `rad` about `c` from angle a0 to a1, in
+    the plane named (xz: angles from +X toward +Z; yz; xy)."""
+    pts = []
+    for i in range(n + 1):
+        a = a0 + (a1 - a0) * i / n
+        u, v = rad * cos(a), rad * sin(a)
+        if plane == "xz":
+            pts.append((c[0] + u, c[1], c[2] + v))
+        elif plane == "yz":
+            pts.append((c[0], c[1] + u, c[2] + v))
+        else:
+            pts.append((c[0] + u, c[1] + v, c[2]))
+    for i, (p, q) in enumerate(zip(pts, pts[1:])):
+        rr = r if r_end is None else r + (r_end - r) * abs(i + 0.5 - n / 2) / (n / 2)
+        rod(p, q, rr, m, parent, 5)
+    return pts
+
+
+def bow(loc, rz=0.0, parent=None, h=0.5, m="wood_dark"):
+    """A strung bow standing upright in a frame facing local -Y."""
+    e = face(loc, rz, parent)
+    a = 0.62
+    rad = h / 2 / sin(a)
+    arc_rod((-rad * cos(a) + 0.0, 0, 0), rad, -a, a, e, 0.011, m, "xz", 6)
+    rod((0.0 + rad * cos(a) - rad * cos(a), 0, -h / 2), (0, 0, h / 2), 0.003, "wool", e, 4)
+    box((0.03, 0.024, 0.06), (rad - rad * cos(a), 0, 0), "leather", parent=e)
+    return e
+
+
+def quiver(loc, parent=None, player=BLUE, tilt=0.15, rz=0.0):
+    """A leather quiver full of fletched arrows, a band in player colour."""
+    e = empty("quiver", loc, rz, parent)
+    e.rotation_euler = (tilt, 0, rz)
+    cyl(0.045, 0.3, (0, 0, 0.15), "leather", parent=e, segs=8, r_top=0.05)
+    cyl(0.052, 0.05, (0, 0, 0.24), mat(player, rough=0.7), parent=e, segs=8)
+    for k in range(5):
+        a = k * 1.3
+        p = (0.022 * cos(a), 0.022 * sin(a), 0.3)
+        rod(p, (p[0], p[1], 0.4), 0.005, "wood", e, 4)
+        box((0.006, 0.03, 0.05), (p[0], p[1], 0.38), ("white", "red_ochre")[k % 2], parent=e)
+    return e
+
+
+def target(loc, rz=0.0, parent=None, r=0.2, arrows=3, seed=0):
+    """A round straw target with painted rings on a tripod, facing local -Y."""
+    e = face(loc, rz, parent)
+    cyl(r, 0.08, (0, 0, 0), "straw", rot=(pi / 2 - 0.12, 0, 0), parent=e, segs=16)
+    for k, (c_, rr) in enumerate((("white", 0.78), ("flower_red", 0.6), ("white", 0.4),
+                                  ("yellow_ochre", 0.2))):
+        cyl(r * rr, 0.01, (0, -0.042 - k * 0.003, 0.005), c_, rot=(pi / 2 - 0.12, 0, 0), parent=e, segs=14)
+    rnd = random.Random(seed)
+    for i in range(arrows):
+        x, z = rnd.uniform(-0.6, 0.6) * r, rnd.uniform(-0.6, 0.6) * r
+        rod((x, -0.04, z), (x + rnd.uniform(-0.03, 0.03), -0.24, z + 0.03), 0.005, "wood", e, 4)
+        box((0.006, 0.04, 0.03), (x, -0.22, z + 0.03), "white", parent=e)
+    for sx in (-1, 1):
+        rod((sx * r * 0.7, 0.04, -loc[2]), (sx * r * 0.35, 0.03, r * 0.4), 0.014, "wood_dark", e)
+    rod((0, 0.25, -loc[2]), (0, 0.04, r * 0.3), 0.014, "wood_dark", e)
+    return e
+
+
+def hay_bale(loc, rz=0.0, parent=None, s=(0.3, 0.2, 0.16)):
+    e = empty("bale", loc, rz, parent)
+    box(s, (0, 0, s[2] / 2), noisy("straw", 0.16, 14.0), parent=e, bevel=0.02)
+    for fx in (-0.25, 0.25):
+        box((0.012, s[1] + 0.008, s[2] + 0.008), (fx * s[0], 0, s[2] / 2), mat(tint("thatch", 0.7)), parent=e)
+    return e
+
+
+def log(p0, p1, r, parent, bark="wood", end=(0.86, 0.68, 0.44)):
+    """A trimmed log with pale sawn ends."""
+    a, b = Vector(p0), Vector(p1)
+    d = (b - a).normalized()
+    rod(a, b, r, bark, parent, 8)
+    for p in (a, b):
+        rod(p - d * 0.004, p + d * 0.004, r * 0.86, end, parent, 8)
+
+
+def timber_stack(loc, rz=0.0, parent=None, n=(4, 3, 2), L=0.9, r=0.055, tarp=None):
+    """Logs piled in a pyramid along local Y."""
+    e = empty("timber", loc, rz, parent)
+    for row, k in enumerate(n):
+        for i in range(k):
+            x = (i - (k - 1) / 2) * r * 2.05
+            z = r + row * r * 1.75
+            log((x, -L / 2 + row * 0.02, z), (x, L / 2 - row * 0.03, z), r * (0.95 + 0.08 * ((i + row) % 2)), e)
+    if tarp is not None:
+        zt = r + (len(n) - 1) * r * 1.75 + r
+        box((r * 2.4 * n[-1] + 0.06, L * 0.5, 0.014), (0, L * 0.18, zt), mat(tarp, rough=0.75), parent=e)
+        for sx in (-1, 1):
+            box((0.014, L * 0.5, r * 2.2), (sx * (r * 1.2 * n[-1] + 0.03), L * 0.18, zt - r * 1.1),
+                mat(tarp, rough=0.75), rot=(0, sx * 0.25, 0), parent=e)
+    return e
+
+
+def stone_pile(loc, parent=None, seed=0, blocks=4, rocks=5):
+    x, y, z = loc
+    rnd = random.Random(seed)
+    st = courses("limestone", 22.0, 0.8, 0.1)
+    for i in range(blocks):
+        bx, by = x + (i % 2) * 0.2 - 0.1, y + (i // 2) * 0.2 - 0.1
+        box((0.18, 0.18, 0.13), (bx, by, z + 0.065), noisy((0.78, 0.76, 0.72), 0.12, 8.0), parent=parent,
+            rot=(0, 0, rnd.uniform(-0.1, 0.1)), bevel=0.01)
+    box((0.2, 0.17, 0.12), (x, y, z + 0.19), noisy((0.78, 0.76, 0.72), 0.12, 8.0), parent=parent,
+        rot=(0, 0, 0.2), bevel=0.01)
+    for i in range(rocks):
+        a = i * 1.9 + seed
+        blob(rnd.uniform(0.05, 0.08), (x + 0.26 * cos(a), y + 0.26 * sin(a), z + 0.03), "rock",
+             (1, 1, 0.7), parent, seed + i, 0.3, 1)
+    return st
+
+
+def gold_pile(loc, parent=None, seed=0, chest=True):
+    """An open chest heaped with gold, bars and loose nuggets beside it."""
+    x, y, z = loc
+    g = gold()
+    rnd = random.Random(seed)
+    if chest:
+        box((0.36, 0.24, 0.16), (x, y, z + 0.08), "cedar", parent=parent, bevel=0.008)
+        for fx in (-1, 1):
+            box((0.025, 0.25, 0.17), (x + fx * 0.13, y, z + 0.085), bronze(), parent=parent)
+        box((0.36, 0.03, 0.22), (x, y + 0.14, z + 0.24), "cedar", rot=(-0.45, 0, 0), parent=parent)
+        blob(0.16, (x, y, z + 0.16), g, (1.1, 0.75, 0.55), parent, seed, 0.15, 2)
+    else:
+        blob(0.16, (x, y, z + 0.02), g, (1.2, 1.0, 0.55), parent, seed, 0.2, 2)
+    for i in range(6):
+        a = i * 1.1 + 0.3
+        d = rnd.uniform(0.17, 0.24)
+        sphere(0.028, (x + d * cos(a), y + d * sin(a) * 0.8, z + 0.02), g, parent=parent, segs=6)
+    for i in range(3):
+        box((0.1, 0.045, 0.035), (x + 0.24, y - 0.14 + i * 0.012, z + 0.018 + i * 0.036), g,
+            rot=(0, 0, 0.3 * (i % 2)), parent=parent)
+
+
+def sack_pile(loc, parent=None, seed=0, n=(4, 2, 1), s=0.12, colours=("wool", "linen", "wool")):
+    x, y, z = loc
+    k = 0
+    for row, cnt in enumerate(n):
+        for i in range(cnt):
+            sx = x + (i - (cnt - 1) / 2) * s * 1.7
+            sack((sx, y + (row % 2) * 0.02, z + row * s * 1.3), parent, s, seed + k, colours[k % len(colours)])
+            k += 1
+
+
+def trough(loc, rz=0.0, parent=None, L=0.6):
+    e = empty("trough", loc, rz, parent)
+    box((L, 0.2, 0.18), (0, 0, 0.09), courses("limestone", 16.0), parent=e, bevel=0.01)
+    box((L - 0.06, 0.13, 0.02), (0, 0, 0.165), mat("water", rough=0.15), parent=e)
+    return e
+
+
+def fence(points, parent=None, h=0.42, m="wood", post="wood_dark", rails=2):
+    """A post-and-rail fence along a polyline of (x, y) points."""
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        L = hypot(x1 - x0, y1 - y0)
+        n = max(1, round(L / 0.4))
+        for i in range(n + 1):
+            t = i / n
+            box((0.045, 0.045, h + 0.04), (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, (h + 0.04) / 2), post,
+                parent=parent)
+        for k in range(rails):
+            zz = h * (0.45 + 0.5 * k / max(1, rails - 1))
+            rod((x0, y0, zz), (x1, y1, zz), 0.016, m, parent, 5)
+
+
+def horse_head(loc, rz=0.0, parent=None, coat="cedar", mane="hair_black", blaze=False):
+    """A horse's head and neck leaning out over a half-door: the frame's
+    local -Y is outward, loc on the door's top edge."""
+    e = face(loc, rz, parent)
+    cm = mat(coat, rough=0.7)
+    rod((0, 0.14, -0.02), (0, -0.07, 0.16), 0.065, cm, e, 8, 0.05)
+    rod((0, 0.14, 0.04), (0, -0.05, 0.215), 0.022, mane, e, 5)
+    hd = empty("head", (0, -0.07, 0.17), 0, e)
+    hd.rotation_euler = (0.85, 0, 0)
+    box((0.1, 0.11, 0.24), (0, -0.01, -0.07), cm, parent=hd, bevel=0.025)
+    box((0.085, 0.09, 0.08), (0, -0.015, -0.2), cm, parent=hd, bevel=0.025)
+    for sx in (-1, 1):
+        sphere(0.014, (sx * 0.05, -0.03, 0.0), "black", parent=hd, segs=6)
+        cyl(0.018, 0.07, (sx * 0.03, 0.03, 0.07), cm, parent=hd, r_top=0.004, segs=5)
+    if blaze:
+        box((0.025, 0.012, 0.18), (0, -0.07, -0.1), "white", parent=hd)
+    box((0.11, 0.115, 0.02), (0, -0.01, -0.12), "leather", parent=hd)
+    return e
+
+
+def _horse(loc, facing, parent, coat="cedar", cloth=None, pose="stand"):
+    """A whole horse, from the figures kit."""
+    import figures as fg
+    root, b = fg._start("horse", loc, facing, parent)
+    fg._quad(b, "horse", pose, coat=coat, cloth=cloth)
+    b.finish(root)
+    return root
+
+
+def _stall(loc, rz=0.0, parent=None, player=BLUE, w=0.7, d=0.5, seed=0, goods=0):
+    """A small market stall: counter, striped awning on four posts. Front
+    (and the awning's low edge) toward local -Y."""
+    e = empty("stall", loc, rz, parent)
+    zb, zf = 0.95, 0.8
+    for x in (-w / 2, w / 2):
+        rod((x, d / 2, 0), (x, d / 2, zb), 0.02, "wood_dark", e)
+        rod((x, -d / 2, 0), (x, -d / 2, zf), 0.02, "wood_dark", e)
+    awning((0, d / 2 + 0.04, zb + 0.03), 0, e, w=w + 0.12, d=d + 0.14, drop=zb - zf + 0.03,
+           player=player, stripes=5, sag=0.0, valance=0.08)
+    box((w - 0.04, d * 0.6, 0.035), (0, -d * 0.12, 0.4), "cedar", parent=e)
+    box((w - 0.02, 0.025, 0.16), (0, -d * 0.42, 0.31), mat(player, rough=0.75), parent=e)
+    box((w - 0.02, 0.03, 0.025), (0, -d * 0.42 - 0.002, 0.24), gold(), parent=e)
+    for x in (-w / 2 + 0.05, w / 2 - 0.05):
+        box((0.04, 0.04, 0.38), (x, -d * 0.12, 0.19), "wood_dark", parent=e)
+    rnd = random.Random(seed)
+    if goods == 0:      # produce
+        for i in range(3):
+            basket(((i - 1) * w * 0.3, -d * 0.12, 0.42), e, 0.09, rnd.randrange(6), seed + i)
+    elif goods == 1:    # pots and jugs
+        for i in range(4):
+            x = (i - 1.5) * w * 0.22
+            lathe([(0.03, 0), (0.06, 0.05), (0.05, 0.1), (0.025, 0.13), (0.03, 0.15), (0.02, 0.15)],
+                  mat(["terracotta", "black", (0.86, 0.6, 0.32), "red_ochre"][i], rough=0.6),
+                  (x, -d * 0.12, 0.42), parent=e, segs=8)
+    else:               # cloth bolts
+        for i in range(3):
+            cyl(0.05, d * 0.5, ((i - 1) * w * 0.28, -d * 0.12, 0.47),
+                mat(["red_ochre", "yellow_ochre", "tyrian"][i], rough=0.8), rot=(pi / 2, 0, 0), parent=e, segs=8)
+    return e
+
+
+# ------------------------------------------------------------- storehouse
+
+
+def storehouse(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
+    """2 x 2. A storeroom at the back, a timber lean-to on the +X side over
+    logs and dressed stone, sacks of grain and a chest of gold in the yard."""
+    r = empty("storehouse", loc, rot_z, parent)
+    _pad(r, 2, "sand")
+    z = 0.03
+    x0, x1, y0, y1, h = -0.95, 0.2, 0.22, 0.95, 1.08
+    c = ((x0 + x1) / 2, (y0 + y1) / 2)
+    wall_block(x1 - x0, y1 - y0, h, (c[0], c[1], z), r, dado="yellow_ochre", line="red_ochre", dado_h=0.3)
+    _band(x1 - x0, y1 - y0, z + h - 0.04, c, r, "red_ochre")
+    gable_roof(x1 - x0, y1 - y0, 0.44, (c[0], c[1], z + h), r, over=0.12, gable=noisy("whitewash"), seed=51)
+    cyl(0.08, 0.03, (x0 - 0.0, c[1], z + h + 0.15), "egyptian_blue", rot=(0, pi / 2, 0), parent=r, segs=10)
+    door((-0.4, y0, z), 0, r, w=0.5, h=0.84, colour="red_ochre")
+    box((0.62, 0.22, 0.04), (-0.4, y0 - 0.1, z + 0.02), "wood", parent=r)
+    for x in (-0.82, 0.06):
+        box((0.16, 0.02, 0.07), (x, y0 - 0.005, z + 0.82), mat((0.15, 0.1, 0.08)), parent=r)
+        box((0.2, 0.03, 0.02), (x, y0 - 0.01, z + 0.78), "wood_dark", parent=r)
+    # a pulley hoist over the door
+    rod((-0.4, y0 + 0.02, z + h + 0.12), (-0.4, y0 - 0.3, z + h + 0.12), 0.024, "wood_dark", r)
+    cyl(0.04, 0.025, (-0.4, y0 - 0.27, z + h + 0.06), "wood", rot=(0, pi / 2, 0), parent=r, segs=8)
+    rod((-0.4, y0 - 0.3, z + h + 0.04), (-0.4, y0 - 0.3, z + 0.62), 0.005, "wool", r, 4)
+    sack((-0.4, y0 - 0.3, z + 0.42), r, 0.09, 11)
+    # lean-to on posts down the +X side
+    lx0, lx1, ly0, ly1 = 0.3, 0.94, -0.12, 0.92
+    zl, rise = 0.78, 0.3
+    shed_roof(ly1 - ly0, lx1 - lx0, rise, ((lx0 + lx1) / 2, (ly0 + ly1) / 2, zl), r, rot_z=pi / 2, over=0.05, seed=53)
+    for y in (ly0 + 0.03, (ly0 + ly1) / 2, ly1 - 0.03):
+        box((0.06, 0.06, zl), (lx1 - 0.04, y, zl / 2), "wood_dark", parent=r)
+        box((0.06, 0.06, zl + rise), (lx0 + 0.03, y, (zl + rise) / 2), "wood_dark", parent=r)
+        rod((lx1 - 0.04, y, zl - 0.2), (lx1 - 0.2, y, zl - 0.02), 0.016, "wood_dark", r)
+    box((0.07, ly1 - ly0 + 0.08, 0.07), (lx1 - 0.04, (ly0 + ly1) / 2, zl - 0.02), "wood", parent=r)
+    box((0.07, ly1 - ly0 + 0.08, 0.07), (lx0 + 0.03, (ly0 + ly1) / 2, zl + rise - 0.03), "wood", parent=r)
+    cloth(0.5, 0.2, mat(player, rough=0.7), (lx1 + 0.0, (ly0 + ly1) / 2 - 0.1, zl - 0.04), pi / 2, r,
+          hang=True, wave=0.008, nx=5)
+    cyl(0.055, 0.012, (lx1 + 0.015, (ly0 + ly1) / 2 - 0.1, zl - 0.14), gold(), rot=(0, pi / 2, 0), parent=r, segs=8)
+    timber_stack((0.62, 0.4, z), 0, r, (4, 3, 2), 0.86, 0.06, tarp=player)
+    stone_pile((0.58, -0.5, z), r, seed=3)
+    # the yard: grain, gold, oil
+    sack_pile((-0.62, -0.12, z), r, seed=2)
+    sack_pile((-0.7, -0.52, z), r, seed=7, n=(3, 2), s=0.11, colours=("linen", "wool"))
+    gold_pile((-0.05, -0.58, z), r, seed=4)
+    for i, (x, y) in enumerate(((-0.12, -0.08), (0.06, -0.14), (-0.02, 0.06))):
+        amphora((x, y, z), i * 0.7, parent=r, s=0.42, colour=((0.88, 0.6, 0.32), "terracotta")[i % 2],
+                band=("red_ochre", "black")[i % 2])
+    pithos((0.3, -0.82, z), r, 0.42)
+    crate((-0.3, -0.84, z), 0.2, r, 0.22)
+    banner((-0.93, -0.92, z), 1.45, player, r, 0.28, 0.5, seed=5)
+    flag((c[0] - 0.3, c[1], z + h + 0.42), 0.5, player, r, w=0.34, fh=0.2, pennant=True)
+    return r
+
+
+# ----------------------------------------------------------------- market
+
+
+def market(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
+    """2 x 2. An agora corner: a stoa of shops along the back, stalls under
+    striped awnings, jars and baskets everywhere, a fountain."""
+    r = empty("market", loc, rot_z, parent)
+    box((1.92, 1.92, 0.04), (0, 0, 0.015), courses("limestone", 3.8, 0.82, 0.1), parent=r, bevel=0.012)
+    z = 0.035
+    # stoa: back wall of shops, a colonnade, a lean-to roof
+    bx0, bx1, by0, by1, bh = -0.95, 0.95, 0.72, 0.95, 1.18
+    wall_block(bx1 - bx0, by1 - by0, bh, (0, (by0 + by1) / 2, z), r, dado="egyptian_blue", line="yellow_ochre")
+    fy, zr, rise = 0.32, 1.0, 0.36
+    for sx in (bx0, bx1):
+        mesh([(sx, by0, z + bh), (sx, by1, z + bh), (sx, by1, zr + rise), (sx, fy, zr)],
+             [(0, 1, 2, 3)], noisy("whitewash"), parent=r)
+        box((0.05, by0 - fy, zr), (sx + (0.025 if sx < 0 else -0.025), (by0 + fy) / 2, zr / 2), noisy("whitewash"), parent=r)
+    shed_roof(bx1 - bx0, by1 - fy, rise, (0, (by1 + fy) / 2, zr), r, over=0.08, seed=61)
+    box((bx1 - bx0, 0.07, 0.08), (0, fy + 0.04, zr - 0.04), "red_ochre", parent=r)
+    for i in range(9):
+        box((0.05, 0.02, 0.04), (bx0 + 0.15 + i * 0.205, fy + 0.0, zr - 0.04), gold(), parent=r)
+    for i in range(4):
+        column((bx0 + 0.24 + i * 0.49, fy + 0.04, z), zr - z - 0.06, 0.06, r, band="egyptian_blue",
+               lower=mat("red_ochre", rough=0.7), flutes=8)
+    box((bx1 - bx0, by0 - fy, 0.03), (0, (by0 + fy) / 2, z + 0.01), noisy("marble", 0.06), parent=r)
+    # shop doorways with goods in front
+    for i, x in enumerate((-0.6, 0.0, 0.6)):
+        box((0.3, 0.02, 0.62), (x, by0 - 0.005, z + 0.33), mat((0.16, 0.11, 0.09)), parent=r)
+        box((0.38, 0.05, 0.05), (x, by0 - 0.02, z + 0.66), "wood_dark", parent=r)
+        cloth(0.32, 0.22, mat(["red_ochre", "yellow_ochre", "egyptian_blue"][i], rough=0.8),
+              (x, by0 - 0.03, z + 0.64), 0, r, hang=True, wave=0.01, nx=4)
+    # cloth bolts and pots under the colonnade
+    for i in range(4):
+        cyl(0.045, 0.24, (-0.78 + i * 0.1, 0.58, z + 0.05), mat(["tyrian", "red_ochre", "linen", "yellow_ochre"][i], rough=0.8),
+            rot=(pi / 2, 0, 0), parent=r, segs=8)
+    for i in range(3):
+        cyl(0.045, 0.24, (-0.73 + i * 0.1, 0.58, z + 0.13), mat(["egyptian_blue", "malachite", "linen"][i], rough=0.8),
+            rot=(pi / 2, 0, 0), parent=r, segs=8)
+    for i in range(5):
+        amphora((0.32 + i * 0.12, 0.6 - (i % 2) * 0.05, z), i * 0.5, parent=r, s=0.36,
+                colour=((0.88, 0.6, 0.32), "terracotta", (0.62, 0.3, 0.2))[i % 3])
+    laundry((bx0 + 0.04, fy + 0.04, zr - 0.12), (bx0 + 0.75, fy + 0.04, zr - 0.12), r, seed=2,
+            colours=("red_ochre", "linen", "tyrian", "yellow_ochre"))
+    # stalls in the square
+    _stall((-0.48, -0.2, z), 0, r, player, 0.72, 0.5, seed=1, goods=0)
+    _stall((0.56, -0.38, z), pi / 2, r, player, 0.66, 0.46, seed=2, goods=1)
+    # fountain
+    fx, fy_ = 0.2, 0.08
+    lathe([(0.2, 0), (0.2, 0.14), (0.17, 0.14), (0.17, 0.1)], courses("marble", 14.0), (fx, fy_, z), parent=r,
+          segs=14, smooth=False)
+    cyl(0.17, 0.02, (fx, fy_, z + 0.1), mat("water", rough=0.15), parent=r, segs=14)
+    cyl(0.035, 0.32, (fx, fy_, z + 0.24), "marble", parent=r, segs=8)
+    lathe([(0.02, 0), (0.09, 0.04), (0.1, 0.06), (0.03, 0.06)], "marble", (fx, fy_, z + 0.38), parent=r, segs=10)
+    cyl(0.012, 0.16, (fx, fy_, z + 0.38), mat("foam", rough=0.1, emit=0.2), parent=r, segs=6, r_top=0.03)
+    # loose goods
+    for i, (x, y) in enumerate(((-0.86, -0.75), (-0.72, -0.84), (-0.82, -0.58))):
+        amphora((x, y, z), i * 1.1, parent=r, s=0.44, colour=((0.88, 0.6, 0.32), "terracotta")[i % 2],
+                band=("red_ochre", "black")[i % 2])
+    pithos((-0.2, -0.8, z), r, 0.4)
+    basket((0.02, -0.72, z), r, 0.11, 3, 2)
+    basket((0.1, -0.88, z), r, 0.1, 0, 5)
+    crate((0.86, 0.12, z), 0.3, r, 0.22, fruit=4, seed=1)
+    crate((0.84, -0.86, z), -0.2, r, 0.22, fruit=1, seed=3)
+    sack((-0.12, -0.55, z), r, 0.1, 5)
+    # a balance on a post
+    bxp, byp = -0.05, -0.36
+    box((0.05, 0.05, 0.62), (bxp, byp, z + 0.31), "wood_dark", parent=r)
+    rod((bxp - 0.18, byp, z + 0.6), (bxp + 0.18, byp, z + 0.6), 0.01, bronze(), r)
+    for sx in (-1, 1):
+        rod((bxp + sx * 0.18, byp, z + 0.6), (bxp + sx * 0.18, byp, z + 0.45), 0.003, "wool", r, 4)
+        cyl(0.06, 0.012, (bxp + sx * 0.18, byp, z + 0.44), bronze(), parent=r, segs=10)
+    flag((0.0, 0.84, z + bh + 0.0), 0.75, player, r, w=0.5, fh=0.3, seed=4)
+    return r
+
+
+# ----------------------------------------------------------------- stable
+
+
+def stable(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
+    """2 x 2. A row of stalls at the back with horses looking out over the
+    half-doors, a hay loft, a paddock with a horse, trough and hay."""
+    r = empty("stable", loc, rot_z, parent)
+    _pad(r, 2, "earth")
+    z = 0.03
+    x0, x1, y0, y1, h = -0.95, 0.62, 0.3, 0.95, 1.0
+    c = ((x0 + x1) / 2, (y0 + y1) / 2)
+    wall_block(x1 - x0, y1 - y0, h, (c[0], c[1], z), r, dado="red_ochre", line="yellow_ochre", dado_h=0.22)
+    gable_roof(x1 - x0, y1 - y0, 0.4, (c[0], c[1], z + h), r, over=0.13, gable=noisy("whitewash"), seed=71)
+    _band(x1 - x0, y1 - y0, z + h - 0.04, c, r, "egyptian_blue")
+    coats = [("cedar", "hair_black", True), ((0.93, 0.9, 0.84), (0.7, 0.66, 0.6), False),
+             ((0.24, 0.17, 0.13), "hair_black", True), ((0.70, 0.48, 0.26), (0.36, 0.22, 0.13), False)]
+    for i, x in enumerate((-0.74, -0.36, 0.02, 0.4)):
+        box((0.3, 0.02, 0.74), (x, y0 - 0.006, z + 0.4), mat((0.12, 0.08, 0.06)), parent=r)
+        box((0.36, 0.05, 0.05), (x, y0 - 0.02, z + 0.79), "wood_dark", parent=r)
+        for sx in (-1, 1):
+            box((0.04, 0.05, 0.78), (x + sx * 0.17, y0 - 0.02, z + 0.39), "wood_dark", parent=r)
+        # half-door, planked, painted
+        box((0.3, 0.035, 0.42), (x, y0 - 0.03, z + 0.22), mat(("egyptian_blue", "red_ochre")[i % 2], rough=0.6), parent=r)
+        box((0.32, 0.045, 0.035), (x, y0 - 0.035, z + 0.44), "wood_dark", parent=r)
+        rod((x - 0.13, y0 - 0.05, z + 0.06), (x + 0.13, y0 - 0.05, z + 0.38), 0.012, "wood_dark", r)
+        cm, mn, bl = coats[i]
+        horse_head((x, y0 - 0.06, z + 0.45), 0, r, cm, mn, bl)
+    # hay loft door in the gable end, hay spilling out, a hoist beam
+    window((x1, c[1], z + h + 0.12), pi / 2, r, 0.22, 0.2, "egyptian_blue", shutters=True)
+    blob(0.1, (x1 + 0.03, c[1], z + h + 0.05), "straw", (0.6, 1.4, 0.6), r, 3, 0.3, 1)
+    rod((x1, c[1], z + h + 0.34), (x1 + 0.3, c[1], z + h + 0.34), 0.02, "wood_dark", r)
+    rod((x1 + 0.28, c[1], z + h + 0.34), (x1 + 0.28, c[1], z + 0.5), 0.004, "wool", r, 4)
+    # a feed shed on the +X end: hay under a lean-to
+    shed_roof(0.62, 0.3, 0.2, (0.78, 0.62, 0.72), r, rot_z=pi / 2, over=0.04, seed=73)
+    for y in (0.36, 0.9):
+        box((0.04, 0.04, 0.72), (0.92, y, 0.36), "wood_dark", parent=r)
+    for i, (x, y, zz) in enumerate(((0.79, 0.45, z), (0.79, 0.77, z), (0.79, 0.61, z + 0.16))):
+        hay_bale((x, y, zz), pi / 2, r, (0.3, 0.2, 0.16))
+    # paddock: post-and-rail fence round the front, a horse, trough, hay
+    fence([(-0.93, 0.25), (-0.93, -0.93), (-0.1, -0.93)], r, 0.42)
+    fence([(0.3, -0.93), (0.93, -0.93), (0.93, 0.25)], r, 0.42)
+    for sx in (-0.1, 0.3):
+        box((0.07, 0.07, 0.6), (sx, -0.93, 0.3), "wood_dark", parent=r)
+        sphere(0.04, (sx, -0.93, 0.62), gold(), parent=r, segs=6)
+    # saddle cloths in player colour over the rails
+    for (x, y, rz) in ((-0.93, -0.45, pi / 2), (0.6, -0.93, 0.0)):
+        e = face((x, y, 0.42), rz, r)
+        cloth(0.3, 0.2, mat(player, rough=0.7), (0, -0.02, 0.0), 0, e, hang=True, wave=0.01, nx=4)
+        cloth(0.3, 0.2, mat(player, rough=0.7), (0, 0.02, 0.0), pi, e, hang=True, wave=0.01, nx=4)
+        box((0.3, 0.05, 0.02), (0, 0, 0.0), gold(), parent=e)
+    _horse((0.36, -0.5, z), -1.1, r, coat=(0.62, 0.38, 0.2), cloth=[gold(), mat(player, rough=0.7), gold()])
+    trough((-0.45, -0.62, z), 0, r, 0.55)
+    hay_bale((-0.62, -0.2, z), 0.4, r)
+    blob(0.12, (-0.28, -0.22, z + 0.02), "straw", (1.4, 1, 0.5), r, 5, 0.3, 1)
+    # bucket and pitchfork
+    lathe([(0.05, 0), (0.06, 0.1), (0.055, 0.1)], "cedar", (-0.1, -0.7, z), parent=r, segs=8)
+    rod((-0.88, 0.0, z), (-0.8, 0.05, z + 0.62), 0.01, "wood", r)
+    for k in (-1, 0, 1):
+        rod((-0.8 + k * 0.02, 0.05, z + 0.62), (-0.79 + k * 0.025, 0.06, z + 0.74), 0.005, "iron", r)
+    banner((-0.93, 0.3, z), 1.5, player, r, 0.28, 0.5, rot_z=0, seed=7)
+    return r
+
+
+# ---------------------------------------------------------- archery range
+
+
+def archery_range(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
+    """2 x 2. Three painted targets against an earth bank at the back, a
+    shooting line, lane pennants, and a shelter with bow racks."""
+    r = empty("archery_range", loc, rot_z, parent)
+    _pad(r, 2, "sand")
+    z = 0.03
+    # earth bank and a stone backstop along the back
+    box((1.86, 0.2, 0.62), (0, 0.84, z + 0.31), courses("limestone", 8.0), parent=r, bevel=0.012)
+    box((1.9, 0.24, 0.05), (0, 0.84, z + 0.64), "red_ochre", parent=r, bevel=0.01)
+    for i in range(7):
+        blob(0.16, (-0.84 + i * 0.28, 0.66, z + 0.05), ("grass", "earth", "grass_dry")[i % 3], (1.2, 0.9, 0.7), r, i, 0.25, 1)
+    # targets, lanes, the shooting line
+    for i, x in enumerate((-0.62, -0.06, 0.5)):
+        target((x, 0.5, z + 0.56), 0.0, r, 0.24, 3, seed=i)
+        box((0.025, 1.1, 0.008), (x - 0.27, -0.05, z + 0.012), "whitewash", parent=r)
+    box((0.025, 1.1, 0.008), (0.77, -0.05, z + 0.012), "whitewash", parent=r)
+    box((1.4, 0.04, 0.008), (-0.06, -0.62, z + 0.012), "whitewash", parent=r)
+    for i, x in enumerate((-0.89, 0.77)):
+        flag((x, 0.62, z), 1.05, player, r, w=0.36, fh=0.2, pennant=True, seed=i)
+    flag((-0.33, 0.62, z), 0.9, player, r, w=0.3, fh=0.16, pennant=True, seed=3)
+    flag((0.22, 0.62, z), 0.9, player, r, w=0.3, fh=0.16, pennant=True, seed=4)
+    # a low rail on the shooting line, with quivers on it
+    for x in (-0.9, -0.3, 0.3):
+        box((0.05, 0.05, 0.4), (x, -0.74, z + 0.2), "wood_dark", parent=r)
+    rod((-0.92, -0.74, z + 0.36), (0.32, -0.74, z + 0.36), 0.02, "wood", r)
+    quiver((-0.62, -0.79, z), r, player, 0.2)
+    quiver((-0.02, -0.79, z), r, player, -0.15)
+    bow((-0.45, -0.785, z + 0.28), 0.0, r, 0.42)
+    # the shelter on the +X front corner: posts, a tiled lean-to, a bow rack
+    sx0, sx1, sy0, sy1 = 0.42, 0.95, -0.95, 0.06
+    shed_roof(sy1 - sy0, sx1 - sx0, 0.24, ((sx0 + sx1) / 2, (sy0 + sy1) / 2, 0.98), r, rot_z=pi / 2, over=0.05, seed=81)
+    for y in (sy0 + 0.04, sy1 - 0.04):
+        box((0.06, 0.06, 1.22), (sx0 + 0.04, y, 0.61), "wood_dark", parent=r)
+        box((0.06, 0.06, 0.98), (sx1 - 0.04, y, 0.49), "wood_dark", parent=r)
+    box((0.06, sy1 - sy0, 0.06), (sx1 - 0.04, (sy0 + sy1) / 2, 0.96), "wood", parent=r)
+    cloth(0.56, 0.2, mat(player, rough=0.7), (sx1 + 0.0, (sy0 + sy1) / 2, 0.93), pi / 2, r, hang=True, wave=0.01, nx=5)
+    cyl(0.055, 0.012, (sx1 + 0.015, (sy0 + sy1) / 2, 0.83), gold(), rot=(0, pi / 2, 0), parent=r, segs=8)
+    # an A-frame rack of bows, side-on to the camera
+    rx, ry = (sx0 + sx1) / 2 + 0.02, (sy0 + sy1) / 2 + 0.05
+    for y in (ry - 0.32, ry + 0.32):
+        for sx in (-1, 1):
+            rod((rx + sx * 0.12, y, z), (rx, y, z + 0.66), 0.014, "wood_dark", r)
+    rod((rx, ry - 0.36, z + 0.64), (rx, ry + 0.36, z + 0.64), 0.016, "wood", r)
+    for i in range(4):
+        bow((rx - 0.03, ry - 0.24 + i * 0.16, z + 0.4), pi / 2, r, 0.46, ("wood_dark", "leather")[i % 2])
+    for i in range(2):
+        quiver((rx + 0.17, ry - 0.2 + i * 0.4, z), r, player, -0.12, rz=pi / 2)
+    amphora((sx0 + 0.15, sy0 + 0.12, z), 0.6, parent=r, s=0.3)
+    # a barrel of arrows and a bench
+    lathe([(0.1, 0), (0.12, 0.12), (0.1, 0.24), (0.09, 0.24)], "cedar", (0.22, -0.84, z), parent=r, segs=10)
+    for k in range(7):
+        a = k * 0.9
+        p = (0.22 + 0.05 * cos(a), -0.84 + 0.05 * sin(a), z + 0.2)
+        rod(p, (p[0] + 0.02 * cos(a), p[1] + 0.02 * sin(a), z + 0.42), 0.005, "wood", r, 4)
+        box((0.006, 0.03, 0.05), (p[0] + 0.02 * cos(a), p[1] + 0.02 * sin(a), z + 0.4), ("white", "red_ochre")[k % 2], parent=r)
+    bench((0.66, -0.2, z), pi / 2, r, 0.36)
+    return r
+
+
 # --------------------------------------------------------------- showcase
 
 

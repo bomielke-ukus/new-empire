@@ -275,6 +275,9 @@ pub struct Atlas {
     /// `(kind, age index, architecture index)` to the id its frames in that
     /// look are filed under.
     variants: HashMap<(KindId, u8, u8), KindId>,
+    /// A kind with colour sets but none for the first architecture's first
+    /// age, to the id of the colour set that draws it instead.
+    stand_ins: HashMap<KindId, KindId>,
     /// Names of the rendered sets that replaced placeholders.
     pub loaded_sets: Vec<String>,
     /// The tree's looks, [`kinds::TREE`] first then each `tree_<n>` set's
@@ -330,6 +333,13 @@ impl Atlas {
     /// anew only for the ages that change it (`house_tool`, `temple_iron`;
     /// see [`set_target`]), so a temple keeps its own look in the Bronze Age
     /// and a slinger in every age.
+    ///
+    /// With the new art on, a kind with any colour set has only colour
+    /// sets here ([`Atlas::with_sheets`]), so this picks the colour set for
+    /// the architecture, else the first architecture's, in every age; a
+    /// colour set named for an age (`temple_iron`) wins from that age on,
+    /// as an indexed one does. A kind whose colour sets lack the first
+    /// architecture's first age falls back to its first colour set.
     pub fn variant(&self, kind: KindId, age: u8, arch: u8) -> KindId {
         // The architecture's own look, of the latest age it has one for;
         // without one, the first set's.
@@ -344,6 +354,7 @@ impl Atlas {
         (1..=age)
             .rev()
             .find_map(|a| self.variants.get(&(kind, a, 0)).copied())
+            .or_else(|| self.stand_ins.get(&kind).copied())
             .unwrap_or(kind)
     }
 
@@ -355,7 +366,11 @@ impl Atlas {
         if self.trees.len() <= 1 {
             return kinds::TREE;
         }
-        self.trees[(tile_hash(x, y, 0x7EE) % self.trees.len() as u32) as usize]
+        // The last look (the olive, a different green) is a third as common
+        // as each of the others, so it dots a forest rather than patching it.
+        let n = self.trees.len() as u32;
+        let h = tile_hash(x, y, 0x7EE) % (3 * (n - 1) + 1);
+        self.trees[if h < 3 * (n - 1) { h / 3 } else { n - 1 } as usize]
     }
 
     /// How far a tree on tile `(x, y)` is drawn off the tile's centre, in
@@ -449,13 +464,32 @@ impl Atlas {
     pub fn with_sheets(sheets: &[crate::sheets::Sheet]) -> Atlas {
         let mut canvases: Vec<Entry> = Vec::new();
         let mut colour: Vec<ColourEntry> = Vec::new();
+        // The new art's rule (`docs/look/buildings.md`, "Which look"): a
+        // kind with any colour set is drawn from its colour sets only, in
+        // every age and architecture; its indexed sets, of every age and
+        // architecture, are left out. Only kinds with no colour set at all
+        // keep the old art. Without colour sets (the new art off) nothing
+        // here changes anything.
+        let colour_kinds = colour_kinds(sheets);
         let replaced = |s: &crate::sheets::Sheet| {
-            !s.colour && sheets.iter().any(|c| c.colour && c.name == s.name)
+            !s.colour
+                && (sheets.iter().any(|c| c.colour && c.name == s.name)
+                    || set_target(&s.name).is_some_and(|(k, _, _)| colour_kinds.contains_key(&k)))
         };
         let mut anims: HashMap<(KindId, Anim), AnimInfo> = HashMap::new();
         let mut variants: HashMap<(KindId, u8, u8), KindId> = HashMap::new();
         let mut loaded_sets = Vec::new();
-        let mut covered: Vec<KindId> = Vec::new();
+        // A kind with colour sets has no placeholder either: what it has no
+        // colour set for is drawn from the colour sets it has.
+        let mut covered: Vec<KindId> = colour_kinds.keys().copied().collect();
+        // Without a first-architecture colour set of its first age, the
+        // kind itself is drawn by its first colour set (by architecture,
+        // then age), so no look of it ever falls through to old art.
+        let stand_ins: HashMap<KindId, KindId> = colour_kinds
+            .iter()
+            .filter(|(_, &first)| first != (0, 0))
+            .map(|(&k, &(age, arch))| (k, look_id(k, age, arch)))
+            .collect();
         for sheet in sheets {
             if replaced(sheet) {
                 continue;
@@ -732,6 +766,7 @@ impl Atlas {
         atlas.trees = trees;
         atlas.anims = anims;
         atlas.variants = variants;
+        atlas.stand_ins = stand_ins;
         atlas.loaded_sets = loaded_sets;
         atlas
     }
@@ -1106,6 +1141,7 @@ fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
         lookup,
         anims: HashMap::new(),
         variants: HashMap::new(),
+        stand_ins: HashMap::new(),
         loaded_sets: Vec::new(),
         trees: vec![kinds::TREE],
     }
@@ -1220,6 +1256,25 @@ pub fn set_target(name: &str) -> Option<(KindId, u8, u8)> {
         .find_map(|&(suffix, arch)| rest.strip_suffix(suffix).map(|rest| (rest, arch)))
         .unwrap_or((rest, 0));
     kind_for_set(rest).map(|kind| (kind, age, arch))
+}
+
+/// Every kind with a colour set among `sheets`, to the first of its colour
+/// sets' (age, architecture) by architecture and then age: `(0, 0)` when
+/// the first architecture's first-age set is there. Empty without colour
+/// sets (the new art off).
+fn colour_kinds(sheets: &[crate::sheets::Sheet]) -> HashMap<KindId, (u8, u8)> {
+    let mut out: HashMap<KindId, (u8, u8)> = HashMap::new();
+    for (kind, age, arch) in sheets
+        .iter()
+        .filter(|s| s.colour)
+        .filter_map(|s| set_target(&s.name))
+    {
+        let e = out.entry(kind).or_insert((age, arch));
+        if (arch, age) < (e.1, e.0) {
+            *e = (age, arch);
+        }
+    }
+    out
 }
 
 /// The id a scenery set (`decor_flowers_0`, `decor_rock_2`, ...) is filed
@@ -2823,10 +2878,10 @@ mod tests {
         assert_eq!((one.pages, one.height), (1, 16));
     }
 
-    /// A colour set replaces the indexed set of its name and nothing else:
-    /// its frames go on a colour page, trimmed to what they cover (a
-    /// shadow included) with the anchor moved by the trim, the mask
-    /// beside them; the kind's later ages keep their indexed sets.
+    /// A colour set replaces the indexed set of its name: its frames go on
+    /// a colour page, trimmed to what they cover (a shadow included) with
+    /// the anchor moved by the trim, the mask beside them. The kind's
+    /// indexed sets of later ages go too (`docs/look/buildings.md`).
     #[test]
     fn a_colour_set_replaces_the_indexed_set_of_its_name() {
         use crate::sheets::fixture;
@@ -2867,19 +2922,14 @@ mod tests {
         // Picking takes the thing and not its shadow.
         assert!(a.solid_at(f.page, x, y));
         assert!(!a.solid_at(f.page, x + 2, y));
-        // Everything keyed by name still works: the later ages are the
-        // indexed sets', and the variant lookups are unchanged.
-        assert_eq!(
-            a.variant(kinds::HOUSE, 2, 0),
-            indexed.variant(kinds::HOUSE, 2, 0)
-        );
+        // The later ages are the colour set's too, not the indexed sets'.
+        assert_eq!(a.variant(kinds::HOUSE, 2, 0), kinds::HOUSE);
         let (bronze, _) = a.frame(a.variant(kinds::HOUSE, 2, 0), 0).unwrap();
-        assert_eq!(bronze.page & COLOUR_PAGE, 0);
-        // The indexed pages are as they were.
-        assert_eq!(
-            (a.width, a.height, a.pages),
-            (indexed.width, indexed.height, indexed.pages)
-        );
+        assert_eq!(bronze.page, COLOUR_PAGE);
+        // The indexed pages are as wide as they were, and no more of them:
+        // the house's later ages have left them.
+        assert_eq!(a.width, indexed.width);
+        assert!(a.pages <= indexed.pages);
     }
 
     /// Colour pages are sized by their own frames, whatever the indexed
@@ -2964,10 +3014,130 @@ mod tests {
         assert_eq!(a.colour_pages, 1);
         assert!(a.colour.len() < 1 << 20, "{} bytes", a.colour.len());
         assert!(a.colour_width <= 64 && a.colour_height <= 64);
+        assert_eq!(a.width, indexed.width);
+        assert!(a.pages <= indexed.pages);
+    }
+
+    /// The new art's rule (`docs/look/buildings.md`, "Which look"): a kind
+    /// with any colour set is drawn from colour sets in every age and
+    /// architecture, the architecture's own if it has one, else the first
+    /// architecture's; a colour set named for an age wins from that age
+    /// on; a kind with no colour set keeps its old art. Without colour
+    /// sets nothing changes.
+    #[test]
+    fn with_the_new_art_a_kind_with_a_colour_set_never_falls_back_to_old_art() {
+        use crate::sheets::fixture;
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
+        let (indexed, _) = crate::sheets::load_all(&dir);
+        assert!(indexed.iter().any(|s| s.name == "barracks_egyptian_bronze"));
+        let old = Atlas::with_sheets(&indexed);
+        let colour = |a: &Atlas, kind| a.frame(kind, 0).unwrap().0.page & COLOUR_PAGE != 0;
+
+        let mut sheets = indexed.clone();
+        sheets.push(fixture::building("rule", "barracks"));
+        sheets.push(fixture::building("rule", "barracks_egyptian"));
+        let a = Atlas::with_sheets(&sheets);
+        for age in 0..4 {
+            for arch in 0..4 {
+                let look = a.variant(kinds::BARRACKS, age, arch);
+                let want = if arch == 1 {
+                    look_id(kinds::BARRACKS, 0, 1)
+                } else {
+                    kinds::BARRACKS
+                };
+                assert_eq!(look, want, "age {age}, architecture {arch}");
+                assert!(colour(&a, look), "age {age}, architecture {arch}");
+                assert!(a.stage_frame(look, 2).is_some() && a.own_rubble(look).is_some());
+            }
+        }
+        // No indexed barracks of any age or architecture is in the atlas.
+        let barracks: Vec<_> = a
+            .loaded_sets
+            .iter()
+            .filter(|s| set_target(s).is_some_and(|(k, _, _)| k == kinds::BARRACKS))
+            .collect();
+        assert_eq!(barracks, ["barracks", "barracks_egyptian"]);
+        // A kind with no colour set keeps its old art, ages and all.
+        for age in 0..4 {
+            for arch in 0..4 {
+                let look = a.variant(kinds::HOUSE, age, arch);
+                assert_eq!(look, old.variant(kinds::HOUSE, age, arch));
+                assert!(!colour(&a, look));
+            }
+        }
+
+        // A colour set named for an age wins from that age on, behind the
+        // architecture's own look as an indexed one does.
+        sheets.push(fixture::building("rule", "barracks_iron"));
+        let a = Atlas::with_sheets(&sheets);
+        assert_eq!(a.variant(kinds::BARRACKS, 2, 0), kinds::BARRACKS);
         assert_eq!(
-            (a.width, a.height, a.pages),
-            (indexed.width, indexed.height, indexed.pages)
+            a.variant(kinds::BARRACKS, 3, 0),
+            look_id(kinds::BARRACKS, 3, 0)
         );
+        assert_eq!(
+            a.variant(kinds::BARRACKS, 3, 2),
+            look_id(kinds::BARRACKS, 3, 0)
+        );
+        assert_eq!(
+            a.variant(kinds::BARRACKS, 3, 1),
+            look_id(kinds::BARRACKS, 0, 1)
+        );
+        assert!(colour(&a, look_id(kinds::BARRACKS, 3, 0)));
+
+        // Only another architecture's colour set: it stands in for the
+        // first architecture's, in every age.
+        let mut sheets = indexed.clone();
+        sheets.push(fixture::building("rule", "temple_egyptian"));
+        let a = Atlas::with_sheets(&sheets);
+        for age in 0..4 {
+            for arch in 0..4 {
+                let look = a.variant(kinds::TEMPLE, age, arch);
+                assert_eq!(look, look_id(kinds::TEMPLE, 0, 1));
+                assert!(colour(&a, look));
+            }
+        }
+
+        // The new art off: no colour set is loaded, and the rule is inert.
+        let (off, _) = crate::sheets::load_art(Some(&dir), None, false);
+        let a = Atlas::with_sheets(&off);
+        for kind in [kinds::BARRACKS, kinds::TEMPLE, kinds::HOUSE] {
+            for age in 0..4 {
+                for arch in 0..4 {
+                    assert_eq!(a.variant(kind, age, arch), old.variant(kind, age, arch));
+                }
+            }
+        }
+        assert_eq!(a.loaded_sets, old.loaded_sets);
+    }
+
+    /// A colour building's three construction stages and its rubble are
+    /// filed as an indexed set's are, on colour pages, each trimmed with
+    /// its anchor moved by the trim so all land on one ground point.
+    #[test]
+    fn a_colour_building_brings_its_stages_and_rubble() {
+        use crate::sheets::fixture;
+        let a = Atlas::with_sheets(&[fixture::building("stages", "house")]);
+        for stage in 0..3u8 {
+            let f = a.stage_frame(kinds::HOUSE, stage).unwrap();
+            assert_eq!((f.anim, f.index, f.page), (Anim::Construction, stage, COLOUR_PAGE));
+            // A row of stage + 1 pixels at (2, 4): trimmed to (2, 4), the
+            // anchor (4, 5) moves to (2, 1); the width rounds to the scale.
+            assert_eq!((f.anchor_x, f.anchor_y), (2, 1));
+            assert_eq!(
+                a.rgba_at(f.page, f.x as u32, f.y as u32),
+                fixture::stage_colour(stage as u32)
+            );
+        }
+        let r = a.own_rubble(kinds::HOUSE).unwrap();
+        assert_eq!((r.anim, r.page), (Anim::Rubble, COLOUR_PAGE));
+        assert_eq!((r.anchor_x, r.anchor_y), (2, 1));
+        assert_eq!(a.rgba_at(r.page, r.x as u32 + 1, r.y as u32), fixture::RUBBLE);
+        let (idle, _) = a.frame(kinds::HOUSE, 0).unwrap();
+        assert_eq!((idle.anim, idle.anchor_x, idle.anchor_y), (Anim::Idle, 2, 3));
+        assert_eq!(a.mask_at(idle.page, idle.x as u32, idle.y as u32), 255);
+        let c = a.anim_info(kinds::HOUSE, Anim::Construction).unwrap();
+        assert_eq!((c.frames, c.loops), (3, false));
     }
 
     #[test]

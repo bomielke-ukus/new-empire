@@ -1815,4 +1815,163 @@ mod tests {
         }
         assert!(drawn(&sim).is_empty(), "only the rubble is left");
     }
+
+    /// A colour building (`docs/look/buildings.md`) is drawn as an indexed
+    /// set is: its own construction stage by progress, uncropped and on
+    /// one anchor with the finished building; then the building; then,
+    /// fallen, its own rubble with the building sinking into it.
+    #[test]
+    fn a_colour_building_rises_through_its_stages_and_falls_to_its_rubble() {
+        use crate::sheets::fixture;
+        use crate::sprites::COLOUR_PAGE;
+        use sim::{Command, CommandKind};
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
+        let (mut sheets, _) = crate::sheets::load_all(&dir);
+        sheets.push(fixture::building("scene", "house"));
+        let atlas = Atlas::with_sheets(&sheets);
+        let mut sim = Simulation::new(
+            5,
+            SimConfig {
+                map: MapSpec {
+                    kind: MapKind::Flat,
+                    size: 48,
+                    players: 2,
+                },
+                starting_stockpile: [5000; 4],
+                wander: false,
+                ..SimConfig::default()
+            },
+        );
+        let spawn = |sim: &mut Simulation, player, kind, x, y| {
+            sim.issue(Command {
+                player,
+                kind: CommandKind::Spawn {
+                    kind,
+                    pos: sim::nav::centre((x, y)),
+                },
+            });
+        };
+        for k in 0..5 {
+            spawn(&mut sim, 0, kinds::VILLAGER, 10 + k, 10);
+        }
+        for _ in 0..3 {
+            sim.step();
+        }
+        let w = sim.world();
+        let builders: Vec<_> = w
+            .slots()
+            .filter(|s| w.kind[s.index()] == kinds::VILLAGER && w.owner[s.index()] == 0)
+            .map(|s| w.id_at(s))
+            .collect();
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Build {
+                kind: kinds::HOUSE,
+                x: 12,
+                y: 13,
+                ids: builders,
+            },
+        });
+        for _ in 0..3 {
+            sim.step();
+        }
+        let hi = {
+            let w = sim.world();
+            w.slots()
+                .find(|s| w.kind[s.index()] == kinds::HOUSE)
+                .map(|s| s.index())
+                .unwrap()
+        };
+        let drawn = |sim: &Simulation| {
+            Scene::build(sim, &atlas, None, 0.0)
+                .sprites
+                .into_iter()
+                .filter(|s| s.slot == hi as u32)
+                .collect::<Vec<_>>()
+        };
+        // Where a sprite puts its frame's anchor: the same ground point for
+        // every stage, the building and its rubble.
+        let ground = |s: &SpriteInstance, f: &crate::sprites::Frame| {
+            let (ax, ay) = f.draw_anchor();
+            (s.x + ax, s.y + ay)
+        };
+        let idle = *atlas.frame(kinds::HOUSE, 0).unwrap().0;
+        assert_ne!(idle.page & COLOUR_PAGE, 0);
+        let total = kinds::info(kinds::HOUSE).build_work().max(1);
+        let mut seen = [false; 4];
+        let mut at = None;
+        for _ in 0..3000 {
+            sim.step();
+            let s = drawn(&sim)[0];
+            let frame = match sim.world().construction[hi] {
+                Some(done) => {
+                    let stage = (done / (total / 3).max(1)).min(2) as u8;
+                    seen[stage as usize] = true;
+                    *atlas.stage_frame(kinds::HOUSE, stage).unwrap()
+                }
+                None => {
+                    seen[3] = true;
+                    idle
+                }
+            };
+            assert_ne!(s.page & COLOUR_PAGE, 0);
+            assert_eq!((s.u, s.v, s.uw, s.vh), (frame.x, frame.y, frame.w, frame.h));
+            assert_eq!(s.h, frame.draw_h(), "a stage of its own is not cropped");
+            let g = ground(&s, &frame);
+            let a: (f32, f32) = *at.get_or_insert(g);
+            assert!(
+                (a.0 - g.0).abs() <= 1.0 && (a.1 - g.1).abs() <= 1.0,
+                "every stage on one anchor: {a:?} {g:?}"
+            );
+            if seen[3] {
+                break;
+            }
+        }
+        assert_eq!(seen, [true; 4], "every stage was drawn");
+        // Brought down by their clubmen: the rubble, and the building
+        // sinking into it at first.
+        for k in 0..6 {
+            spawn(&mut sim, 1, kinds::CLUBMAN, 14 + k, 17);
+        }
+        for _ in 0..3 {
+            sim.step();
+        }
+        let w = sim.world();
+        let clubs: Vec<_> = w
+            .slots()
+            .filter(|s| w.kind[s.index()] == kinds::CLUBMAN)
+            .map(|s| w.id_at(s))
+            .collect();
+        let house = w.id_at(w.slots().find(|s| s.index() == hi).unwrap());
+        sim.issue(Command {
+            player: 1,
+            kind: CommandKind::Attack {
+                ids: clubs,
+                target: house,
+            },
+        });
+        for _ in 0..6000 {
+            sim.step();
+            if sim.world().dying[hi] > 0 {
+                break;
+            }
+        }
+        assert!(sim.world().dying[hi] > 0, "the house fell");
+        let rubble = *atlas.own_rubble(kinds::HOUSE).unwrap();
+        assert_ne!(rubble.page & COLOUR_PAGE, 0);
+        let sprites = drawn(&sim);
+        let r = sprites
+            .iter()
+            .find(|s| (s.u, s.v) == (rubble.x, rubble.y))
+            .expect("its own rubble");
+        let (g, a) = (ground(r, &rubble), at.unwrap());
+        assert!(
+            (a.0 - g.0).abs() <= 1.0 && (a.1 - g.1).abs() <= 1.0,
+            "the rubble on its footprint: {a:?} {g:?}"
+        );
+        assert!(
+            sprites.iter().any(|s| (s.u, s.v) == (idle.x, idle.y)),
+            "the building sinking into it"
+        );
+    }
 }

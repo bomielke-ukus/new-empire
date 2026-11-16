@@ -1587,6 +1587,419 @@ def barracks(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
     return r
 
 
+# --- more props -------------------------------------------------------------
+
+def sack(root, x, y, z=0.0, s=1.0, c="linen", tie=None):
+    lathe([(0.0, 0), (0.10 * s, 0.0), (0.135 * s, 0.07 * s), (0.125 * s, 0.17 * s),
+           (0.075 * s, 0.24 * s), (0.03 * s, 0.26 * s), (0.05 * s, 0.30 * s), (0, 0.31 * s)],
+          M(c, rough=0.95), (x, y, z), root, segs=10, scale=(1, 0.85, 1))
+    if tie:
+        lathe([(0.034 * s, 0.25 * s), (0.034 * s, 0.27 * s)], tie, (x, y, z), root, segs=8)
+
+
+def crate(root, x, y, z=0.0, s=1.0, rz=0.0, fill=None):
+    e = _sub(root, (x, y, z), rz, s, "crate")
+    box((0.30, 0.30, 0.22), (0, 0, 0.11), M("cedar"), parent=e)
+    for t in (-1, 1):
+        box((0.025, 0.31, 0.23), (t * 0.14, 0, 0.115), M("wood_dark"), parent=e)
+        box((0.31, 0.025, 0.23), (0, t * 0.14, 0.115), M("wood_dark"), parent=e)
+    if fill:
+        for i in range(5):
+            sphere(0.06, (-0.07 + 0.07 * (i % 3), -0.05 + 0.09 * (i // 3), 0.23), M(fill),
+                   parent=e, segs=8, scale=(1, 1, 0.7))
+    return e
+
+
+def logs(root, x, y, z=0.0, rows=(4, 3, 2), L=0.9, r=0.055, rz=0.0, c="wood"):
+    """A stack of trimmed logs lying along local X."""
+    e = _sub(root, (x, y, z), rz, 1.0, "logs")
+    ring = M((0.88, 0.70, 0.46))
+    for row, n in enumerate(rows):
+        for i in range(n):
+            yy = (i - (n - 1) / 2) * 2.02 * r
+            zz = r + row * r * 1.72
+            rod((-L / 2, yy, zz), (L / 2, yy, zz), r, c if (i + row) % 2 else "wood_dark", e, segs=8)
+            for sx in (-1, 1):
+                cyl(r * 0.86, 0.006, (sx * (L / 2 + 0.002), yy, zz), ring, rot=(0, math.pi / 2, 0),
+                    parent=e, segs=8)
+    return e
+
+
+def planks(root, x, y, z=0.0, n=5, L=0.8, w=0.16, rz=0.0):
+    e = _sub(root, (x, y, z), rz, 1.0, "planks")
+    for i in range(n):
+        box((L - 0.03 * (i % 2), w, 0.035), (0.01 * (i % 3), 0.01 * (i % 2), 0.02 + i * 0.037),
+            M(("cedar", "wood", (0.70, 0.50, 0.30))[i % 3]), parent=e)
+    for sx in (-1, 1):
+        box((0.05, w + 0.04, 0.05), (sx * L * 0.35, 0, 0.0), M("wood_dark"), parent=e)
+    return e
+
+
+def blocks(root, x, y, z=0.0, rz=0.0, n=3):
+    """Dressed stone blocks, stacked."""
+    e = _sub(root, (x, y, z), rz, 1.0, "blocks")
+    st = brickmat("stone_lt", 0.9, 0.9, 0.04, 0.9, blotch=0.12)
+    lay = [(-0.17, 0, 0), (0.17, 0, 0), (0, 0.02, 1), (-0.17, 0.30, 0), (0.17, 0.30, 0)][:n + 2]
+    for dx, dy, lev in lay:
+        box((0.32, 0.27, 0.22), (dx, dy, 0.11 + lev * 0.225), st, parent=e, bevel=0.012)
+    return e
+
+
+def gold_heap(root, x, y, z=0.0, s=1.0):
+    """A basket of gold rings and nuggets, ingots beside it."""
+    e = _sub(root, (x, y, z), 0.0, s, "gold")
+    g = gold()
+    lathe([(0.12, 0), (0.17, 0.12), (0.18, 0.13), (0.14, 0.13)],
+          stripemat(("straw", "thatch", "straw", "red"), 0.035, "z"), (0, 0, 0), e, segs=12)
+    rnd = random.Random(3)
+    for i in range(9):
+        a = i * 2.4
+        rr = 0.03 + 0.08 * ((i * 37) % 10) / 10
+        sphere(0.045, (rr * math.cos(a), rr * math.sin(a), 0.13 + rnd.uniform(0, 0.04)), g,
+               parent=e, segs=8, scale=(1, 1, 0.7))
+    for i in range(3):
+        box((0.16, 0.07, 0.04), (0.28, -0.05 + 0.08 * i, 0.02), g, parent=e, bevel=0.01)
+    box((0.16, 0.07, 0.04), (0.28, 0.03, 0.06), g, parent=e, bevel=0.01)
+    return e
+
+
+def hay(root, x, y, z=0.0, s=1.0, seed=0):
+    m = mottle("straw", 0.16, 9.0, rough=1.0)
+    blob(0.30 * s, (x, y, z + 0.08 * s), m, scale=(1.2, 1.0, 0.62), parent=root, seed=seed,
+         rough=0.10)
+    for i in range(6):
+        a = i * 1.1 + seed
+        rod((x + 0.25 * s * math.cos(a), y + 0.2 * s * math.sin(a), z + 0.02),
+            (x + 0.36 * s * math.cos(a + 0.2), y + 0.30 * s * math.sin(a + 0.2), z + 0.01),
+            0.006, "straw", root, segs=4)
+
+
+def trough(root, x, y, z=0.0, L=0.7, rz=0.0):
+    e = _sub(root, (x, y, z), rz, 1.0, "trough")
+    box((L, 0.24, 0.20), (0, 0, 0.10), brickmat("stone_lt", 0.3, 0.1, 0.05), parent=e, bevel=0.012)
+    box((L - 0.07, 0.17, 0.02), (0, 0, 0.18), mat(PAL["water"], rough=0.12, emit=0.08), parent=e)
+    box((L + 0.004, 0.244, 0.03), (0, 0, 0.13), M("blue"), parent=e)
+    return e
+
+
+def mat_reed(root, x, y, z, sx, sy, cols=("straw", "thatch"), rz=0.0, period=0.035):
+    return box((sx, sy, 0.012), (x, y, z + 0.006), stripemat(cols, period, "x"), parent=root,
+               rot=(0, 0, rz))
+
+
+def bow(root, p, ang=0.0, h=0.62, c="wood_dark", tilt=0.18):
+    """A strung bow standing on its tip, in the plane of `ang` (about Z)."""
+    e = _sub(root, p, ang, 1.0, "bow")
+    pts = []
+    for i in range(9):
+        t = i / 8
+        pts.append(Vector((0.06 * math.sin(math.pi * t) + tilt * t * h * 0.3, 0, t * h)))
+    for a, b in zip(pts, pts[1:]):
+        rod(a, b, 0.010, c, e, segs=5)
+    rod(pts[0], pts[-1], 0.003, "linen", e, segs=3)
+    return e
+
+
+def quiver(root, x, y, z=0.0, c="red", band=None, lean=(0.0, 0.0)):
+    top = (x + lean[0], y + lean[1], z + 0.42)
+    rod((x, y, z), top, 0.045, c, root, r_top=0.05, segs=8)
+    if band is not None:
+        rod((x + lean[0] * 0.55, y + lean[1] * 0.55, z + 0.22),
+            (x + lean[0] * 0.65, y + lean[1] * 0.65, z + 0.27), 0.052, band, root, segs=8)
+    for i in range(4):
+        a = i * 1.7
+        q = (top[0] + 0.02 * math.cos(a), top[1] + 0.02 * math.sin(a), top[2])
+        rod(q, (q[0], q[1], q[2] + 0.10), 0.005, "wood", root, segs=3)
+        box((0.012, 0.03, 0.05), (q[0], q[1], q[2] + 0.09), M(("white", "red")[i % 2]), parent=root)
+
+
+def scrolls(root, x, y, z=0.0, n=5, rz=0.0, L=0.26):
+    """Rolled papyri lying in a little pile."""
+    e = _sub(root, (x, y, z), rz, 1.0, "scrolls")
+    pap = M((0.96, 0.90, 0.70))
+    k = 0
+    for row, cnt in enumerate((n - n // 2, n // 2)):
+        for i in range(cnt):
+            yy = (i - (cnt - 1) / 2) * 0.062
+            zz = 0.03 + row * 0.052
+            rod((-L / 2, yy, zz), (L / 2, yy, zz), 0.029, pap, e, segs=8)
+            for sx in (-1, 1):
+                cyl(0.031, 0.008, (sx * L / 2, yy, zz), M(("red", "blue", "yellow")[k % 3]),
+                    rot=(0, math.pi / 2, 0), parent=e, segs=8)
+            k += 1
+    return e
+
+
+def desk(root, x, y, z=0.0, rz=0.0):
+    """A scribe's low table with a palette, a pot of reeds and an open papyrus."""
+    e = _sub(root, (x, y, z), rz, 1.0, "desk")
+    box((0.38, 0.24, 0.03), (0, 0, 0.20), M("cedar"), parent=e)
+    for sx in (-1, 1):
+        box((0.03, 0.22, 0.19), (sx * 0.16, 0, 0.095), M("wood_dark"), parent=e)
+    box((0.22, 0.15, 0.006), (-0.03, 0, 0.218), M((0.97, 0.92, 0.74)), parent=e)
+    for i in range(3):
+        box((0.16, 0.006, 0.004), (-0.03, -0.04 + 0.03 * i, 0.222), M("dark"), parent=e)
+    box((0.04, 0.16, 0.015), (0.14, 0, 0.222), M("white"), parent=e)
+    sphere(0.012, (0.14, -0.03, 0.232), M("red"), parent=e, segs=6)
+    sphere(0.012, (0.14, 0.02, 0.232), M("dark"), parent=e, segs=6)
+    return e
+
+
+def horse(root, loc, facing=0.0, coat="cedar", cloth=None, pose="stand"):
+    import figures as F
+    e, b = F._start("horse", loc, facing, root)
+    F._quad(b, "horse", pose, coat=coat, dark="hair_black", cloth=cloth)
+    b.finish(e)
+    return e
+
+
+def target(root, x, y, z=0.0, player=RED, rz=0.0, s=1.0, arrows=3, seed=0):
+    """A round straw butt on a stand, painted face toward -Y before rz."""
+    e = _sub(root, (x, y, z), rz, s, "target")
+    zc = 0.58
+    for sx in (-1, 1):
+        rod((sx * 0.20, -0.02, 0), (sx * 0.12, 0.02, zc + 0.20), 0.018, "wood", e, segs=6)
+    rod((0, 0.34, 0), (0, 0.05, zc + 0.12), 0.018, "wood_dark", e, segs=6)
+    rod((-0.2, 0.0, 0.18), (0.2, 0.0, 0.18), 0.014, "wood_dark", e, segs=5)
+    rot = (math.pi / 2, 0, 0)
+    cyl(0.30, 0.12, (0, 0.06, zc), mottle("straw", 0.12, 14.0), rot=rot, parent=e, segs=20)
+    for i, (rr, c) in enumerate(((0.27, "white"), (0.215, player), (0.15, "white"),
+                                 (0.095, "red"), (0.04, "yellow"))):
+        cyl(rr, 0.01, (0, -0.002 - 0.004 * i, zc), M(c), rot=rot, parent=e, segs=20)
+    rnd = random.Random(seed)
+    for i in range(arrows):
+        a = rnd.uniform(0, 6.28)
+        rr = rnd.uniform(0.03, 0.2)
+        px, pz = rr * math.cos(a), zc + rr * math.sin(a)
+        rod((px, -0.02, pz), (px + rnd.uniform(-0.05, 0.05), -0.36, pz - 0.05), 0.006, "wood", e, segs=3)
+        box((0.008, 0.06, 0.035), (px, -0.33, pz - 0.045), M(("white", "red")[i % 2]), parent=e)
+    return e
+
+
+def reed_roof(root, x0, y0, x1, y1, z0, z1, axis="y", c=("thatch", "straw"), t=0.06, edge=None):
+    """A flat-ish mat roof; z0 at y0 (or x0), z1 at the other side."""
+    if axis == "y":
+        vs = [(x0, y0, z0), (x1, y0, z0), (x1, y1, z1), (x0, y1, z1)]
+    else:
+        vs = [(x0, y0, z0), (x1, y0, z1), (x1, y1, z1), (x0, y1, z0)]
+    vs += [(x, y, z + t) for x, y, z in vs]
+    m = stripemat(tuple(c) + ((0.70, 0.55, 0.26),), 0.06, "x" if axis == "y" else "y")
+    mesh(vs, [(0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)],
+         m, parent=root, name="reedroof")
+    if edge is not None:
+        if axis == "y":
+            box((x1 - x0 + 0.04, 0.025, 0.07), ((x0 + x1) / 2, y0 - 0.012, z0 + t / 2), M(edge),
+                parent=root)
+        else:
+            box((0.025, y1 - y0 + 0.04, 0.07), (x1 + 0.012, (y0 + y1) / 2, z1 + t / 2), M(edge),
+                parent=root)
+
+
+def post(root, x, y, h, r=0.05, z=0.0, c="wood"):
+    """A palm-log post with a cap."""
+    rod((x, y, z), (x, y, z + h), r, c, root, r_top=r * 0.9, segs=8)
+    box((r * 2.6, r * 2.6, 0.04), (x, y, z + h - 0.02), M("wood_dark"), parent=root)
+
+
+def hangings(root, x0, x1, y, z, player, n=3, h=0.30, side="y"):
+    """Strips of player cloth hanging from a beam (y wall) with gold tassels."""
+    for i in range(n):
+        u = x0 + (x1 - x0) * (i + 0.5) / n
+        w = (x1 - x0) / n * 0.62
+        if side == "y":
+            box((w, 0.012, h), (u, y, z - h / 2), M(player), parent=root)
+            box((w, 0.014, 0.03), (u, y, z - h + 0.03), gold(), parent=root)
+        else:
+            box((0.012, w, h), (y, u, z - h / 2), M(player), parent=root)
+            box((0.014, w, 0.03), (y, u, z - h + 0.03), gold(), parent=root)
+
+
+def battered(root, sx, sy, h, loc, m, k=0.10):
+    """A block whose walls lean in by k on every side."""
+    return loft([(sx, sy, 0), (sx - k, sy - k, h)], m, loc, root)
+
+
+# --- watch tower ---------------------------------------------------------------
+
+def watch_tower(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
+    """1x1: a battered sandstone tower with a linen-shaded lookout."""
+    r = empty("eg_watch_tower", loc, rot_z, parent)
+    pad(r, 1, 1)
+    stone = brickmat("stone", 0.28, 0.10, 0.06, 0.84)
+    box((0.94, 0.94, 0.07), (0, 0, 0.035), brickmat("stone_lt", 0.25, 0.07), parent=r, bevel=0.01)
+    z0, H, b0, b1 = 0.07, 1.90, 0.78, 0.62
+    loft([(b0 + 0.04, b0 + 0.04, 0), (b0 + 0.03, b0 + 0.03, 0.10)], brickmat("stone_dk", 0.28, 0.10),
+         (0, 0, z0), r)
+    loft([(b0, b0, 0), (b1, b1, H)], stone, (0, 0, z0), r)
+    for ex, ey in ((-1, -1), (1, -1), (1, 1)):
+        rod((ex * b0 / 2, ey * b0 / 2, z0), (ex * b1 / 2, ey * b1 / 2, z0 + H), 0.02, "yellow", r, segs=6)
+    sl = (b0 - b1) / 2
+    for o, u, v in (((0, -b0 / 2, z0), (1, 0, 0), (0, sl, H)), ((b0 / 2, 0, z0), (0, 1, 0), (-sl, 0, H))):
+        p = Paint(o, u, v, r)
+        ln = Vector(v).length
+        hw = lambda b: b0 / 2 - sl * (b / ln) - 0.025  # noqa: E731
+        p.rect(-hw(0.13), 0.13, hw(0.13), 0.21, "blue")
+        p.rect(-hw(0.22), 0.22, hw(0.22), 0.245, "yellow")
+        p.rect(-hw(0.25), 0.25, hw(0.25), 0.28, "red")
+        p.rect(-hw(ln), ln - 0.24, hw(ln), ln - 0.03, "white")
+        p.rect(-hw(ln), ln - 0.27, hw(ln), ln - 0.24, "red")
+        for i in range(5):
+            a = (i - 2) * 0.115
+            p.rect(a - 0.03, ln - 0.21, a + 0.03, ln - 0.06, ("blue", "red", "green")[i % 3], 1)
+        # arrow slits
+        for b in (1.02, 1.40):
+            p.rect(-0.022, b, 0.022, b + 0.20, "dark")
+            p.rect(-0.05, b - 0.03, 0.05, b, "stone_lt")
+        p.done()
+    door(r, "y", -b0 / 2 + 0.01, -0.08, 0.24, 0.70, "blue", "red", z=z0 + 0.10)
+    slab(r, "y", -b0 / 2 + 0.03, 0.22, z0 + 0.36, 0.16, 0.42, 0.016, "white")
+    pj = Paint((0.22, -b0 / 2 + 0.012, z0 + 0.36), (1, 0, 0), (0, 0, 1), r)
+    glyphs(pj, 0, 0.03, 0.39, 0.06, 77, 0)
+    pj.done()
+    # a shield hung on the +X face
+    shield(r, b0 / 2 - 0.02, 0.0, z0 + 0.42, player, (0, -0.1, math.pi / 2), 0.85, 7)
+    zt = cavetto(r, b1, b1, z0 + H, 0.15, 0.06, (0, 0), 0.09)
+    # the lookout: round-topped merlons, a linen sunshade, a signal brazier
+    hx = (b1 + 0.12) / 2 - 0.04
+    for (p0, p1) in (((-hx, -hx), (hx, -hx)), ((hx, -hx), (hx, hx)), ((hx, hx), (-hx, hx)),
+                     ((-hx, hx), (-hx, -hx))):
+        merlons(r, p0, p1, zt, 3, 0.12, 0.10, 0.07, brickmat("stone_lt", 0.2, 0.06))
+    awning(r, -0.26, -0.26, 0.26, 0.26, zt, 0.62, player, sag=0.04, lean=0.07)
+    lathe([(0.0, 0), (0.07, 0.02), (0.10, 0.09), (0.09, 0.10)], M("bronze", metal=0.6, rough=0.4),
+          (0.16, -0.16, zt + 0.0), r, segs=10)
+    sphere(0.06, (0.16, -0.16, zt + 0.12), mat((1.0, 0.55, 0.12), emit=3.0), parent=r, segs=8,
+           scale=(1, 1, 1.5))
+    flagpole(r, -0.24, 0.24, 1.15, player, zt + 0.62, 0.025, (0.50, 0.16), seed=3)
+    jar(r, 0.36, -0.40, z0, 0.6, "terracotta", "white")
+    return r
+
+
+# --- archery range ---------------------------------------------------------------
+
+def archery_range(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
+    """2x2: a shooting yard: straw targets before an earth butt, a reed shelter
+    with bow racks and quivers, pennants at the shooting line."""
+    r = empty("eg_archery_range", loc, rot_z, parent)
+    pad(r, 2, 2)
+    mud = brickmat("mud", 0.2, 0.07, 0.09, 0.78)
+    white = brickmat("white", 0.24, 0.085, 0.03, 0.9)
+    # the butt: an earth bank along the back, faced with mudbrick
+    loft([(1.80, 0.34, 0, 0.08, 0.76), (1.70, 0.18, 0.46, 0.08, 0.80), (1.62, 0.06, 0.56, 0.08, 0.82)],
+         mottle("earth", 0.12, 4.0), (0, 0, 0.02), r)
+    box((1.80, 0.10, 0.62), (0.08, 0.92, 0.31), mud, parent=r)
+    box((1.82, 0.12, 0.04), (0.08, 0.92, 0.64), M("white"), parent=r)
+    # targets in a row before it
+    for i, x in enumerate((-0.42, 0.18, 0.72)):
+        target(r, x, 0.42, 0.02, player, rz=0.0 if i != 2 else 0.25, s=1.0, arrows=2 + i, seed=i)
+    # a copper oxhide ingot on a post, shot through (Amenhotep's target)
+    rod((0.80, -0.20, 0), (0.80, -0.20, 0.72), 0.03, "wood_dark", r, segs=6)
+    vs = []
+    for a, b in ((-1, -1), (-0.6, -0.8), (0.6, -0.8), (1, -1), (0.8, 0), (1, 1), (0.6, 0.8),
+                 (-0.6, 0.8), (-1, 1), (-0.8, 0)):
+        vs.append((0.80 + a * 0.14, -0.215, 0.72 + b * 0.10))
+    mesh(vs + [(x, y + 0.02, z) for x, y, z in vs], [tuple(range(10)), tuple(range(19, 9, -1))] +
+         [(i, (i + 1) % 10, 10 + (i + 1) % 10, 10 + i) for i in range(10)],
+         mat((0.86, 0.46, 0.24), rough=0.35, metal=0.7), parent=r)
+    for k in range(2):
+        rod((0.78 + 0.05 * k, -0.20, 0.70 + 0.04 * k), (0.70 + 0.05 * k, -0.52, 0.66 + 0.04 * k),
+            0.006, "wood", r, segs=3)
+    # the shelter on the left: palm posts, a reed roof, a whitewashed back wall
+    x0, x1, y0, y1 = -0.96, -0.40, -0.70, 0.30
+    box((0.10, y1 - y0 + 0.04, 1.02), (x0 + 0.05, (y0 + y1) / 2, 0.51), white, parent=r)
+    band(r, 0.10, y1 - y0 + 0.04, 0.0, 0.14, "red", (x0 + 0.05, (y0 + y1) / 2))
+    band(r, 0.10, y1 - y0 + 0.04, 0.16, 0.03, "blue", (x0 + 0.05, (y0 + y1) / 2))
+    for y in (y0 + 0.05, y1 - 0.05):
+        post(r, x1, y, 0.98, 0.045)
+    reed_roof(r, x0 - 0.02, y0 - 0.04, x1 + 0.08, y1 + 0.04, 1.08, 0.96, axis="x", edge=player)
+    # bow rack against the wall
+    for y in (y0 + 0.16, y1 - 0.16):
+        rod((x0 + 0.13, y, 0), (x0 + 0.13, y, 0.80), 0.016, "wood_dark", r, segs=6)
+    rod((x0 + 0.13, y0 + 0.12, 0.78), (x0 + 0.13, y1 - 0.12, 0.78), 0.014, "wood_dark", r, segs=5)
+    for i in range(5):
+        y = y0 + 0.24 + i * 0.13
+        bow(r, (x0 + 0.17, y, 0.08), math.pi / 2, 0.66, ("wood_dark", "cedar")[i % 2], tilt=-0.15)
+    for i, y in enumerate((-0.52, -0.32, 0.10)):
+        quiver(r, x0 + 0.34, y, 0.0, ("red", "leather", "red")[i], player if i != 1 else "yellow",
+               lean=(-0.08, 0.0))
+    jar(r, x0 + 0.38, 0.0 - 0.18, 0.0, 0.8, "white", "blue")
+    for k in range(5):
+        rod((x0 + 0.38 + 0.01 * k, -0.18 + 0.01 * (k % 2), 0.2), (x0 + 0.36 + 0.03 * k, -0.20, 0.52),
+            0.005, "wood", r, segs=3)
+    # the shooting line: a reed mat, pennants, spent arrows in the sand
+    mat_reed(r, -0.05, -0.70, 0.02, 0.90, 0.20, ("straw", "red", "straw", "straw"))
+    for x in (-0.30, 0.55):
+        box((0.10, 0.10, 0.10), (x, -0.86, 0.05), M("stone_lt"), parent=r)
+        flagpole(r, x, -0.86, 1.25, player, 0.10, 0.022, (0.34, 0.12), seed=int(x * 10))
+    for k in range(5):
+        x, y = -0.2 + 0.2 * k, 0.05 + 0.04 * (k % 3)
+        rod((x, y, 0.02), (x - 0.05, y - 0.22, 0.12), 0.005, "wood", r, segs=3)
+    quiver(r, 0.95, -0.85, 0.0, "red", player, lean=(-0.05, 0.05))
+    return r
+
+
+# --- stable ----------------------------------------------------------------------
+
+def stable(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
+    """2x2: stalls under a reed roof against a mudbrick wall, horses in a
+    railed yard, hay, a stone trough."""
+    r = empty("eg_stable", loc, rot_z, parent)
+    pad(r, 2, 2)
+    mud = brickmat("mud", 0.2, 0.07, 0.09, 0.78)
+    white = brickmat("white", 0.24, 0.085, 0.03, 0.9)
+    # stall block: back (+Y) and left (-X) walls, a reed roof on palm posts
+    bh = 1.15
+    box((1.92, 0.12, bh), (0, 0.90, bh / 2), mud, parent=r)
+    box((0.12, 1.30, bh), (-0.90, 0.31, bh / 2), mud, parent=r)
+    for (sx, sy, x, y) in ((1.92, 0.12, 0, 0.90), (0.12, 1.30, -0.90, 0.31)):
+        band(r, sx, sy, 0.0, 0.12, "mud_dk", (x, y))
+        band(r, sx, sy, bh - 0.20, 0.07, "white", (x, y))
+        band(r, sx, sy, bh - 0.17, 0.025, "red", (x, y), out=0.012)
+        box((sx + 0.03, sy + 0.03, 0.04), (x, y, bh + 0.02), M("white"), parent=r)
+    # stall partitions and posts
+    yf = 0.30
+    for x in (-0.84, -0.30, 0.24, 0.78):
+        post(r, x, yf, 1.04, 0.045)
+    for x in (-0.30, 0.24):
+        box((0.05, 0.56, 0.62), (x, 0.60, 0.31), M("wood"), parent=r)
+        box((0.06, 0.58, 0.04), (x, 0.60, 0.63), M("wood_dark"), parent=r)
+    reed_roof(r, -0.90, yf - 0.10, 0.92, 0.90, 1.02, 1.14, axis="y", edge=player)
+    box((1.82, 0.04, 0.10), (0.01, yf - 0.02, 0.98), M("wood_dark"), parent=r)
+    # a horse in a stall, head out; mangers
+    horse(r, (-0.03, 0.62, 0), -math.pi / 2, coat=(0.93, 0.90, 0.84))
+    for x in (-0.57, 0.51):
+        box((0.36, 0.14, 0.12), (x, 0.80, 0.42), M("wood"), parent=r)
+        hay(r, x, 0.80, 0.42, 0.45, seed=int(x * 10))
+    hay(r, 0.50, 0.58, 0.0, 0.8, 2)
+    # tack on the left wall: harness pegs, saddle cloths in the owner's colour
+    for i, y in enumerate((-0.05, 0.12)):
+        box((0.012, 0.16, 0.26), (-0.83, y, 0.68), M(player), parent=r)
+        box((0.014, 0.16, 0.035), (-0.83, y, 0.56), gold(), parent=r)
+    rod((-0.84, -0.40, 0.75), (-0.80, -0.40, 0.75), 0.012, "wood_dark", r, segs=5)
+    lathe([(0.07, -0.01), (0.075, 0.01), (0.06, 0.01), (0.055, -0.01)], "leather", (-0.80, -0.40, 0.66),
+          r, segs=12, rot=(0, math.pi / 2, 0), closed=True)
+    wheel(_sub(r, (-0.80, -0.20, 0.0), math.pi / 2, 1.0, "wheel"), 0.0, 0.22)
+    # the yard: horses, trough, rails
+    horse(r, (0.25, -0.30, 0), math.pi * 0.98, coat="cedar", cloth=M(player))
+    horse(r, (-0.32, -0.15, 0), -0.25, coat=(0.36, 0.22, 0.13))
+    trough(r, 0.45, 0.02, 0.0, 0.62)
+    basket(r, -0.55, -0.62, 0.0, 0.9, "straw")
+    jar(r, 0.86, 0.10, 0.0, 0.8, "terracotta", "white")
+    # rail fence along the front and the right, a gap at the front
+    rail = M("wood")
+    for (xa, ya, xb, yb) in ((-0.92, -0.92, -0.10, -0.92), (0.30, -0.92, 0.92, -0.92),
+                             (0.92, -0.92, 0.92, 0.25)):
+        n = max(2, int(round(math.hypot(xb - xa, yb - ya) / 0.38)) + 1)
+        for i in range(n):
+            t = i / (n - 1)
+            rod((xa + (xb - xa) * t, ya + (yb - ya) * t, 0), (xa + (xb - xa) * t, ya + (yb - ya) * t, 0.62),
+                0.025, "wood_dark", r, segs=6)
+        for z in (0.30, 0.56):
+            rod((xa, ya, z), (xb, yb, z), 0.018, rail, r, segs=5)
+    # a standard by the gap
+    flagpole(r, -0.10, -0.92, 1.6, player, 0.0, 0.026, (0.42, 0.14), seed=5)
+    return r
+
+
 def showcase():
     """All of them, laid out in screen rows (u = screen-right, d = away)."""
     def at(u, d):

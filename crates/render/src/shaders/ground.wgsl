@@ -28,8 +28,10 @@ const DRIFT_A: vec2<f32> = vec2<f32>(5.0, 2.0);
 const DRIFT_B: vec2<f32> = vec2<f32>(-3.0, 4.0);
 const BREATH: f32 = 4.0;
 const BREATH_DEPTH: f32 = 0.04;
-const FOAM: vec3<f32> = vec3<f32>(0.97, 0.99, 1.0);
-const FOAM_MAX: f32 = 0.6;
+const FOAM_CORE: vec3<f32> = vec3<f32>(0.90, 0.96, 0.99);
+const FOAM_EDGE: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
+const FOAM_MAX: f32 = 0.85;
+const LACE_SCALE: f32 = 7.0;
 const FOAM_BLUR: f32 = 0.45;
 const FOAM_SWAY: f32 = 0.3;
 const SWAY_SCALE: f32 = 0.27;
@@ -181,13 +183,20 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let calm = (water_at(fp + vec2<f32>(-d, -d)) + water_at(fp + vec2<f32>(d, -d))
             + water_at(fp + vec2<f32>(-d, d)) + water_at(fp + vec2<f32>(d, d))) * 0.25;
         let shift = BREATH_DEPTH * sin(time * TAU / BREATH);
-        let band = smoothstep(0.44 - shift, 0.53 - shift, calm)
-            * (1.0 - smoothstep(0.66 - shift, 0.9 - shift, calm));
-        if (band > 0.0) {
+        var body = smoothstep(0.44 - shift, 0.52 - shift, calm)
+            * (1.0 - smoothstep(0.70 - shift, 1.00 - shift, calm));
+        var lead = smoothstep(0.40 - shift, 0.46 - shift, calm)
+            * (1.0 - smoothstep(0.52 - shift, 0.62 - shift, calm));
+        if (body > 0.0 || lead > 0.0) {
             let fine = noise_at(w * (NOISE_PER_TILE * 3.1) + vec2<f32>(17.0, 5.0));
             let broad = noise_at(vec2<f32>(w.y * (NOISE_PER_TILE * 0.9) + 93.0, w.x * (NOISE_PER_TILE * 0.9) + 61.0));
-            let breakup = smoothstep(0.42, 0.66, fine * 0.6 + broad * 0.4);
-            col += (FOAM - col) * (band * wet * breakup * FOAM_MAX);
+            let lace = noise_at(vec2<f32>(w.y * (NOISE_PER_TILE * LACE_SCALE) + 131.0, w.x * (NOISE_PER_TILE * LACE_SCALE) + 23.0));
+            let breakup = smoothstep(0.22, 0.46, fine * 0.6 + broad * 0.4);
+            body = body * breakup * (0.7 + 0.3 * smoothstep(0.25, 0.6, lace));
+            lead = lead * smoothstep(0.12, 0.36, lace * 0.7 + broad * 0.3);
+            let alpha = max(body * FOAM_MAX, lead * 0.95) * wet;
+            let edge = min(lead * 1.2, 1.0) * wet;
+            col += (mix(FOAM_CORE, FOAM_EDGE, edge) - col) * alpha;
         }
     }
     return vec4<f32>(col * in.light, 1.0);

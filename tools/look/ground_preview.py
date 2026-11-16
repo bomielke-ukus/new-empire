@@ -135,7 +135,7 @@ def ground(tex, nz, m, wx, wy):
             col[sel] += c * w[..., k][sel][..., None]
     # foam on the water side of the shore: the water smoothed over 0.45
     # tile round a point pushed by the wobble and a broader sway, broken
-    # by two scales of the noise, at most 0.6
+    # by two scales of the noise, a bright lacy leading edge, at most 0.85
     ww = w[..., SH] + w[..., DP]
     wet = _ss(0.2, 0.55, ww)
     s = 32 * 0.27
@@ -144,11 +144,19 @@ def ground(tex, nz, m, wx, wy):
     d = 0.45
     calm = (_water_at(m, fx_ - d, fy_ - d) + _water_at(m, fx_ + d, fy_ - d)
             + _water_at(m, fx_ - d, fy_ + d) + _water_at(m, fx_ + d, fy_ + d)) * 0.25
-    band = _ss(0.44, 0.53, calm) * (1 - _ss(0.66, 0.9, calm))
+    shift = 0.0
+    body = _ss(0.44, 0.52, calm) * (1 - _ss(0.70, 1.00, calm))
+    lead = _ss(0.40, 0.46, calm) * (1 - _ss(0.52, 0.62, calm))
     fine = bil(nz, wx * 32 * 3.1 + 17, wy * 32 * 3.1 + 5)
     broad = bil(nz, wy * 32 * 0.9 + 93, wx * 32 * 0.9 + 61)
-    foam = band * wet * _ss(0.42, 0.66, fine * 0.6 + broad * 0.4) * 0.6
-    col += (np.array([0.97, 0.99, 1.0], _F) - col) * foam[..., None]
+    lace = bil(nz, wy * 32 * 7.0 + 131, wx * 32 * 7.0 + 23)
+    body = body * _ss(0.22, 0.46, fine * 0.6 + broad * 0.4) * (0.7 + 0.3 * _ss(0.25, 0.6, lace))
+    lead = lead * _ss(0.12, 0.36, lace * 0.7 + broad * 0.3)
+    alpha = np.maximum(body * 0.85, lead * 0.95) * wet
+    edge = np.minimum(lead * 1.2, 1) * wet
+    core_c, edge_c = np.array([0.90, 0.96, 0.99], _F), np.array([1, 1, 1], _F)
+    fc = core_c + (edge_c - core_c) * edge[..., None]
+    col += (fc - col) * alpha[..., None]
     return col
 
 

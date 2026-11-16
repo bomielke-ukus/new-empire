@@ -175,10 +175,9 @@ def rock(variant=0):
     else:
         _stone(b, (0, 0, 0.14), 0.36, (1.15, 0.95, 0.8), warm=0.15)
         _stone(b, (0.26, 0.18, 0.08), 0.18, (1.1, 1.0, 0.8), warm=0.1)
-        # moss on the sunny crown
-        b.blob((-0.03, -0.05, 0.38), 0.24, (0.50, 0.70, 0.22), (0.26, 0.44, 0.16),
-               scale=(1.25, 1.0, 0.32), sub=2, rough=0.15)
-        b.clumps((-0.03, -0.05, 0.38), 0.22, 9, 0.06, (0.56, 0.76, 0.26), (0.28, 0.46, 0.16),
+        # moss on the shoulder
+        # (a few dark, dull patches on the shoulder, not a bright cap)
+        b.clumps((-0.08, -0.08, 0.37), 0.20, 5, 0.05, (0.30, 0.40, 0.18), (0.16, 0.26, 0.12),
                  scale=(1.2, 1.0, 0.3), stretch=(1, 1, 0.6))
         _stone(b, (-0.30, -0.14, 0.03), 0.07, (1.2, 1.0, 0.6), warm=0.3)
         for i in range(6):
@@ -303,15 +302,15 @@ TREES = [
          fork=0.80, bark=((0.50, 0.45, 0.38), (0.24, 0.21, 0.18)), lump=0.04, seed=961, rings=3),
     # 2 a spreading oak: low, wide, flat-topped, ~15% shorter, warm olive-green
     dict(reach=(0.62, 0.70), cz=1.00, rad=(0.27, 0.32), squash=0.62, lobes=1, core=0.58,
-         greens=((0.32, 0.50, 0.10), (0.27, 0.45, 0.10)), leaf=(0.52, 0.66, 0.20),
+         greens=((0.27, 0.47, 0.12), (0.23, 0.43, 0.12)), leaf=(0.45, 0.63, 0.20),
          fork=0.56, bark=((0.52, 0.40, 0.30), (0.22, 0.15, 0.11)), lump=0.14, seed=972),
     # 3 a ragged two-headed tree: two crowns side by side, deep green
     dict(reach=(0.30, 0.40), cz=1.36, rad=(0.24, 0.30), squash=0.85, lobes=2, core=0.40,
          greens=((0.16, 0.38, 0.11), (0.19, 0.40, 0.09)), leaf=(0.36, 0.58, 0.18),
          fork=0.62, bark=((0.56, 0.42, 0.30), (0.24, 0.16, 0.12)), lump=0.10, seed=983),
-    # 4 an olive: twisted grey trunk, an open silvery grey-green crown
+    # 4 an olive: twisted grey trunk, an open dusty olive-green crown
     dict(reach=(0.48, 0.60), cz=1.02, rad=(0.22, 0.30), squash=0.62, lobes=1, core=0.34,
-         greens=((0.40, 0.50, 0.30), (0.36, 0.47, 0.30)), leaf=(0.62, 0.70, 0.50),
+         greens=((0.28, 0.44, 0.15), (0.25, 0.41, 0.16)), leaf=(0.44, 0.58, 0.25),
          fork=0.56, bark=((0.56, 0.52, 0.46), (0.26, 0.23, 0.20)), lump=0.22, seed=994,
          under=(0.08, 0.16, 0.10), gaps=True, rings=1),
 ]
@@ -345,7 +344,8 @@ def tree(variant=0):
     for k in range(3):                                   # limbs into the crown
         a = lean + k * 2.1 + r.uniform(-0.3, 0.3)
         h0 = heads[k % len(heads)]
-        end = top + (math.cos(a) * 0.32 + h0[0], math.sin(a) * 0.32 + h0[1], cz - fz - 0.22)
+        lr, lz = (0.20, 0.42) if p.get("gaps") else (0.32, 0.22)   # an open crown: limbs stay inside
+        end = top + (math.cos(a) * lr + h0[0], math.sin(a) * lr + h0[1], cz - fz - lz)
         b.tube([top, (top + end) / 2 + (0, 0, -0.03), end], [0.07, 0.05, 0.035], bark_l, bark_d,
                segs=5, lump=tw * 0.5)
     # the crown: a lower skirt of masses, a middle ring, a top, a little
@@ -385,8 +385,8 @@ def tree(variant=0):
         topc = _c(tc, (0.75 + 0.45 * h) * kk)
         botc = _c(under, (0.80 + 0.4 * h) * kk)
         sc = (1.0, 1.0, p["squash"])
-        if gaps and r.random() < 0.3:                    # an open crown: some masses smaller
-            rad *= 0.75
+        if gaps and r.random() < 0.2:                    # an open crown: some masses smaller
+            rad *= 0.85
         b.blob((x, y, z), rad, topc, botc, scale=sc, rough=0.18 if not gaps else 0.26, shade=0.95)
         b.clumps((x, y, z), rad, 14, rad * 0.36, _c(topc, 1.08), _c(botc, 1.0), scale=sc,
                  stretch=(1, 1, 0.8))

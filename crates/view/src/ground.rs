@@ -39,10 +39,15 @@ pub const DRIFT: [[f32; 2]; 2] = [[5.0, 2.0], [-3.0, 4.0]];
 pub const BREATH: f32 = 4.0;
 /// How far the foam's band moves as it breathes, in water weight.
 pub const BREATH_DEPTH: f32 = 0.04;
-/// The foam's colour, sRGB 0 to 1.
-pub const FOAM: [f32; 3] = [0.97, 0.99, 1.0];
-/// The foam at its thickest: never opaque, the water shows through.
-pub const FOAM_MAX: f32 = 0.6;
+/// The foam at its thickest, at the core of the surf: nearly opaque.
+pub const FOAM_MAX: f32 = 0.85;
+/// The surf's body is this slightly blue-white; its thin leading edge,
+/// nearest the shore, brightens toward [`FOAM_EDGE`].
+pub const FOAM_CORE: [f32; 3] = [0.90, 0.96, 0.99];
+/// The leading edge's colour, sRGB 0 to 1.
+pub const FOAM_EDGE: [f32; 3] = [1.0, 1.0, 1.0];
+/// The lace's noise scale, multiples of [`NOISE_PER_TILE`].
+pub const LACE_SCALE: f32 = 7.0;
 /// The foam follows the water smoothed over this far, tiles: the mean of
 /// the blend at four points this far off diagonally, so a coast's corners
 /// round off instead of stepping with the tiles.
@@ -380,27 +385,30 @@ impl Ground<'_> {
                 col[k] += c[k] * w;
             }
         }
-        let f = self.foam(x, y, b.water(), time);
+        let (f, edge) = self.foam(x, y, b.water(), time);
         if f > 0.0 {
             for k in 0..3 {
-                col[k] += (FOAM[k] - col[k]) * f;
+                let fc = FOAM_CORE[k] + (FOAM_EDGE[k] - FOAM_CORE[k]) * edge;
+                col[k] += (fc - col[k]) * f;
             }
         }
         col
     }
 
-    /// How much foam at world `(x, y)`, 0 to [`FOAM_MAX`], where the blend
-    /// there gives the water `water`: on the water side of the shore, soft
-    /// at both edges, broken into patches by two scales of the noise,
-    /// moving a little toward the land and back as it breathes. It follows
-    /// the water smoothed over [`FOAM_BLUR`] around a point pushed by the
-    /// edge's wobble and a broader sway, so it rounds a coast's corners
-    /// and does not trace the tile grid.
-    pub fn foam(&self, x: f32, y: f32, water: f32, time: f32) -> f32 {
+    /// The foam at world `(x, y)` as `(alpha, edge)`, where the blend there
+    /// gives the water `water`: alpha 0 to [`FOAM_MAX`], edge 0 to 1 (how
+    /// much of the leading edge, which is brighter). On the water side of
+    /// the shore, soft at both edges, a body broken into patches by two
+    /// scales of the noise with a thin, lacy, brighter line nearest the
+    /// shore, moving a little toward the land and back as it breathes. It
+    /// follows the water smoothed over [`FOAM_BLUR`] around a point pushed
+    /// by the edge's wobble and a broader sway, so it rounds a coast's
+    /// corners and does not trace the tile grid.
+    pub fn foam(&self, x: f32, y: f32, water: f32, time: f32) -> (f32, f32) {
         // Only where the blend has water: never on dry sand.
         let wet = smoothstep(0.2, 0.55, water);
         if wet <= 0.0 {
-            return 0.0;
+            return (0.0, 0.0);
         }
         let art = self.art;
         let (ox, oy) = art.wobble(x, y);
@@ -416,10 +424,13 @@ impl Ground<'_> {
             * 0.25;
         let shift = BREATH_DEPTH * (time * std::f32::consts::TAU / BREATH).sin();
         // Rising sharply just past the shore, fading out to sea.
-        let band = smoothstep(0.44 - shift, 0.53 - shift, smooth)
-            * (1.0 - smoothstep(0.66 - shift, 0.9 - shift, smooth));
-        if band <= 0.0 {
-            return 0.0;
+        let body = smoothstep(0.44 - shift, 0.52 - shift, smooth)
+            * (1.0 - smoothstep(0.70 - shift, 1.00 - shift, smooth));
+        // A thin line along the shore's very edge.
+        let lead = smoothstep(0.40 - shift, 0.46 - shift, smooth)
+            * (1.0 - smoothstep(0.52 - shift, 0.62 - shift, smooth));
+        if body <= 0.0 && lead <= 0.0 {
+            return (0.0, 0.0);
         }
         let fine = art.noise_at(
             x * NOISE_PER_TILE * 3.1 + 17.0,
@@ -429,8 +440,16 @@ impl Ground<'_> {
             y * NOISE_PER_TILE * 0.9 + 93.0,
             x * NOISE_PER_TILE * 0.9 + 61.0,
         );
-        let breakup = smoothstep(0.42, 0.66, fine * 0.6 + broad * 0.4);
-        band * wet * breakup * FOAM_MAX
+        let lace = art.noise_at(
+            y * NOISE_PER_TILE * LACE_SCALE + 131.0,
+            x * NOISE_PER_TILE * LACE_SCALE + 23.0,
+        );
+        let breakup = smoothstep(0.22, 0.46, fine * 0.6 + broad * 0.4);
+        // Fine lace eats into the body's seaward part and the edge line.
+        let body = body * breakup * (0.7 + 0.3 * smoothstep(0.25, 0.6, lace));
+        let lead = lead * smoothstep(0.12, 0.36, lace * 0.7 + broad * 0.3);
+        let alpha = (body * FOAM_MAX).max(lead * 0.95) * wet;
+        (alpha, (lead * 1.2).min(1.0) * wet)
     }
 
     /// The land's broad tint at world `(x, y)`: a factor per channel
@@ -623,7 +642,7 @@ pub(crate) mod tests {
             (0..64)
                 .map(|i| {
                     let y = 0.5 + i as f32 * 0.05;
-                    g.foam(x, y, g.blend(x, y).water(), t)
+                    g.foam(x, y, g.blend(x, y).water(), t).0
                 })
                 .sum::<f32>()
         };
