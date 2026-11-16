@@ -785,6 +785,7 @@ def town_center(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     bamboo((-0.6, -1.2, z), r, 6, 1.3, seed=4)
     pine((1.2, 0.3, z), r, 0.75, seed=2)
     flag((0.0, 0.8, zu + 0.45), 1.0, player, r, w=0.9, fh=0.56, seed=2)
+    lib.attach("smoke", (0.25, -0.35, 0.72), r)     # the incense in the ding
     return r
 
 
@@ -867,6 +868,8 @@ def house(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, variant=0):
             jar((x, y, z), r, 0.8)
         g.chicken((0.1, -0.4, z), 1.0, r)
         g.basket((-0.2, -0.3, z), r, 0.1, 0, 2)
+    if variant == 0:      # the kitchen's chimney
+        lib.attach("smoke", (0.7, 0.68, 1.12), r)
     return r
 
 
@@ -1027,6 +1030,7 @@ def temple(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
         streamer((sx * 0.86, -0.88, z), 1.7, player, r, seed=sx + 7)
     bell((0.8, -0.2, z), r, 0.55, pi / 2)
     pine((-0.84, -0.3, z), r, 0.65, seed=5)
+    lib.attach("smoke", (0, -0.72, 0.58), r)        # the incense in the ding
     return r
 
 
@@ -1461,6 +1465,7 @@ def siege_workshop(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
                segs=10)
     g.wheel((-0.3, -0.8, z + 0.03), r, 0.2, rot=(0, 0, 0))
     streamer((-0.92, 0.1, z), 1.5, player, r, seed=2)
+    lib.attach("smoke_dark", (0.39, 0.45, 0.6), r)  # a smith's hearth in the shed
     return r
 
 
@@ -2061,7 +2066,7 @@ SETS = {
     "stable_asian": dict(func="asian.stable", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
     "storehouse_asian": dict(func="asian.storehouse", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
     "farm_asian": dict(func="asian.farm", cls="MediumBuilding", tiles=2, kwargs={}, fit=None, stages="flat"),
-    "dock_asian": dict(func="asian.dock", cls="LargeBuilding", tiles=3, kwargs={}, fit=None, stages="flat"),
+    "dock_asian": dict(func="asian.dock", cls="LargeBuilding", tiles=3, kwargs={}, fit=None, stages="flat", fires=3),
     "wonder_asian": dict(func="asian.wonder", cls="Wonder", tiles=5, kwargs={}, fit=None),
     "stone_wall_asian": dict(func="asian.stone_wall", cls="SmallBuilding", tiles=1, kwargs={}, fit=None,
                              anims=_ARMS),

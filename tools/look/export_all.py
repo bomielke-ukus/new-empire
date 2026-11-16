@@ -25,7 +25,15 @@ A SETS entry (keys; only func and cls are required):
         stages=True,                    # construction and rubble (False: idle only)
         anims={},                       # {"arm": [{"arm": 0}, ...]}: more animations
         sun_angle=None, samples=None,   # export.py's --sun-angle, --samples
+        fires=None,                     # fire points (default: export.py's, by class)
+        timing={},                      # {"idle": [frame_ms, loops]}: other than the defaults
     )
+
+--points-only rewrites only the attachment points (and the hash) of every
+set, stale or not, without rendering: export.py --points-only, which fails
+for a set whose model no longer renders as it did (that set needs a full
+export, without --points-only). --adopt also takes the geometry fingerprint
+of an up-to-date set exported before fingerprints were written.
 """
 import argparse
 import concurrent.futures
@@ -40,9 +48,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-MODULES = ("greek", "egyptian", "mesopotamian", "asian", "nature")
+MODULES = ("greek", "egyptian", "mesopotamian", "asian", "nature", "fx")
 KEYS = {"func", "cls", "tiles", "kwargs", "fit", "model_tiles", "stages", "anims", "sun_angle",
-        "samples"}
+        "samples", "fires", "timing"}
 
 
 def load_sets():
@@ -121,6 +129,12 @@ def command(name, entry, h, args):
         cmd += ["--stages"] + (["flat"] if st == "flat" else [])
     if entry.get("anims"):
         cmd += ["--anims", json.dumps(entry["anims"])]
+    if entry.get("timing"):
+        cmd += ["--timing", json.dumps(entry["timing"])]
+    if entry.get("fires") is not None:
+        cmd += ["--fires", str(entry["fires"])]
+    if args.points_only:
+        cmd += ["--points-only"] + (["--adopt"] if args.adopt else [])
     if entry.get("sun_angle") is not None:
         cmd += ["--sun-angle", str(entry["sun_angle"])]
     samples = args.samples or entry.get("samples")
@@ -134,6 +148,11 @@ def command(name, entry, h, args):
 def run_one(name, entry, h, args):
     t = time.time()
     p = subprocess.run(command(name, entry, h, args), capture_output=True, text=True, cwd=ROOT)
+    if args.points_only:
+        keep = [ln for ln in p.stdout.splitlines() if ln.startswith(("points", name))]
+        return name, p.returncode == 0, "\n".join(keep) + (
+            "" if p.returncode in (0, 3) else p.stdout[-1500:] + p.stderr[-1500:]) + \
+            "\n%.0fs" % (time.time() - t)
     keep = [ln for ln in p.stdout.splitlines()
             if ln.startswith(("frame", "trimmed", "  palette", "  **", "wrote", "fit", "ground"))]
     if p.returncode:
@@ -155,6 +174,10 @@ def main():
     ap.add_argument("--samples", type=int, help="override every set's samples")
     ap.add_argument("--out", default=os.path.join(ROOT, "assets", "look"))
     ap.add_argument("--debug", help="where export.py and check_set.py put their pictures")
+    ap.add_argument("--points-only", action="store_true", help="rewrite every set's "
+                    "attachment points and hash without rendering (export.py --points-only)")
+    ap.add_argument("--adopt", action="store_true", help="with --points-only: take the "
+                    "geometry fingerprint of up-to-date sets exported without one")
     ap.add_argument("--list", action="store_true", help="list the sets and whether each is "
                     "up to date, export nothing")
     args = ap.parse_args()
@@ -173,7 +196,9 @@ def main():
         if args.list:
             print("%-32s %-10s %s" % (name, mod, "up to date" if fresh else "stale"))
             continue
-        if fresh and not args.force:
+        if args.adopt and not fresh:
+            raise SystemExit("%s: --adopt takes a fingerprint only from an up-to-date set" % name)
+        if fresh and not args.force and not args.points_only:
             print("%s: up to date" % name)
             continue
         todo.append((name, entry, h))

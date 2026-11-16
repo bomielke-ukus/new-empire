@@ -116,6 +116,15 @@ def empty(name="root", loc=(0, 0, 0), rot_z=0.0, parent=None):
     return e
 
 
+def attach(kind, loc, parent=None):
+    """An attachment point (docs/look/buildings.md, "Smoke, flags and fire"):
+    an empty named `attach_<kind>` at `loc` in the parent's frame, for
+    `kind` in "smoke" (a hearth's or chimney's mouth), "smoke_dark" (a forge),
+    "flag" (a pole's top) or "fire" (where it burns when damaged). It draws
+    nothing; export.py writes where it lands in the cell into the manifest."""
+    return empty("attach_" + kind, loc, 0.0, parent)
+
+
 def box(size, loc=(0, 0, 0), m="plaster", rot=(0, 0, 0), parent=None, bevel=0.0,
         name="box"):
     """A box `size` = (x, y, z), centred on `loc`."""

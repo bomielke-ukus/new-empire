@@ -647,6 +647,7 @@ def temple(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     jar(r, 0.7, -0.8, z, 0.3, band=TURQ)
     jar(r, 0.56, -0.86, z, 0.24)
     _garden(r, [(0.78, -0.62 + i * 0.12, z) for i in range(3)] + [(-0.8, -0.62, z)], seed=5)
+    lib.attach("smoke", (0.62, -0.38, 1.05), r)     # the terrace's brazier
     return r
 
 
@@ -729,6 +730,8 @@ def house(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, variant=0):
     basket((-0.15, -0.5, z), r, 0.11, 4, 3)
     sack((0.25, -0.3, z), r, 0.11, 2)
     box((0.5, 0.4, 0.012), (-0.25, -0.35, z + 0.006), mat(RUG[variant % 4], rough=0.9), parent=r)
+    if variant == 0:      # a hearth on the roof terrace
+        lib.attach("smoke", (-0.46, 0.23, 1.70), r)
     return r
 
 
@@ -854,6 +857,7 @@ def town_center(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     standard((-0.82, -0.12, z), 1.7, player, r, 0.26, 0.5, seed=1)
     standard((0.32, -0.12, z), 1.7, player, r, 0.26, 0.5, seed=2)
     flag((-1.2, 0.62, zk), 1.15, player, r, w=0.9, fh=0.52, pole_r=0.03, seed=2)
+    lib.attach("smoke", (0.05, -1.4, 0.94), r)      # the gate's brazier
     return r
 
 
@@ -1178,6 +1182,7 @@ def siege_workshop(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     standard((-0.9, -0.5, z), 1.45, player, r, 0.24, 0.44, seed=3)
     for k in range(3):
         cyl(0.1 - k * 0.022, 0.03, (0.78, 0.55, z + 0.015 + k * 0.03), "wool", parent=r, segs=12)
+    lib.attach("smoke_dark", (-0.21, 0.54, 0.6), r)  # a smith's hearth under the reeds
     return r
 
 
@@ -1835,7 +1840,7 @@ SETS = {
     "farm_mesopotamian": dict(func="mesopotamian.farm", cls="MediumBuilding", tiles=2, kwargs={}, fit=None,
                               stages="flat"),
     "dock_mesopotamian": dict(func="mesopotamian.dock", cls="LargeBuilding", tiles=3, kwargs={}, fit=None,
-                              stages="flat"),
+                              stages="flat", fires=3),
     "wonder_mesopotamian": dict(func="mesopotamian.wonder", cls="Wonder", tiles=5, kwargs={}, fit=None),
     "stone_wall_mesopotamian": dict(func="mesopotamian.stone_wall", cls="SmallBuilding", tiles=1, kwargs={},
                                     fit=None, anims=_ARMS),

@@ -580,6 +580,7 @@ impl App {
                 sweep: None,
                 viewer: None,
                 symbols: self.settings.player_symbols,
+                time: self.render_time(),
             },
         );
         self.scenery

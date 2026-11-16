@@ -2,7 +2,7 @@
 //! mapview [--seed N] [--size N] [--players N] [--ticks N] [--stockpile N]
 //!         [--zoom 0.5|1|1.5|2] [--width W] [--height H]
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
-//!         [--scenario gather|build|stages|ages|army|battle|siege|walls|scout|town]
+//!         [--scenario gather|build|stages|ages|army|battle|siege|walls|scout|town|burning]
 //!         [--civ NAME] [--enemy-civ NAME] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1] [--symbols off|selected|always]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
@@ -32,6 +32,10 @@
 //! (`docs/look/buildings.md`, "Memory"). `--scenario town` lays out one of
 //! every building, finished, for player 0 on a drawn map with a shore:
 //! `--look 1 --fog 0 --zoom 1 --width 1600 --height 900` shows it whole.
+//! `--scenario burning` is the town with some of its buildings hurt, by
+//! axemen of player 1's set on them and taken away again, so the new art's
+//! fires show (`docs/look/buildings.md`, "Smoke, flags and fire"); `--time`
+//! moves the smoke and the flames too.
 
 use sim::kinds;
 use std::process::ExitCode;
@@ -467,7 +471,7 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
             &detail,
             time,
         );
-        let mut scene = d.scene(&atlas);
+        let mut scene = d.scene(&atlas, a.time);
         view::scenery::Scenery::new(d.sim().map(), d.sim().seed(), &atlas).decorate(
             &mut scene,
             d.sim(),
@@ -556,9 +560,12 @@ fn run() -> Result<(), String> {
             }
         }
         (sim, seed)
-    } else if a.scenario.as_deref() == Some("town") {
+    } else if matches!(a.scenario.as_deref(), Some("town" | "burning")) {
         let sc = town(&a)?;
         let mut sim = sim::Simulation::new(a.seed, sc.config());
+        if a.scenario.as_deref() == Some("burning") {
+            burn(&mut sim)?;
+        }
         for _ in 0..a.ticks {
             sim.step();
             feedback.observe(&sim);
@@ -734,6 +741,7 @@ fn run() -> Result<(), String> {
             sweep,
             viewer,
             symbols: a.symbols,
+            time: a.time,
         },
     );
     feedback.decorate(&mut scene, &sim, &atlas, viewer);
@@ -874,6 +882,100 @@ fn run() -> Result<(), String> {
         }
         save(path, m.width * scale, m.height * scale, &big)?;
         println!("wrote minimap {path}");
+    }
+    Ok(())
+}
+
+/// How hurt `--scenario burning` leaves some of the town: each kind (its
+/// first building of player 0) at this share of its health, one for each
+/// step of the fires (`view::scene::BURNS_BELOW`).
+const BURNING: [(&str, f32); 5] = [
+    ("House", 0.6),
+    ("Barracks", 0.45),
+    ("Town Center", 0.3),
+    ("Temple", 0.1),
+    ("Siege Workshop", 0.25),
+];
+
+/// Hurts the town's buildings as [`BURNING`] says, by the simulation's own
+/// means: player 1's axemen are spawned beside each, set on it until it is
+/// down to its share, and taken away again, with whatever they left lying.
+fn burn(sim: &mut sim::Simulation) -> Result<(), String> {
+    use sim::{Command, CommandKind};
+    for (name, share) in BURNING {
+        let kind = kinds::by_name(name).ok_or_else(|| format!("burning: no kind {name}"))?;
+        let w = sim.world();
+        let slot = w
+            .slots()
+            .find(|s| w.kind[s.index()] == kind && w.owner[s.index()] == 0)
+            .ok_or_else(|| format!("burning: no {name} in the town"))?;
+        let (i, target) = (slot.index(), w.id_at(slot));
+        let want = sim::Fx::from_int((sim.max_health_of(0, kind) as f32 * share) as i32);
+        let at = w.pos[i];
+        let reach = kinds::info(kind).footprint as i32 / 2 + 1;
+        let mut axes: Vec<sim::EntityId> = Vec::new();
+        for _ in 0..20_000 {
+            let w = sim.world();
+            if w.health[i] <= want {
+                break;
+            }
+            axes.retain(|&a| w.slot(a).is_some_and(|s| w.dying[s.index()] == 0));
+            if axes.is_empty() {
+                // Three more on the building's near side.
+                let before: Vec<sim::EntityId> = w.slots().map(|s| w.id_at(s)).collect();
+                for k in 0..3 {
+                    let (x, y) = sim::nav::tile_of(at);
+                    sim.issue(Command {
+                        player: 1,
+                        kind: CommandKind::Spawn {
+                            kind: kinds::AXEMAN,
+                            pos: sim::nav::centre((x + reach, y - 1 + k)),
+                        },
+                    });
+                }
+                // Commands land `COMMAND_DELAY` ticks after they are issued.
+                for _ in 0..=sim::COMMAND_DELAY {
+                    sim.step();
+                }
+                let w = sim.world();
+                axes = w
+                    .slots()
+                    .map(|s| w.id_at(s))
+                    .filter(|id| !before.contains(id))
+                    .collect();
+                sim.issue(Command {
+                    player: 1,
+                    kind: CommandKind::Attack {
+                        ids: axes.clone(),
+                        target,
+                    },
+                });
+            }
+            sim.step();
+        }
+        if sim.world().health[i] > want {
+            return Err(format!("burning: the {name} would not come down"));
+        }
+        for id in axes {
+            sim.issue(Command {
+                player: 1,
+                kind: CommandKind::Despawn { id },
+            });
+        }
+        for _ in 0..=sim::COMMAND_DELAY {
+            sim.step();
+        }
+    }
+    // The fallen lie a while: wait until they are gone.
+    for _ in 0..5_000 {
+        let w = sim.world();
+        if !w
+            .slots()
+            .any(|s| w.owner[s.index()] == 1 && kinds::info(w.kind[s.index()]).mobile)
+        {
+            break;
+        }
+        sim.step();
     }
     Ok(())
 }

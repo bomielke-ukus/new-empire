@@ -752,6 +752,34 @@ const SCENES: &[Scene] = &[
             "900",
         ],
     },
+    Scene {
+        // The new art's smoke and fire (`docs/look/buildings.md`, "Smoke,
+        // flags and fire"): the Egyptian town with some buildings hurt by
+        // the simulation's own axemen (`--scenario burning`), the hearths
+        // smoking and the hurt burning at their fire points, more and
+        // larger as they are worse, at a moment of the renderers' clock.
+        name: "look-burning",
+        args: &[
+            "--scenario",
+            "burning",
+            "--civ",
+            "Egyptians",
+            "--look",
+            "1",
+            "--fog",
+            "0",
+            "--zoom",
+            "1.5",
+            "--at",
+            "27,31",
+            "--time",
+            "0.7",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
 ];
 
 fn golden_dir() -> PathBuf {

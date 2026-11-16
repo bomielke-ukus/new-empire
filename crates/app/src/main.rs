@@ -145,8 +145,13 @@ impl Gpu {
         self.renderer.upload_map(&self.device, &self.queue, map);
     }
 
+    /// The renderers' clock now, seconds: the water's, and the smoke's.
+    fn time(&self) -> f32 {
+        view::ground::wrap_time(self.born.elapsed().as_secs_f64())
+    }
+
     fn render(&mut self, camera: &Camera, scene: &Scene, minimap: Option<MinimapRect>) {
-        let secs = view::ground::wrap_time(self.born.elapsed().as_secs_f64());
+        let secs = self.time();
         self.renderer.set_ground_time(secs);
         let frame = match self.surface.get_current_texture() {
             Ok(f) => f,
@@ -1150,6 +1155,12 @@ impl App {
             && self.sim.can_place(ME, kind, x, y).is_ok()
     }
 
+    /// The renderers' clock (`Gpu::time`), for the scene's smoke and
+    /// fire; 0 before there is a window.
+    fn render_time(&self) -> f32 {
+        self.gpu.as_ref().map_or(0.0, Gpu::time)
+    }
+
     fn ghost(&self) -> Option<Ghost> {
         let kind = self.build_mode?;
         let (x, y) = self.hover_tile()?;
@@ -1501,6 +1512,7 @@ impl App {
                 sweep,
                 viewer: self.viewer,
                 symbols: self.settings.player_symbols,
+                time: self.render_time(),
             },
         );
         self.feedback
@@ -1775,10 +1787,11 @@ impl App {
         };
         let mut camera = None;
         let mut sprites = Vec::new();
+        let time = self.render_time();
         if let Some(d) = self.diorama.as_mut().filter(|_| behind) {
             d.advance(dt);
             let cam = d.camera(self.camera.viewport, self.camera.dpi);
-            let mut scene = d.scene(&self.atlas);
+            let mut scene = d.scene(&self.atlas, time);
             self.diorama_scenery
                 .decorate(&mut scene, d.sim(), None, Some(&cam));
             sprites = scene.sprites;

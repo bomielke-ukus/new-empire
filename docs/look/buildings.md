@@ -184,33 +184,127 @@ shadow catcher at z = 0 gives its shadow on the water as translucent black.
 Its rubble should be floating planks rather than a heap: a dock declares
 `stages="flat"` until stages.py has a water rubble.
 
-## Smoke, flags and fire (designed, not built)
+## Smoke, flags and fire
 
-A building declares attachment points in its manifest, in authored pixels
-in the cell like the anchor, one list per animation frame they apply to:
+Built for smoke and fire; flags are built through the pipeline but no
+building uses them yet (see "Flags" below).
+
+### Attachment points
+
+A building's model places named empties, `lib.attach(kind, loc, parent)`
+(`attach_smoke`, `attach_smoke_dark`, `attach_flag`, `attach_fire`), in
+its own frame. `export.py` projects them into the cell and writes them
+into the manifest, in authored pixels like the anchor, for the standing
+(idle) look only:
 
 ```ron
     attach: [
-        (kind: Smoke, at: (148, 60)),        // a chimney's mouth
-        (kind: Flag, at: (120, 12)),         // a pole's top: the cloth hangs from it
-        (kind: Fire, at: (100, 150)),        // where it burns when damaged
+        (kind: Smoke, at: (148, 60)),        // a hearth's or chimney's mouth
+        (kind: Fire, at: (100, 150)),        // where it burns, in the order fires catch
     ],
 ```
 
-`export.py` would find them from empties named `attach_smoke`,
-`attach_flag`, `attach_fire_<n>` in the model (projected with `project()`,
-then moved by the trim). Effects are small colour sets of their own,
-`fx_smoke`, `fx_flag`, `fx_fire` (a looping `idle` of 8 to 12 frames, the
-flag's cloth masked for player colour), filed under ids of their own as the
-scenery is. The scene pushes one sprite per attachment of a standing,
-finished building, anchored at the building's ground point plus the
-attachment's offset from the building's anchor, at the building's depth
-plus a small epsilon, its clock offset by the slot so they do not breathe
-in step: smoke always, the flag always (its frames replace a modelled
-flag, so the model draws only the pole), fire at the first `n` points as
-health falls below 75%, 50%, 25%. Nothing of this is built.
+- **Smoke** (`SmokeDark` for a forge) is lifted, if the model hides the
+  point from the camera, until it is seen: smoke from a courtyard hearth
+  rises from behind the wall in front of it.
+- **Fire**: unless the model places its own `attach_fire` empties, the
+  exporter finds them: the camera's rays every 4 px across the cell, kept
+  where they land on the building's own mass (above 0.4 of a unit, facing
+  the camera, not a pole, a rod, a sheet such as a cloth or door, a plant
+  or anything in the player's colour) with neighbours 12 px round that do
+  too; the first nearest the upper middle of the mass (the roof), each next
+  the farthest from those chosen. How many: 2 for a 1 x 1 building, 3 for
+  2 x 2, 4 for 3 x 3, 5 for a Wonder, 1 for a wall post or gate, none for a
+  farm or a resource; `fires=N` in a `SETS` entry overrides (docks: 3).
+- **Flag** points are written only for a model built without its own cloth
+  (kwargs `"flags": False`); none is, so none is written yet.
+
+Who smokes now (placed by hand in the four architecture modules):
+
+| | house | town centre | temple | siege workshop (dark) |
+|-|-|-|-|-|
+| Greek | the ridge (smoke out through the tiles) | the hall's ridge | the altar's fire | a smith's hearth under the frame |
+| Egyptian | the yard's bread oven | a hearth on the upper roof | incense, from the sanctuary's roof | the shed |
+| Mesopotamian | the roof terrace | the gate's brazier | the terrace's brazier | under the reeds |
+| Asian | the kitchen's chimney | the incense in the ding | the incense in the ding | the shed |
+
+No store, market, stable, range, academy, government centre, dock, tower
+or wall smokes; every building with stages can burn.
+
+### Points without re-rendering
+
+`export.py --points-only` (and `export_all.py --points-only`, every set,
+stale or not, a few seconds each) rebuilds the model, checks it still
+renders what was rendered, and rewrites only the manifest's `attach` and
+its export hash. The check is `// export-geometry: F` in the manifest's
+header, written by every export: a hash of every mesh's evaluated vertices
+(world space, to 1e-4), face and loop counts, shading, render and shadow
+flags and materials, and every material's node values and links, over the
+idle and the extra animations (the stages are made from the idle by
+`stages.py`, which the export hash covers). An empty draws nothing and is
+not in it, so adding `lib.attach` calls changes the module's source (every
+set it draws goes stale) but not the fingerprint; any other change does,
+and `--points-only` then fails (exit 3): that set needs a full export.
+`--adopt` took the fingerprints of the sets exported before there were any,
+allowed only while their hash was up to date.
+
+### The effects (`tools/look/fx.py`)
+
+Colour sets of their own, filed under `sprites::FX + i` as the scenery is
+(`FX_SETS`), loaded with every architecture. Each is a looping `idle`
+(declared as `anims={"idle": [{"frame": i} ...]}` with `timing`), class
+`SmallBuilding`, its anchor the attachment point; its builders set
+`no_ground` (no shadow catcher: an effect casts no shadow and the flag hangs
+below its origin). Smoke and fire are billboards: discs in the camera's
+plane, Principled with a black base and their colour as emission, alpha a
+soft rim broken by noise, so the sheet's alpha is soft and straight.
+
+| set | frames | ms | what |
+|-|-|-|-|
+| `fx_smoke` | 16 | 125 | eleven grey-white puffs, each born every 1/11 of the loop, rising 2 units, swelling, drifting right, thinning; shaded as balls lit from the sun's side |
+| `fx_smoke_dark` | 16 | 125 | the same, sooty |
+| `fx_fire_small` | 8 | 100 | six flame tongues (three stacked discs each: yellow core, orange, red rim) under half a tile across, a breathing glow, a wisp of dark smoke |
+| `fx_fire_large` | 8 | 100 | three clusters of taller tongues, a wider glow, dark smoke on the fire's loop |
+| `fx_flag` | 8 | 125 | a flag's cloth (player colour, gold stripe) waving from a pole's top; masked |
+
+Every loop divides the renderers' clock's period (512 s), so it wraps
+unseen.
+
+### In the view
+
+`Scene::build_full` (`SceneOptions::time`: the renderers' clock, seconds,
+the water's; 0 in mapview unless `--time`, and in tests) draws, for every
+standing finished building (not a site, not falling, not rubble, not a
+building remembered in the fog), an effect sprite per attachment point, at
+the building's ground point plus the point's offset from its anchor, at
+the building's depth plus `FX_DEPTH` (0.03, a thousandth more per point),
+`slot = u32::MAX` (never picked), the frame at `time` plus a phase by a
+hash of the building's tile and the point, so no two chimneys puff in
+step. Smoke always; the flag always, in the owner's colour; fire by health
+(`scene::fires`, `BURNS_BELOW`): under 66% one small fire at the first
+point, under 50% two, under 33% every point with the first two large, under
+15% every one large. The old art draws no fire, and has no attachment
+points, so with the new art off nothing changes. The app passes its GPU
+clock in a match, the editor and the title's diorama.
+`mapview --scenario burning` is the town with five buildings hurt to each
+step by player 1's axemen, spawned beside them and taken away again.
+
+### Flags (future work)
+
+The models keep their static flags: animating them would draw the cloth
+twice. To animate them: give the flag helpers (`greek.flag`,
+`egyptian.flagpole`, `asian.flag`) an `attach_flag` empty at the pole's top
+and a `flags` keyword that leaves the cloth out, set `"flags": False` in the
+`SETS` kwargs, and re-export every set in full (about 2.5 hours at `--jobs
+2`); the exporter then writes the flag points and the view draws `fx_flag`
+there with no further change. Chimney pots for the Greek houses and town
+centre (which smoke through their roofs) want the same re-export.
 
 ## Memory
+
+The effects add five small sets: 4.9 MiB of colour pages (RGBA and mask,
+frames trimmed one by one): each smoke 1.7, the large fire 1.0, the small
+0.4, the flag 0.06.
 
 Colour frames are trimmed one by one in the atlas, so a set costs the sum
 of its frames' drawn rectangles at 5 bytes a pixel (RGBA and mask).

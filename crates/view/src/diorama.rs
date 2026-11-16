@@ -246,8 +246,9 @@ impl Diorama {
 
     /// The world's sprites, between the last tick and the next, with the
     /// hits, dust and falls of the fighting; everything in sight, nobody's
-    /// symbols, nothing selected.
-    pub fn scene(&self, atlas: &Atlas) -> Scene {
+    /// symbols, nothing selected; the smoke and fire at `time`, the
+    /// renderers' clock in seconds.
+    pub fn scene(&self, atlas: &Atlas, time: f32) -> Scene {
         let alpha = (self.owed_ms / TICK_MS as f32).clamp(0.0, 1.0);
         let prev = (self.prev.len() == self.sim.world().pos.len()).then_some(&self.prev[..]);
         let mut scene = Scene::build_full(
@@ -257,6 +258,7 @@ impl Diorama {
             alpha,
             &SceneOptions {
                 symbols: PlayerSymbols::Off,
+                time,
                 ..SceneOptions::default()
             },
         );

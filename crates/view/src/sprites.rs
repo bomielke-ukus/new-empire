@@ -51,6 +51,46 @@ pub const DECOR_KINDS: [&str; 5] = ["flowers", "tuft", "rock", "bush", "reeds"];
 /// set `tree` is the kind itself. Which one a tree wears is
 /// [`Atlas::tree_look`].
 pub const TREE_LOOK: KindId = 63_500;
+/// The effects drawn at a building's attachment points
+/// (`docs/look/buildings.md`, "Smoke, flags and fire"): the set
+/// `FX_SETS[i]` is filed under `FX + i`. Pictures only, as the scenery is.
+pub const FX: KindId = 63_700;
+/// The effects' sets, by [`Effect`].
+pub const FX_SETS: [&str; 5] = [
+    "fx_smoke",
+    "fx_smoke_dark",
+    "fx_fire_small",
+    "fx_fire_large",
+    "fx_flag",
+];
+
+/// An effect drawn at an attachment point: a looping colour set of its own.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Effect {
+    /// Pale hearth smoke.
+    Smoke = 0,
+    /// Sooty forge smoke.
+    SmokeDark = 1,
+    /// A few flames.
+    FireSmall = 2,
+    /// A blaze.
+    FireLarge = 3,
+    /// The owner's flag waving from a pole's top.
+    Flag = 4,
+}
+
+/// One of a building look's attachment points: what, and where in 1x
+/// pixels from the look's anchor (its ground point).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Attachment {
+    /// What happens there.
+    pub kind: crate::sheets::AttachKind,
+    /// Right of the ground point, 1x px.
+    pub dx: f32,
+    /// Below the ground point, 1x px (negative: above it).
+    pub dy: f32,
+}
+
 /// How far a tree with variants is moved off its tile's centre, tiles at
 /// most along each axis, so the rows of a forest do not line up.
 pub const TREE_JITTER: f32 = 0.16;
@@ -286,6 +326,9 @@ pub struct Atlas {
     /// The tree's looks, [`kinds::TREE`] first then each `tree_<n>` set's
     /// id: one entry when there are no others.
     trees: Vec<KindId>,
+    /// A building look's attachment points, by the id it is filed under:
+    /// only colour sets have any.
+    attach: HashMap<KindId, Vec<Attachment>>,
 }
 
 impl Atlas {
@@ -394,6 +437,20 @@ impl Atlas {
         &self.trees
     }
 
+    /// Where smoke, flags and fire go on a standing building drawn in
+    /// `look` (`docs/look/buildings.md`, "Smoke, flags and fire"): none
+    /// for a look without them, so none at all with the new art off.
+    pub fn attachments(&self, look: KindId) -> &[Attachment] {
+        self.attach.get(&look).map_or(&[], Vec::as_slice)
+    }
+
+    /// The frame of `effect` at `time_ms` into its loop, if its set is
+    /// loaded.
+    pub fn effect(&self, effect: Effect, time_ms: u32) -> Option<&Frame> {
+        self.frame_at(FX + effect as KindId, 0, Anim::Idle, time_ms)
+            .map(|(f, _)| f)
+    }
+
     /// Timing of an animation, if the kind has it.
     pub fn anim_info(&self, kind: KindId, anim: Anim) -> Option<AnimInfo> {
         self.anims.get(&(kind, anim)).copied()
@@ -480,6 +537,7 @@ impl Atlas {
                     || set_target(&s.name).is_some_and(|(k, _, _)| colour_kinds.contains_key(&k)))
         };
         let mut anims: HashMap<(KindId, Anim), AnimInfo> = HashMap::new();
+        let mut attach: HashMap<KindId, Vec<Attachment>> = HashMap::new();
         let mut variants: HashMap<(KindId, u8, u8), KindId> = HashMap::new();
         let mut loaded_sets = Vec::new();
         // A kind with colour sets has no placeholder either: what it has no
@@ -505,8 +563,9 @@ impl Atlas {
                 if replaced(sheet) {
                     return None;
                 }
-                if let Some(id) =
-                    decor_id_for_set(&sheet.name).or_else(|| tree_id_for_set(&sheet.name))
+                if let Some(id) = decor_id_for_set(&sheet.name)
+                    .or_else(|| tree_id_for_set(&sheet.name))
+                    .or_else(|| fx_id_for_set(&sheet.name))
                 {
                     return Some((id, None));
                 }
@@ -552,6 +611,22 @@ impl Atlas {
                 None => {}
             }
             loaded_sets.push(sheet.name.clone());
+            if sheet.colour && !sheet.attach.is_empty() {
+                let sc = sheet.scale.max(1) as f32;
+                let (ax, ay) = (sheet.anchor.0 as f32, sheet.anchor.1 as f32);
+                attach.insert(
+                    kind,
+                    sheet
+                        .attach
+                        .iter()
+                        .map(|a| Attachment {
+                            kind: a.kind,
+                            dx: (a.at.0 as f32 - ax) / sc,
+                            dy: (a.at.1 as f32 - ay) / sc,
+                        })
+                        .collect(),
+                );
+            }
             for animation in &sheet.animations {
                 let Some(anim) = Anim::from_name(&animation.name) else {
                     continue;
@@ -754,6 +829,7 @@ impl Atlas {
         atlas.anims = anims;
         atlas.variants = variants;
         atlas.stand_ins = stand_ins;
+        atlas.attach = attach;
         atlas.loaded_sets = loaded_sets;
         atlas
     }
@@ -1286,6 +1362,7 @@ fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
         shadows: HashMap::new(),
         loaded_sets: Vec::new(),
         trees: vec![kinds::TREE],
+        attach: HashMap::new(),
     }
 }
 
@@ -1509,8 +1586,18 @@ pub fn tree_id_for_set(name: &str) -> Option<KindId> {
     (1..100).contains(&n).then_some(TREE_LOOK + n)
 }
 
-/// A well-mixed hash of a tile and a salt, for picking a tree's look.
-fn tile_hash(x: i32, y: i32, salt: u32) -> u32 {
+/// The id an effect's set (`fx_smoke`, ...) is filed under, or `None` if
+/// the name is not one of [`FX_SETS`].
+pub fn fx_id_for_set(name: &str) -> Option<KindId> {
+    FX_SETS
+        .iter()
+        .position(|&n| n == name)
+        .map(|i| FX + i as KindId)
+}
+
+/// A well-mixed hash of a tile and a salt, for picking a tree's look (and
+/// an effect's phase).
+pub(crate) fn tile_hash(x: i32, y: i32, salt: u32) -> u32 {
     let mut h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77) ^ salt;
     h ^= h >> 16;
     h = h.wrapping_mul(0x7FEB_352D);

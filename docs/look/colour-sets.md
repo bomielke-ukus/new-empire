@@ -50,6 +50,11 @@ SpriteSet(
   (`docs/05` §2.3) times `scale` is too small (a building with a flag).
   `anchor` is in the cell, in authored pixels, as before.
 - **`scale`**: 2. A tile is 128 x 64 authored pixels.
+- **`attach`** (default none): a building's attachment points for smoke,
+  flags and fire, `[(kind: Smoke | SmokeDark | Flag | Fire, at: (x, y))]`
+  in authored pixels in the cell (`docs/look/buildings.md`, "Smoke, flags
+  and fire"). A comment `// export-geometry: F` in the header fingerprints
+  the model it was rendered from, for `export.py --points-only`.
 - **`mask`**: an 8-bit greyscale PNG the size of the sheet. 0 is ordinary
   colour; 255 takes the owner's colour; between, a blend (antialiased
   edges).

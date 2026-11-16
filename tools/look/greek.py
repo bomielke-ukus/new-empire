@@ -867,6 +867,7 @@ def temple(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
         banner((sx * 1.3, ay + 0.02, 0), 1.75 if sx < 0 else 1.25, player, r, seed=sx + 2,
                bh=0.62 if sx < 0 else 0.5)
     amphora((-0.7, ay - 0.1, 0), 0.4, parent=r, s=0.42, colour=(0.9, 0.62, 0.3), band="black")
+    lib.attach("smoke", (0, -1.24, 0.62), r)        # the altar's fire
     return r
 
 
@@ -950,6 +951,7 @@ def town_center(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
     pot((-0.36, -0.14, 0.045), r, 0.2, "leaf", flowers="flower_red", seed=3)
     # the flag: a tall pole on the ridge
     flag((0.3, mc[1], zt + 0.5), 1.25, player, r, w=1.0, fh=0.62, pole_r=0.03, seed=2)
+    lib.attach("smoke", (-0.7, 0.95, 2.62), r)      # the hall's hearth, at the ridge
     return r
 
 
@@ -1086,6 +1088,8 @@ def house(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None, variant=0):
         chicken((0.02, -0.55, z), -1.0, r)
         basket((0.72, -0.62, z), r, 0.12, 4, 6)
         bench((0.0, y0 - 0.34, z), 0, r, 0.4)
+    if variant == 0:      # the hearth's smoke, out through the tiles at the ridge
+        lib.attach("smoke", (-0.3, 0.465, 1.56), r)
     return r
 
 
@@ -1952,6 +1956,7 @@ def siege_workshop(loc=(0, 0, 0), rot_z=0.0, player=BLUE, parent=None):
         cyl(0.11 - k * 0.025, 0.03, (-0.55, -0.82, z + 0.015 + k * 0.03), "wool", parent=r, segs=12)
     sawhorse((0.62, 0.0, z), 1.2, r)
     banner((-0.9, -0.9, z), 1.4, player, r, 0.26, 0.46, seed=2)
+    lib.attach("smoke_dark", (-0.6, 0.65, 0.4), r)  # a smith's hearth under the frame
     return r
 
 
@@ -2918,7 +2923,7 @@ SETS = {
     "stable": dict(func="greek.stable", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
     "storehouse": dict(func="greek.storehouse", cls="MediumBuilding", tiles=2, kwargs={}, fit=None),
     "farm": dict(func="greek.farm", cls="MediumBuilding", tiles=2, kwargs={}, fit=None, stages="flat"),
-    "dock": dict(func="greek.dock", cls="LargeBuilding", tiles=3, kwargs={}, fit=None, stages="flat"),
+    "dock": dict(func="greek.dock", cls="LargeBuilding", tiles=3, kwargs={}, fit=None, stages="flat", fires=3),
     "wonder": dict(func="greek.wonder", cls="Wonder", tiles=5, kwargs={}, fit=None),
     "stone_wall": dict(func="greek.stone_wall", cls="SmallBuilding", tiles=1, kwargs={}, fit=None,
                        anims={"arm": [{"arm": k} for k in range(8)]}),

@@ -14,6 +14,7 @@ import bpy
 import bmesh
 from mathutils import Vector
 
+import lib
 from lib import PAL, RED, BLUE, _lin, _obj, box, cyl, sphere, blob, empty, mat, mesh
 
 PADS = True  # a thin packed-sand pad under each building (set False to drop it)
@@ -1029,6 +1030,7 @@ def temple2(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
     e = empty("eg_temple2_s", (0, 0, 0), 0.0, r)
     e.scale = (0.664, 0.664, 0.85)
     temple(player=player, parent=e)
+    lib.attach("smoke", (0.44, -0.36, 2.24), r)     # incense in the sanctuary
     return r
 
 
@@ -1293,6 +1295,7 @@ def town_center(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
     basket(r, ax - 0.68, yA - 0.16, 0.0, 0.9, "wheat")
     basket(r, 0.52, -0.42, 0.0, 0.8, (0.9, 0.3, 0.1))
     jar(r, 0.60, 1.20, 0.0, 0.9, "terracotta")
+    lib.attach("smoke", (-0.81, 0.98, 2.13), r)     # a hearth on the upper roof
     return r
 
 
@@ -1454,6 +1457,8 @@ def house(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None, variant=0):
         basket(r, -0.76, -0.66, 0, 0.8, "wheat")
         palm(r, 0.72, -0.62, 1.0, seed=6, lean=(0.03, -0.05))
         box((0.10, 0.012, 0.22), (ax + 0.10, yA - 0.02, 0.62), M(player), parent=r)
+    if variant == 0:      # the yard's bread oven
+        lib.attach("smoke", (0.66, -0.60, 0.3), r)
     return r
 
 
@@ -2101,6 +2106,7 @@ def siege_workshop(loc=(0, 0, 0), rot_z=0.0, player=RED, parent=None):
     whl.rotation_euler = (0.0, -0.32, 0.0)
     wheel(whl, 0.0, 0.18)
     logs(r, -0.62, -0.62, 0.0, (3, 2), L=0.62, r=0.05, rz=0.2)
+    lib.attach("smoke_dark", (0.32, 0.60, 1.0), r)  # a smith's hearth in the shed
     return r
 
 
@@ -3139,7 +3145,7 @@ SETS = {
     "archery_range_egyptian": dict(func="egyptian.archery_range", cls="MediumBuilding", tiles=2, kwargs={},
                                    fit=None),
     "dock_egyptian": dict(func="egyptian.dock", cls="LargeBuilding", tiles=3, kwargs={}, fit=None,
-                          stages="flat"),
+                          stages="flat", fires=3),
     "farm_egyptian": dict(func="egyptian.farm", cls="MediumBuilding", tiles=2, kwargs={}, fit=None,
                           stages="flat"),
     "government_centre_egyptian": dict(func="egyptian.government_centre", cls="MediumBuilding", tiles=2,

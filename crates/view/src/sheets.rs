@@ -97,6 +97,32 @@ pub struct Animation {
     pub impact: Option<u32>,
 }
 
+/// What happens at a building's attachment point
+/// (`docs/look/buildings.md`, "Smoke, flags and fire").
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum AttachKind {
+    /// A hearth's or chimney's mouth: pale smoke rises from it.
+    Smoke,
+    /// A forge's: sooty smoke.
+    SmokeDark,
+    /// A pole's top: the owner's flag waves from it.
+    Flag,
+    /// Where the building burns when it is hurt, in the order the fires
+    /// catch.
+    Fire,
+}
+
+/// One attachment point of a colour set: where in the cell, in authored
+/// pixels like the anchor (it may lie outside the cell: smoke from a
+/// chimney's mouth at the cell's top).
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Attach {
+    /// What happens there.
+    pub kind: AttachKind,
+    /// Where, in authored pixels in the cell.
+    pub at: (i32, i32),
+}
+
 #[derive(Deserialize, Clone, PartialEq, Eq, Debug)]
 struct AnchorOverride {
     animation: String,
@@ -127,6 +153,9 @@ struct Manifest {
     /// The cell size in authored pixels, when the class's is too small.
     #[serde(default)]
     frame: Option<(u32, u32)>,
+    /// A building's attachment points, of its standing (idle) look.
+    #[serde(default)]
+    attach: Vec<Attach>,
 }
 
 /// A loaded sprite set: manifest plus the indexed pixels of its sheet.
@@ -159,6 +188,8 @@ pub struct Sheet {
     pub colour: bool,
     /// The cell size in authored pixels, if the manifest gives one.
     frame: Option<(u32, u32)>,
+    /// Where smoke, flags and fire go on the standing building, if anywhere.
+    pub attach: Vec<Attach>,
 }
 
 impl Sheet {
@@ -258,6 +289,7 @@ impl Sheet {
             mask,
             colour: m.colour,
             frame: m.frame,
+            attach: m.attach,
         })
     }
 
@@ -836,6 +868,81 @@ pub(crate) mod fixture {
         manifest
     }
 
+    /// Where the attached building fixture's smoke rises, in its cell.
+    pub const SMOKE_AT: (i32, i32) = (6, -4);
+    /// Where it burns, in the order the fires catch.
+    pub const FIRE_AT: [(i32, i32); 3] = [(4, 2), (2, 3), (6, 3)];
+
+    /// The building fixture `name` ([`write_building`]) with attachment
+    /// points: smoke at [`SMOKE_AT`] (above the cell) and fire at each of
+    /// [`FIRE_AT`]. Returns the manifest's path.
+    pub fn write_attached_building(dir: &Path, name: &str) -> PathBuf {
+        let manifest = write_building(dir, name);
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        let mut attach = format!(
+            "    attach: [\n        (kind: Smoke, at: ({}, {})),\n",
+            SMOKE_AT.0, SMOKE_AT.1
+        );
+        for (x, y) in FIRE_AT {
+            attach += &format!("        (kind: Fire, at: ({x}, {y})),\n");
+        }
+        attach += "    ],\n)";
+        let i = text.rfind(')').unwrap();
+        std::fs::write(&manifest, format!("{}{attach}", &text[..i])).unwrap();
+        manifest
+    }
+
+    /// An effect's colour set `name` (`docs/look/buildings.md`, "Smoke,
+    /// flags and fire"): a looping idle of `frames` frames of 100 ms, frame
+    /// `k` one pixel of [`fx_colour`]`(k)` at its anchor's column, a row up.
+    pub fn write_fx(dir: &Path, name: &str, frames: u32) -> PathBuf {
+        let set = dir.join(name);
+        std::fs::create_dir_all(&set).unwrap();
+        let (w, h) = FRAME;
+        let sw = w * frames;
+        let mut rgba = vec![0u8; (sw * h * 4) as usize];
+        for k in 0..frames {
+            let i = ((ANCHOR.1 - 1) * sw + k * w + ANCHOR.0) as usize;
+            rgba[i * 4..i * 4 + 4].copy_from_slice(&fx_colour(k));
+        }
+        write_png(
+            &set.join(format!("{name}.png")),
+            sw,
+            h,
+            png::ColorType::Rgba,
+            &rgba,
+        );
+        let manifest = set.join(format!("{name}.ron"));
+        std::fs::write(
+            &manifest,
+            format!(
+                r#"SpriteSet(
+    name: "{name}",
+    class: SmallBuilding,
+    scale: 2,
+    palette: "rgba",
+    sheet: "{name}.png",
+    anchor: ({}, {}),
+    animations: [
+        (name: "idle", frames: {frames}, frame_ms: 100, loops: true, impact: None),
+    ],
+    anchor_overrides: [],
+    colour: true,
+    mask: None,
+    frame: Some(({w}, {h})),
+)"#,
+                ANCHOR.0, ANCHOR.1
+            ),
+        )
+        .unwrap();
+        manifest
+    }
+
+    /// The colour of an effect fixture's frame `k`: soft, as smoke is.
+    pub fn fx_colour(k: u32) -> [u8; 4] {
+        [200, 10 * k as u8, 30, 128]
+    }
+
     /// The building fixture `name`, loaded.
     pub fn building(test: &str, name: &str) -> super::Sheet {
         let dir = scratch(&format!("{test}-{name}"));
@@ -855,6 +962,67 @@ mod tests {
 
     fn repo_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    /// The exported buildings carry their attachment points
+    /// (`docs/look/buildings.md`, "Smoke, flags and fire"): every one with
+    /// stages but a farm can burn, every architecture's house and town
+    /// centre smokes, and the effects' sets are there, each a looping idle.
+    #[test]
+    fn the_new_buildings_smoke_and_burn_where_their_models_say() {
+        let look = repo_root().join("assets/look");
+        let manifests: Vec<(String, Manifest)> = find_sets(&look)
+            .into_iter()
+            .map(|p| {
+                let m: Manifest = ron::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+                (m.name.clone(), m)
+            })
+            .collect();
+        let get = |name: &str| &manifests.iter().find(|(n, _)| n == name).unwrap().1;
+        for (name, m) in &manifests {
+            let staged = m.animations.iter().any(|a| a.name == "construction");
+            if staged && !name.starts_with("farm") {
+                assert!(
+                    m.attach.iter().any(|a| a.kind == AttachKind::Fire),
+                    "{name} has nowhere to burn"
+                );
+            }
+        }
+        for arch in ["", "_egyptian", "_mesopotamian", "_asian"] {
+            for kind in ["house", "town_center", "temple"] {
+                let m = get(&format!("{kind}{arch}"));
+                assert!(
+                    m.attach.iter().any(|a| a.kind == AttachKind::Smoke),
+                    "{kind}{arch} does not smoke"
+                );
+            }
+            let m = get(&format!("siege_workshop{arch}"));
+            assert!(m.attach.iter().any(|a| a.kind == AttachKind::SmokeDark));
+            assert!(
+                !get(&format!("storehouse{arch}"))
+                    .attach
+                    .iter()
+                    .any(|a| matches!(a.kind, AttachKind::Smoke | AttachKind::SmokeDark)),
+                "a store has no hearth"
+            );
+        }
+        for name in crate::sprites::FX_SETS {
+            let m = get(name);
+            assert!(m.colour);
+            assert_eq!(m.animations.len(), 1);
+            let idle = &m.animations[0];
+            assert!(
+                idle.name == "idle" && idle.loops && idle.frames >= 8,
+                "{name}"
+            );
+            // The loop divides the renderers' clock, so it wraps unseen.
+            let period = idle.frames * idle.frame_ms;
+            assert_eq!((crate::ground::PERIOD as u32 * 1000) % period, 0, "{name}");
+        }
+        assert!(
+            get("fx_flag").mask.is_some(),
+            "the flag takes its owner's colour"
+        );
     }
 
     /// A double-clicked bundle runs from `/`, where no ancestor holds

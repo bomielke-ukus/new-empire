@@ -117,6 +117,10 @@ pub struct SceneOptions<'a> {
     pub viewer: Option<u8>,
     /// Where the players' symbols are drawn (`GD-A11Y-03`).
     pub symbols: PlayerSymbols,
+    /// The renderers' clock, seconds ([`crate::ground::wrap_time`]): the
+    /// time the water drifts by, which the smoke, fire and flags at the
+    /// buildings' attachment points loop by too. 0 in tools and tests.
+    pub time: f32,
 }
 
 /// A frame's worth of sprites, sorted back to front.
@@ -174,6 +178,7 @@ impl Scene {
             sweep,
             viewer,
             symbols,
+            time,
         } = *opts;
         let world = sim.world();
         let map = sim.map();
@@ -461,6 +466,22 @@ impl Scene {
                         sprites.push(s);
                     }
                 }
+            }
+            // Smoke from its hearths, its flags, and fire where it is hurt.
+            if standing && !info.mobile {
+                let hurt = fx_to_f32(world.health[i])
+                    / sim.max_health_of(world.owner[i], kind).max(1) as f32;
+                push_effects(
+                    atlas,
+                    look,
+                    (gx, gy),
+                    tile,
+                    hurt,
+                    row,
+                    depth,
+                    time,
+                    &mut sprites,
+                );
             }
             // A wall reaches for the walls beside it.
             if kinds::is_wall(kind) && standing {
@@ -908,6 +929,94 @@ fn push_arms(
             sprites.push(overlay(arm, gx, gy, row, depth + walls::arm_depth(k), slot));
             push_shadow(atlas, arm, (gx, gy), row, depth, slot, sprites);
         }
+    }
+}
+
+/// How far in front of its building an effect is drawn: over the building
+/// and under whatever stands nearer.
+pub const FX_DEPTH: f32 = 0.03;
+
+/// Health, as a share of the most, below which a building burns at its
+/// fire points: one small fire below the first, two below the second,
+/// every point below the third with the first two large, and every one
+/// large below the last.
+pub const BURNS_BELOW: [f32; 4] = [0.66, 0.5, 0.33, 0.15];
+
+/// The effects to draw at a standing building's fire points at `health`
+/// (its share of its most): one per fire point that burns, in order, large
+/// or not.
+pub fn fires(points: usize, health: f32) -> Vec<bool> {
+    let [one, two, all, blaze] = BURNS_BELOW;
+    let (n, large) = if health < blaze {
+        (points, points)
+    } else if health < all {
+        (points, 2)
+    } else if health < two {
+        (2, 0)
+    } else if health < one {
+        (1, 0)
+    } else {
+        (0, 0)
+    };
+    (0..n.min(points)).map(|k| k < large).collect()
+}
+
+/// The smoke, flags and fires of a standing building drawn in `look` with
+/// its ground point at `(gx, gy)` (`docs/look/buildings.md`, "Smoke, flags
+/// and fire"): each effect's frame at the attachment point, from the
+/// renderers' clock `time` (seconds) plus a phase by a hash of the
+/// building's tile and the point, so no two chimneys puff in step; drawn
+/// just in front of the building, never picked. A look without
+/// attachment points (every one with the new art off) draws none.
+#[allow(clippy::too_many_arguments)]
+fn push_effects(
+    atlas: &Atlas,
+    look: sim::KindId,
+    (gx, gy): (f32, f32),
+    tile: (i32, i32),
+    health: f32,
+    row: u8,
+    depth: f32,
+    time: f32,
+    sprites: &mut Vec<SpriteInstance>,
+) {
+    use crate::sheets::AttachKind;
+    use sprites::Effect;
+    let points = atlas.attachments(look);
+    if points.is_empty() {
+        return;
+    }
+    let fire_points = points.iter().filter(|p| p.kind == AttachKind::Fire).count();
+    let burning = fires(fire_points, health);
+    let clock = (time.max(0.0) * 1000.0) as u32;
+    let mut nth_fire = 0;
+    for (k, p) in points.iter().enumerate() {
+        let (effect, owner_row) = match p.kind {
+            AttachKind::Smoke => (Effect::Smoke, 0),
+            AttachKind::SmokeDark => (Effect::SmokeDark, 0),
+            AttachKind::Flag => (Effect::Flag, row),
+            AttachKind::Fire => {
+                let n = nth_fire;
+                nth_fire += 1;
+                match burning.get(n) {
+                    Some(&true) => (Effect::FireLarge, 0),
+                    Some(&false) => (Effect::FireSmall, 0),
+                    None => continue,
+                }
+            }
+        };
+        let phase = sprites::tile_hash(tile.0, tile.1, 0xF0 + k as u32) % 60_000;
+        let Some(frame) = atlas.effect(effect, clock.wrapping_add(phase)) else {
+            continue;
+        };
+        sprites.push(overlay(
+            frame,
+            gx + p.dx,
+            gy + p.dy,
+            owner_row,
+            depth + FX_DEPTH + k as f32 * 0.001,
+            u32::MAX,
+        ));
     }
 }
 
@@ -1873,6 +1982,311 @@ mod tests {
     /// set is: its own construction stage by progress, uncropped and on
     /// one anchor with the finished building; then the building; then,
     /// fallen, its own rubble with the building sinking into it.
+    #[test]
+    fn a_building_burns_by_its_health() {
+        // None while it is two thirds whole; one small fire, then two, then
+        // every point with the first two large, then every one large.
+        assert_eq!(fires(3, 1.0), Vec::<bool>::new());
+        assert_eq!(fires(3, 0.7), Vec::<bool>::new());
+        assert_eq!(fires(3, 0.6), vec![false]);
+        assert_eq!(fires(3, 0.45), vec![false, false]);
+        assert_eq!(fires(4, 0.3), vec![true, true, false, false]);
+        assert_eq!(fires(4, 0.1), vec![true; 4]);
+        // Never more than the building has points for.
+        assert_eq!(fires(1, 0.45), vec![false]);
+        assert_eq!(fires(0, 0.1), Vec::<bool>::new());
+    }
+
+    /// The new art's smoke and fires (`docs/look/buildings.md`, "Smoke,
+    /// flags and fire"): a finished, standing building smokes at its
+    /// smoke point, drawn just in front of it and never picked, its frame
+    /// by the renderers' clock and a phase of its own; it burns at its fire
+    /// points as it is hurt; a site, rubble and a remembered building do
+    /// neither.
+    #[test]
+    fn smoke_and_fire_rise_from_a_buildings_attachment_points() {
+        use crate::sheets::{fixture, Sheet};
+        use crate::sprites::{Effect, FX_SETS};
+        use sim::{Command, CommandKind};
+        let dir = fixture::scratch("scene-fx");
+        let mut sheets =
+            vec![Sheet::load(&fixture::write_attached_building(&dir, "house")).unwrap()];
+        for name in FX_SETS {
+            sheets.push(Sheet::load(&fixture::write_fx(&dir, name, 8)).unwrap());
+        }
+        let atlas = Atlas::with_sheets(&sheets);
+        // The points, from the cell to 1x px off the ground point.
+        let points = atlas.attachments(kinds::HOUSE);
+        let (ax, ay) = (fixture::ANCHOR.0 as f32, fixture::ANCHOR.1 as f32);
+        let off = |(x, y): (i32, i32)| ((x as f32 - ax) / 2.0, (y as f32 - ay) / 2.0);
+        assert_eq!(points.len(), 4);
+        assert_eq!(points[0].kind, crate::sheets::AttachKind::Smoke);
+        assert_eq!((points[0].dx, points[0].dy), off(fixture::SMOKE_AT));
+        for (p, &at) in points[1..].iter().zip(&fixture::FIRE_AT) {
+            assert_eq!(p.kind, crate::sheets::AttachKind::Fire);
+            assert_eq!((p.dx, p.dy), off(at));
+        }
+        assert!(atlas.attachments(kinds::BARRACKS).is_empty());
+
+        let mut sim = Simulation::new(
+            5,
+            SimConfig {
+                map: MapSpec {
+                    kind: MapKind::Flat,
+                    size: 48,
+                    players: 2,
+                },
+                starting_stockpile: [5000; 4],
+                wander: false,
+                ..SimConfig::default()
+            },
+        );
+        let spawn = |sim: &mut Simulation, player, kind, pos| {
+            sim.issue(Command {
+                player,
+                kind: CommandKind::Spawn { kind, pos },
+            });
+        };
+        let fp = kinds::info(kinds::HOUSE).footprint as i32;
+        let tiles = [(10, 10), (13, 10), (16, 10), (19, 10)];
+        for &(x, y) in &tiles {
+            spawn(
+                &mut sim,
+                0,
+                kinds::HOUSE,
+                sim::nav::building_centre(x, y, fp),
+            );
+        }
+        for _ in 0..3 {
+            sim.step();
+        }
+        let houses: Vec<usize> = {
+            let w = sim.world();
+            w.slots()
+                .filter(|s| w.kind[s.index()] == kinds::HOUSE)
+                .map(|s| s.index())
+                .collect()
+        };
+        assert_eq!(houses.len(), 4);
+        let at = |sim: &Simulation, time: f32, viewer: Option<u8>| {
+            Scene::build_full(
+                sim,
+                &atlas,
+                None,
+                0.0,
+                &SceneOptions {
+                    time,
+                    viewer,
+                    ..SceneOptions::default()
+                },
+            )
+        };
+        let frames_of = |e: Effect| -> Vec<(u16, u16)> {
+            (0..8)
+                .map(|k| {
+                    let f = atlas.effect(e, k * 100).unwrap();
+                    (f.x, f.y)
+                })
+                .collect()
+        };
+        let (smoke, small, large) = (
+            frames_of(Effect::Smoke),
+            frames_of(Effect::FireSmall),
+            frames_of(Effect::FireLarge),
+        );
+        let effects = |scene: &Scene, of: &[(u16, u16)]| -> Vec<SpriteInstance> {
+            scene
+                .sprites
+                .iter()
+                .filter(|s| of.contains(&(s.u, s.v)))
+                .copied()
+                .collect()
+        };
+        let scene = at(&sim, 0.0, None);
+        let puffs = effects(&scene, &smoke);
+        assert_eq!(puffs.len(), 4, "each finished house smokes");
+        assert!(effects(&scene, &small).is_empty() && effects(&scene, &large).is_empty());
+        for s in &puffs {
+            assert_eq!(s.slot, u32::MAX, "never picked");
+            assert_eq!(s.row, 0);
+        }
+        // Each puff at its house's smoke point, just in front of it.
+        for &h in &houses {
+            let house = scene.sprites.iter().find(|s| s.slot == h as u32).unwrap();
+            let idle = atlas.frame(kinds::HOUSE, 0).unwrap().0;
+            let (gx, gy) = (
+                house.x + idle.draw_anchor().0,
+                house.y + idle.draw_anchor().1,
+            );
+            let puff = puffs
+                .iter()
+                .find(|s| (s.depth - house.depth - FX_DEPTH).abs() < 0.01)
+                .unwrap();
+            let f = atlas.effect(Effect::Smoke, 0).unwrap();
+            let want = (
+                (gx + points[0].dx - f.draw_anchor().0).round(),
+                (gy + points[0].dy - f.draw_anchor().1).round(),
+            );
+            // (Each rounded to the pixel on its own.)
+            assert!(
+                puffs
+                    .iter()
+                    .any(|s| (s.x - want.0).abs() <= 1.0 && (s.y - want.1).abs() <= 1.0),
+                "a puff at {want:?}: {puffs:?}"
+            );
+            assert!(puff.depth > house.depth, "in front of its house");
+            let pos = scene.sprites.iter().position(|s| s == puff).unwrap();
+            let hpos = scene.sprites.iter().position(|s| s == house).unwrap();
+            assert!(pos > hpos, "drawn after its house");
+        }
+        // The same scene from the same clock; the chimneys out of step;
+        // the clock moves them on.
+        assert_eq!(at(&sim, 0.0, None).sprites, scene.sprites, "deterministic");
+        let phases: std::collections::HashSet<(u16, u16)> =
+            puffs.iter().map(|s| (s.u, s.v)).collect();
+        assert!(phases.len() > 1, "not every chimney puffs in step");
+        let later = effects(&at(&sim, 0.35, None), &smoke);
+        assert_ne!(
+            later.iter().map(|s| (s.u, s.v)).collect::<Vec<_>>(),
+            puffs.iter().map(|s| (s.u, s.v)).collect::<Vec<_>>(),
+            "the smoke rises with the clock"
+        );
+        // Remembered out of sight: no smoke. Their clubman sees the houses
+        // and walks away.
+        spawn(&mut sim, 1, kinds::CLUBMAN, sim::nav::centre((15, 13)));
+        for _ in 0..5 {
+            sim.step();
+        }
+        let seen = at(&sim, 0.0, Some(1));
+        let live = seen
+            .sprites
+            .iter()
+            .filter(|s| houses.contains(&(s.slot as usize)))
+            .count();
+        assert!(live > 0);
+        assert_eq!(effects(&seen, &smoke).len(), live, "in sight, they smoke");
+        let theirs = {
+            let w = sim.world();
+            w.slots()
+                .find(|s| w.kind[s.index()] == kinds::CLUBMAN)
+                .map(|s| w.id_at(s))
+                .unwrap()
+        };
+        sim.issue(Command {
+            player: 1,
+            kind: CommandKind::Move {
+                ids: vec![theirs],
+                target: sim::nav::centre((15, 42)),
+            },
+        });
+        for _ in 0..400 {
+            sim.step();
+        }
+        let fogged = at(&sim, 0.0, Some(1));
+        assert!(
+            fogged.sprites.iter().any(|s| s.light == fog::EXPLORED),
+            "the houses remembered"
+        );
+        assert!(effects(&fogged, &smoke).is_empty(), "no smoke from memory");
+        // Hurt: their clubmen on the first house; it burns as it goes down,
+        // then lies as rubble, which neither smokes nor burns.
+        let target = houses[0];
+        let id = {
+            let w = sim.world();
+            w.id_at(w.slots().find(|s| s.index() == target).unwrap())
+        };
+        for k in 0..6 {
+            spawn(&mut sim, 1, kinds::CLUBMAN, sim::nav::centre((9 + k, 13)));
+        }
+        for _ in 0..3 {
+            sim.step();
+        }
+        let clubs: Vec<_> = {
+            let w = sim.world();
+            w.slots()
+                .filter(|s| w.kind[s.index()] == kinds::CLUBMAN)
+                .map(|s| w.id_at(s))
+                .collect()
+        };
+        sim.issue(Command {
+            player: 1,
+            kind: CommandKind::Attack {
+                ids: clubs,
+                target: id,
+            },
+        });
+        let max = sim.max_health_of(0, kinds::HOUSE) as f32;
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..6000 {
+            sim.step();
+            let w = sim.world();
+            if w.dying[target] > 0 {
+                break;
+            }
+            let health = fx_to_f32(w.health[target]) / max;
+            let scene = at(&sim, 0.0, None);
+            let burning = fires(3, health);
+            let want_small = burning.iter().filter(|&&l| !l).count();
+            let want_large = burning.len() - want_small;
+            assert_eq!(
+                (effects(&scene, &small).len(), effects(&scene, &large).len()),
+                (want_small, want_large),
+                "at {health}"
+            );
+            assert_eq!(
+                effects(&scene, &smoke).len(),
+                4,
+                "still smoking while it stands"
+            );
+            seen.insert((want_small, want_large));
+        }
+        assert!(sim.world().dying[target] > 0, "the house fell");
+        assert!(seen.contains(&(1, 0)) && seen.contains(&(1, 2)), "{seen:?}");
+        let fallen = at(&sim, 0.0, None);
+        assert_eq!(effects(&fallen, &smoke).len(), 3, "rubble does not smoke");
+        assert!(effects(&fallen, &small).is_empty() && effects(&fallen, &large).is_empty());
+        // A site neither smokes nor burns, until it is finished.
+        for k in 0..3 {
+            spawn(&mut sim, 0, kinds::VILLAGER, sim::nav::centre((30 + k, 20)));
+        }
+        for _ in 0..3 {
+            sim.step();
+        }
+        let villagers: Vec<_> = {
+            let w = sim.world();
+            w.slots()
+                .filter(|s| w.kind[s.index()] == kinds::VILLAGER)
+                .map(|s| w.id_at(s))
+                .collect()
+        };
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Build {
+                kind: kinds::HOUSE,
+                x: 31,
+                y: 23,
+                ids: villagers,
+            },
+        });
+        let mut rose = false;
+        for _ in 0..3000 {
+            sim.step();
+            let w = sim.world();
+            let site = w
+                .slots()
+                .any(|s| w.kind[s.index()] == kinds::HOUSE && w.construction[s.index()].is_some());
+            let n = effects(&at(&sim, 0.0, None), &smoke).len();
+            if site {
+                rose = true;
+                assert_eq!(n, 3, "a site does not smoke");
+            } else if rose {
+                assert_eq!(n, 4, "finished, it does");
+                break;
+            }
+        }
+        assert!(rose);
+    }
+
     #[test]
     fn a_colour_building_rises_through_its_stages_and_falls_to_its_rubble() {
         use crate::sheets::fixture;
