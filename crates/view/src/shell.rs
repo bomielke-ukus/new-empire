@@ -594,15 +594,25 @@ impl<'a> Sheet<'a> {
                 Style::Button
             };
             self.p.boxed(x, y, w, h, style, h >= 20.0);
-            let shown = self.p.fit(&label, w - 6.0);
-            let lw = self.p.measure(&shown, 1.0);
-            self.p.type_in(
-                (x + (w - lw) / 2.0).round(),
-                (y + (h - font::GLYPH_H as f32) / 2.0).round(),
-                &shown,
-                style.ink(),
-                1.0,
-            );
+            if label == "-" || label == "+" {
+                // A step button's sign, drawn: the type's hyphen sits low.
+                self.p.sign(
+                    x + w / 2.0,
+                    y + h / 2.0,
+                    label == "+",
+                    style.ink().rgba(),
+                );
+            } else {
+                let shown = self.p.fit(&label, w - 6.0);
+                let lw = self.p.measure(&shown, 1.0);
+                self.p.type_in(
+                    (x + (w - lw) / 2.0).round(),
+                    (y + (h - font::GLYPH_H as f32) / 2.0).round(),
+                    &shown,
+                    style.ink(),
+                    1.0,
+                );
+            }
         } else {
             let (fill, ink) = if !enabled {
                 (GREY_DARK, Ink::White)
@@ -703,7 +713,10 @@ pub fn title(atlas: &Atlas, input: &ShellInput) -> Screen {
     if s.world_behind {
         // Over the diorama the title and the menu stand on a panel, and
         // the line along the bottom on a dark strip, so they read.
-        let pw = s.p.measure_ink(TITLE, Ink::Gold, 4.0).ceil().max(MENU_W) + 64.0;
+        // Sized by the old font, as always, so the skin's panel covers no
+        // more of the diorama than the old one did; the skin's title is
+        // narrower than this.
+        let pw = (font::width(TITLE) as f32 * 4.0).max(MENU_W) + 64.0;
         let bottom = my + 7.0 * (MENU_H + 8.0) + 12.0;
         let px = (cx - pw / 2.0).round();
         s.panel(px, ty - 20.0, pw, bottom - (ty - 20.0));
@@ -720,7 +733,13 @@ pub fn title(atlas: &Atlas, input: &ShellInput) -> Screen {
             s.p.rect(0.0, s.vh - 30.0, s.vw, 30.0, BLACK, 0);
         }
     }
-    s.centred(cx, ty, TITLE, Ink::Gold, 4.0);
+    if s.p.skinned() {
+        // The serif's capitals are wider than the old font's: a size down
+        // keeps a margin inside the old panel.
+        s.centred(cx, ty + 1.0, TITLE, Ink::Gold, 3.75);
+    } else {
+        s.centred(cx, ty, TITLE, Ink::Gold, 4.0);
+    }
     s.centred(cx, ty + 40.0, TAGLINE, Ink::White, 1.0);
     let entries = [
         (ShellAction::Campaigns, "CAMPAIGNS", true, ""),

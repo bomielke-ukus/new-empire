@@ -556,6 +556,32 @@ impl<'a> Painter<'a> {
         }
     }
 
+    /// A minus, or with `plus` a plus, in skin colour `c`, centred on
+    /// `(cx, cy)` HUD px, its bars on whole device pixels: the type's own
+    /// hyphen sits at its lower case's middle, low in a small step button.
+    pub fn sign(&mut self, cx: f32, cy: f32, plus: bool, c: skin::Rgba) {
+        let Some(f) = skin::solid_index(c)
+            .and_then(|i| self.atlas.frame_exact(skin::SOLID_ID, i, 0))
+            .copied()
+        else {
+            return;
+        };
+        let s = self.s;
+        let t = (1.4 * s).round().max(1.0);
+        let mut len = (7.0 * s).round();
+        if (len - t) % 2.0 != 0.0 {
+            len += 1.0;
+        }
+        let x0 = (cx * s - len / 2.0).round();
+        let y0 = (cy * s - t / 2.0).round();
+        let whole = (0, 0, f.w, f.h);
+        self.push_device(&f, whole, x0, y0, len, t, 0);
+        if plus {
+            let off = (len - t) / 2.0;
+            self.push_device(&f, whole, x0 + off, y0 - off, t, len, 0);
+        }
+    }
+
     /// A player's symbol in the player's colour (`GD-A11Y-03`), 11 pixels
     /// square with its top left at `(x, y)`; nothing for nature.
     pub fn symbol(&mut self, x: f32, y: f32, owner: u8) {
@@ -2318,20 +2344,16 @@ impl Hud {
             );
             let (mw, margin) = (256.0, 16.0);
             if reserve >= mw * 0.5 {
+                // The well stays inside the panel, so the frame covers no
+                // more of the world than the old panel did: the diamond's
+                // top point stands above it, as it always has.
                 let (mx, my) = (vw - margin - mw, vh - margin - mw * 0.5);
-                p.boxed(
-                    mx - 8.0,
-                    my - 8.0,
-                    mw + 16.0,
-                    mw * 0.5 + 16.0,
-                    skin::Style::Plate,
-                    true,
-                );
+                let top = (my - 3.0).max(py + 8.0);
                 p.boxed(
                     mx - 3.0,
-                    my - 3.0,
+                    top,
                     mw + 6.0,
-                    mw * 0.5 + 6.0,
+                    my + mw * 0.5 + 3.0 - top,
                     skin::Style::Trough,
                     false,
                 );

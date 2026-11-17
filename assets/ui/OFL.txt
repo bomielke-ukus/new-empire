@@ -8,6 +8,7 @@ Reserved Font Name.
   Carlito Bold (the UI's sans):
   Copyright (c) 2010-2013 by tyPoland Lukasz Dziedzic with Reserved Font
   Name "Carlito". https://github.com/googlefonts/carlito
+  (the font file's own notice: Copyright 2013 The Carlito Project Authors)
 
   Caladea Bold (the UI's serif):
   Copyright 2012 The Caladea Project Authors

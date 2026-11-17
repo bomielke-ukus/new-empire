@@ -1,0 +1,24 @@
+The new look's UI type (docs/look/ui.md)
+
+font.png   grey coverage atlas of the UI's glyphs, every baked size
+font.txt   its metrics: faces, kerning pairs, bakes, glyph rectangles
+
+Both are generated, not drawn: `python3.13 tools/look/ui_font.py` renders
+them with FreeType (via Pillow) from two fonts:
+
+  Carlito Bold   the sans, for the HUD's text
+                 /usr/share/fonts/truetype/crosextra/Carlito-Bold.ttf
+                 (Debian/Ubuntu package fonts-crosextra-carlito;
+                 upstream https://github.com/googlefonts/carlito)
+  Caladea Bold   the serif, for headings, counts and titles
+                 /usr/share/fonts/truetype/crosextra/Caladea-Bold.ttf
+                 (package fonts-crosextra-caladea;
+                 upstream https://github.com/huertatipografica/Caladea)
+
+Both are under the SIL Open Font License, Version 1.1: the fonts' own
+name tables say so (licence description and URL, name IDs 13 and 14), as
+do the packages' copyright files (/usr/share/doc/fonts-crosextra-*/
+copyright). The atlas is a Modified Version of each under that licence and
+is distributed under it; the copyright notices and the full licence text
+are in OFL.txt beside this file. The atlas does not use either font's name
+as its own, and is never sold by itself.
