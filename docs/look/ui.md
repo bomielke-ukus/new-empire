@@ -91,8 +91,8 @@ standing over the world casts a soft drop shadow.
   gold line; corners rounded 6 px. The resource bar and the bottom panel
   are panels whose ends run off the window.
 - **Plate**: parchment with a light inner edge, rounded 4 px: tooltips,
-  notices, the hint, objectives, the narrator, the Wonder clocks, the
-  minimap's frame, a line over the world (the banner's subtitle).
+  notices, the hint, objectives, the narrator, the Wonder clocks, a line
+  over the world (the banner's subtitle).
 - **Buttons**: rest is limestone with a lit inner edge and a dark bronze
   edge; hover is lit limestone with a gold edge; greyed is drained stone
   with a pewter edge and muted text. A button newly opened by a technology
@@ -130,9 +130,13 @@ standing over the world casts a soft drop shadow.
 - **Notifications**: plates, each marked with a small chip of its kind:
   terracotta an attack, pewter a loss, ochre research and ages, lapis a
   cheat.
-- **The minimap** sits in a trough set in a plate, a framed medallion at
-  the panel's corner. (The diamond pokes above the panel as it always did;
-  the plate frames it.)
+- **The minimap** sits in a trough set into the bottom panel. The trough
+  stops at the panel's top edge, so the diamond's top point stands above
+  the panel over the world as it always did: a frame round the whole
+  diamond would have covered two corners of world the old HUD left open.
+  (Measured: over the same frame, no pixel the old HUD left showing is
+  covered by the skin's; only the soft shadows darken the world's edge by
+  a few steps.)
 - **Health bars over the world**: small troughs with the bar inside.
 - **Banner**: a panel with the serif title in rubric; its subtitle stands
   on a plate so it reads over the world.
@@ -144,13 +148,57 @@ standing over the world casts a soft drop shadow.
 The title, setup, load, settings (both pages), campaigns, briefing, pause,
 results and the scenario editor's strips all use the same panel, buttons,
 warnings and type; a screen with no world behind it stands on a dark warm
-backdrop. The title is the serif at four times the text size. The setup
+backdrop. The title screen's panel keeps the old one's width (sized by the
+old font), and the title is the serif at 3.75 times the text size, a step
+under the old title's four, so that its wider capitals keep a margin
+inside it. The step buttons' minus and plus (setup, settings) are drawn as
+bars centred in the button rather than set in the type, whose hyphen sits
+at the middle of the lower case, low in a 16 px button. The setup
 screen's map preview lies in a trough. One fix that is the skin's alone:
 the setup screen's rows run one row past the height the panel allows for
 them (`3 + opponents + 2` rows are counted, `4 + opponents + 2` drawn), so
 the civilization's lines sat on the seed row; with the skin they are set
 clear of it. Nothing that is clicked moves; the old UI keeps the overlap,
 as its golden image does.
+
+## Icons
+
+An icon is the new art itself, never drawn for the UI: the frame the
+world shows, area-filtered down when the atlas is built, once for each of
+the first four device scales (1, 1.25, 1.5, 2; larger scales use the 2×
+one) so it is never resampled again on the way to the screen.
+
+- A **resource** is its node: the berry bush for food, a tree for wood,
+  the stone and gold mines. Shown in the resource bar in place of the
+  word, only when all four exist (with the new art off, or a set
+  missing, the words are written as before).
+- A **unit or building** is its idle frame, facing the viewer, in the
+  owner's colour: on a build or train button at least 80 HUD px wide, and
+  in a production queue's box.
+- What has no picture keeps its word: stop, the stances and formations,
+  technologies and ages (a queued technology keeps its letter), toggles
+  such as reseeding and unloading. A picture is used only where the thing
+  is a thing in the world; an invented pictogram for "aggressive" or
+  "tool age" would be one more thing to learn.
+- The key a button answers to is always written, on a small dark key cap
+  at the button's bottom right, so the grid can be learnt from the screen.
+
+## Left in the old skin
+
+On purpose: the world's own feedback and the accessibility marks are not
+UI chrome, and they stay as they were.
+
+- The players' symbols (`GD-A11Y-03`): their pixel shapes are what is
+  tested to be tellable apart, so they are drawn as before, beside the
+  skin's type.
+- The attack chevrons at the window's edge: palette black and red, which
+  read over any ground.
+- The minimap's picture and its marks (only its well is the skin's), and
+  everything drawn in the world: selection rings, rally flags, the
+  building ghost, the box drag.
+- The controls overlay keeps its columns' widths, so the one line that
+  was cut in the old font is still cut in the skin's (less of it).
+- With the new art off, all of it: the old UI to the pixel.
 
 ## How it reaches the screen
 
@@ -161,8 +209,22 @@ pieces and shadows at each scale, its flat colours, the sheen and grain,
 and the icons and portraits made from the colour sets already loaded. The
 GPU renderer and the software rasteriser draw them as they draw any colour
 frame (straight alpha, sampled texel for texel), so neither needed a
-change. The painter places the skin's sprites in device pixels, stored in
-HUD pixels so the UI's scale on the way out lands them back on the grid.
+change. The painter places every one of the skin's sprites, flat fills and
+rules included, with its edges on whole device pixels, stored in HUD
+pixels so the UI's scale on the way out lands them back on the grid: a
+one-pixel rule under a UI scale of 1.5 is the same width wherever it
+falls, and the GPU (which fills a pixel whose centre an edge passes) and
+the rasteriser (which rounds) fill the same pixels. Nothing the skin
+draws is resampled except the sheen over a box taller than 96 device px:
+the sheen is baked once for each height up to that and laid texel for
+pixel, since the two renderers would pick a minified gradient's texels
+differently (the GPU at a pixel's centre, the rasteriser at its corner).
+The headless test `the_skinned_hud_draws_as_the_rasteriser_draws_it`
+(`crates/render/tests/headless.rs`) holds it: a skinned HUD with a
+tooltip, a notice, the hint and a flashed resource at a UI scale of 1.5
+over a bright ground, drawn by both, no pixel more than three steps
+apart (a step of blend rounding for each layer: shadow, face, sheen,
+grain).
 A box is about a dozen sprites, a line of text a sprite a glyph; the HUD
 stays a few hundred sprites a frame. The skin adds a few megabytes to the
 colour pages (most of it the type at the larger scales).

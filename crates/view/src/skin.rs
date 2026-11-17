@@ -535,6 +535,10 @@ pub enum Misc {
 /// The grain tile's side, device px.
 pub const GRAIN: u32 = 96;
 
+/// The tallest sheen baked to its own height ([`Misc::Sheen`], index
+/// the height in device px); a taller box stretches index 0.
+pub const SHEEN_EXACT: u32 = 96;
+
 /// A box's corner piece size at bucket `b`, device px: the radius and the
 /// lines inside it.
 pub fn corner(style: Style, b: usize) -> u32 {
@@ -967,11 +971,13 @@ pub fn frames(sources: &[Source]) -> Vec<SkinFrame> {
         out.push(fr);
     }
     // The sheen: light at the top fading out by a third, shade gathering
-    // over the last third.
-    let mut sheen = SkinFrame::new(MISC_ID, Misc::Sheen as u8, 0, 1, 64);
-    for y in 0..64u32 {
-        let t = (y as f32 + 0.5) / 64.0;
-        let c = if t < 0.35 {
+    // over the last third. Index 0 is a tall one to stretch; index `h`
+    // (up to [`SHEEN_EXACT`]) is `h` device px tall, laid texel for pixel
+    // so that a short box's sheen is not a resampling of the tall one's
+    // (which the GPU, sampling at pixel centres, and the rasteriser,
+    // at pixel corners, would pick differently).
+    let wash = |t: f32| -> Rgba {
+        if t < 0.35 {
             let a = (1.0 - t / 0.35).powf(1.5) * 70.0;
             [255, 252, 240, a.round() as u8]
         } else if t > 0.6 {
@@ -979,10 +985,16 @@ pub fn frames(sources: &[Source]) -> Vec<SkinFrame> {
             [90, 56, 20, a.round() as u8]
         } else {
             [0, 0, 0, 0]
-        };
-        sheen.set(0, y, c);
+        }
+    };
+    for index in 0..=SHEEN_EXACT as u8 {
+        let h = if index == 0 { 64 } else { index as u32 };
+        let mut sheen = SkinFrame::new(MISC_ID, Misc::Sheen as u8, index, 1, h);
+        for y in 0..h {
+            sheen.set(0, y, wash((y as f32 + 0.5) / h as f32));
+        }
+        out.push(sheen);
     }
-    out.push(sheen);
     // The grain: soft fibres and specks, a hash of the pixel, tiling.
     let mut grain = SkinFrame::new(MISC_ID, Misc::Grain as u8, 0, GRAIN, GRAIN);
     for y in 0..GRAIN {

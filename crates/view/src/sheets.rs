@@ -323,11 +323,100 @@ impl Sheet {
         })
     }
 
+    /// This unit set with decay rows of its own (`decay: Frames`), as the
+    /// exporter drew them before `decay: Synth`: every facing's frame `k` of
+    /// `n` is the death's last frame faded to `1 - 0.45 k / (n - 1)`. The
+    /// inverse of [`Sheet::without_decay_frames`]; a set that has decay rows
+    /// already is returned as it is. For tests, since no exported set has
+    /// them now.
+    #[cfg(test)]
+    pub(crate) fn with_decay_frames(&self) -> Sheet {
+        if self.decay == Decay::Frames {
+            return self.clone();
+        }
+        let di = self
+            .animations
+            .iter()
+            .position(|a| a.name == "decay")
+            .expect("a decay to add");
+        let death = self
+            .animations
+            .iter()
+            .position(|a| a.name == "death")
+            .expect("a death to decay from");
+        let (fw, fh) = self.frame_size();
+        let facings = self.facings().len();
+        let n = self.animations[di].frames;
+        let cols = self.width / fw;
+        assert!(n <= cols, "room for the decay's frames");
+        let height = self.animations.len() as u32 * facings as u32 * fh;
+        let last = self.animations[death].frames - 1;
+        let planes = [&self.indices, &self.rgba, &self.mask];
+        let bpp = [1usize, 4, 1];
+        let mut out: Vec<Vec<u8>> = planes
+            .iter()
+            .zip(bpp)
+            .map(|(src, b)| {
+                if src.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![0; (self.width * height) as usize * b]
+                }
+            })
+            .collect();
+        for a in 0..self.animations.len() {
+            for f in 0..facings {
+                let row = (a * facings + f) as u32;
+                for frame in 0..self.animations[a].frames {
+                    let (from, src_frame) = if a == di { (death, last) } else { (a, frame) };
+                    let (sx, sy, _, _) = self.frame_rect(from, f, src_frame);
+                    let k = if n > 1 {
+                        frame as f32 / (n - 1) as f32
+                    } else {
+                        0.0
+                    };
+                    let alpha = if a == di { 1.0 - 0.45 * k } else { 1.0 };
+                    for y in 0..fh {
+                        for x in 0..fw {
+                            let src = ((sy + y) * self.width + sx + x) as usize;
+                            let dst = ((row * fh + y) * self.width + frame * fw + x) as usize;
+                            for (p, plane) in planes.iter().enumerate() {
+                                if plane.is_empty() {
+                                    continue;
+                                }
+                                for i in 0..bpp[p] {
+                                    let mut v = plane[src * bpp[p] + i];
+                                    if a == di && p == 1 && i == 3 {
+                                        v = (v as f32 * alpha).round() as u8;
+                                    }
+                                    out[p][dst * bpp[p] + i] = v;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let [indices, rgba, mask]: [Vec<u8>; 3] = out.try_into().unwrap();
+        Sheet {
+            height,
+            indices,
+            rgba,
+            mask,
+            decay: Decay::Frames,
+            ..self.clone()
+        }
+    }
+
     /// This unit set as its next export makes it (`docs/look/units.md`,
     /// "Memory"): the same, but its decay's rows cut out of the sheet and
-    /// `decay: Synth`. For tests, which have only the sets as exported now.
+    /// `decay: Synth`; a set that is `Synth` already is returned as it is.
+    /// For tests.
     #[cfg(test)]
     pub(crate) fn without_decay_frames(&self) -> Sheet {
+        if self.decay == Decay::Synth {
+            return self.clone();
+        }
         let di = self
             .animations
             .iter()

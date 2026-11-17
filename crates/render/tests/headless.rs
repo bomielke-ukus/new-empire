@@ -445,3 +445,130 @@ fn the_textured_ground_draws_as_the_rasteriser_draws_it() {
         assert!(distinct.len() > 1000, "{} colours", distinct.len());
     }
 }
+
+/// The new look's skinned UI (`docs/look/ui.md`) drawn by the GPU is what
+/// the software rasteriser draws: the parchment panels, their bronze
+/// frames and soft shadows, the baked type in its inks, the key caps and
+/// a tooltip, all colour frames blended over what is behind. Over a
+/// bright ground, so the shadows' and the glyphs' edges blend with
+/// something; at a UI scale of 1.5, so the skin's device-pixel placement
+/// (whole device pixels under a fractional scale) is held on both paths.
+#[test]
+fn the_skinned_hud_draws_as_the_rasteriser_draws_it() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let atlas = Atlas::with_sheets_skinned(&[], view::sprites::ATLAS_PAGE_HEIGHT, true);
+    assert!(atlas.has_skin());
+    let sim = Simulation::new(3, SimConfig::default());
+    let selected: Vec<u32> = sim
+        .world()
+        .slots()
+        .filter(|s| {
+            sim.world().owner[s.index()] == 0
+                && sim.world().kind[s.index()] == sim::kinds::TOWN_CENTER
+        })
+        .map(|s| s.index() as u32)
+        .collect();
+    assert_eq!(selected.len(), 1);
+    let (w, h) = (960u32, 540u32);
+    let s = 1.5;
+    let camera = Camera::new(sim.map().width(), sim.map().height(), (w as f32, h as f32));
+    let settings = view::Settings::default();
+    let notices = [view::Notice {
+        kind: view::NoticeKind::Attack,
+        text: "YOUR TOWN IS UNDER ATTACK".into(),
+        tile: None,
+        tick: sim.tick(),
+    }];
+    let input = |hover: Option<(f32, f32)>| view::HudInput {
+        sim: &sim,
+        player: 0,
+        camera: &camera,
+        selected: &selected,
+        build_mode: None,
+        fps: 60.0,
+        paused: false,
+        speed: 1.0,
+        status: "TICK 0",
+        hover,
+        banner: None,
+        ui_scale: s,
+        help: false,
+        targeting: false,
+        defences: false,
+        settings: &settings,
+        notices: &notices,
+        hint: Some("VILLAGERS ARE IDLE"),
+        narration: None,
+        flash: [true, false, false, false],
+        perf: None,
+        fresh: &[],
+    };
+    // Hover the first button, for its tooltip and the hover style.
+    let b = view::Hud::build(&atlas, &input(None)).buttons[0].clone();
+    let hud = view::Hud::build(
+        &atlas,
+        &input(Some(((b.x + b.w * 0.5) * s, (b.y + b.h * 0.5) * s))),
+    );
+    let scene = Scene {
+        ui: hud.sprites,
+        ..Scene::default()
+    };
+    assert!(scene.ui.len() > 200, "{} sprites", scene.ui.len());
+
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    let mut renderer = Renderer::new(&device, &queue, format, &atlas);
+    let clear = [204u8, 230, 153, 255];
+    renderer.clear = wgpu::Color {
+        r: 0.8,
+        g: 0.9,
+        b: 0.6,
+        a: 1.0,
+    };
+    let target = target(&device, format, w, h);
+    renderer.render(
+        &device,
+        &queue,
+        &target.create_view(&Default::default()),
+        &camera,
+        &scene,
+        None,
+    );
+    let gpu = read_back(&device, &queue, &target, w, h);
+    let mut cpu = view::raster::Image::new(w, h, clear);
+    view::raster::draw_sprites(
+        &mut cpu,
+        &camera,
+        &atlas,
+        &view::palette::texture(),
+        &scene.ui,
+    );
+    // Texel for texel, every edge on the same pixel: what is left is the
+    // rounding of each blend, a step for each layer the skin stacks
+    // (a shadow, a face, its sheen, the parchment's grain), so no pixel
+    // more than three steps out, and most none.
+    let (mut far, mut worst, mut drawn, mut sum) = (0usize, 0u32, 0usize, 0u64);
+    for y in 0..h {
+        for x in 0..w {
+            let g = gpu[(y * w + x) as usize];
+            let c = cpu.get(x as i32, y as i32);
+            let d = (0..3)
+                .map(|k| (g[k] as i32 - c[k] as i32).unsigned_abs())
+                .max()
+                .unwrap();
+            worst = worst.max(d);
+            sum += d as u64;
+            far += usize::from(d > 3);
+            drawn += usize::from(c[..3] != clear[..3]);
+        }
+    }
+    assert!(
+        drawn > (w * h / 5) as usize,
+        "the HUD covers {drawn} pixels"
+    );
+    let mean = sum as f64 / (w * h) as f64;
+    eprintln!("skinned HUD: mean channel delta {mean:.2}, worst {worst}");
+    assert_eq!(far, 0, "{far} pixels differ by more than 3 (worst {worst})");
+    assert!(mean < 1.0, "mean channel delta {mean:.2}");
+}

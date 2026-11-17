@@ -596,12 +596,8 @@ impl<'a> Sheet<'a> {
             self.p.boxed(x, y, w, h, style, h >= 20.0);
             if label == "-" || label == "+" {
                 // A step button's sign, drawn: the type's hyphen sits low.
-                self.p.sign(
-                    x + w / 2.0,
-                    y + h / 2.0,
-                    label == "+",
-                    style.ink().rgba(),
-                );
+                self.p
+                    .sign(x + w / 2.0, y + h / 2.0, label == "+", style.ink().rgba());
             } else {
                 let shown = self.p.fit(&label, w - 6.0);
                 let lw = self.p.measure(&shown, 1.0);

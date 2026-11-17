@@ -238,15 +238,18 @@ scale 2 about 700 MiB. Over the 150 MiB wanted for units, so:
    frames best at 2 pixels. The fade rides in the high four bits of
    `SpriteInstance::row` (`opacity()`, `palette_row()`), in twentieths,
    multiplied into the alpha by the shader and the rasteriser alike.
-   Measured against the hoplite's rendered decay frames
-   (`the_synthesised_decay_looks_as_the_exported_frames_did`): frame 0 is
-   the same pixels; frames 1 to 3 differ by at most 17% of the coverage and
-   14 levels of colour where both are solid, the rendered frames' own
-   noise (each was rendered apart) and the sub-pixel sink, against 25%
-   and 27 faded but not sunk. `tools/look/unitexport.py` (`SYNTH_DECAY`)
-   no longer renders the decay and writes `decay: Synth`; its source is in
-   the export hash, so the next `export_all.py` run re-exports every unit
-   without the frames (not yet run: about 40 minutes). The loader takes
+   Measured once against the hoplite's rendered decay frames, while the
+   exported set still had them: frame 0 was the same pixels; frames 1 to 3
+   differed by at most 17% of the coverage and 14 levels of colour where
+   both are solid, the rendered frames' own noise (each was rendered apart)
+   and the sub-pixel sink, against 25% and 27 faded but not sunk. The
+   frames are gone from the repo with the re-export, so that comparison is
+   no longer a test; `a_unit_without_decay_frames_decays_from_its_deaths_last_frame`
+   checks the synthesised decay's behaviour on the real set and against a
+   copy of it given decay rows (`Sheet::with_decay_frames`).
+   `tools/look/unitexport.py` (`SYNTH_DECAY`) no longer renders the decay
+   and writes `decay: Synth`; its source is in the export hash, and every
+   unit has been re-exported without the frames. The loader takes
    both forms; a set with decay frames is drawn from them as before.
    Saves 9.1 MiB of the 96.5 the units cost now.
 4. **Only the units in play**. Built: `sprites::Loadout` is the buildings'

@@ -471,6 +471,19 @@ impl<'a> Painter<'a> {
     }
 
     fn push(&mut self, f: &Frame, x: f32, y: f32, w: f32, h: f32, row: u8) {
+        if self.skin {
+            // With the skin every edge lands on a whole device pixel, so a
+            // rule or a bar is the same width wherever it falls under a
+            // fractional UI scale, and the GPU, which fills a pixel whose
+            // centre the edge passes, and the rasteriser, which rounds,
+            // draw the same pixels.
+            let s = self.s;
+            let (x, y) = (x.round(), y.round());
+            let (x0, y0) = ((x * s).round(), (y * s).round());
+            let (x1, y1) = (((x + w) * s).round(), ((y + h) * s).round());
+            self.push_device(f, (0, 0, f.w, f.h), x0, y0, x1 - x0, y1 - y0, row);
+            return;
+        }
         self.out.push(SpriteInstance {
             x: x.round(),
             y: y.round(),
@@ -798,7 +811,17 @@ impl<'a> Painter<'a> {
         {
             let (x0, y0) = ((x * s).round(), (y * s).round());
             let (x1, y1) = (((x + w) * s).round(), ((y + h) * s).round());
-            self.push_device(&f, (0, 0, f.w, f.h), x0, y0, x1 - x0, y1 - y0, 0);
+            // Texel for pixel where one is baked to the height.
+            let dh = y1 - y0;
+            let f = (dh >= 1.0 && dh <= skin::SHEEN_EXACT as f32)
+                .then(|| {
+                    self.atlas
+                        .frame_exact(skin::MISC_ID, skin::Misc::Sheen as u8, dh as u8)
+                        .copied()
+                })
+                .flatten()
+                .unwrap_or(f);
+            self.push_device(&f, (0, 0, f.w, f.h), x0, y0, x1 - x0, dh, 0);
         }
     }
 
@@ -2182,7 +2205,8 @@ fn top_bar_skin(p: &mut Painter<'_>, segs: &[Seg], vw: f32, status: &str) {
         true,
     );
     let icon_w = 20.0;
-    let icons = p.has_icon(skin::ICON_ID);
+    // Pictures in place of the names only if every resource has one.
+    let icons = (0..4).all(|r| p.has_icon(skin::ICON_ID + r));
     let shown = |s: &Seg| -> String {
         if icons && s.res.is_some() {
             s.value.clone()
@@ -3022,7 +3046,12 @@ impl Hud {
                 let ly = y + 24.0 + i as f32 * line;
                 let ink = if i == 0 { Ink::Gold } else { Ink::White };
                 for (c, cell) in cells.iter().enumerate() {
-                    p.text_in(x + 8.0 + cols[c], ly, cell, ink, 1.0);
+                    let mut cx = x + 8.0 + cols[c];
+                    if p.skinned() {
+                        // Kept inside the frame (the old one ran past it).
+                        cx = cx.min(x + pw - 8.0 - p.measure_ink(cell, ink, 1.0).ceil());
+                    }
+                    p.text_in(cx, ly, cell, ink, 1.0);
                 }
             }
         }

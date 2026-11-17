@@ -4014,14 +4014,23 @@ mod tests {
                     (info.frames, info.frame_ms, info.loops),
                     (animation.frames, animation.frame_ms, animation.loops)
                 );
+                // A synthesised decay has no frames: it is the death's last.
+                let (shown, shown_index) =
+                    if sheet.decay == crate::sheets::Decay::Synth && anim == Anim::Decay {
+                        let death = sheet.animations.iter().find(|d| d.name == "death");
+                        (Anim::Death, death.unwrap().frames - 1)
+                    } else {
+                        (anim, 0)
+                    };
                 for facing8 in 0..8u8 {
                     for index in 0..info.frames {
                         let t = index * info.frame_ms + info.frame_ms / 2;
                         let (f, flip) = a.frame_at(kind, facing8, anim, t).unwrap();
                         let (authored, mirrored) = source_facing(facing8);
+                        let want_index = if shown == anim { index } else { shown_index };
                         assert_eq!(
                             (f.anim, f.index as u32, f.facing, flip),
-                            (anim, index, authored, mirrored),
+                            (shown, want_index, authored, mirrored),
                             "{name} {} facing {facing8} frame {index}",
                             animation.name
                         );
@@ -4604,27 +4613,36 @@ mod tests {
         assert!(a.shadow_of(site).is_none());
     }
 
-    /// The hoplite's colour set as exported now, with its decay frames,
-    /// and as the next export makes it, without them (`decay: Synth`).
+    /// The hoplite's colour set as exported now (`decay: Synth`), and the
+    /// same with decay rows of its own, as the exporter drew them before:
+    /// the set to compare it with, since no exported set has them now.
     fn hoplite_with_and_without_decay() -> (crate::sheets::Sheet, crate::sheets::Sheet) {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let full =
+        let synth =
             crate::sheets::Sheet::load(&root.join("assets/look/hoplite/hoplite.ron")).unwrap();
-        let synth = full.without_decay_frames();
-        (full, synth)
+        (synth.with_decay_frames(), synth)
     }
 
     /// A unit set without decay frames (`docs/look/units.md`, "Memory")
     /// loads and keeps its decay's timing; its corpse is the death's last
     /// frame the whole decay long, faded and sunk step by step as the
-    /// exporter drew the frames; everything else is as the set with its
-    /// decay frames draws it. A set with them is drawn from them.
+    /// exporter drew the frames; everything else is as the same set with
+    /// decay rows draws it. A set with them is drawn from them.
     #[test]
     fn a_unit_without_decay_frames_decays_from_its_deaths_last_frame() {
         let (full, synth) = hoplite_with_and_without_decay();
+        assert_eq!(synth.decay, crate::sheets::Decay::Synth, "as exported");
         assert_eq!(full.decay, crate::sheets::Decay::Frames);
         assert_eq!(synth.animations, full.animations, "the same timing");
         assert_eq!(synth.height * 5, full.height * 4, "no decay rows");
+        // Cutting the rows again gives the set back; cutting none is a no-op.
+        let cut = full.without_decay_frames();
+        assert_eq!(
+            (cut.decay, cut.height, &cut.rgba, &cut.mask),
+            (synth.decay, synth.height, &synth.rgba, &synth.mask)
+        );
+        assert_eq!(synth.without_decay_frames().rgba, synth.rgba);
+        assert_eq!(synth.without_decay_frames().height, synth.height);
         let (a, b) = (Atlas::with_sheets(&[full]), Atlas::with_sheets(&[synth]));
         let h = kinds::HOPLITE;
         let decay = b.anim_info(h, Anim::Decay).unwrap();
@@ -4633,6 +4651,10 @@ mod tests {
             .frames()
             .iter()
             .all(|f| f.kind != h || f.anim != Anim::Decay));
+        assert!(a
+            .frames()
+            .iter()
+            .any(|f| f.kind == h && f.anim == Anim::Decay));
         // Every frame but the decay's draws the same pixels.
         let pixels = |atlas: &Atlas, f: &Frame| -> Vec<[u8; 5]> {
             (0..f.h as u32)
@@ -4666,7 +4688,12 @@ mod tests {
                 f.index
             );
         }
+        // With its own frames a set is drawn from them, not synthesised.
         assert_eq!(a.decay_look(h, 0), None, "its own frames");
+        for facing8 in 0..8 {
+            let (real, _) = a.frame_at(h, facing8, Anim::Decay, 0).unwrap();
+            assert_eq!(real.anim, Anim::Decay);
+        }
         for facing8 in 0..8 {
             let last = b.frame_at(h, facing8, Anim::Death, u32::MAX).unwrap();
             assert_eq!(last.0.index, 7);
@@ -4689,76 +4716,6 @@ mod tests {
         );
         // Faded nine twentieths: the exporter's 55% on the last frame.
         assert!((1.0 - 9.0 / f32::from(DECAY_FADE_STEPS) - DECAY_FADE).abs() < 1e-6);
-    }
-
-    /// What the synthesised decay draws is what the exported decay frames
-    /// drew, near enough not to tell apart: frame by frame and facing by
-    /// facing, the death's last frame faded and sunk against the decay
-    /// frame itself, by the corpse's coverage (alpha) and its colour where
-    /// both are solid.
-    #[test]
-    fn the_synthesised_decay_looks_as_the_exported_frames_did() {
-        let (full, synth) = hoplite_with_and_without_decay();
-        let (a, b) = (Atlas::with_sheets(&[full]), Atlas::with_sheets(&[synth]));
-        let h = kinds::HOPLITE;
-        let decay = a.anim_info(h, Anim::Decay).unwrap();
-        // Each pixel of a frame by its offset from the anchor, at 1x.
-        let drawn = |atlas: &Atlas, f: &Frame, alpha: f32, sink: i32| {
-            let mut out = HashMap::new();
-            for y in 0..f.h as i32 {
-                for x in 0..f.w as i32 {
-                    let p = atlas.rgba_at(f.page, f.x as u32 + x as u32, f.y as u32 + y as u32);
-                    if p[3] > 0 {
-                        let at = (x - f.anchor_x as i32, y - f.anchor_y as i32 + sink);
-                        out.insert(at, [p[0], p[1], p[2], (p[3] as f32 * alpha).round() as u8]);
-                    }
-                }
-            }
-            out
-        };
-        let mut worst = (0.0f32, 0.0f32);
-        for facing8 in AUTHORED {
-            for k in 0..decay.frames {
-                let t = k * decay.frame_ms;
-                let (real, _) = a.frame_at(h, facing8, Anim::Decay, t).unwrap();
-                let (last, _) = b.frame_at(h, facing8, Anim::Decay, t).unwrap();
-                let look = b.decay_look(h, t).unwrap();
-                let alpha = 1.0 - f32::from(look.fade) / f32::from(DECAY_FADE_STEPS);
-                let want = drawn(&a, real, 1.0, 0);
-                // Lowered and cut as `scene::sink` does it: whole pixels.
-                let sunk = (look.sink * f32::from(last.scale)) as i32 / i32::from(last.scale);
-                let mut got = drawn(&b, last, alpha, sunk);
-                got.retain(|&(_, y), _| y < last.h as i32 - last.anchor_y as i32);
-                let keys: std::collections::HashSet<_> = want.keys().chain(got.keys()).collect();
-                let (mut diff, mut mass, mut colour, mut solid) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-                for k in keys {
-                    let (w, g) = (
-                        want.get(k).copied().unwrap_or([0; 4]),
-                        got.get(k).copied().unwrap_or([0; 4]),
-                    );
-                    diff += (w[3] as f32 - g[3] as f32).abs();
-                    mass += w[3] as f32;
-                    if w[3] > 128 && g[3] > 128 {
-                        colour += (0..3)
-                            .map(|c| (w[c] as f32 - g[c] as f32).abs())
-                            .sum::<f32>()
-                            / 3.0;
-                        solid += 1.0;
-                    }
-                }
-                let (coverage, tone) = (diff / mass, colour / solid.max(1.0));
-                println!(
-                    "facing {facing8} decay {k}: coverage off {:.1}%, colour off {tone:.1}",
-                    coverage * 100.0
-                );
-                worst = (worst.0.max(coverage), worst.1.max(tone));
-            }
-        }
-        // What is left is the render's own noise (each exported frame was
-        // rendered apart) and the sub-pixel sinking: measured, at most 17%
-        // of the coverage and 14 levels of colour where both are solid,
-        // against 25% and 27 drawn faded but not sunk.
-        assert!(worst.0 < 0.2 && worst.1 < 16.0, "{worst:?}");
     }
 
     /// A match's sides can have only the units their civilisations are not
