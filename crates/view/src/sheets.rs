@@ -1025,6 +1025,40 @@ mod tests {
         );
     }
 
+    /// A unit's colour set (`docs/look/units.md`) plays exactly what the
+    /// old set of its name played: the same animations in the same order,
+    /// with the same frame counts, timing, looping and impact frames, so
+    /// nothing that times itself by them changes; and it turns, takes its
+    /// owner's colour and is laid out as its manifest says.
+    #[test]
+    fn the_new_units_keep_the_old_units_timing() {
+        let look = repo_root().join("assets/look");
+        let old = repo_root().join("assets/sprites");
+        let mut units = 0;
+        for path in find_sets(&look) {
+            let m: Manifest = ron::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            if !m.class.turns() {
+                continue;
+            }
+            units += 1;
+            let was: Manifest = ron::from_str(
+                &std::fs::read_to_string(old.join(&m.name).join(format!("{}.ron", m.name)))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(m.animations, was.animations, "{}", m.name);
+            assert_eq!(m.class, was.class, "{}", m.name);
+            assert!(m.colour && m.mask.is_some(), "{}", m.name);
+            let sheet = Sheet::load(&path).unwrap();
+            assert_eq!(sheet.facings().len(), 5);
+            assert_eq!(
+                sheet.height,
+                m.frame.unwrap().1 * 5 * m.animations.len() as u32
+            );
+        }
+        assert!(units >= 2, "the villager and the hoplite at least");
+    }
+
     /// A double-clicked bundle runs from `/`, where no ancestor holds
     /// the art: the binary's own bundle is looked in first, then a plain
     /// install beside the binary, then the working directory and its

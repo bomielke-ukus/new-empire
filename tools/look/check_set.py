@@ -20,6 +20,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 TURNING = {"Foot", "Mounted", "Heavy", "Ship"}
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FACINGS = 5
 GREEN = (86, 140, 60)
 
@@ -49,10 +50,13 @@ def parse_ron(text):
     mask = field("mask", r'Some\(\s*"([^"]*)"\s*\)')
     anims = [(n, int(f)) for n, f in re.findall(
         r'\(\s*name\s*:\s*"([^"]+)"\s*,\s*frames\s*:\s*(\d+)', text)]
+    timing = re.findall(r'\(\s*name\s*:\s*"([^"]+)"\s*,\s*frames\s*:\s*(\d+)\s*,\s*frame_ms'
+                        r'\s*:\s*(\d+)\s*,\s*loops\s*:\s*(\w+)\s*,\s*impact\s*:\s*(None|Some\(\d+\))',
+                        text)
     return {
         "name": field("name"), "class": field("class", r"(\w+)"),
         "scale": int(field("scale", r"(\d+)")), "sheet": field("sheet"),
-        "anchor": anchor, "frame": frame, "mask": mask, "animations": anims,
+        "anchor": anchor, "frame": frame, "mask": mask, "animations": anims, "timing": timing,
         "colour": field("colour", r"(true|false)") == "true",
     }
 
@@ -87,8 +91,18 @@ def main():
         errors.append("manifest name %r is not the directory's %r" % (man["name"], name))
     if not man["colour"]:
         errors.append("colour: true is missing")
-    if man["scale"] != 2:
-        errors.append("scale is %d, not 2" % man["scale"])
+    turns = man["class"] in TURNING
+    # Everything is authored at 2; a unit may be at 1 (docs/look/units.md).
+    if man["scale"] not in ((1, 2) if turns else (2,)):
+        errors.append("scale is %d, not 2%s" % (man["scale"], " or 1" if turns else ""))
+    if turns:
+        # A unit plays what the old set of its name played (docs/look/units.md).
+        old = os.path.join(ROOT, "assets", "sprites", name, name + ".ron")
+        if not os.path.exists(old):
+            errors.append("no old set %s to take the timing from" % old)
+        elif parse_ron(open(old).read())["timing"] != man["timing"]:
+            errors.append("animations differ from the old set's: %s vs %s"
+                          % (man["timing"], parse_ron(open(old).read())["timing"]))
     if man["frame"] is None:
         errors.append("no frame: Some((w, h))")
     sheet_img = Image.open(os.path.join(args.set_dir, man["sheet"]))
@@ -108,7 +122,6 @@ def main():
         mask = np.zeros((H, W))
 
     fw, fh = man["frame"] or (0, 0)
-    turns = man["class"] in TURNING
     rows = [(a, f) for a, n in man["animations"] for f in range(FACINGS if turns else 1)]
     cols = max(n for _, n in man["animations"])
     if (W, H) != (fw * cols, fh * len(rows)):
@@ -139,10 +152,28 @@ def main():
     print("alpha: %d opaque, %d translucent (edges and shadow), %d clear"
           % ((a == 255).sum(), soft.sum(), (a == 0).sum()))
 
-    # Previews: per cell, [as is | blue | red | mask] over green, 2x.
+    # Every frame of every animation (and facing) draws something.
+    for r, (anim, facing) in enumerate(rows):
+        n = dict(man["animations"])[anim]
+        for c in range(n):
+            if sheet[r * fh:(r + 1) * fh, c * fw:(c + 1) * fw, 3].max() == 0:
+                errors.append("%s facing %d frame %d is empty" % (anim, facing, c))
+
+    # Previews: per cell, [as is | blue | red | mask] over green, 2x; a
+    # unit's rows side by side, [blue | red] a cell.
     os.makedirs(args.out, exist_ok=True)
     panels = []
-    for r in range(len(rows)):
+    if turns:
+        for r in range(len(rows)):
+            cells = []
+            for c in range(cols):
+                cell = sheet[r * fh:(r + 1) * fh, c * fw:(c + 1) * fw]
+                m = mask[r * fh:(r + 1) * fh, c * fw:(c + 1) * fw]
+                rgb, al = cell[..., :3], cell[..., 3]
+                cells.append(np.concatenate([over_green(tint(rgb, m, BLUE), al),
+                                             over_green(tint(rgb, m, RED), al)], axis=1))
+            panels.append(np.concatenate(cells, axis=1))
+    for r in range(len(rows) if not turns else 0):
         for c in range(cols):
             cell = sheet[r * fh:(r + 1) * fh, c * fw:(c + 1) * fw]
             m = mask[r * fh:(r + 1) * fh, c * fw:(c + 1) * fw]
@@ -156,7 +187,8 @@ def main():
             panels.append(row)
     img = Image.fromarray(np.concatenate(panels, axis=0).clip(0, 255).astype(np.uint8), "RGB")
     d = ImageDraw.Draw(img)
-    d.text((8, 6), "%s  as is | blue | red | mask" % name, fill=(255, 255, 255))
+    d.text((8, 6), "%s  %s" % (name, "blue | red" if turns else "as is | blue | red | mask"),
+           fill=(255, 255, 255))
     img = img.resize((img.width * 2, img.height * 2), Image.NEAREST)
     path = os.path.join(args.out, name + ".check.png")
     img.save(path)

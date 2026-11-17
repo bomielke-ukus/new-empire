@@ -41,7 +41,8 @@ SpriteSet(
   animations in manifest order and, for a class that turns, the five facings
   S, SW, W, NW, N within each; one column per frame, as many columns as the
   longest animation (a shorter one's other cells transparent); every cell
-  `frame` pixels, one anchor for all. A building's animations are
+  `frame` pixels, one anchor for all. A unit's are its old set's
+  (`docs/look/units.md`). A building's animations are
   `construction` (3), `idle`, `rubble` (1), and a wall's `arm` (8) or a
   gate's `shut` and `open` (4 each): `docs/look/buildings.md`.
 - A comment line `// export-hash: H` in the header is `export_all.py`'s
@@ -49,7 +50,8 @@ SpriteSet(
 - **`frame`**: the cell size in authored pixels, when the class's size
   (`docs/05` §2.3) times `scale` is too small (a building with a flag).
   `anchor` is in the cell, in authored pixels, as before.
-- **`scale`**: 2. A tile is 128 x 64 authored pixels.
+- **`scale`**: 2. A tile is 128 x 64 authored pixels. A unit's set may be
+  authored at 1, half the resolution (`docs/look/units.md`).
 - **`attach`** (default none): a building's attachment points for smoke,
   flags and fire, `[(kind: Smoke | SmokeDark | Flag | Fire, at: (x, y))]`
   in authored pixels in the cell (`docs/look/buildings.md`, "Smoke, flags

@@ -29,6 +29,10 @@ A SETS entry (keys; only func and cls are required):
         timing={},                      # {"idle": [frame_ms, loops]}: other than the defaults
     )
 
+A unit (units.py, docs/look/units.md) is declared the same way with only
+func (a units.py figure factory) and cls (Foot, Mounted, Heavy, Ship);
+export.py renders it through unitexport.py, resumably.
+
 --points-only rewrites only the attachment points (and the hash) of every
 set, stale or not, without rendering: export.py --points-only, which fails
 for a set whose model no longer renders as it did (that set needs a full
@@ -48,9 +52,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-MODULES = ("greek", "egyptian", "mesopotamian", "asian", "nature", "fx")
+MODULES = ("greek", "egyptian", "mesopotamian", "asian", "nature", "fx", "units")
 KEYS = {"func", "cls", "tiles", "kwargs", "fit", "model_tiles", "stages", "anims", "sun_angle",
-        "samples", "fires", "timing"}
+        "samples", "fires", "timing", "scale"}
 
 
 def load_sets():
@@ -93,12 +97,18 @@ def export_version():
     return m.group(1) if m else "0"
 
 
+# A unit set (docs/look/units.md) is rendered by export.py's unit path: its
+# hash covers that path's modules too.
+UNIT_SOURCES = {"unitexport", "exr"}
+
+
 def digest(entry):
     mod = entry["func"].rsplit(".", 1)[0]
     h = hashlib.sha256()
     h.update(json.dumps(entry, sort_keys=True).encode())
     h.update(export_version().encode())
-    for m in sorted(local_imports(mod) | {"stages", "lib"}):
+    extra = UNIT_SOURCES if mod == "units" else set()
+    for m in sorted(local_imports(mod) | {"stages", "lib"} | extra):
         h.update(m.encode())
         with open(os.path.join(HERE, m + ".py"), "rb") as fh:
             h.update(fh.read())
@@ -131,6 +141,8 @@ def command(name, entry, h, args):
         cmd += ["--anims", json.dumps(entry["anims"])]
     if entry.get("timing"):
         cmd += ["--timing", json.dumps(entry["timing"])]
+    if entry.get("scale"):
+        cmd += ["--scale", str(entry["scale"])]
     if entry.get("fires") is not None:
         cmd += ["--fires", str(entry["fires"])]
     if args.points_only:
@@ -154,7 +166,8 @@ def run_one(name, entry, h, args):
             "" if p.returncode in (0, 3) else p.stdout[-1500:] + p.stderr[-1500:]) + \
             "\n%.0fs" % (time.time() - t)
     keep = [ln for ln in p.stdout.splitlines()
-            if ln.startswith(("frame", "trimmed", "  palette", "  **", "wrote", "fit", "ground"))]
+            if ln.startswith(("frame", "trimmed", "  palette", "  **", "wrote", "fit", "ground",
+                              "rendered"))]
     if p.returncode:
         return name, False, "\n".join(keep) + "\n" + p.stdout[-1500:] + p.stderr[-1500:]
     chk = [sys.executable, os.path.join(HERE, "check_set.py"), os.path.join(args.out, name)]

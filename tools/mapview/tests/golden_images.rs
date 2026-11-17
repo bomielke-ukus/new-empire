@@ -753,6 +753,35 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The new art's units (`docs/look/units.md`): two ranks of
+        // hoplites closing and fighting in front of the Greek Town Center,
+        // blue against red, facings mirrored, a body down, and villagers
+        // foraging and walking in their colour sets.
+        name: "look-phalanx",
+        args: &[
+            "--seed",
+            "3",
+            "--scenario",
+            "phalanx",
+            "--ticks",
+            "200",
+            "--civ",
+            "Greeks",
+            "--look",
+            "1",
+            "--fog",
+            "0",
+            "--zoom",
+            "1.5",
+            "--at",
+            "90,33",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The new art's smoke and fire (`docs/look/buildings.md`, "Smoke,
         // flags and fire"): the Egyptian town with some buildings hurt by
         // the simulation's own axemen (`--scenario burning`), the hearths

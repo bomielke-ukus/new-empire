@@ -498,11 +498,12 @@ impl Atlas {
 
     /// Whether a pixel of a page is the thing itself, for picking: an
     /// index other than transparent and the shadow, or on a colour page
-    /// more than half covered (a soft edge, or a shadow on the ground at
-    /// half black or lighter, is not).
+    /// more than half covered and not shadow on the ground (a soft edge is
+    /// not, nor a unit's contact shadow however dark under its feet).
     pub fn solid_at(&self, page: u8, x: u32, y: u32) -> bool {
         if page & COLOUR_PAGE != 0 {
-            self.rgba_at(page, x, y)[3] > 128
+            let p = self.rgba_at(page, x, y);
+            p[3] > 128 && !is_shadow(&p)
         } else {
             let idx = self.index_at(page, x, y);
             idx != TRANSPARENT && idx != SHADOW
@@ -3412,6 +3413,71 @@ mod tests {
             }
         }
         assert_eq!(a.loaded_sets, old.loaded_sets);
+    }
+
+    /// The new units (`docs/look/units.md`): with their colour sets in, a
+    /// villager and a hoplite are drawn from them in every age and
+    /// architecture (the old `villager_tool`, `hoplite_iron`, ... are left
+    /// out), in every one of the eight facings (the three unauthored ones
+    /// mirrored from SW, W and NW), every animation at every moment of it,
+    /// on colour pages with the owner's colour in them.
+    #[test]
+    fn the_new_units_are_drawn_from_their_colour_sets_in_every_facing() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let (mut sheets, _) = crate::sheets::load_all(&root.join("assets/sprites"));
+        let units = [("villager", kinds::VILLAGER), ("hoplite", kinds::HOPLITE)];
+        for (name, _) in units {
+            let path = root
+                .join("assets/look")
+                .join(name)
+                .join(format!("{name}.ron"));
+            sheets.push(crate::sheets::Sheet::load(&path).unwrap());
+        }
+        let a = Atlas::with_sheets(&sheets);
+        for (name, kind) in units {
+            let sets: Vec<_> = a
+                .loaded_sets
+                .iter()
+                .filter(|s| set_target(s).is_some_and(|(k, _, _)| k == kind))
+                .collect();
+            assert_eq!(sets, [name], "no old {name} of any age");
+            for age in 0..4 {
+                for arch in 0..4 {
+                    assert_eq!(a.variant(kind, age, arch), kind);
+                }
+            }
+            let sheet = sheets.iter().find(|s| s.name == name && s.colour).unwrap();
+            let mut owned = false;
+            for animation in &sheet.animations {
+                let anim = Anim::from_name(&animation.name).unwrap();
+                let info = a.anim_info(kind, anim).unwrap();
+                assert_eq!(
+                    (info.frames, info.frame_ms, info.loops),
+                    (animation.frames, animation.frame_ms, animation.loops)
+                );
+                for facing8 in 0..8u8 {
+                    for index in 0..info.frames {
+                        let t = index * info.frame_ms + info.frame_ms / 2;
+                        let (f, flip) = a.frame_at(kind, facing8, anim, t).unwrap();
+                        let (authored, mirrored) = source_facing(facing8);
+                        assert_eq!(
+                            (f.anim, f.index as u32, f.facing, flip),
+                            (anim, index, authored, mirrored),
+                            "{name} {} facing {facing8} frame {index}",
+                            animation.name
+                        );
+                        assert!(f.page & COLOUR_PAGE != 0);
+                        let page = f.page;
+                        owned = owned
+                            || (0..f.h as u32).any(|y| {
+                                (0..f.w as u32)
+                                    .any(|x| a.mask_at(page, f.x as u32 + x, f.y as u32 + y) > 128)
+                            });
+                    }
+                }
+            }
+            assert!(owned, "{name} wears its owner's colour");
+        }
     }
 
     /// A colour building's three construction stages and its rubble are

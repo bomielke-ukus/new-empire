@@ -1823,11 +1823,19 @@ mod tests {
     /// the wood carried home on the walk back.
     #[test]
     fn a_villager_chops_and_carries_the_wood_home() {
-        use sim::{Command, CommandKind};
-        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/sprites");
-        let (sheets, errors) = crate::sheets::load_all(&dir);
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let (mut sheets, errors) = crate::sheets::load_all(&root.join("assets/sprites"));
         assert!(errors.is_empty(), "{errors:?}");
-        let atlas = Atlas::with_sheets(&sheets);
+        chops_then_carries(&Atlas::with_sheets(&sheets), false);
+        // The new art's villager (`docs/look/units.md`) does the same from
+        // its colour set.
+        let path = root.join("assets/look/villager/villager.ron");
+        sheets.push(crate::sheets::Sheet::load(&path).unwrap());
+        chops_then_carries(&Atlas::with_sheets(&sheets), true);
+    }
+
+    fn chops_then_carries(atlas: &Atlas, colour: bool) {
+        use sim::{Command, CommandKind};
         let mut sim = Simulation::new(
             1,
             SimConfig {
@@ -1861,14 +1869,15 @@ mod tests {
         });
         // The animation the villager's sprite is drawn from.
         let anim_of = |sim: &Simulation| {
-            let scene = Scene::build(sim, &atlas, None, 0.0);
+            let scene = Scene::build(sim, atlas, None, 0.0);
             let s = scene.sprites.iter().find(|s| s.slot == vi as u32).unwrap();
-            atlas
+            let f = atlas
                 .frames()
                 .iter()
-                .find(|f| (f.x, f.y) == (s.u, s.v))
-                .map(|f| f.anim)
-                .unwrap()
+                .find(|f| (f.x, f.y, f.page) == (s.u, s.v, s.page))
+                .unwrap();
+            assert_eq!(f.page & crate::sprites::COLOUR_PAGE != 0, colour);
+            f.anim
         };
         let mut seen = Vec::new();
         for _ in 0..3000 {

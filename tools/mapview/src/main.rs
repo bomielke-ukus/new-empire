@@ -2,7 +2,7 @@
 //! mapview [--seed N] [--size N] [--players N] [--ticks N] [--stockpile N]
 //!         [--zoom 0.5|1|1.5|2] [--width W] [--height H]
 //!         [--at X,Y | --start P] [--out frame.png] [--minimap mini.png] [--atlas atlas.png]
-//!         [--scenario gather|build|stages|ages|army|battle|siege|walls|scout|town|burning]
+//!         [--scenario gather|build|stages|ages|army|battle|phalanx|siege|walls|scout|town|burning]
 //!         [--civ NAME] [--enemy-civ NAME] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1] [--symbols off|selected|always]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
@@ -35,7 +35,10 @@
 //! `--scenario burning` is the town with some of its buildings hurt, by
 //! axemen of player 1's set on them and taken away again, so the new art's
 //! fires show (`docs/look/buildings.md`, "Smoke, flags and fire"); `--time`
-//! moves the smoke and the flames too.
+//! moves the smoke and the flames too. `--scenario phalanx` sends two ranks
+//! of hoplites, ours and theirs, into each other while our villagers
+//! gather, for the new art's units (`docs/look/units.md`):
+//! `--seed 3 --look 1 --fog 0 --at 90,33 --ticks 200`.
 
 use sim::kinds;
 use std::process::ExitCode;
@@ -1605,6 +1608,58 @@ fn scenario(sim: &mut sim::Simulation, name: &str) -> Result<(), String> {
                     target: sim::nav::centre((sx - 8, sy + 7)),
                 },
             });
+        }
+        "phalanx" => {
+            // The new art's units (`docs/look/units.md`): two ranks of
+            // hoplites, ours and theirs, attack-moving into each other in
+            // front of the Town Center while our villagers keep working.
+            // At `--ticks 0` they stand; by 60 they are marching; by 160
+            // they fight and the first fall; by 400 the dead lie decaying.
+            let bush = nearest(kinds::BERRY_BUSH).ok_or("no bush")?;
+            let tree = nearest(kinds::TREE).ok_or("no tree")?;
+            let half = villagers.len() / 2;
+            sim.issue(cmd(CommandKind::Gather {
+                ids: villagers[..half].to_vec(),
+                node: bush,
+            }));
+            sim.issue(cmd(CommandKind::Gather {
+                ids: villagers[half..].to_vec(),
+                node: tree,
+            }));
+            for k in 0..6 {
+                for (player, x) in [(0u8, sx - 7), (1u8, sx + 7)] {
+                    sim.issue(Command {
+                        player,
+                        kind: CommandKind::Spawn {
+                            kind: kinds::HOPLITE,
+                            pos: sim::nav::centre((x, sy + 4 + k)),
+                        },
+                    });
+                }
+            }
+            for _ in 0..3 {
+                sim.step();
+            }
+            let side = |sim: &sim::Simulation, player: u8| -> Vec<sim::EntityId> {
+                sim.world()
+                    .slots()
+                    .filter(|s| {
+                        sim.world().owner[s.index()] == player
+                            && sim.world().kind[s.index()] == kinds::HOPLITE
+                    })
+                    .map(|s| sim.world().id_at(s))
+                    .collect()
+            };
+            for (player, x) in [(0u8, sx + 7), (1u8, sx - 7)] {
+                let ids = side(sim, player);
+                sim.issue(Command {
+                    player,
+                    kind: CommandKind::AttackMove {
+                        ids,
+                        target: sim::nav::centre((x, sy + 6)),
+                    },
+                });
+            }
         }
         "siege" => {
             // A palisade with a gate sealing the map in front of the
