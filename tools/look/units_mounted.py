@@ -933,6 +933,7 @@ class Gazelle(Beast):
     speed = 1.4
     size = 1.2
     sp = GAZELLE
+    mask_always = True          # no player colour, but the view wants a mask of every unit
 
     def quad(self, name, t):
         sp = self.sp

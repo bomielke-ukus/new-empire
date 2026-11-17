@@ -372,7 +372,9 @@ def main(args, factory):
     out = os.path.join(args.out, args.name)
     os.makedirs(out, exist_ok=True)
     Image.fromarray(sheet, "RGBA").save(os.path.join(out, args.name + ".png"), optimize=True)
-    has_mask = bool(msheet.any())
+    # A unit always has a mask (the view expects one of every turning set),
+    # even one with no player colour at all (the gazelle): then it is empty.
+    has_mask = bool(msheet.any()) or getattr(figure, "mask_always", False)
     mask_path = os.path.join(out, args.name + ".mask.png")
     if has_mask:
         Image.fromarray(msheet, "L").save(mask_path, optimize=True)
