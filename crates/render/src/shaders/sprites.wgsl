@@ -19,8 +19,9 @@ struct Inst {
     @location(0) rect: vec4<f32>,
     // u, v, uw, vh in atlas px
     @location(1) uv: vec4<f32>,
-    // palette row, flip (bit 0) and atlas page (above it), screen-space
-    // flag, light out of 255
+    // palette row (low four bits; above them a fade in twentieths of the
+    // opacity, `view::SpriteInstance::opacity`), flip (bit 0) and atlas
+    // page (above it), screen-space flag, light out of 255
     @location(2) misc: vec4<u32>,
 };
 
@@ -30,6 +31,7 @@ struct VsOut {
     @location(1) @interpolate(flat) row: u32,
     @location(2) @interpolate(flat) light: u32,
     @location(3) @interpolate(flat) page: u32,
+    @location(4) @interpolate(flat) opacity: f32,
 };
 
 @vertex
@@ -51,7 +53,8 @@ fn vs_main(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
         u = 1.0 - u;
     }
     out.uv = inst.uv.xy + vec2<f32>(u, c.y) * inst.uv.zw;
-    out.row = inst.misc.x;
+    out.row = inst.misc.x & 15u;
+    out.opacity = 1.0 - f32(inst.misc.x >> 4u) / 20.0;
     out.light = inst.misc.w;
     out.page = inst.misc.y >> 1u;
     return out;
@@ -80,7 +83,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             let hi = textureLoad(palette, vec2<i32>(RAMP + min(i + 1, 7), row), 0).rgb;
             rgb = mix(rgb, mix(lo, hi, t - f32(i)), m);
         }
-        return vec4<f32>(rgb * light, c.a);
+        return vec4<f32>(rgb * light, c.a * in.opacity);
     }
     let idx = textureLoad(atlas, texel, i32(in.page), 0).r;
     if (idx == 0u) {
@@ -94,5 +97,5 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     // Drawn from memory: dimmed to the explored light (`GD-FOG-01`).
     let c = textureLoad(palette, vec2<i32>(i32(idx), row), 0);
-    return vec4<f32>(c.rgb * light, c.a);
+    return vec4<f32>(c.rgb * light, c.a * in.opacity);
 }

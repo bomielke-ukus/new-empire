@@ -209,9 +209,10 @@ impl App {
         self.last_fog_tick = None;
         self.last_minimap = Instant::now() - Duration::from_secs(10);
         self.diorama_shown = false;
-        // Every architecture's buildings: a side's civilisation is changed
-        // here at a click, which should not wait on loading them.
-        self.ensure_art(view::sprites::Architectures::ALL);
+        // Every architecture's buildings and every unit: a side's
+        // civilisation is changed and any kind placed here at a click,
+        // which should not wait on loading them.
+        self.ensure_art(view::sprites::Loadout::ALL);
         self.scenery = view::scenery::Scenery::new(self.sim.map(), self.sim.seed(), &self.atlas);
         if let Some(gpu) = &mut self.gpu {
             gpu.upload_map(self.sim.map());

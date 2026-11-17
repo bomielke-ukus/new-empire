@@ -214,14 +214,21 @@ fn a_colour_frame_draws_as_the_rasteriser_draws_it() {
     assert_eq!(f.page, view::sprites::COLOUR_PAGE);
 
     // Each texel 8 x 8 on screen, for three owners, lit and dimmed,
-    // mirrored and not.
-    let (w, h) = (160u32, 64u32);
+    // mirrored and not; and the fourth faded nine twentieths, as a corpse
+    // decaying from its death's last frame is (`docs/look/units.md`,
+    // "Memory").
+    let (w, h) = (208u32, 64u32);
     let mut scene = Scene::default();
-    for (i, (row, light, flip)) in [(1, 255, false), (2, 255, true), (5, 128, false)]
-        .into_iter()
-        .enumerate()
+    for (i, (row, light, flip, fade)) in [
+        (1, 255, false, 0),
+        (2, 255, true, 0),
+        (5, 128, false, 0),
+        (3, 255, false, 9),
+    ]
+    .into_iter()
+    .enumerate()
     {
-        scene.ui.push(view::SpriteInstance {
+        let mut s = view::SpriteInstance {
             x: 8.0 + i as f32 * 48.0,
             y: 8.0,
             w: 32.0,
@@ -237,8 +244,12 @@ fn a_colour_frame_draws_as_the_rasteriser_draws_it() {
             slot: u32::MAX,
             screen: true,
             light,
-        });
+        };
+        s.fade(fade);
+        assert_eq!(s.palette_row(), row);
+        scene.ui.push(s);
     }
+    assert!((scene.ui[3].opacity() - 0.55).abs() < 1e-6);
     // Unorm, not sRGB, so the GPU writes and blends the bytes as the
     // rasteriser does. Twice: with the atlas the renderer was made with,
     // and with it uploaded in place of another, as a match that brings
@@ -281,7 +292,7 @@ fn a_colour_frame_draws_as_the_rasteriser_draws_it() {
         );
         // Compare the middle of every texel's 8 x 8 block, a step or two
         // of float rounding allowed.
-        for i in 0..3 {
+        for i in 0..4 {
             for ty in 0..2 {
                 for tx in 0..4 {
                     let (x, y) = (8 + i * 48 + tx * 8 + 4, 8 + ty * 8 + 4);
@@ -297,6 +308,28 @@ fn a_colour_frame_draws_as_the_rasteriser_draws_it() {
         }
         // And the owners differ where the mask is set.
         assert_ne!(cpu.get(12, 12), cpu.get(60 + 24, 12));
+        // The faded one lets the ground through: its opaque cloth (texel
+        // (0, 0)) is 55% itself, 45% the clear colour behind.
+        let mut unfaded = scene.ui[3];
+        unfaded.fade(0);
+        let mut solid = view::raster::Image::new(w, h, clear);
+        view::raster::draw_sprites(
+            &mut solid,
+            &camera,
+            &atlas,
+            &view::palette::texture(),
+            &[unfaded],
+        );
+        let (x, y) = (8 + 3 * 48 + 4, 12);
+        let (faded, solid) = (cpu.get(x, y), solid.get(x, y));
+        for k in 0..3 {
+            let want = clear[k] as f32 + (solid[k] as f32 - clear[k] as f32) * 0.55;
+            assert!(
+                (faded[k] as f32 - want).abs() <= 2.0,
+                "{faded:?}, {solid:?} unfaded"
+            );
+        }
+        assert_ne!(faded, solid);
     }
 }
 

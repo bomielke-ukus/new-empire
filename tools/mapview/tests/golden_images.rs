@@ -809,6 +809,67 @@ const SCENES: &[Scene] = &[
             "540",
         ],
     },
+    Scene {
+        // The new look's UI (`docs/look/ui.md`): the parchment resource
+        // bar with the resources' own pictures, three villagers selected,
+        // the build grid with each building's own picture and its key on a
+        // key cap, a tooltip over HOUSE, one notice of each kind with the
+        // food flashed, and the minimap in its well.
+        name: "look-hud",
+        args: &[
+            "--seed",
+            "3",
+            "--look",
+            "1",
+            "--hud",
+            "1",
+            "--select",
+            "6",
+            "--notices",
+            "1",
+            "--hover-button",
+            "HOUSE",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
+        // The title screen in the new look's skin: the serif title, the
+        // menu's stone buttons on a parchment panel over the diorama, the
+        // cursor on NEW GAME.
+        name: "look-title-screen",
+        args: &[
+            "--screen", "title", "--look", "1", "--ticks", "400", "--width", "960", "--height",
+            "540", "--hover", "480,222",
+        ],
+    },
+    Scene {
+        // The setup screen in the new look's skin at a display scale of
+        // 1.5, where the type and the frames are drawn at their own pixel
+        // size rather than scaled: a Hardest opponent's bonus declared,
+        // the preview in its well, the cursor on START.
+        name: "look-setup-screen",
+        args: &[
+            "--screen",
+            "setup",
+            "--look",
+            "1",
+            "--seed",
+            "1",
+            "--difficulty",
+            "standard,hardest",
+            "--dpi",
+            "1.5",
+            "--width",
+            "1280",
+            "--height",
+            "720",
+            "--hover",
+            "1110,536",
+        ],
+    },
 ];
 
 fn golden_dir() -> PathBuf {

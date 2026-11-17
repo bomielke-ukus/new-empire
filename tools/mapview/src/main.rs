@@ -7,7 +7,8 @@
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
 //!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0] [--look 1] [--time SECS]
-//!         [--screen title|setup|load|settings] [--difficulty easy,standard,hard,hardest]
+//!         [--screen title|setup|load|settings|pause|results|editor] [--notices 1]
+//!         [--difficulty easy,standard,hard,hardest]
 //! mapview --keys KEYS.md
 //! ```
 //!
@@ -23,6 +24,7 @@
 //! the colour sets under `assets/look` (beside `--assets`, if given)
 //! replace the indexed sets of their names (`docs/look/colour-sets.md`),
 //! the ground is painted from its textures under `look/terrain` and
+//! the UI wears the new look's skin (`docs/look/ui.md`), and
 //! scattered with scenery (`docs/look/ground.md`); `--time` is the
 //! ground's clock in seconds (the water's drift and the foam's breath),
 //! 0 by default. `--civ` gives player 0 a civilisation by the sim's name
@@ -89,6 +91,9 @@ struct Args {
     hover_button: Option<String>,
     /// Show the first-time hint the moment would bring up.
     hint: bool,
+    /// Put a sample of every kind of notice on the stack, and flash the
+    /// food as a refused click does (`--notices 1`).
+    notices: bool,
     /// Show the performance readout with fixed sample numbers.
     perf: bool,
     /// Ring what the side's technologies opened, as if each had just
@@ -166,6 +171,7 @@ fn parse() -> Result<Args, String> {
         hover: None,
         hover_button: None,
         hint: false,
+        notices: false,
         perf: false,
         fresh: false,
         dpi: 1.0,
@@ -239,6 +245,7 @@ fn parse() -> Result<Args, String> {
             "--select-kind" => a.select_kind = Some(val.clone()),
             "--sweep" => a.sweep = Some(val.parse().map_err(|e| format!("{key}: {e}"))?),
             "--hover-button" => a.hover_button = Some(val.clone()),
+            "--notices" => a.notices = val == "1" || val == "true",
             "--hint" => a.hint = val == "1" || val == "true",
             "--perf" => a.perf = val == "1" || val == "true",
             "--fresh" => a.fresh = val == "1" || val == "true",
@@ -274,6 +281,12 @@ fn load_sheets(
 ) -> (Vec<view::sheets::Sheet>, Vec<String>) {
     let sprites = a.assets.clone().or_else(view::sheets::default_dir);
     view::sheets::load_art_for(sprites.as_deref(), look_dir(a).as_deref(), a.look, archs)
+}
+
+/// The atlas from `sheets`, with the new look's UI skin when `look`
+/// (`docs/look/ui.md`), as the game builds it with the new art on.
+fn skinned(sheets: &[view::sheets::Sheet], look: bool) -> Atlas {
+    Atlas::with_sheets_skinned(sheets, view::sprites::ATLAS_PAGE_HEIGHT, look)
 }
 
 /// The new art's directory: `look` beside `--assets`, or the checkout's.
@@ -331,9 +344,9 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
     let sheet_dir = a.assets.clone().or_else(view::sheets::default_dir);
     let atlas = if behind {
         let (sheets, _) = load_sheets(a, view::sprites::Architectures::ALL);
-        Atlas::with_sheets(&sheets)
+        skinned(&sheets, a.look)
     } else {
-        Atlas::placeholder()
+        skinned(&[], a.look)
     };
     let input = ShellInput {
         viewport: (a.width as f32, a.height as f32),
@@ -442,9 +455,72 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
             };
             (shell::briefing_screen(&atlas, &input, &b), None)
         }
+        "pause" => (
+            shell::pause_menu(&atlas, &input, false, None, Some("SAVED"), false, false),
+            None,
+        ),
+        "results" => {
+            let side = |player: u8, name: &str, score: u64, standing: bool| shell::Side {
+                player,
+                name: name.into(),
+                score,
+                standing,
+            };
+            let r = shell::Results {
+                heading: "VICTORY".into(),
+                why: "EVERY OTHER SIDE IS OUT".into(),
+                sides: vec![side(0, "YOU", 1460, true), side(1, "HARD", 820, false)],
+                scenario: None,
+            };
+            (shell::results(&atlas, &input, &r), None)
+        }
+        "editor" => {
+            use view::editor::{Chip, EditorAction, Item, Panel, Tool};
+            let panel = Panel {
+                tool: Tool::Triggers,
+                file: "nile.ron".into(),
+                dirty: true,
+                status: "2 problems: trigger 1: no objective \"x\"".into(),
+                palette: vec![vec![
+                    Item {
+                        label: "ADD A TRIGGER".into(),
+                        action: EditorAction::Chip(0, 0),
+                        active: true,
+                    },
+                    Item {
+                        label: "REMOVE".into(),
+                        action: EditorAction::Chip(0, 1),
+                        active: false,
+                    },
+                ]],
+                rows: (0..12)
+                    .map(|r| {
+                        vec![
+                            Chip::words(format!("WHEN {r}")),
+                            Chip {
+                                label: "HAS SIDE 2 CLUBMAN AT LEAST 5".into(),
+                                action: Some(EditorAction::Chip(r, 1)),
+                                active: r == 1,
+                            },
+                            Chip {
+                                label: "X".into(),
+                                action: Some(EditorAction::Chip(r, 2)),
+                                active: false,
+                            },
+                        ]
+                    })
+                    .collect(),
+                top: 0,
+                typing: Some(("the title".into(), "The Granary".into())),
+                prompt: None,
+                confirm_exit: false,
+            };
+            (view::editor::editor_screen(&atlas, &input, &panel), None)
+        }
         other => {
             return Err(format!(
-                "--screen {other}: title, setup, load, settings, campaigns or briefing"
+                "--screen {other}: title, setup, load, settings, campaigns, briefing, pause, \
+                 results or editor"
             ))
         }
     };
@@ -631,7 +707,7 @@ fn run() -> Result<(), String> {
     for e in &errors {
         eprintln!("warning: {e}");
     }
-    let atlas = Atlas::with_sheets(&sheets);
+    let atlas = skinned(&sheets, a.look);
     if !atlas.loaded_sets.is_empty() {
         println!("rendered sprite sets: {}", atlas.loaded_sets.join(", "));
     }
@@ -795,6 +871,27 @@ fn run() -> Result<(), String> {
             .map_or_else(Vec::new, |p| {
                 p.researched.iter().map(|t| (*t, sim.tick())).collect()
             });
+        // One of each kind, the newest last, as `--notices 1` asks.
+        let notices: Vec<view::Notice> = if a.notices {
+            use view::NoticeKind as K;
+            [
+                (K::Research, "BOWS RESEARCHED", None),
+                (K::Age, "TOOL AGE REACHED", None),
+                (K::Loss, "A VILLAGER WAS KILLED", Some((20.0, 20.0))),
+                (K::Cheat, "CHEAT: 1000 FOOD", None),
+                (K::Attack, "YOUR TOWN IS UNDER ATTACK", Some((30.0, 30.0))),
+            ]
+            .into_iter()
+            .map(|(kind, text, tile)| view::Notice {
+                kind,
+                text: text.into(),
+                tile,
+                tick: sim.tick(),
+            })
+            .collect()
+        } else {
+            Vec::new()
+        };
         let input = |hover: Option<(f32, f32)>| HudInput {
             sim: &sim,
             player: 0,
@@ -812,10 +909,10 @@ fn run() -> Result<(), String> {
             targeting: false,
             defences: false,
             settings: &settings,
-            notices: &[],
+            notices: &notices,
             hint: hint.as_deref(),
             narration: narration.as_deref(),
-            flash: [false; 4],
+            flash: [a.notices, false, false, false],
             perf: perf.as_ref(),
             fresh: &fresh,
         };

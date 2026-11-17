@@ -55,7 +55,12 @@ pub struct SpriteInstance {
     pub uw: u16,
     /// Atlas rectangle, px.
     pub vh: u16,
-    /// Palette row (0 neutral, 1..=8 players).
+    /// Palette row (0 neutral, 1..=8 players) in the low four bits; above
+    /// them, how far the sprite is faded, in steps of 1/20 of its opacity
+    /// (a decaying corpse drawn from its death's last frame,
+    /// [`sprites::Atlas::decay_look`]): 0, as almost everything is, is not
+    /// at all. Read with [`SpriteInstance::palette_row`] and
+    /// [`SpriteInstance::opacity`].
     pub row: u8,
     /// Mirror horizontally.
     pub flip: bool,
@@ -68,6 +73,24 @@ pub struct SpriteInstance {
     /// Light out of 255: full for what is in sight, [`fog::EXPLORED`] for
     /// what is drawn from memory.
     pub light: u8,
+}
+
+impl SpriteInstance {
+    /// The palette row it is drawn in.
+    pub fn palette_row(&self) -> u8 {
+        self.row & 0x0F
+    }
+
+    /// How opaque it is drawn, 0 to 1: its pixels' alpha is multiplied by
+    /// this.
+    pub fn opacity(&self) -> f32 {
+        1.0 - f32::from(self.row >> 4) / f32::from(sprites::DECAY_FADE_STEPS)
+    }
+
+    /// Fades it `steps` twentieths of its opacity (at most 15).
+    pub fn fade(&mut self, steps: u8) {
+        self.row = self.row & 0x0F | steps.min(15) << 4;
+    }
 }
 
 /// The architecture `p` builds in (`docs/02` §11), by
@@ -424,6 +447,14 @@ impl Scene {
                 let full = sprite.h;
                 sprite.h = (full * keep).round();
                 sprite.y += full - sprite.h;
+            }
+            // A corpse whose set has no decay frames: the death's last
+            // frame, fading and sinking as the frames would have.
+            if anim == Anim::Decay && world.dying[i] > 0 {
+                if let Some(d) = atlas.decay_look(look, time_ms) {
+                    sprite.fade(d.fade);
+                    sink(&mut sprite, frame, d.sink / frame.draw_h().max(1.0));
+                }
             }
             let top = sprite.y;
             sprites.push(sprite);
@@ -1897,6 +1928,100 @@ mod tests {
             "chops, then carries: {seen:?}"
         );
         assert!(!seen.contains(&Anim::Work), "no swing stands in: {seen:?}");
+    }
+
+    /// A corpse whose set has no decay frames (`docs/look/units.md`,
+    /// "Memory") lies as its death left it, fading and sinking step by
+    /// step over its decay, in its owner's colour all the while.
+    #[test]
+    fn a_corpse_without_decay_frames_fades_and_sinks() {
+        use sim::{Command, CommandKind};
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let hoplite = crate::sheets::Sheet::load(&root.join("assets/look/hoplite/hoplite.ron"))
+            .unwrap()
+            .without_decay_frames();
+        let atlas = Atlas::with_sheets(&[hoplite]);
+        let mut sim = Simulation::new(
+            5,
+            SimConfig {
+                map: MapSpec {
+                    kind: MapKind::Flat,
+                    size: 48,
+                    players: 2,
+                },
+                wander: false,
+                ..SimConfig::default()
+            },
+        );
+        let spawn = |sim: &mut Simulation, player, kind, x, y| {
+            sim.issue(Command {
+                player,
+                kind: CommandKind::Spawn {
+                    kind,
+                    pos: sim::nav::centre((x, y)),
+                },
+            });
+        };
+        spawn(&mut sim, 1, kinds::HOPLITE, 30, 30);
+        for k in 0..8 {
+            spawn(&mut sim, 0, kinds::HOPLITE, 27 + k, 29);
+        }
+        for _ in 0..3 {
+            sim.step();
+        }
+        let w = sim.world();
+        let mine = |s: &sim::entity::Slot| w.kind[s.index()] == kinds::HOPLITE;
+        let slot = w
+            .slots()
+            .find(|s| mine(s) && w.owner[s.index()] == 1)
+            .unwrap();
+        let (hi, target) = (slot.index(), w.id_at(slot));
+        let ids = w
+            .slots()
+            .filter(|s| mine(s) && w.owner[s.index()] == 0)
+            .map(|s| w.id_at(s))
+            .collect();
+        sim.issue(Command {
+            player: 0,
+            kind: CommandKind::Attack { ids, target },
+        });
+        for _ in 0..6000 {
+            sim.step();
+            if sim.world().dying[hi] > 0 {
+                break;
+            }
+        }
+        assert!(sim.world().dying[hi] > 0, "the hoplite fell");
+        let drawn = |sim: &Simulation| {
+            *Scene::build(sim, &atlas, None, 0.0)
+                .sprites
+                .iter()
+                .find(|s| s.slot == hi as u32)
+                .unwrap()
+        };
+        let falling = drawn(&sim);
+        assert_eq!((falling.opacity(), falling.palette_row()), (1.0, 2));
+        let decay = atlas.anim_info(kinds::HOPLITE, Anim::Decay).unwrap();
+        let mut seen = Vec::new();
+        while sim.world().dying[hi] > 1 {
+            sim.step();
+            let s = drawn(&sim);
+            assert_eq!(s.palette_row(), 2, "the owner's colour");
+            if seen.last().is_none_or(|&(row, _, _)| row != s.row) {
+                seen.push((s.row, s.y, s.vh));
+            }
+        }
+        // The death's frames, then the decay's four steps: unfaded, then
+        // 3, 6 and 9 twentieths faded, each a little lower and shorter.
+        let fades: Vec<u8> = seen.iter().map(|&(row, _, _)| row >> 4).collect();
+        assert_eq!(fades, [0, 3, 6, 9], "{seen:?}");
+        assert!(
+            seen.windows(2)
+                .all(|p| p[1].1 >= p[0].1 && p[1].2 <= p[0].2),
+            "{seen:?}"
+        );
+        assert!(seen[3].1 > seen[0].1, "sunk");
+        assert_eq!(decay.frames, 4);
     }
 
     /// A building that falls sinks into its rubble under the dust for its

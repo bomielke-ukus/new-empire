@@ -16,7 +16,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 use crate::palette_table::ENTRIES;
-use crate::sprites::Architectures;
+use crate::sprites::{worth_decoding, Loadout};
 
 /// Size classes from `docs/05` §2.3, mirrored from `tools/atlas`.
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -131,6 +131,20 @@ struct AnchorOverride {
     anchor: (u32, u32),
 }
 
+/// Where a colour unit's `decay` frames come from (`docs/look/units.md`,
+/// "Memory").
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Decay {
+    /// Its own rows in the sheet, as every other animation's.
+    #[default]
+    Frames,
+    /// None in the sheet: the view draws the death's last frame, sinking
+    /// and fading as the corpse lies ([`crate::sprites::Atlas::decay_look`]).
+    /// The animation stays in the manifest's list, so its timing is the
+    /// old set's as every other's is.
+    Synth,
+}
+
 /// The manifest as written by `atlas compose`; the RON type is `SpriteSet`.
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename = "SpriteSet")]
@@ -156,6 +170,9 @@ struct Manifest {
     /// A building's attachment points, of its standing (idle) look.
     #[serde(default)]
     attach: Vec<Attach>,
+    /// Whether the `decay` animation has rows in the sheet.
+    #[serde(default)]
+    decay: Decay,
 }
 
 /// A loaded sprite set: manifest plus the indexed pixels of its sheet.
@@ -190,6 +207,15 @@ pub struct Sheet {
     frame: Option<(u32, u32)>,
     /// Where smoke, flags and fire go on the standing building, if anywhere.
     pub attach: Vec<Attach>,
+    /// Whether the `decay` animation is in the sheet or drawn by the view.
+    pub decay: Decay,
+}
+
+/// Reads and parses a set's manifest, decoding nothing.
+fn read_manifest(manifest_path: &Path) -> Result<Manifest, String> {
+    let text = std::fs::read_to_string(manifest_path)
+        .map_err(|e| format!("{}: {e}", manifest_path.display()))?;
+    ron::from_str(&text).map_err(|e| format!("{}: {e}", manifest_path.display()))
 }
 
 impl Sheet {
@@ -206,10 +232,7 @@ impl Sheet {
         manifest_path: &Path,
         wanted: &(dyn Fn(&str) -> bool + Sync),
     ) -> Result<Option<Sheet>, String> {
-        let text = std::fs::read_to_string(manifest_path)
-            .map_err(|e| format!("{}: {e}", manifest_path.display()))?;
-        let m: Manifest =
-            ron::from_str(&text).map_err(|e| format!("{}: {e}", manifest_path.display()))?;
+        let m = read_manifest(manifest_path)?;
         if m.colour && !wanted(&m.name) {
             return Ok(None);
         }
@@ -264,8 +287,14 @@ impl Sheet {
         let (fw, fh) = m
             .frame
             .unwrap_or_else(|| (m.class.size().0 * m.scale, m.class.size().1 * m.scale));
-        let cols = m.animations.iter().map(|a| a.frames).max().unwrap_or(0);
-        let rows = m.animations.len() as u32 * if m.class.turns() { 5 } else { 1 };
+        // A synthesised decay has no rows (nor columns) in the sheet.
+        let drawn = || {
+            m.animations
+                .iter()
+                .filter(|a| !(m.decay == Decay::Synth && a.name == "decay"))
+        };
+        let cols = drawn().map(|a| a.frames).max().unwrap_or(0);
+        let rows = drawn().count() as u32 * if m.class.turns() { 5 } else { 1 };
         let want = (cols * fw, rows * fh);
         if (width, height) != want {
             return Err(format!(
@@ -290,7 +319,62 @@ impl Sheet {
             colour: m.colour,
             frame: m.frame,
             attach: m.attach,
+            decay: m.decay,
         })
+    }
+
+    /// This unit set as its next export makes it (`docs/look/units.md`,
+    /// "Memory"): the same, but its decay's rows cut out of the sheet and
+    /// `decay: Synth`. For tests, which have only the sets as exported now.
+    #[cfg(test)]
+    pub(crate) fn without_decay_frames(&self) -> Sheet {
+        let di = self
+            .animations
+            .iter()
+            .position(|a| a.name == "decay")
+            .expect("a decay to cut");
+        let (fw, fh) = self.frame_size();
+        let facings = self.facings().len() as u32;
+        let cols = self
+            .animations
+            .iter()
+            .filter(|a| a.name != "decay")
+            .map(|a| a.frames)
+            .max()
+            .unwrap_or(0);
+        let width = cols * fw;
+        let rows: Vec<u32> = (0..self.animations.len() as u32 * facings)
+            .filter(|r| (r / facings) as usize != di)
+            .collect();
+        let height = rows.len() as u32 * fh;
+        let cut = |src: &[u8], bpp: usize| -> Vec<u8> {
+            if src.is_empty() {
+                return Vec::new();
+            }
+            let mut out = Vec::with_capacity(width as usize * height as usize * bpp);
+            for &r in &rows {
+                for y in r * fh..(r + 1) * fh {
+                    let at = (y * self.width) as usize * bpp;
+                    out.extend_from_slice(&src[at..at + width as usize * bpp]);
+                }
+            }
+            out
+        };
+        Sheet {
+            width,
+            height,
+            indices: cut(&self.indices, 1),
+            rgba: cut(&self.rgba, 4),
+            mask: cut(&self.mask, 1),
+            decay: Decay::Synth,
+            ..self.clone()
+        }
+    }
+
+    /// Whether animation `animation` (an index into [`Sheet::animations`])
+    /// has rows in the sheet: every one but a synthesised decay.
+    pub fn in_sheet(&self, animation: usize) -> bool {
+        !(self.decay == Decay::Synth && self.animations[animation].name == "decay")
     }
 
     /// Facings this set has, as `facing8` indices.
@@ -320,7 +404,9 @@ impl Sheet {
     ) -> (u32, u32, u32, u32) {
         let (fw, fh) = self.frame_size();
         let facings = self.facings().len();
-        let row = animation * facings + facing_row;
+        // The rows of the animations before it that are in the sheet.
+        let before = (0..animation).filter(|&a| self.in_sheet(a)).count();
+        let row = before * facings + facing_row;
         (frame * fw, row as u32 * fh, fw, fh)
     }
 
@@ -563,17 +649,35 @@ pub fn find_sets(dir: &Path) -> Vec<PathBuf> {
 /// Loads every set under `dir`, reporting each failure by path rather than
 /// stopping at the first: a bad sheet should cost one sprite, not the game.
 pub fn load_all(dir: &Path) -> (Vec<Sheet>, Vec<String>) {
-    load_paths(&find_sets(dir), &|_| true)
+    load_paths(&find_sets(dir), &|sets| vec![true; sets.len()])
 }
 
-/// Loads the sets at `paths`, in that order, leaving out the colour sets
-/// whose names `wanted` refuses. The images are decoded on as many
-/// threads as the machine has, which is most of the time a match's art
-/// takes to load.
-fn load_paths(
-    paths: &[PathBuf],
-    wanted: &(dyn Fn(&str) -> bool + Sync),
-) -> (Vec<Sheet>, Vec<String>) {
+/// Loads the sets at `paths`, in that order: every manifest first, then
+/// the images of the sets `decode` picks (given each set's name and
+/// whether it is a colour set, it says which to decode); the others are
+/// left out. The images are decoded on as many threads as the machine
+/// has, which is most of the time a match's art takes to load.
+/// Which of the sets (each its name and whether it is a colour set) to
+/// decode ([`load_paths`]).
+type Pick<'a> = &'a dyn Fn(&[(&str, bool)]) -> Vec<bool>;
+
+fn load_paths(paths: &[PathBuf], decode: Pick) -> (Vec<Sheet>, Vec<String>) {
+    let manifests = par_map(paths, |p| read_manifest(p));
+    let sets: Vec<(&str, bool)> = manifests
+        .iter()
+        .flatten()
+        .map(|m| (m.name.as_str(), m.colour))
+        .collect();
+    let mut picked = decode(&sets).into_iter();
+    // Each path's manifest, if it is to be decoded, or why it failed.
+    let jobs: Vec<Option<Result<(&PathBuf, Manifest), String>>> = paths
+        .iter()
+        .zip(manifests.iter())
+        .map(|(p, m)| match m {
+            Ok(m) => picked.next().unwrap_or(true).then(|| Ok((p, m.clone()))),
+            Err(e) => Some(Err(e.clone())),
+        })
+        .collect();
     // The biggest first, so no thread is left decoding a Wonder alone at
     // the end: by the bytes of the images beside each manifest.
     let weight = |p: &PathBuf| -> u64 {
@@ -587,19 +691,34 @@ fn load_paths(
                 .sum()
         })
     };
-    let mut order: Vec<(u64, usize)> = paths.iter().map(weight).zip(0..).collect();
+    let mut order: Vec<(u64, usize)> = jobs
+        .iter()
+        .enumerate()
+        .filter_map(|(i, j)| match j {
+            Some(Ok((p, _))) => Some((weight(p), i)),
+            _ => None,
+        })
+        .collect();
     order.sort_by(|a, b| b.cmp(a));
-    let mut loaded: Vec<(usize, Result<Option<Sheet>, String>)> =
-        par_map(&order, |&(_, i)| (i, Sheet::load_if(&paths[i], wanted)));
-    loaded.sort_by_key(|(i, _)| *i);
-    let loaded = loaded.into_iter().map(|(_, r)| r);
+    let mut decoded: Vec<(usize, Result<Sheet, String>)> = par_map(&order, |&(_, i)| {
+        let Some(Ok((p, m))) = &jobs[i] else {
+            unreachable!("only manifests to decode are ordered")
+        };
+        (i, Sheet::from_manifest(p, m.clone()))
+    });
+    decoded.sort_by_key(|(i, _)| *i);
+    let mut decoded = decoded.into_iter().peekable();
     let mut sheets = Vec::new();
     let mut errors = Vec::new();
-    for r in loaded {
-        match r {
-            Ok(Some(s)) => sheets.push(s),
-            Ok(None) => {}
-            Err(e) => errors.push(e),
+    for (i, job) in jobs.iter().enumerate() {
+        match job {
+            None => {}
+            Some(Err(e)) => errors.push(e.clone()),
+            Some(Ok(_)) => match decoded.next() {
+                Some((j, Ok(s))) if j == i => sheets.push(s),
+                Some((_, Err(e))) => errors.push(e),
+                _ => unreachable!("one result a manifest decoded"),
+            },
         }
     }
     (sheets, errors)
@@ -651,27 +770,31 @@ pub fn load_art(
     look: Option<&Path>,
     new_art: bool,
 ) -> (Vec<Sheet>, Vec<String>) {
-    load_art_for(sprites, look, new_art, Architectures::ALL)
+    load_art_for(sprites, look, new_art, Loadout::ALL)
 }
 
-/// [`load_art`] for a match whose sides build in `archs`
-/// (`docs/look/buildings.md`, "Memory"): the colour sets of the other
-/// architectures are not read beyond their manifests. Everything with no
-/// architecture (trees, scenery, units) and the first architecture's sets
-/// are always loaded.
+/// [`load_art`] for a match that needs `loadout` (`docs/look/buildings.md`
+/// and `docs/look/units.md`, "Memory"): the colour sets of the other
+/// architectures and of the units left out are not read beyond their
+/// manifests, and nor is any indexed set the colour sets replace
+/// ([`crate::sprites::worth_decoding`]): with the new art on, the old art
+/// is decoded only where it is still drawn. Everything with no
+/// architecture and no unit to leave out (trees, scenery, resources) and
+/// the first architecture's sets are always loaded.
 pub fn load_art_for(
     sprites: Option<&Path>,
     look: Option<&Path>,
     new_art: bool,
-    archs: Architectures,
+    loadout: impl Into<Loadout>,
 ) -> (Vec<Sheet>, Vec<String>) {
+    let loadout = loadout.into();
     let mut paths = sprites.map(find_sets).unwrap_or_default();
     if new_art {
         if let Some(dir) = look {
             paths.extend(find_sets(dir));
         }
     }
-    load_paths(&paths, &|name| archs.keeps(name))
+    load_paths(&paths, &|sets| worth_decoding(sets, loadout))
 }
 
 /// A tiny colour set for tests, written to disk and loaded as the game
@@ -1051,10 +1174,13 @@ mod tests {
             assert!(m.colour && m.mask.is_some(), "{}", m.name);
             let sheet = Sheet::load(&path).unwrap();
             assert_eq!(sheet.facings().len(), 5);
-            assert_eq!(
-                sheet.height,
-                m.frame.unwrap().1 * 5 * m.animations.len() as u32
-            );
+            // Every animation has its rows but a decay the view draws
+            // (`decay: Synth`, `docs/look/units.md`, "Memory").
+            let rows = (0..m.animations.len())
+                .filter(|&a| sheet.in_sheet(a))
+                .count() as u32;
+            assert_eq!(sheet.height, m.frame.unwrap().1 * 5 * rows);
+            assert!(m.decay == Decay::Frames || m.animations.iter().any(|a| a.name == "decay"));
         }
         assert!(units >= 2, "the villager and the hoplite at least");
     }
@@ -1236,12 +1362,71 @@ mod tests {
         assert!(off.iter().all(|s| !s.colour));
         let (on, errors) = load_art(Some(&sprites), Some(&dir), true);
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(on.len(), off.len() + 1);
         assert!(on.last().unwrap().colour);
+        // The colour house replaces every indexed house, of every age and
+        // architecture: they are not even decoded. Every other indexed set
+        // is, as before.
+        let house = |s: &Sheet| {
+            crate::sprites::set_target(&s.name).is_some_and(|(k, _, _)| k == sim::kinds::HOUSE)
+        };
+        let kept: Vec<&str> = off
+            .iter()
+            .filter(|s| !house(s))
+            .map(|s| s.name.as_str())
+            .collect();
+        assert!(off.iter().any(house));
+        assert_eq!(
+            on.iter()
+                .filter(|s| !s.colour)
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
+            kept
+        );
+        assert_eq!(on.len(), kept.len() + 1);
         assert_eq!(
             candidates_for(None, Some(Path::new("/repo/crates/view")), "look")[2],
             Path::new("/repo/assets/look")
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A unit's manifest saying `decay: Synth` lays out a sheet without the
+    /// decay's rows, the animation still in its list; the other rows are
+    /// found where they are. A sheet laid out with them is refused.
+    #[test]
+    fn a_synthesised_decay_has_no_rows_in_the_sheet() {
+        let dir = fixture::scratch("synth-decay");
+        let set = dir.join("scout");
+        std::fs::create_dir_all(&set).unwrap();
+        // Two animations of one frame and the decay between them, a cell
+        // of 2 x 1 and five facings: ten rows, none of them the decay's.
+        let (w, h) = (2u32, 10u32);
+        let rgba: Vec<u8> = (0..w * h).flat_map(|i| [i as u8, 0, 0, 255]).collect();
+        fixture::write_png(&set.join("scout.png"), w, h, png::ColorType::Rgba, &rgba);
+        let manifest = |decay: &str| {
+            format!(
+                r#"SpriteSet(name: "scout", class: Foot, scale: 1, palette: "rgba",
+                sheet: "scout.png", anchor: (1, 0),
+                animations: [
+                    (name: "idle", frames: 1, frame_ms: 100, loops: true, impact: None),
+                    (name: "decay", frames: 4, frame_ms: 7500, loops: false, impact: None),
+                    (name: "death", frames: 1, frame_ms: 100, loops: false, impact: None),
+                ],
+                colour: true, frame: Some((2, 1)){decay})"#
+            )
+        };
+        std::fs::write(set.join("scout.ron"), manifest(", decay: Synth")).unwrap();
+        let s = Sheet::load(&set.join("scout.ron")).unwrap();
+        assert_eq!(s.decay, Decay::Synth);
+        assert_eq!(s.animations.len(), 3);
+        assert!(s.in_sheet(0) && !s.in_sheet(1) && s.in_sheet(2));
+        // The death's first facing is the sixth row, not the eleventh.
+        assert_eq!(s.frame_rect(2, 0, 0), (0, 5, 2, 1));
+        assert_eq!(s.rgba_at(0, 5)[0], 10);
+        // Without `decay: Synth` the same sheet lacks the decay's rows.
+        std::fs::write(set.join("scout.ron"), manifest("")).unwrap();
+        let e = Sheet::load(&set.join("scout.ron")).unwrap_err();
+        assert!(e.contains("lays out"), "{e}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

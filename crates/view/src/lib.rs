@@ -30,6 +30,7 @@ pub mod scenery;
 pub mod settings;
 pub mod sheets;
 pub mod shell;
+pub mod skin;
 pub mod sprites;
 pub mod symbols;
 pub mod terrain;

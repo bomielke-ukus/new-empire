@@ -42,6 +42,11 @@ FACING_ORDER = ("S", "SW", "W", "NW", "N")
 SAMPLES = 20                  # with the denoiser; the AOVs are not denoised
 CONTACT = (2.5, 30.0)         # the contact light's strength and angular size (degrees)
 DECAY_FADE = 0.55             # the corpse's alpha on the decay's last frame
+# The view draws `decay` from the death's last frame, faded to DECAY_FADE and
+# sunk as these frames were (docs/look/units.md, "Memory";
+# view::sprites::Atlas::decay_look): the sheet has no decay rows and the
+# manifest says `decay: Synth`, keeping the animation's timing in its list.
+SYNTH_DECAY = True
 # Crispness at game size (a unit is 40 to 50 px tall at zoom 1 and drawn
 # pixel-doubled at zoom 2): the denoiser's prefilter kept accurate, a pixel
 # filter narrower than the buildings' 1.5, and after the render a slight
@@ -251,17 +256,23 @@ class Stage:
         return beauty, mask
 
 
+def drawn(figure):
+    """The figure's animations that have rows in the sheet: all but a
+    decay the view synthesises (SYNTH_DECAY)."""
+    return [x for x in figure.animations if not (SYNTH_DECAY and x[0] == "decay")]
+
+
 def layout(figure):
     """[(animation, facing, frames)] in sheet order: the animations in the
     figure's order, the five facings within each."""
-    return [(a, f, n) for a, n, *_ in figure.animations for f in FACING_ORDER]
+    return [(a, f, n) for a, n, *_ in drawn(figure) for f in FACING_ORDER]
 
 
 def bounds(stage, figure, tiles=1):
     """One cell size and anchor holding every frame in every facing, its
     contact shadow and the tile's diamond."""
     lo, hi = np.array([1e9, 1e9]), np.array([-1e9, -1e9])
-    for a, n, *_ in figure.animations:
+    for a, n, *_ in drawn(figure):
         for i in range(n):
             stage.place(figure, a, i)
             for f in FACING_ORDER:
@@ -325,7 +336,7 @@ def main(args, factory):
     print("frame %s, anchor %s" % (frame, anchor))
     export.camera(frame, anchor)
     cells, rendered, t_render = {}, 0, 0.0
-    for a, n, *_ in figure.animations:
+    for a, n, *_ in drawn(figure):
         for i in range(n):
             todo = [f for f in FACING_ORDER
                     if not os.path.exists(os.path.join(work, "%s_%s_%d.png" % (a, f, i)))]
@@ -383,9 +394,11 @@ def main(args, factory):
     anims = [(a, n) for a, n, *_ in figure.animations]
     timing = {a: (ms, loops) for a, n, ms, loops, imp in figure.animations}
     impacts = {a: imp for a, n, ms, loops, imp in figure.animations}
+    synth = len(drawn(figure)) < len(figure.animations)
     with open(os.path.join(out, args.name + ".ron"), "w") as fh:
         fh.write(export.manifest(args.name, args.cls, anchor, frame, anims, has_mask,
-                                 args.target, args.hash, None, (), timing, impacts))
+                                 args.target, args.hash, None, (), timing, impacts,
+                                 synth_decay=synth))
     dbg = os.path.join(args.debug, args.name + ".debug.png")
     contact_sheet(dbg, grid, frame, anchor, ["%s %s" % (a, f) for a, f, _ in rows])
     print("wrote %s (%.1fs); contact sheet %s" % (out, time.time() - t_start, dbg))

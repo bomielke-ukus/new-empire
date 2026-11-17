@@ -333,33 +333,46 @@ colour sets.
 ### Only the architectures in play
 
 So the atlas holds the colour building sets of the architectures of the
-civilisations in play and no others, plus the first architecture's (the
-fallback of "Which look", and the look of a side with no civilisation),
-plus everything with no architecture: trees, scenery, units, resources.
+civilisations in play and no others, plus the first architecture's where
+one of theirs lacks a look of a kind (the fallback of "Which look") or a
+side has no civilisation (it builds in the first), plus everything with no
+architecture: trees, scenery, resources, and the units the sides can have
+(`docs/look/units.md`, "Memory"). With every architecture exported, the
+Egyptians against the Shang hold no Greek building.
 
-- `view::sprites::Architectures` is the set (`of_match(sim)`,
-  `of_civs`, `FIRST`, `ALL`); `keeps(name)` says whether a colour set is
-  loaded with it: one with no architecture suffix, or whose suffix is in
-  the set.
-- `sheets::load_art_for(sprites, look, new_art, archs)` reads every
-  manifest but decodes only the images of the sets kept (`load_art` is it
-  with `ALL`); indexed sets are always loaded. The images are decoded on
+- `view::sprites::Architectures` is the set (`of_match(sim)`, `of_civs`,
+  `of_sides`, `FIRST`, `ALL`); `keeps(name)` says whether a colour set is
+  of an architecture in it. `view::sprites::Loadout` is it with the
+  match's units (`sprites::Units`): what the atlas holds.
+- `sheets::load_art_for(sprites, look, new_art, loadout)` reads every
+  manifest first and decodes only the images of the sets
+  `sprites::worth_decoding` picks (`load_art` is it with `Loadout::ALL`):
+  the colour sets the loadout keeps, the first architecture's where it is
+  a fallback, and an indexed set only if no kept colour set replaces it,
+  which with the new art on is none of `assets/sprites` (with it off,
+  every one, as before). The images are decoded on
   every core (`sheets::par_map`, std threads, the biggest first), and
   `Atlas::with_sheets` cuts the sets' frames out in parallel too, in the
   sets' order, so the atlas is the same whatever the threads do.
-- The game (`crates/app`): `App::art` is the set the atlas holds with the
-  new art on (as the settings had it at start; `None` with it off, and then
-  nothing here happens). `App::ensure_art(want)` rebuilds the atlas when the
-  set differs and re-uploads it (`render::Renderer::upload_atlas`, new
+- The game (`crates/app`): `App::art` is the loadout the atlas holds with
+  the new art on (as the settings had it at start; `None` with it off, and
+  then nothing here happens). The game starts with an empty atlas and
+  `load_settings` loads the art the settings ask for, so with the new art
+  on the old art is never decoded or packed at all.
+  `App::ensure_art(want)` rebuilds the atlas when the loadout differs and
+  re-uploads it (`render::Renderer::upload_atlas`, new
   textures and bind group), and rebuilds the diorama's scenery, whose
   sprites point into the pages. Called from `enter_match` (a skirmish, a
   campaign scenario, a loaded save, a replay, a playtest) with the match's
-  architectures, before the world's scenery is made, in the moment the game
-  already takes to set the match up. The editor asks for all four (a
-  side's civilisation changes there at a click); the title's diorama has no
-  civilisations, so it needs only the first, which every atlas holds: it
-  never reloads on the way back to the title. At start, with the new art
-  on, only the first is loaded.
+  loadout, before the world's scenery is made, in the moment the game
+  already takes to set the match up; after every tick,
+  `App::ensure_world_art` loads the set of a unit that turns up without
+  one. The editor asks for everything (a side's civilisation, and any
+  kind, is a click away); the title's diorama has no civilisations, so it
+  needs the first architecture and the units standing in its world
+  (`Loadout::of_world`), which a match's atlas usually covers: then it
+  does not reload on the way back to the title. At start, with the new art
+  on, the first architecture and every unit are loaded.
 - `mapview` loads everything, as the goldens always have, unless `--civ`
   or `--enemy-civ` names the civilisations: then only theirs.
 
@@ -382,3 +395,73 @@ the atlas's together. Tested: `a_match_holds_only_the_buildings_of_its_architect
 `switching_matches_swaps_the_architectures_loaded`, and the GPU's
 `a_colour_frame_draws_as_the_rasteriser_draws_it` (with the atlas uploaded
 in place of another).
+
+### Everything in colour
+
+With every kind in colour (130 sets: four architectures' buildings, every
+unit, trees, resources, scenery, effects), measured by
+`crates/view/tests/atlas_memory.rs` (release, median of three, 4 shared
+cores; run it with `cargo test --release -p view --test atlas_memory --
+--ignored --nocapture`). Sprite textures in MiB, indexed pages plus colour
+pages (RGBA and mask); "before" is the atlas as it was when every kind first
+had a colour set:
+
+| load | before | now | after the units' re-export |
+|------|--------|-----|----------------------------|
+| new art off | 128.0 | 128.0 (unchanged) | 128.0 |
+| title, diorama (Greek, every unit) | 161.0 | 148.0 | 138.0 |
+| Greeks only (two Greek sides) | 161.0 | 138.0 | 128.0 |
+| Greeks v Egyptians | 193.5 | 185.5 | 175.5 |
+| Egyptians v Shang | 228.5 | 183.0 | 175.5 |
+| four architectures (editor) | 263.5 | 258.0 | 248.0 |
+
+Where it went: the indexed pages with the new art on were already only the
+UI's frames (8192 x 128, 1 MiB), but every indexed set was still decoded
+and the game built the whole old atlas at start before the settings
+switched to the new; now neither happens, and the indexed page is 1024 x
+512. The skyline packer fills the colour pages to 92-93% (shelves, 86-88%).
+A match of two Greek civilisations loads no chariot or horse archers; a
+match with no Greek side loads no Greek building its architectures do not
+fall back on. Loading (decode and pack, median of three runs of three, on four shared cores) went
+from 0.42 to 0.36 s for the title, 0.52 to 0.47 s for Greeks against
+Egyptians, 0.65 to 0.39 s for Egyptians against Shang and 0.68 to 0.55 s
+for all four: the decode is a third shorter, the skyline packs in about
+the time the shelves did. The start with the new art on also no longer
+builds the old atlas first (another 0.21 s). The last column projects the
+units exported without decay frames (`decay: Synth`, `docs/look/units.md`, "Memory";
+`sprites::tests::projected_memory_without_decay_frames`). On a GPU
+limited to 4096 the same frames take 2 to 4 pages of 4096 wide, 1 to 3 MiB
+more.
+
+What is left is pixels: for Greek against Egyptian, 171 MiB of trimmed
+frames (165 after the re-export), 96.5 MiB of them units', of which 23.3
+are the death's lying frames. Below about 170 MiB for two architectures,
+with nothing given up, takes compressed textures:
+
+- **BC7** for the RGBA pages (wgpu's `TEXTURE_COMPRESSION_BC`: desktop
+  GPUs under Vulkan, D3D12 and Metal on macOS; not most mobile GPUs, nor
+  WebGL) is a quarter of RGBA8, and the mask as **BC4**
+  half of R8: Greek against Egyptian would take about 50 MiB, not 175.
+  BC7 handles soft alpha well (mode 6, separate per-block endpoints) but
+  not perfectly: a 4 x 4 block's colours lie on one or two lines, so a
+  block where a unit's cloth meets its skin or the shadow meets a bright
+  edge shifts by a few levels, and the player-colour path reads the
+  sheet's grey through `luma * 7` to pick a ramp step, which magnifies a
+  luma error of 1/255 into 7/255 of a ramp step: likely a visible
+  shimmer between frames on the masked cloth. Doing it needs: an encoder
+  (`intel_tex_2`, ISPC kernels with prebuilt binaries, at load time costs
+  CPU seconds for 170 MiB even at its fast setting (not measured here); or
+  a build step writing compressed sheets beside each set, which then have
+  to be packed in 4 x 4 blocks with frames on 4-pixel boundaries); a fallback to RGBA8 where the feature is
+  missing; the rasteriser decoding the same blocks (or the look goldens
+  comparing across a tolerance) so `a_colour_frame_draws_as_the_rasteriser_draws_it`
+  still holds; and picking (`Atlas::solid_at`) reading alpha from the
+  compressed or a separate copy. Recommended only if the budget must
+  drop well below 170 MiB: then the mask uncompressed (it is the player
+  colour) and BC7 at the slow setting for RGBA, built offline per sheet
+  so the game does not encode, with a check that the masked cloth's luma
+  error stays under 1/255.
+- Smaller, lossless: packing the frames that use the mask first and
+  giving the mask texture only their rows would save the mask under the
+  rest, 7 MiB of 175 (80% of the frames' area has some player colour).
+  Not done.

@@ -3333,3 +3333,66 @@ fn the_new_art_is_kept_at_once_and_drawn_from_the_next_start() {
     app.shell_action(ShellAction::ToggleNewArt);
     assert!(!app.settings.new_art);
 }
+
+/// With the new art on, a match's atlas holds the units its sides can have
+/// and no others (`docs/look/units.md`, "Memory"); one that turns up
+/// anyway (a cheat's spawn, a scenario's trigger) has its colour set loaded
+/// the tick it appears and is never drawn as a placeholder. A priest's
+/// convert is always among the sides' units, so needs nothing.
+#[test]
+fn a_unit_the_match_was_loaded_without_is_loaded_when_it_turns_up() {
+    use view::sprites::{Loadout, COLOUR_PAGE};
+    let mut app = app();
+    app.art = Some(Loadout::FIRST);
+    app.sim = Simulation::new(
+        1,
+        SimConfig {
+            map: MapSpec {
+                kind: MapKind::Flat,
+                size: 48,
+                players: 2,
+            },
+            civs: vec![sim::Civ::Greeks, sim::Civ::Greeks],
+            wander: false,
+            ..SimConfig::default()
+        },
+    );
+    app.enter_match();
+    let have = app.art.unwrap();
+    assert!(have.units.contains(kinds::HOPLITE));
+    assert!(
+        !have.units.contains(kinds::CHARIOT_ARCHER),
+        "the Greeks have none"
+    );
+    let colour = |app: &App, kind| {
+        app.atlas
+            .frame(kind, 1)
+            .is_some_and(|(f, _)| f.page & COLOUR_PAGE != 0)
+    };
+    assert!(colour(&app, kinds::HOPLITE));
+    assert!(!colour(&app, kinds::CHARIOT_ARCHER));
+    assert!(!app.atlas.loaded_sets.iter().any(|s| s == "chariot_archer"));
+    app.sim.issue(Command {
+        player: 0,
+        kind: sim::CommandKind::Spawn {
+            kind: kinds::CHARIOT_ARCHER,
+            pos: sim::nav::centre((20, 20)),
+        },
+    });
+    let now = Instant::now();
+    for _ in 0..3 {
+        app.tick_once(now);
+    }
+    assert!(app
+        .sim
+        .world()
+        .slots()
+        .any(|s| app.sim.world().kind[s.index()] == kinds::CHARIOT_ARCHER));
+    let now_have = app.art.unwrap();
+    assert!(now_have.units.contains(kinds::CHARIOT_ARCHER));
+    assert!(now_have.covers(have), "nothing else was let go");
+    assert!(
+        colour(&app, kinds::CHARIOT_ARCHER),
+        "drawn from its colour set"
+    );
+}

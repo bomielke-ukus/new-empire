@@ -60,6 +60,12 @@ SpriteSet(
 - **`mask`**: an 8-bit greyscale PNG the size of the sheet. 0 is ordinary
   colour; 255 takes the owner's colour; between, a blend (antialiased
   edges).
+- **`decay`** (default `Frames`): a unit's `decay: Synth` says the sheet has
+  no rows (nor columns) for the `decay` animation, which stays in
+  `animations` so its timing is the old set's; the view draws the death's
+  last frame instead, fading and sinking (`docs/look/units.md`, "Memory").
+  The other animations' rows close up in order. `check_set.py` and the
+  loader accept both forms.
 
 ## Trees
 
@@ -104,13 +110,36 @@ non-transparent bounds when packed, the anchor moving with the trim.
 ## In the atlas
 
 Colour frames are packed into their own pages: RGBA8 and an R8 mask, sized
-by the colour frames alone and not by the indexed pages. A page is as wide
-as the widest frame needs, rounded up to a power of two, and wider (up to
-8192) before there is a second page; as tall as its content, to a multiple
-of 64; and only when one 8192 x 8192 page is full is there another, all
-pages alike. `Frame::page` and `SpriteInstance::page`
+by the colour frames alone and not by the indexed pages. Frames go on
+tallest first, each where its top comes lowest on the first page it fits
+(a skyline: a short frame fills the gap beside a tall one rather than
+starting a shelf of its own), a pixel apart. A page is as wide as the
+widest frame needs, rounded up to a power of two, and wider (up to the
+largest side) before there is a second page; as tall as its content, to a
+multiple of 64. When one page of the largest side is not enough, all pages
+(a texture array's layers are alike) are that wide and as short as still
+fits the frames on as few pages. `Frame::page` and `SpriteInstance::page`
 carry bit 7 (`0x80`) for a colour page, the page number in the low bits, so
 nothing that builds a sprite instance from a frame changes.
 
-What the buildings cost there, and the plan if the pages grow too big, is
-in `docs/look/buildings.md`, "Memory".
+The largest side is 8192, or what the GPU allows if less
+(`max_texture_dimension_2d`): the game asks the device for the adapter's
+own limit, and on a GPU that allows less than the atlas measures builds it
+again for that limit before uploading it (`Atlas::with_sheets_max`, down
+to 2048); the frames are the same, on more and smaller pages
+(`a_smaller_texture_limit_packs_the_same_frames_onto_smaller_pages`).
+
+With the new art on, the indexed pages hold only what no colour set
+replaces: the UI's procedural frames (solid fills, the font's glyphs in
+three inks, the player symbols, selection rings, placement footprints and
+the age-up glow), the arrow and the stone in flight, the generic
+construction pegs and rubble (fallbacks no colour building uses), and a
+placeholder for a kind with no colour set (none now, and a unit left out of
+the match, `docs/look/units.md`, "Memory"). No indexed set under
+`assets/sprites` is decoded at all: every one is of a kind with colour sets
+(`sprites::worth_decoding`). They are sized as the colour pages are, about
+square (1024 x 512, half a MiB), not a page 8192 wide. With the new art off
+the indexed pages are exactly as before.
+
+What the buildings cost there, and what is loaded for a match, is in
+`docs/look/buildings.md`, "Memory".

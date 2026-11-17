@@ -489,7 +489,7 @@ impl<'a> Sheet<'a> {
     pub(crate) fn new(atlas: &'a Atlas, input: &ShellInput) -> Sheet<'a> {
         let s = input.ui_scale.max(0.5);
         Sheet {
-            p: Painter::new(atlas),
+            p: Painter::scaled(atlas, s),
             buttons: Vec::new(),
             vw: input.viewport.0 / s,
             vh: input.viewport.1 / s,
@@ -503,12 +503,21 @@ impl<'a> Sheet<'a> {
     /// unless a world is drawn behind them.
     pub(crate) fn backdrop(&mut self) {
         if !self.world_behind {
-            self.p.rect(0.0, 0.0, self.vw, self.vh, BLACK, 0);
+            if self.p.skinned() {
+                self.p
+                    .fill(0.0, 0.0, self.vw, self.vh, crate::skin::BACKDROP);
+            } else {
+                self.p.rect(0.0, 0.0, self.vw, self.vh, BLACK, 0);
+            }
         }
     }
 
     /// The framed panel the HUD's overlays use.
     pub(crate) fn panel(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        if self.p.skinned() {
+            self.p.boxed(x, y, w, h, crate::skin::Style::Panel, true);
+            return;
+        }
         self.p.rect(x, y, w, h, BLACK, 0);
         self.p
             .rect(x + 2.0, y + 2.0, w - 4.0, h - 4.0, BROWN_DARK, 0);
@@ -518,8 +527,31 @@ impl<'a> Sheet<'a> {
 
     /// Text centred on a vertical line.
     pub(crate) fn centred(&mut self, cx: f32, y: f32, text: &str, ink: Ink, scale: f32) {
-        let w = font::width(text) as f32 * scale;
+        let w = self.p.measure_ink(text, ink, scale);
         self.p.text_in((cx - w / 2.0).round(), y, text, ink, scale);
+    }
+
+    /// What went wrong, on a warning strip centred in the panel at `x`
+    /// `pw` wide, its text's top at `y + 2`.
+    pub(crate) fn warning(&mut self, x: f32, pw: f32, y: f32, e: &str) {
+        let text = self.p.fit(&e.to_uppercase(), pw - 32.0);
+        let tw = self.p.measure(&text, 1.0).ceil();
+        let ex = (x + (pw - tw) / 2.0).round() - 4.0;
+        if self.p.skinned() {
+            self.p.boxed(
+                ex - 2.0,
+                y - 1.0,
+                tw + 12.0,
+                13.0,
+                crate::skin::Style::Warn,
+                false,
+            );
+            self.p
+                .type_in(ex + 4.0, y + 2.0, &text, crate::skin::Ink::Cream, 1.0);
+        } else {
+            self.p.rect(ex, y, tw + 8.0, 11.0, RED_DARK, 0);
+            self.p.text(ex + 4.0, y + 2.0, &text, false, 1.0);
+        }
     }
 
     /// A button with its label centred, in the `(x, y, w, h)` rectangle.
@@ -551,24 +583,45 @@ impl<'a> Sheet<'a> {
         let hover = self
             .hover
             .is_some_and(|(hx, hy)| hx >= x && hx < x + w && hy >= y && hy < y + h);
-        let (fill, ink) = if !enabled {
-            (GREY_DARK, Ink::White)
-        } else if hover {
-            (TAN, Ink::Black)
-        } else {
-            (BROWN, Ink::Black)
-        };
-        self.p.rect(x, y, w, h, BLACK, 0);
-        self.p.rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, fill, 0);
         let label = fit(label, w - 6.0);
-        let lw = font::width(&label) as f32;
-        self.p.text_in(
-            (x + (w - lw) / 2.0).round(),
-            (y + (h - font::GLYPH_H as f32) / 2.0).round(),
-            &label,
-            ink,
-            1.0,
-        );
+        if self.p.skinned() {
+            use crate::skin::Style;
+            let style = if !enabled {
+                Style::Disabled
+            } else if hover {
+                Style::Hover
+            } else {
+                Style::Button
+            };
+            self.p.boxed(x, y, w, h, style, h >= 20.0);
+            let shown = self.p.fit(&label, w - 6.0);
+            let lw = self.p.measure(&shown, 1.0);
+            self.p.type_in(
+                (x + (w - lw) / 2.0).round(),
+                (y + (h - font::GLYPH_H as f32) / 2.0).round(),
+                &shown,
+                style.ink(),
+                1.0,
+            );
+        } else {
+            let (fill, ink) = if !enabled {
+                (GREY_DARK, Ink::White)
+            } else if hover {
+                (TAN, Ink::Black)
+            } else {
+                (BROWN, Ink::Black)
+            };
+            self.p.rect(x, y, w, h, BLACK, 0);
+            self.p.rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, fill, 0);
+            let lw = font::width(&label) as f32;
+            self.p.text_in(
+                (x + (w - lw) / 2.0).round(),
+                (y + (h - font::GLYPH_H as f32) / 2.0).round(),
+                &label,
+                ink,
+                1.0,
+            );
+        }
         if beside && !enabled && !reason.is_empty() {
             self.p
                 .text(x + w + 8.0, y + (h - 7.0) / 2.0, reason, false, 1.0);
@@ -650,11 +703,22 @@ pub fn title(atlas: &Atlas, input: &ShellInput) -> Screen {
     if s.world_behind {
         // Over the diorama the title and the menu stand on a panel, and
         // the line along the bottom on a dark strip, so they read.
-        let pw = (font::width(TITLE) as f32 * 4.0).max(MENU_W) + 64.0;
+        let pw = s.p.measure_ink(TITLE, Ink::Gold, 4.0).ceil().max(MENU_W) + 64.0;
         let bottom = my + 7.0 * (MENU_H + 8.0) + 12.0;
         let px = (cx - pw / 2.0).round();
         s.panel(px, ty - 20.0, pw, bottom - (ty - 20.0));
-        s.p.rect(0.0, s.vh - 30.0, s.vw, 30.0, BLACK, 0);
+        if s.p.skinned() {
+            s.p.boxed(
+                -12.0,
+                s.vh - 30.0,
+                s.vw + 24.0,
+                42.0,
+                crate::skin::Style::Panel,
+                true,
+            );
+        } else {
+            s.p.rect(0.0, s.vh - 30.0, s.vw, 30.0, BLACK, 0);
+        }
     }
     s.centred(cx, ty, TITLE, Ink::Gold, 4.0);
     s.centred(cx, ty + 40.0, TAGLINE, Ink::White, 1.0);
@@ -676,7 +740,7 @@ pub fn title(atlas: &Atlas, input: &ShellInput) -> Screen {
         1.0,
     );
     let version = format!("V{}", env!("CARGO_PKG_VERSION"));
-    let vw = font::width(&version) as f32;
+    let vw = s.p.measure(&version, 1.0);
     s.p.text(s.vw - vw - 8.0, s.vh - 12.0, &version, false, 1.0);
     s.finish(None)
 }
@@ -850,6 +914,15 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
         let px = x + pw - 16.0 - PREVIEW_W;
         let py = y + 40.0;
         s.p.text(px, py + 4.0, "PREVIEW", false, 1.0);
+        // With the skin, the map lies in a sunken well.
+        s.p.boxed(
+            px - 4.0,
+            py + 12.0,
+            PREVIEW_W + 8.0,
+            PREVIEW_W / 2.0 + 8.0,
+            crate::skin::Style::Trough,
+            false,
+        );
         MinimapRect {
             cx: px + PREVIEW_W / 2.0,
             cy: py + 16.0 + PREVIEW_W / 4.0,
@@ -873,6 +946,14 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
         )
         .collect();
     let civ_y = y + 40.0 + body_h + 16.0;
+    // The rows can run a row past `body_h` (it counts one fewer than are
+    // drawn), and the line under them then sits on the seed's. With the
+    // skin it is set clear of them; nothing that is clicked moves.
+    let civ_y = if s.p.skinned() {
+        civ_y.max(ry + 4.0)
+    } else {
+        civ_y
+    };
     s.centred(
         x + pw / 2.0,
         civ_y,
@@ -899,11 +980,7 @@ pub fn setup(atlas: &Atlas, input: &ShellInput, setup: &Setup, error: Option<&st
         1.0,
     );
     if let Some(e) = error {
-        let text = fit(&e.to_uppercase(), pw - 32.0);
-        let tw = font::width(&text) as f32;
-        let ex = (x + (pw - tw) / 2.0).round() - 4.0;
-        s.p.rect(ex, below + 12.0, tw + 8.0, 11.0, RED_DARK, 0);
-        s.p.text(ex + 4.0, below + 14.0, &text, false, 1.0);
+        s.warning(x, pw, below + 12.0, e);
     }
     let by = y + ph - 16.0 - 26.0;
     s.button(
@@ -983,11 +1060,7 @@ fn letters_page(
     };
     s.centred(x + pw / 2.0, ry, note, Ink::White, 1.0);
     if let Some(e) = error {
-        let text = fit(&e.to_uppercase(), pw - 32.0);
-        let tw = font::width(&text) as f32;
-        let ex = (x + (pw - tw) / 2.0).round() - 4.0;
-        s.p.rect(ex, ry + 12.0, tw + 8.0, 11.0, RED_DARK, 0);
-        s.p.text(ex + 4.0, ry + 14.0, &text, false, 1.0);
+        s.warning(x, pw, ry + 12.0, e);
     }
     footer(s, x, y, pw, ph);
 }
@@ -1218,11 +1291,7 @@ pub fn settings_screen(
     };
     s.centred(x + pw / 2.0, ry + 4.0, note, Ink::White, 1.0);
     if let Some(e) = error {
-        let text = fit(&e.to_uppercase(), pw - 32.0);
-        let tw = font::width(&text) as f32;
-        let ex = (x + (pw - tw) / 2.0).round() - 4.0;
-        s.p.rect(ex, ry + 16.0, tw + 8.0, 11.0, RED_DARK, 0);
-        s.p.text(ex + 4.0, ry + 18.0, &text, false, 1.0);
+        s.warning(x, pw, ry + 16.0, e);
     }
     footer(&mut s, x, y, pw, ph);
     s.finish(None)
@@ -1352,11 +1421,7 @@ pub fn load_screen(
         );
     }
     if let Some(e) = error {
-        let text = fit(&e.to_uppercase(), pw - 32.0);
-        let tw = font::width(&text) as f32;
-        let ex = (x + (pw - tw) / 2.0).round() - 4.0;
-        s.p.rect(ex, ry + 14.0, tw + 8.0, 11.0, RED_DARK, 0);
-        s.p.text(ex + 4.0, ry + 16.0, &text, false, 1.0);
+        s.warning(x, pw, ry + 14.0, e);
     }
     let by = y + ph - 16.0 - 26.0;
     s.button(
@@ -1535,7 +1600,7 @@ pub fn campaigns_screen(
                 false,
             );
             if !sc.open {
-                let lw = font::width("LOCKED") as f32;
+                let lw = s.p.measure("LOCKED", 1.0);
                 s.p.text_in(
                     x + 32.0 + bw - lw - 8.0,
                     (ly + (SCENARIO_H - font::GLYPH_H as f32) / 2.0).round(),

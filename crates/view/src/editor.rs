@@ -208,8 +208,19 @@ pub fn editor_screen(atlas: &Atlas, input: &ShellInput, panel: &Panel) -> Screen
     let mut s = Sheet::new(atlas, input);
     let (vw, vh) = (s.vw, s.vh);
     // The strip.
-    s.p.rect(0.0, 0.0, vw, TOP_H, BLACK, 0);
-    s.p.rect(0.0, 0.0, vw, TOP_H - 2.0, BROWN_DARK, 0);
+    if s.p.skinned() {
+        s.p.boxed(
+            -12.0,
+            -12.0,
+            vw + 24.0,
+            TOP_H + 12.0,
+            crate::skin::Style::Panel,
+            true,
+        );
+    } else {
+        s.p.rect(0.0, 0.0, vw, TOP_H, BLACK, 0);
+        s.p.rect(0.0, 0.0, vw, TOP_H - 2.0, BROWN_DARK, 0);
+    }
     let mut x = 4.0;
     for tool in Tool::ALL {
         let w = font::width(tool.label()) as f32 + 16.0;
@@ -267,8 +278,19 @@ pub fn editor_screen(atlas: &Atlas, input: &ShellInput, panel: &Panel) -> Screen
     // The palette, beside the minimap.
     let py = vh - BOTTOM_PANEL;
     let pw = (vw - MINIMAP_RESERVE).max(200.0);
-    s.p.rect(0.0, py, vw, BOTTOM_PANEL, BLACK, 0);
-    s.p.rect(0.0, py + 2.0, vw, BOTTOM_PANEL - 2.0, BROWN_DARK, 0);
+    if s.p.skinned() {
+        s.p.boxed(
+            -12.0,
+            py,
+            vw + 24.0,
+            BOTTOM_PANEL + 12.0,
+            crate::skin::Style::Panel,
+            true,
+        );
+    } else {
+        s.p.rect(0.0, py, vw, BOTTOM_PANEL, BLACK, 0);
+        s.p.rect(0.0, py + 2.0, vw, BOTTOM_PANEL - 2.0, BROWN_DARK, 0);
+    }
     let mut iy = py + 8.0;
     for row in &panel.palette {
         let mut ix = 8.0;

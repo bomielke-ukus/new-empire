@@ -552,7 +552,10 @@ def finish(beauty, mask):
 # ------------------------------------------------------------------ output
 
 def manifest(name, cls, anchor, frame, anims, has_mask, source, digest=None, geometry=None,
-             points=(), timing=None, impacts=None):
+             points=(), timing=None, impacts=None, synth_decay=False):
+    """The set's manifest (docs/look/colour-sets.md). With `synth_decay`, the
+    sheet has no rows for `decay`, still listed in `anims` for its timing,
+    and the view draws it (`decay: Synth`, docs/look/units.md)."""
     timing = dict(TIMING, **(timing or {}))
     impacts = impacts or {}
     lines = [
@@ -581,7 +584,7 @@ def manifest(name, cls, anchor, frame, anims, has_mask, source, digest=None, geo
         "    colour: true,",
         "    mask: %s," % ('Some("%s.mask.png")' % name if has_mask else "None"),
         "    frame: Some((%d, %d))," % frame,
-    ] + attach_lines(points) + [
+    ] + (["    decay: Synth,"] if synth_decay else []) + attach_lines(points) + [
         ")",
         "",
     ]

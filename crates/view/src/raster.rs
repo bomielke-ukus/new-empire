@@ -331,7 +331,17 @@ pub fn draw_sprites(
         let dw = (s.w * zoom).round() as i32;
         let dh = (s.h * zoom).round() as i32;
         let (x0, y0) = (x0.round() as i32, y0.round() as i32);
-        let row = s.row as usize * 256;
+        let row = s.palette_row() as usize * 256;
+        // A fading corpse's opacity (`SpriteInstance::opacity`), 1 for
+        // everything else.
+        let opacity = s.opacity();
+        let fade = |c: [u8; 4]| -> [u8; 4] {
+            if opacity >= 1.0 {
+                c
+            } else {
+                [c[0], c[1], c[2], (c[3] as f32 * opacity).round() as u8]
+            }
+        };
         // Source scale: a stretched fill (w != uw) maps proportionally.
         let sxs = s.uw as f32 / (s.w * zoom).max(1.0);
         let sys = s.vh as f32 / (s.h * zoom).max(1.0);
@@ -358,7 +368,7 @@ pub fn draw_sprites(
                     }
                     let ramp = &palette_tex[row + palette::PLAYER_RAMP.start as usize..][..8];
                     let c = tint(c, atlas.mask_at(s.page, ax, ay), ramp);
-                    img.blend(x0 + dx, y0 + dy, lit(c, s.light));
+                    img.blend(x0 + dx, y0 + dy, fade(lit(c, s.light)));
                     continue;
                 }
                 let idx = atlas.index_at(s.page, ax, ay);
@@ -370,7 +380,7 @@ pub fn draw_sprites(
                 } else {
                     palette_tex[row + idx as usize]
                 };
-                img.blend(x0 + dx, y0 + dy, lit(c, s.light));
+                img.blend(x0 + dx, y0 + dy, fade(lit(c, s.light)));
             }
         }
     }

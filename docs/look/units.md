@@ -71,7 +71,7 @@ Every foot unit:
 | `walk`    | 8      | 100  | yes   |        | left foot strikes on frame 0, right on 4 (`docs/05` §2.2); arms swing against the legs |
 | `attack`  | 6      | 90   | no    | 3      | wind-up 0 to 2, the blow lands on 3, recovery 4 and 5 |
 | `death`   | 8      | 110  | no    |        | hit, stagger back, knees go, falls on its back; the last frame lies still |
-| `decay`   | 4      | 7500 | no    |        | the body lying as death left it, sinking into the ground and fading to 55% |
+| `decay`   | 4      | 7500 | no    |        | the body lying as death left it, sinking into the ground and fading to 55%: drawn by the view (`decay: Synth`, "Memory") |
 
 The villager adds, after them in this order: `build` (6 x 140, loops: a
 crouched hammer blow), `carry_food`, `carry_gold`, `carry_stone`,
@@ -225,15 +225,45 @@ scale 2 about 700 MiB. Over the 150 MiB wanted for units, so:
 2. **One look per unit kind**: no age costumes in the new art unless a
    kind needs one to be told apart (the rule already makes one set enough
    for every age). Saves about 50 MiB.
-3. **Decay from the death's last frame**: the view sinking and fading the
-   corpse as it sinks a fallen building (`scene::sink`), so a set has no
-   decay frames: 4 of a foot unit's 30 frames a facing, and the widest
-   (lying) ones, about 15%. Needs a view change and a manifest without
-   `decay` (the timing test then compares the rest).
-4. **Only the units in play**: like the buildings' architectures, load only
-   the kinds the match's civilisations can train. Civilisations deny one
-   to three units each, so this saves little now.
-5. **Compressed colour pages** (BC7 on the GPU, a quarter of RGBA8) if the
-   whole new look must fit far below the current 170 MiB.
-
-With 1 to 3, about 150 MiB for every unit.
+3. **Decay from the death's last frame**. Built; it takes effect with the
+   units' next export. A unit's manifest says `decay: Synth`: the `decay`
+   animation stays in its list with the old set's timing (so
+   `check_set.py` and `the_new_units_keep_the_old_units_timing` compare
+   the same list), but the sheet has no rows for it. The view draws decay
+   frame `k` of `n` (picked by the timing, as a frame would be) as the
+   death's last frame faded to `1 - 0.45 k / (n - 1)` and sunk
+   `2 k / (n - 1)` pixels (`sprites::Atlas::decay_look`, `DECAY_FADE`,
+   `DECAY_SINK`; `scene::sink` lowers it and cuts its bottom rows): the
+   exporter's 55% fade and its 0.05-unit sink, which matches the rendered
+   frames best at 2 pixels. The fade rides in the high four bits of
+   `SpriteInstance::row` (`opacity()`, `palette_row()`), in twentieths,
+   multiplied into the alpha by the shader and the rasteriser alike.
+   Measured against the hoplite's rendered decay frames
+   (`the_synthesised_decay_looks_as_the_exported_frames_did`): frame 0 is
+   the same pixels; frames 1 to 3 differ by at most 17% of the coverage and
+   14 levels of colour where both are solid, the rendered frames' own
+   noise (each was rendered apart) and the sub-pixel sink, against 25%
+   and 27 faded but not sunk. `tools/look/unitexport.py` (`SYNTH_DECAY`)
+   no longer renders the decay and writes `decay: Synth`; its source is in
+   the export hash, so the next `export_all.py` run re-exports every unit
+   without the frames (not yet run: about 40 minutes). The loader takes
+   both forms; a set with decay frames is drawn from them as before.
+   Saves 9.1 MiB of the 96.5 the units cost now.
+4. **Only the units in play**. Built: `sprites::Loadout` is the buildings'
+   architectures and `sprites::Units`, the trainable units the match's
+   sides can have (each civilisation's, less what it is denied; every unit
+   for a side with none), plus every kind already standing in the world (a
+   scenario's or a save's placements). Animals, fish and the relic, which
+   no civilisation trains, are always loaded. A priest converts only from
+   the sides in play, so a convert is always among them. Anything else
+   that turns up (a scenario trigger's placement, a cheat's spawn) is
+   caught after the tick that brings it: `App::ensure_world_art` sees a
+   kind the loadout lacks and loads its set at once, the atlas re-packed
+   and re-uploaded (`a_unit_the_match_was_loaded_without_is_loaded_when_it_turns_up`);
+   it is never drawn from a placeholder. The editor loads every unit; the
+   title's diorama needs the units standing in its world. Civilisations
+   deny one to four units each, so a match of two different ones usually
+   needs them all; two of one civilisation save 10 MiB (the Greeks: no
+   chariot or horse archers).
+5. **Compressed colour pages** (BC7 on the GPU, a quarter of RGBA8):
+   evaluated, not built; see `docs/look/buildings.md`, "Memory".

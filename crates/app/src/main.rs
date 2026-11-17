@@ -41,7 +41,7 @@ use view::hints::{self, Hints, Keys};
 use view::hud::{Action, BOTTOM_PANEL, TOP_BAR};
 use view::minimap::{Minimap, MinimapRect};
 use view::shell::{self, Results, Side};
-use view::sprites::Architectures;
+use view::sprites::Loadout;
 use view::{
     Atlas, Camera, Capture, Control, FogLights, Ghost, Hud, HudInput, LoadRow, Notice, NoticeKind,
     Notices, Scene, SceneOptions, Screen, Settings, SettingsPage, Setup, ShellAction, ShellInput,
@@ -61,6 +61,9 @@ use winit::window::{CursorIcon, Fullscreen, Window, WindowId};
 
 /// The human player.
 const ME: u8 = 0;
+
+/// The most an atlas page measures a side, on a GPU that allows it.
+const MAX_SIDE: u32 = view::sprites::ATLAS_PAGE_HEIGHT;
 /// Drags shorter than this are clicks.
 const DRAG_THRESHOLD: f32 = 4.0;
 /// Two clicks within this are a double-click.
@@ -79,7 +82,12 @@ struct Gpu {
 }
 
 impl Gpu {
-    fn new(window: Arc<Window>, atlas: &Atlas) -> Gpu {
+    /// The GPU, the window's surface and the renderer, drawing from
+    /// `atlas`. A GPU whose textures may not measure as much as the atlas's
+    /// pages (`max_texture_dimension_2d` under 8192) has the atlas built
+    /// again by `refit` for its limit, given in turn, before anything is
+    /// uploaded; also that limit.
+    fn new(window: Arc<Window>, atlas: &mut Atlas, refit: impl FnOnce(u32) -> Atlas) -> (Gpu, u32) {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
         let surface = instance
             .create_surface(window.clone())
@@ -94,9 +102,10 @@ impl Gpu {
             &wgpu::DeviceDescriptor {
                 label: Some("new-empire"),
                 required_features: wgpu::Features::empty(),
-                // The atlas is 2048 wide and grows past 2048 tall once
-                // rendered sets load; `default()` allows 8192.
-                required_limits: wgpu::Limits::default(),
+                // The atlas's pages measure up to 8192 a side, which
+                // `default()` asks for; a GPU that allows less gets an
+                // atlas built for what it allows (below), not a refusal.
+                required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
                 memory_hints: wgpu::MemoryHints::Performance,
             },
             None,
@@ -122,15 +131,23 @@ impl Gpu {
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
+        let max_side = device.limits().max_texture_dimension_2d.min(MAX_SIDE);
+        if atlas.largest_side() > max_side {
+            eprintln!(
+                "the GPU's textures measure at most {max_side} a side: packing the atlas for it"
+            );
+            *atlas = refit(max_side);
+        }
         let renderer = render::Renderer::new(&device, &queue, format, atlas);
-        Gpu {
+        let gpu = Gpu {
             surface,
             device,
             queue,
             config,
             renderer,
             born: Instant::now(),
-        }
+        };
+        (gpu, max_side)
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -176,10 +193,16 @@ struct App {
     gpu: Option<Gpu>,
     atlas: Atlas,
     /// With the new art on (as the settings had it at the start), the
-    /// architectures whose buildings the atlas holds: those of the match,
-    /// the editor or the diorama on screen ([`App::ensure_art`]). `None`
-    /// with it off: then the atlas never changes.
-    art: Option<Architectures>,
+    /// architectures whose buildings and the units whose sets the atlas
+    /// holds: those of the match, the editor or the diorama on screen
+    /// ([`App::ensure_art`]). `None` with it off: then the atlas never
+    /// changes.
+    art: Option<Loadout>,
+    /// The most a texture may measure a side on this GPU
+    /// (`max_texture_dimension_2d`, up to the atlas's 8192): the atlas is
+    /// built to fit it ([`view::sprites::Atlas::with_sheets_max`]). 8192
+    /// until the GPU is known.
+    max_texture: u32,
     /// The ground's textures, with the new art on and the art found
     /// (`docs/look/ground.md`); the ground is drawn as before without.
     ground_art: Option<view::ground::GroundArt>,
@@ -475,9 +498,10 @@ fn random_seed() -> u64 {
 /// The atlas the game draws with: rendered sprite sets replace
 /// placeholders wherever they exist, and with the new art on
 /// (`Settings::new_art`) the colour sets under `assets/look` replace the
-/// indexed sets of their names, of the architectures `archs` only
-/// (`docs/look/buildings.md`, "Memory").
-fn load_atlas(new_art: bool, archs: Architectures) -> Atlas {
+/// indexed sets of their names, of the architectures and units of
+/// `loadout` only (`docs/look/buildings.md` and `docs/look/units.md`,
+/// "Memory"). No page measures more than `max_side` a side.
+fn load_atlas(new_art: bool, loadout: Loadout, max_side: u32) -> Atlas {
     let started = Instant::now();
     let sprites = view::sheets::default_dir();
     let look = if new_art {
@@ -486,24 +510,29 @@ fn load_atlas(new_art: bool, archs: Architectures) -> Atlas {
         None
     };
     let (sheets, errors) =
-        view::sheets::load_art_for(sprites.as_deref(), look.as_deref(), new_art, archs);
+        view::sheets::load_art_for(sprites.as_deref(), look.as_deref(), new_art, loadout);
     for e in &errors {
         eprintln!("warning: {e}");
     }
     let decoded = started.elapsed();
-    let atlas = Atlas::with_sheets(&sheets);
+    // With the new art, the UI wears its skin too (`docs/look/ui.md`).
+    let atlas = Atlas::with_sheets_skinned(&sheets, max_side, new_art);
     drop(sheets);
     if !atlas.loaded_sets.is_empty() {
         eprintln!("rendered sprite sets: {}", atlas.loaded_sets.join(", "));
     }
     if atlas.colour_pages > 0 {
         eprintln!(
-            "new art: {archs} buildings, {} colour page(s) of {}x{} ({} MiB with masks); \
-             read in {} ms, packed in {} ms",
+            "new art: {loadout}; {} colour page(s) of {}x{} ({} MiB with masks), \
+             {} indexed of {}x{} ({} MiB); read in {} ms, packed in {} ms",
             atlas.colour_pages,
             atlas.colour_width,
             atlas.colour_height,
             (atlas.colour.len() + atlas.mask.len()) >> 20,
+            atlas.pages,
+            atlas.width,
+            atlas.height,
+            atlas.indices.len() >> 20,
             decoded.as_millis(),
             (started.elapsed() - decoded).as_millis()
         );
@@ -512,7 +541,17 @@ fn load_atlas(new_art: bool, archs: Architectures) -> Atlas {
 }
 
 impl App {
+    /// The app with the old art loaded, as the settings' defaults have it.
+    #[cfg(test)]
     fn new() -> App {
+        App::starting(load_atlas(false, Loadout::ALL, MAX_SIDE))
+    }
+
+    /// The app drawing from `atlas` until [`App::load_settings`] loads the
+    /// art the settings ask for: the game starts with an empty one, so the
+    /// old art is not decoded and packed only to be thrown away when the
+    /// new art is on.
+    fn starting(atlas: Atlas) -> App {
         // `new-empire [SEED]` pre-fills the setup screen's seed; without
         // one the clock picks.
         let seed = std::env::args()
@@ -527,7 +566,6 @@ impl App {
         camera.look_at_tile(sx as f32 + 0.5, sy as f32 + 0.5);
         let prev_pos = sim.world().pos.clone();
         // The new art waits for the settings (`App::load_settings`).
-        let atlas = load_atlas(false, Architectures::ALL);
         // Recordings under assets/sounds replace the placeholder sounds by
         // cue name, as rendered sprite sets replace placeholder art.
         let mut library = audio::placeholder::library();
@@ -551,6 +589,7 @@ impl App {
             gpu: None,
             atlas,
             art: None,
+            max_texture: MAX_SIDE,
             ground_art: None,
             // No scenery sets in the atlas yet: none, until the new art
             // and a map come.
@@ -723,27 +762,51 @@ impl App {
         if self.settings.new_art {
             // The title's diorama first, whose sides have no civilisation:
             // the first architecture's buildings.
-            self.atlas = load_atlas(true, Architectures::FIRST);
-            self.art = Some(Architectures::FIRST);
+            self.atlas = load_atlas(true, Loadout::FIRST, self.max_texture);
+            self.art = Some(Loadout::FIRST);
             self.ground_art = view::ground::GroundArt::find(view::sheets::look_dir().as_deref());
+            self.scenery =
+                view::scenery::Scenery::new(self.sim.map(), self.sim.seed(), &self.atlas);
+        } else if self.atlas.frames().is_empty() {
+            // Started with no art at all ([`App::starting`]): the old.
+            self.atlas = load_atlas(false, Loadout::ALL, self.max_texture);
+        }
+    }
+
+    /// With the new art on, makes sure every kind standing in the world has
+    /// its art in the atlas: a unit the match's sides could not have had
+    /// that turns up anyway (a scenario's trigger spawning it) has its set
+    /// loaded the tick it appears, the atlas built again with it and put on
+    /// the GPU, rather than be drawn as a placeholder or not at all
+    /// (`docs/look/units.md`, "Memory"). Called after every tick; nothing
+    /// while every kind in the world is loaded, as it almost always is.
+    fn ensure_world_art(&mut self) {
+        let Some(have) = self.art else {
+            return;
+        };
+        let want = have.with_world(&self.sim);
+        if want != have {
+            eprintln!("new art: a unit the match was loaded without turned up; loading its set");
+            self.ensure_art(want);
             self.scenery =
                 view::scenery::Scenery::new(self.sim.map(), self.sim.seed(), &self.atlas);
         }
     }
 
     /// With the new art on, makes the atlas hold the buildings of the
-    /// architectures `want` and no others (`docs/look/buildings.md`,
-    /// "Memory"), rebuilding it and putting it on the GPU if it holds
+    /// architectures and the units of `want` and no others
+    /// (`docs/look/buildings.md` and `docs/look/units.md`, "Memory"),
+    /// rebuilding it and putting it on the GPU if it holds
     /// another set: called as a match, a replay, a save or the editor is
     /// entered, the moment the game already takes to set the world up. The
     /// caller makes the world's scenery afresh after it (its sprites point
     /// into the pages); the diorama's is made again here. Nothing with the
     /// new art off.
-    fn ensure_art(&mut self, want: Architectures) {
+    fn ensure_art(&mut self, want: Loadout) {
         if self.art.is_none_or(|have| have == want) {
             return;
         }
-        self.atlas = load_atlas(true, want);
+        self.atlas = load_atlas(true, want, self.max_texture);
         self.art = Some(want);
         if let Some(gpu) = &mut self.gpu {
             gpu.renderer
@@ -1263,6 +1326,7 @@ impl App {
             .sim
             .step_timed(&mut || epoch.elapsed().as_nanos() as u64);
         self.meter.tick(&timings, thinking);
+        self.ensure_world_art();
         self.feedback.observe(&self.sim);
         // What the tick sounded like, through the viewer's fog
         // (`TA-AUDIO-02`).
@@ -1722,15 +1786,16 @@ impl App {
             }
         }
         let behind = behind && self.diorama.is_some();
-        // The diorama's buildings: any atlas holding its architectures will
-        // do, so coming back from a match keeps the match's rather than
-        // loading again with nothing to cover it (the first architecture,
-        // which its sides build in, is always there).
+        // The diorama's buildings and units: any atlas holding its
+        // architectures and the kinds in its world will do, so coming back
+        // from a match keeps the match's rather than loading again with
+        // nothing to cover it (the first architecture, which its sides
+        // build in, is always there).
         if let Some(want) = self
             .diorama
             .as_ref()
             .filter(|_| behind)
-            .map(|d| Architectures::of_match(d.sim()))
+            .map(|d| Loadout::of_world(d.sim()))
         {
             if self.art.is_some_and(|have| !have.covers(want)) {
                 self.ensure_art(want);
@@ -2295,8 +2360,9 @@ impl App {
         self.recording = None;
         self.shell = Shell::Match;
         self.diorama_shown = false;
-        // The buildings of the match's civilisations, and no others.
-        self.ensure_art(Architectures::of_match(&self.sim));
+        // The buildings of the match's civilisations and the units they
+        // can have (and any standing in its world), and no others.
+        self.ensure_art(Loadout::of_match(&self.sim));
         self.scenery = view::scenery::Scenery::new(self.sim.map(), self.sim.seed(), &self.atlas);
         if let Some(gpu) = &mut self.gpu {
             gpu.upload_map(self.sim.map());
@@ -3281,7 +3347,20 @@ impl ApplicationHandler for App {
                     .then_some(Fullscreen::Borderless(None)),
             );
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
-        let mut gpu = Gpu::new(window.clone(), &self.atlas);
+        let (new_art, loadout) = (self.art.is_some(), self.art.unwrap_or(Loadout::ALL));
+        let (mut gpu, max_side) = Gpu::new(window.clone(), &mut self.atlas, |max| {
+            load_atlas(new_art, loadout, max)
+        });
+        if max_side < self.max_texture {
+            self.max_texture = max_side;
+            // The scenery's sprites point into the pages.
+            self.scenery =
+                view::scenery::Scenery::new(self.sim.map(), self.sim.seed(), &self.atlas);
+            if let Some(d) = &self.diorama {
+                self.diorama_scenery =
+                    view::scenery::Scenery::new(d.sim().map(), d.sim().seed(), &self.atlas);
+            }
+        }
         // The ground's grain, beside the sprites; plain ground without it.
         gpu.renderer
             .upload_detail(&gpu.device, &gpu.queue, &view::detail::Detail::find());
@@ -3410,7 +3489,7 @@ fn main() {
         }
     }));
     let event_loop = EventLoop::new().expect("event loop");
-    let mut app = App::new();
+    let mut app = App::starting(Atlas::empty());
     app.load_settings();
     app.load_progress();
     app.reload_user_campaign();

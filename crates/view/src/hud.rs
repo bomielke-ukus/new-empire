@@ -15,6 +15,7 @@ use crate::notify::{Notice, NoticeKind};
 use crate::palette::*;
 use crate::scene::SpriteInstance;
 use crate::settings::{pretty, Control, Settings};
+use crate::skin;
 use crate::sprites::{Atlas, Frame, Ink};
 
 /// Height of the top resource bar.
@@ -425,19 +426,48 @@ pub struct Hud {
 }
 
 /// Draws screen-space primitives into a sprite list.
+///
+/// With the new look's skin on the atlas ([`Atlas::has_skin`],
+/// `docs/look/ui.md`) the same calls paint in the skin: rectangles in its
+/// colours, text in its typefaces at the device's own pixel size; and the
+/// skin's boxes, bars and icons ([`Painter::boxed`] and the rest) are
+/// there to dress panels and buttons. Without it, everything is drawn as
+/// it always was.
 pub struct Painter<'a> {
     atlas: &'a Atlas,
     /// Output.
     pub out: Vec<SpriteInstance>,
+    /// Device pixels per HUD pixel: what the sprites are scaled by on the
+    /// way out, so the skin's text and pieces can land on whole device
+    /// pixels.
+    s: f32,
+    /// The skin is on the atlas.
+    skin: bool,
+    /// The palette row of the player whose UI this is, for portraits.
+    pub owner_row: u8,
 }
 
 impl<'a> Painter<'a> {
-    /// A painter over an atlas.
+    /// A painter over an atlas, drawing at the window's own scale.
     pub fn new(atlas: &'a Atlas) -> Painter<'a> {
+        Painter::scaled(atlas, 1.0)
+    }
+
+    /// A painter whose output will be scaled by `s` device pixels per HUD
+    /// pixel.
+    pub fn scaled(atlas: &'a Atlas, s: f32) -> Painter<'a> {
         Painter {
             atlas,
             out: Vec::new(),
+            s: s.max(0.1),
+            skin: atlas.has_skin(),
+            owner_row: 0,
         }
+    }
+
+    /// Whether the new look's skin paints.
+    pub fn skinned(&self) -> bool {
+        self.skin
     }
 
     fn push(&mut self, f: &Frame, x: f32, y: f32, w: f32, h: f32, row: u8) {
@@ -460,11 +490,70 @@ impl<'a> Painter<'a> {
         });
     }
 
+    /// Part `(u, v, uw, vh)` of a frame, at a rectangle in whole device
+    /// pixels: stored in HUD pixels so the scale on the way out puts it
+    /// back on them.
+    #[allow(clippy::too_many_arguments)]
+    fn push_device(
+        &mut self,
+        f: &Frame,
+        (u, v, uw, vh): (u16, u16, u16, u16),
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        row: u8,
+    ) {
+        if w <= 0.0 || h <= 0.0 || uw == 0 || vh == 0 {
+            return;
+        }
+        let s = self.s;
+        self.out.push(SpriteInstance {
+            x: x / s,
+            y: y / s,
+            w: w / s,
+            h: h / s,
+            page: f.page,
+            u: f.x + u,
+            v: f.y + v,
+            uw,
+            vh,
+            row,
+            flip: false,
+            depth: 0.0,
+            slot: u32::MAX,
+            screen: true,
+            light: 255,
+        });
+    }
+
     /// A filled rectangle in a palette colour (player row 0 unless the
-    /// colour is a player ramp index, in which case `row` applies).
+    /// colour is a player ramp index, in which case `row` applies). With
+    /// the skin, in the skin's colour for it (`skin::remap`).
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, idx: u8, row: u8) {
+        if self.skin {
+            if let Some(c) = skin::remap(idx) {
+                self.fill(x, y, w, h, c);
+                return;
+            }
+        }
         let f = *self.atlas.solid(idx);
         self.push(&f, x, y, w, h, row);
+    }
+
+    /// A rectangle in one of the skin's colours ([`skin::SOLIDS`]); a
+    /// palette black without the skin.
+    pub fn fill(&mut self, x: f32, y: f32, w: f32, h: f32, c: skin::Rgba) {
+        let f = skin::solid_index(c)
+            .and_then(|i| self.atlas.frame_exact(skin::SOLID_ID, i, 0))
+            .copied();
+        match f {
+            Some(f) => self.push(&f, x, y, w, h, 0),
+            None => {
+                let f = *self.atlas.solid(BLACK);
+                self.push(&f, x, y, w, h, 0);
+            }
+        }
     }
 
     /// A player's symbol in the player's colour (`GD-A11Y-03`), 11 pixels
@@ -495,8 +584,17 @@ impl<'a> Painter<'a> {
         )
     }
 
-    /// Text in an ink. Returns the width drawn.
+    /// Text in an ink. Returns the width drawn. With the skin, light and
+    /// dark text are both its ink (its panels are light) and gold its
+    /// rubric.
     pub fn text_in(&mut self, x: f32, y: f32, text: &str, ink: Ink, scale: f32) -> f32 {
+        if self.skin {
+            let ink = match ink {
+                Ink::Gold => skin::Ink::Rubric,
+                Ink::White | Ink::Black => skin::Ink::Ink,
+            };
+            return self.type_in(x, y, text, ink, scale);
+        }
         let mut cx = x;
         for ch in text.chars() {
             if let Some(g) = self.atlas.glyph_ink(ch, ink) {
@@ -508,6 +606,265 @@ impl<'a> Painter<'a> {
             cx += font::ADVANCE as f32 * scale;
         }
         cx - x
+    }
+
+    /// Text in one of the skin's inks; without the skin, in the old ink
+    /// nearest it. `(x, y)` is the top left of the capitals, which are
+    /// `7 * scale` HUD px tall as the old font's were. Returns the width.
+    pub fn type_in(&mut self, x: f32, y: f32, text: &str, ink: skin::Ink, scale: f32) -> f32 {
+        if !self.skin {
+            let old = match ink {
+                skin::Ink::Rubric => Ink::Gold,
+                skin::Ink::Ink => Ink::Black,
+                skin::Ink::Cream | skin::Ink::Muted => Ink::White,
+            };
+            return self.text_in(x, y, text, old, scale);
+        }
+        let font = &*skin::FONT;
+        let cap = 7.0 * scale * self.s;
+        let Some(bi) = font.pick(skin::face_for(scale), cap, ink) else {
+            return 0.0;
+        };
+        let b = &font.bakes[bi];
+        let (pens, width) = font.layout(bi, text);
+        let x0 = (x.round() * self.s).round();
+        let top = (y.round() * self.s).round();
+        let base = top + ((cap - b.drawn as f32) * 0.5).round() + b.drawn as f32;
+        for (code, pen) in pens {
+            let Some(g) = b.glyphs[code as usize].filter(|g| g.w > 0) else {
+                continue;
+            };
+            let Some(f) = self
+                .atlas
+                .frame_exact(skin::FONT_ID + bi as KindId, ink as u8, code)
+                .copied()
+            else {
+                continue;
+            };
+            self.push_device(
+                &f,
+                (0, 0, f.w, f.h),
+                x0 + pen as f32 + g.bx as f32,
+                base + g.by as f32,
+                g.w as f32,
+                g.h as f32,
+                0,
+            );
+        }
+        width / self.s
+    }
+
+    /// The width `text` is drawn at `scale`, HUD px: the old font's with
+    /// the skin off.
+    pub fn measure(&self, text: &str, scale: f32) -> f32 {
+        self.measure_in(text, skin::Ink::Ink, scale)
+    }
+
+    /// [`Painter::measure`] for text in a skin ink: a large size may be
+    /// baked in some inks only ([`skin::has_ink`]).
+    pub fn measure_in(&self, text: &str, ink: skin::Ink, scale: f32) -> f32 {
+        if !self.skin {
+            return font::width(text) as f32 * scale;
+        }
+        let font = &*skin::FONT;
+        let cap = 7.0 * scale * self.s;
+        font.pick(skin::face_for(scale), cap, ink)
+            .map_or(0.0, |bi| font.layout(bi, text).1 / self.s)
+    }
+
+    /// [`Painter::measure`] for text in one of the old inks, as
+    /// [`Painter::text_in`] draws it.
+    pub fn measure_ink(&self, text: &str, ink: Ink, scale: f32) -> f32 {
+        let ink = match ink {
+            Ink::Gold => skin::Ink::Rubric,
+            Ink::White | Ink::Black => skin::Ink::Ink,
+        };
+        self.measure_in(text, ink, scale)
+    }
+
+    /// `text` cut to what fits in `width` HUD px at `scale`: [`fit`] with
+    /// the skin off.
+    pub fn fit_at(&self, text: &str, width: f32, scale: f32) -> String {
+        if !self.skin {
+            return fit(text, width / scale);
+        }
+        let mut t: String = text.to_string();
+        while !t.is_empty() && self.measure(&t, scale) > width {
+            t.pop();
+        }
+        t
+    }
+
+    /// [`Painter::fit_at`] at the HUD's text size.
+    pub fn fit(&self, text: &str, width: f32) -> String {
+        self.fit_at(text, width, 1.0)
+    }
+
+    /// A box in the skin's `style` with its top left at `(x, y)`, HUD px,
+    /// its corners and lines on whole device pixels; with `shadow`, a soft
+    /// shadow falls from it onto what is behind. Nothing without the skin.
+    pub fn boxed(&mut self, x: f32, y: f32, w: f32, h: f32, style: skin::Style, shadow: bool) {
+        if !self.skin {
+            return;
+        }
+        let s = self.s;
+        let b = skin::bucket(s);
+        let (x0, y0) = ((x * s).round(), (y * s).round());
+        let (x1, y1) = (((x + w) * s).round(), ((y + h) * s).round());
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        if shadow {
+            let r = skin::shadow_reach(b) as f32;
+            let d = skin::shadow_drop(b);
+            let c = skin::shadow_reach(b) * 2 + skin::corner(skin::Style::Panel, b);
+            self.nine(
+                skin::SHADOW_ID + b as KindId,
+                c,
+                (x0 - r, y0 - r + d, x1 + r, y1 + r + d),
+            );
+        }
+        let c = skin::corner(style, b);
+        self.nine(
+            skin::BOX_ID + style as KindId * 8 + b as KindId,
+            c,
+            (x0, y0, x1, y1),
+        );
+        if style == skin::Style::Trough {
+            return;
+        }
+        // The sheen: lit at the top, shaded at the foot.
+        let inset = 2.0;
+        self.sheen(x + inset, y + inset, w - 2.0 * inset, h - 2.0 * inset);
+        // A panel's parchment has its grain, tiled a device pixel to a
+        // pixel, clear of the rounded corners.
+        if style == skin::Style::Panel {
+            if let Some(f) = self
+                .atlas
+                .frame_exact(skin::MISC_ID, skin::Misc::Grain as u8, 0)
+                .copied()
+            {
+                let m = c as f32;
+                let t = skin::GRAIN as f32;
+                let mut gy = y0 + m;
+                while gy < y1 - m {
+                    let gh = t.min(y1 - m - gy);
+                    let mut gx = x0 + m;
+                    while gx < x1 - m {
+                        let gw = t.min(x1 - m - gx);
+                        self.push_device(&f, (0, 0, gw as u16, gh as u16), gx, gy, gw, gh, 0);
+                        gx += t;
+                    }
+                    gy += t;
+                }
+            }
+        }
+    }
+
+    /// The skin's sheen over a HUD rectangle: light at its top, shade at
+    /// its foot, for a bevelled face.
+    pub fn sheen(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        let s = self.s;
+        if let Some(f) = self
+            .atlas
+            .frame_exact(skin::MISC_ID, skin::Misc::Sheen as u8, 0)
+            .copied()
+        {
+            let (x0, y0) = ((x * s).round(), (y * s).round());
+            let (x1, y1) = (((x + w) * s).round(), ((y + h) * s).round());
+            self.push_device(&f, (0, 0, f.w, f.h), x0, y0, x1 - x0, y1 - y0, 0);
+        }
+    }
+
+    /// The nine pieces filed under `kind` (corners `c` device px) over the
+    /// device rectangle `(x0, y0, x1, y1)`; corners cut down to fit a box
+    /// smaller than two of them.
+    fn nine(&mut self, kind: KindId, c: u32, (x0, y0, x1, y1): (f32, f32, f32, f32)) {
+        use skin::Piece as P;
+        let piece = |p: P| self.atlas.frame_exact(kind, p as u8, 0).copied();
+        let (Some(tl), Some(t), Some(tr), Some(l), Some(fl), Some(r), Some(bl), Some(bt), Some(br)) = (
+            piece(P::TopLeft),
+            piece(P::Top),
+            piece(P::TopRight),
+            piece(P::Left),
+            piece(P::Fill),
+            piece(P::Right),
+            piece(P::BottomLeft),
+            piece(P::Bottom),
+            piece(P::BottomRight),
+        ) else {
+            return;
+        };
+        let (w, h) = (x1 - x0, y1 - y0);
+        let c = c as f32;
+        let cl = c.min((w / 2.0).floor());
+        let cr = c.min(w - cl);
+        let ct = c.min((h / 2.0).floor());
+        let cb = c.min(h - ct);
+        let (ci, cli, cri, cti, cbi) = (c as u16, cl as u16, cr as u16, ct as u16, cb as u16);
+        self.push_device(&tl, (0, 0, cli, cti), x0, y0, cl, ct, 0);
+        self.push_device(&tr, (ci - cri, 0, cri, cti), x1 - cr, y0, cr, ct, 0);
+        self.push_device(&bl, (0, ci - cbi, cli, cbi), x0, y1 - cb, cl, cb, 0);
+        self.push_device(
+            &br,
+            (ci - cri, ci - cbi, cri, cbi),
+            x1 - cr,
+            y1 - cb,
+            cr,
+            cb,
+            0,
+        );
+        let (mw, mh) = (w - cl - cr, h - ct - cb);
+        self.push_device(&t, (0, 0, 1, cti), x0 + cl, y0, mw, ct, 0);
+        self.push_device(&bt, (0, ci - cbi, 1, cbi), x0 + cl, y1 - cb, mw, cb, 0);
+        self.push_device(&l, (0, 0, cli, 1), x0, y0 + ct, cl, mh, 0);
+        self.push_device(&r, (ci - cri, 0, cri, 1), x1 - cr, y0 + ct, cr, mh, 0);
+        self.push_device(&fl, (0, 0, 1, 1), x0 + cl, y0 + ct, mw, mh, 0);
+    }
+
+    /// A bar in the skin: a trough, filled to `frac` in `colour`, lit
+    /// along its top.
+    pub fn bar(&mut self, x: f32, y: f32, w: f32, h: f32, frac: f32, colour: skin::Rgba) {
+        self.boxed(x, y, w, h, skin::Style::Trough, false);
+        let fw = ((w - 2.0) * frac.clamp(0.0, 1.0)).max(0.0);
+        if fw > 0.0 {
+            self.fill(x + 1.0, y + 1.0, fw, h - 2.0, colour);
+            self.sheen(x + 1.0, y + 1.0, fw, h - 2.0);
+        }
+    }
+
+    /// An icon of the skin's, filed under `kind` by bucket, centred in the
+    /// HUD box `(x, y, w, h)` at its own device size, in palette row
+    /// `row`. Returns whether there was one.
+    pub fn icon(&mut self, kind: KindId, (x, y, w, h): (f32, f32, f32, f32), row: u8) -> bool {
+        if !self.skin {
+            return false;
+        }
+        let b = skin::bucket(self.s).min(skin::ICON_BUCKETS - 1) as u8;
+        let Some(f) = self.atlas.frame_exact(kind, b, 0).copied() else {
+            return false;
+        };
+        if f.w <= 1 {
+            return false;
+        }
+        let s = self.s;
+        let cx = ((x + w / 2.0) * s - f.w as f32 / 2.0).round();
+        let cy = ((y + h / 2.0) * s - f.h as f32 / 2.0).round();
+        self.push_device(&f, (0, 0, f.w, f.h), cx, cy, f.w as f32, f.h as f32, row);
+        true
+    }
+
+    /// Whether the skin has an icon filed under `kind` at this scale.
+    pub fn has_icon(&self, kind: KindId) -> bool {
+        self.skin
+            && self
+                .atlas
+                .frame_exact(
+                    kind,
+                    skin::bucket(self.s).min(skin::ICON_BUCKETS - 1) as u8,
+                    0,
+                )
+                .is_some_and(|f| f.w > 1)
     }
 
     /// A labelled button. Greyed when disabled; lit when hovered.
@@ -523,6 +880,10 @@ impl<'a> Painter<'a> {
     /// A labelled button showing `key` in its corner, the key its letter
     /// is bound to (`GD-A11Y-02`); nothing for none.
     pub fn button_keyed(&mut self, b: &Button, hover: bool, key: &str) {
+        if self.skin {
+            self.skin_button(b, hover, key);
+            return;
+        }
         let (fill, ink) = if !b.enabled {
             (GREY_DARK, Ink::White)
         } else if hover {
@@ -555,6 +916,67 @@ impl<'a> Painter<'a> {
             self.rect(b.x + b.w - 3.0, b.y + 1.0, 2.0, b.h - 2.0, GOLD_LIGHT, 0);
         }
     }
+
+    /// The skin's command button: a bevelled stone, the unit or building's
+    /// own picture on the left where it has one and there is room, the
+    /// label and cost beside it, the key on a small dark key cap.
+    fn skin_button(&mut self, b: &Button, hover: bool, key: &str) {
+        let style = if !b.enabled {
+            skin::Style::Disabled
+        } else if hover {
+            skin::Style::Hover
+        } else {
+            skin::Style::Button
+        };
+        if b.fresh {
+            // Newly opened (`docs/03` §6.3): a gold halo round it.
+            self.boxed(
+                b.x - 2.0,
+                b.y - 2.0,
+                b.w + 4.0,
+                b.h + 4.0,
+                skin::Style::Gold,
+                false,
+            );
+        }
+        self.boxed(b.x, b.y, b.w, b.h, style, false);
+        let ink = style.ink();
+        let mut tx = b.x + 5.0;
+        let portrait = match b.action {
+            Action::Build(k) | Action::Train(k) if b.w >= 80.0 => Some(k),
+            _ => None,
+        };
+        if let Some(k) = portrait {
+            let row = self.owner_row;
+            if self.icon(
+                skin::PORTRAIT_ID + k,
+                (b.x + 2.0, b.y + 3.0, 26.0, b.h - 6.0),
+                if b.enabled { row } else { 0 },
+            ) {
+                tx = b.x + 30.0;
+            }
+        }
+        let right = b.x + b.w - 4.0;
+        let label = self.fit(&b.label, right - tx);
+        self.type_in(tx, b.y + 6.0, &label, ink, 1.0);
+        let mut cost_right = right;
+        if !key.is_empty() {
+            let kw = self.measure(key, 1.0).max(5.0) + 6.0;
+            let (kx, ky) = (right - kw, b.y + b.h - 13.0);
+            self.boxed(kx, ky, kw, 11.0, skin::Style::Trough, false);
+            let tw = self.measure(key, 1.0);
+            self.type_in(
+                (kx + (kw - tw) / 2.0).round(),
+                ky + 2.0,
+                key,
+                skin::Ink::Cream,
+                1.0,
+            );
+            cost_right = kx - 3.0;
+        }
+        let cost = self.fit(&b.cost, cost_right - tx);
+        self.type_in(tx, b.y + b.h - 11.0, &cost, ink, 1.0);
+    }
 }
 
 /// The line a cheat code is typed into (`GD-CHEAT-01`): a dark box under
@@ -572,8 +994,12 @@ pub fn cheat_line(
     let h = font::GLYPH_H as f32 * scale + 2.0 * pad;
     let x = ((viewport.0 - w) * 0.5).round();
     let y = (40.0 * scale).round();
-    p.rect(x, y, w, h, BLACK, 0);
-    p.outline(x, y, w, h, GOLD);
+    if p.skinned() {
+        p.boxed(x, y, w, h, skin::Style::Plate, true);
+    } else {
+        p.rect(x, y, w, h, BLACK, 0);
+        p.outline(x, y, w, h, GOLD);
+    }
     p.text(x + pad, y + pad, &text, false, scale);
     p.out
 }
@@ -612,8 +1038,12 @@ fn scenario_overlay(p: &mut Painter<'_>, sim: &Simulation, narration: Option<&st
                 .sum::<f32>();
         let x = (vw - OBJECTIVES_W - 6.0).floor();
         let y = TOP_BAR + 6.0;
-        p.rect(x - 1.0, y - 1.0, OBJECTIVES_W + 2.0, h + 2.0, BLACK, 0);
-        p.rect(x, y, OBJECTIVES_W, h, BROWN_DARK, 0);
+        if p.skinned() {
+            p.boxed(x, y, OBJECTIVES_W, h, skin::Style::Plate, true);
+        } else {
+            p.rect(x - 1.0, y - 1.0, OBJECTIVES_W + 2.0, h + 2.0, BLACK, 0);
+            p.rect(x, y, OBJECTIVES_W, h, BROWN_DARK, 0);
+        }
         p.text_in(x + 8.0, y + 6.0, "OBJECTIVES", Ink::Gold, 1.0);
         let mut ly = y + 20.0;
         for (text, status) in &lines {
@@ -623,11 +1053,20 @@ fn scenario_overlay(p: &mut Painter<'_>, sim: &Simulation, narration: Option<&st
                 S::Failed => RED,
                 _ => GOLD_DARK,
             };
-            p.rect(x + 8.0, ly, 7.0, 7.0, BLACK, 0);
-            if *status != S::Open {
-                p.rect(x + 9.0, ly + 1.0, 5.0, 5.0, mark, 0);
+            if p.skinned() {
+                let style = match status {
+                    S::Done => skin::Style::Gold,
+                    S::Failed => skin::Style::Warn,
+                    _ => skin::Style::Button,
+                };
+                p.boxed(x + 8.0, ly, 7.0, 7.0, style, false);
             } else {
-                p.rect(x + 9.0, ly + 1.0, 5.0, 5.0, BROWN, 0);
+                p.rect(x + 8.0, ly, 7.0, 7.0, BLACK, 0);
+                if *status != S::Open {
+                    p.rect(x + 9.0, ly + 1.0, 5.0, 5.0, mark, 0);
+                } else {
+                    p.rect(x + 9.0, ly + 1.0, 5.0, 5.0, BROWN, 0);
+                }
             }
             for l in text {
                 if *status == S::Done {
@@ -652,9 +1091,14 @@ fn scenario_overlay(p: &mut Painter<'_>, sim: &Simulation, narration: Option<&st
         let h = lines.len() as f32 * line + 14.0;
         let x = ((right.min(vw) - w) / 2.0).max(8.0).round();
         let y = TOP_BAR + 6.0;
-        p.rect(x - 1.0, y - 1.0, w + 2.0, h + 2.0, BLACK, 0);
-        p.rect(x, y, w, h, BROWN_DARK, 0);
-        p.rect(x, y, 3.0, h, GOLD, 0);
+        if p.skinned() {
+            p.boxed(x, y, w, h, skin::Style::Plate, true);
+            p.fill(x + 3.0, y + 4.0, 2.0, h - 8.0, skin::GOLD_LINE);
+        } else {
+            p.rect(x - 1.0, y - 1.0, w + 2.0, h + 2.0, BLACK, 0);
+            p.rect(x, y, w, h, BROWN_DARK, 0);
+            p.rect(x, y, 3.0, h, GOLD, 0);
+        }
         for (i, l) in lines.iter().enumerate() {
             p.text(x + 12.0, y + 7.0 + i as f32 * line, l, false, 1.0);
         }
@@ -1479,6 +1923,11 @@ struct Seg {
     sub: Option<String>,
     /// A box behind it, for warnings.
     boxed: Option<u8>,
+    /// The resource it counts, by [`Resource::index`]: with the skin, its
+    /// icon stands for its name and only `value` is written.
+    res: Option<usize>,
+    /// The count alone.
+    value: String,
 }
 
 /// The resource bar. Reflows rather than overlaps: at widths where the
@@ -1508,10 +1957,14 @@ fn victory_clocks(p: &mut Painter<'_>, sim: &Simulation, me: u8, vw: f32) {
         lines.push(format!("{who} EVERY RELIC {}", clock(left)));
     }
     for (k, line) in lines.iter().enumerate() {
-        let w = font::width(line) as f32 + 12.0;
+        let w = p.measure(line, 1.0).round() + 12.0;
         let (x, y) = ((vw - w - 6.0).round(), TOP_BAR + 6.0 + k as f32 * 16.0);
-        p.rect(x, y, w, 14.0, BLACK, 0);
-        p.rect(x + 1.0, y + 1.0, w - 2.0, 12.0, BROWN_DARK, 0);
+        if p.skinned() {
+            p.boxed(x, y, w, 14.0, skin::Style::Plate, true);
+        } else {
+            p.rect(x, y, w, 14.0, BLACK, 0);
+            p.rect(x + 1.0, y + 1.0, w - 2.0, 12.0, BROWN_DARK, 0);
+        }
         p.text_in(x + 6.0, y + 3.0, line, Ink::Gold, 1.0);
     }
 }
@@ -1522,17 +1975,8 @@ fn clock(ticks: u64) -> String {
     format!("{}:{:02}", s / 60, s % 60)
 }
 
-fn top_bar(
-    p: &mut Painter<'_>,
-    sim: &Simulation,
-    me: u8,
-    vw: f32,
-    status: &str,
-    hint: bool,
-    flash: [bool; 4],
-) {
-    p.rect(0.0, 0.0, vw, TOP_BAR, BROWN_DARK, 0);
-    p.rect(0.0, TOP_BAR - 2.0, vw, 2.0, BLACK, 0);
+/// The resource bar's entries, in order.
+fn bar_segments(sim: &Simulation, me: u8, hint: bool, flash: [bool; 4]) -> Vec<Seg> {
     let world = sim.world();
     let mut segs: Vec<Seg> = Vec::new();
     if let Some(pl) = sim.player(me) {
@@ -1549,12 +1993,16 @@ fn top_bar(
                 sub: Some(format!("({workers})")),
                 // Short of it for the last click: it flashes.
                 boxed: flash[r.index()].then_some(RED),
+                res: Some(r.index()),
+                value: pl.stockpile[r.index()].to_string(),
             });
         }
         let housed = pl.pop >= pl.pop_cap;
         segs.push(Seg {
             text: format!("POP {}/{}", pl.pop, pl.pop_cap),
             sub: None,
+            res: None,
+            value: String::new(),
             boxed: housed.then_some(RED_DARK),
         });
         let idle = sim.idle_villagers(me).len();
@@ -1562,6 +2010,8 @@ fn top_bar(
             segs.push(Seg {
                 text: format!("IDLE {idle}"),
                 sub: None,
+                res: None,
+                value: String::new(),
                 boxed: Some(if idle > 3 { RED } else { GOLD_DARK }),
             });
         }
@@ -1573,12 +2023,16 @@ fn top_bar(
                 None => age,
             },
             sub: None,
+            res: None,
+            value: String::new(),
             boxed: None,
         });
         if farm_needs_wood(sim, me) {
             segs.push(Seg {
                 text: "FARM NEEDS WOOD".to_string(),
                 sub: None,
+                res: None,
+                value: String::new(),
                 boxed: Some(RED_DARK),
             });
         }
@@ -1586,10 +2040,31 @@ fn top_bar(
             segs.push(Seg {
                 text: "F1 CONTROLS".to_string(),
                 sub: None,
+                res: None,
+                value: String::new(),
                 boxed: Some(GOLD_DARK),
             });
         }
     }
+    segs
+}
+
+fn top_bar(
+    p: &mut Painter<'_>,
+    sim: &Simulation,
+    me: u8,
+    vw: f32,
+    status: &str,
+    hint: bool,
+    flash: [bool; 4],
+) {
+    let segs = bar_segments(sim, me, hint, flash);
+    if p.skinned() {
+        top_bar_skin(p, &segs, vw, status);
+        return;
+    }
+    p.rect(0.0, 0.0, vw, TOP_BAR, BROWN_DARK, 0);
+    p.rect(0.0, TOP_BAR - 2.0, vw, 2.0, BLACK, 0);
     let status_w = font::width(status) as f32 + 20.0;
     let measure = |scale: f32, subs: bool, gap: f32| -> f32 {
         10.0 + segs
@@ -1666,6 +2141,124 @@ fn top_bar(
     }
 }
 
+/// The resource bar in the skin: a parchment band with the resources'
+/// own pictures for their names, the same entries and the same reflow as
+/// [`top_bar`]'s, measured in the skin's type.
+fn top_bar_skin(p: &mut Painter<'_>, segs: &[Seg], vw: f32, status: &str) {
+    // The band's ends and top run off the window; its shadow falls on the
+    // world.
+    p.boxed(
+        -12.0,
+        -12.0,
+        vw + 24.0,
+        TOP_BAR + 12.0,
+        skin::Style::Panel,
+        true,
+    );
+    let icon_w = 20.0;
+    let icons = p.has_icon(skin::ICON_ID);
+    let shown = |s: &Seg| -> String {
+        if icons && s.res.is_some() {
+            s.value.clone()
+        } else {
+            s.text.clone()
+        }
+    };
+    let seg_w = |p: &Painter<'_>, s: &Seg, scale: f32, subs: bool| -> f32 {
+        let icon = if icons && s.res.is_some() {
+            icon_w
+        } else {
+            0.0
+        };
+        let sub = match (&s.sub, subs) {
+            (Some(t), true) => p.measure(t, 1.0) + 4.0,
+            _ => 0.0,
+        };
+        icon + p.measure(&shown(s), scale) + sub
+    };
+    let status_w = p.measure(status, 1.0) + 20.0;
+    let measure = |p: &Painter<'_>, scale: f32, subs: bool, gap: f32| -> f32 {
+        10.0 + segs
+            .iter()
+            .map(|s| seg_w(p, s, scale, subs) + gap)
+            .sum::<f32>()
+    };
+    let layouts = [
+        (2.0, true, 28.0),
+        (2.0, false, 20.0),
+        (1.0, true, 16.0),
+        (1.0, false, 12.0),
+    ];
+    let with_status = layouts
+        .iter()
+        .find(|(s, sub, g)| measure(p, *s, *sub, *g) + status_w <= vw)
+        .copied();
+    let (scale, subs, gap, show_status, two_lines) = match with_status {
+        Some((s, sub, g)) => (s, sub, g, true, false),
+        None => match layouts
+            .iter()
+            .find(|(s, sub, g)| measure(p, *s, *sub, *g) <= vw)
+        {
+            Some(&(s, sub, g)) => (s, sub, g, false, false),
+            None => (1.0, false, 12.0, false, true),
+        },
+    };
+    let mut y = if two_lines {
+        3.0
+    } else if scale > 1.5 {
+        6.0
+    } else {
+        9.0
+    };
+    let mut x = 10.0;
+    for s in segs {
+        let w = seg_w(p, s, scale, false);
+        if two_lines && x + w > vw - 10.0 {
+            if y > 3.0 {
+                break;
+            }
+            y = 14.0;
+            x = 10.0;
+        }
+        let style = s.boxed.map(|c| match c {
+            RED => skin::Style::Flash,
+            RED_DARK => skin::Style::Warn,
+            _ => skin::Style::Gold,
+        });
+        if let Some(style) = style {
+            let pad = if two_lines { 1.0 } else { 4.0 };
+            p.boxed(
+                x - 5.0,
+                y - pad,
+                w + 10.0,
+                7.0 * scale + 2.0 * pad,
+                style,
+                false,
+            );
+        }
+        let ink = style.map_or(skin::Ink::Ink, |s| s.ink());
+        let mut tx = x;
+        if let (true, Some(r)) = (icons, s.res) {
+            let h = if two_lines { 10.0 } else { 18.0 };
+            p.icon(
+                skin::ICON_ID + r as KindId,
+                (x, y + 7.0 * scale / 2.0 - h / 2.0, icon_w - 2.0, h),
+                0,
+            );
+            tx += icon_w;
+        }
+        tx += p.type_in(tx, y, &shown(s), ink, scale);
+        if let (Some(t), true) = (&s.sub, subs) {
+            tx += 4.0 + p.type_in(tx + 4.0, y + 7.0 * scale - 7.0, t, skin::Ink::Ink, 1.0);
+        }
+        x = tx + gap;
+    }
+    if show_status {
+        let sw = p.measure(status, 1.0);
+        p.type_in(vw - sw - 10.0, 10.0, status, skin::Ink::Ink, 1.0);
+    }
+}
+
 impl Hud {
     /// Builds the HUD for a frame.
     pub fn build(atlas: &Atlas, input: &HudInput<'_>) -> Hud {
@@ -1673,7 +2266,8 @@ impl Hud {
         let scale = s;
         let (vw, vh) = (input.camera.viewport.0 / s, input.camera.viewport.1 / s);
         let hover = input.hover.map(|(x, y)| (x / s, y / s));
-        let mut p = Painter::new(atlas);
+        let mut p = Painter::scaled(atlas, s);
+        p.owner_row = row_for_owner(input.player);
         let mut buttons = Vec::new();
         let sim = input.sim;
         let world = sim.world();
@@ -1699,12 +2293,54 @@ impl Hud {
 
         // ----- bottom panel
         let py = vh - BOTTOM_PANEL;
-        p.rect(0.0, py, vw, BOTTOM_PANEL, BROWN_DARK, 0);
-        p.rect(0.0, py, vw, 2.0, BLACK, 0);
         let reserve = MINIMAP_RESERVE.min(vw * 0.3);
         let panel_w = vw - reserve;
         let left_w = 260.0_f32.min(panel_w * 0.4).floor();
-        p.rect(left_w, py + 8.0, 2.0, BOTTOM_PANEL - 16.0, BLACK, 0);
+        if p.skinned() {
+            // A parchment band along the foot, its ends and foot off the
+            // window; a bronze rule between the selection and the grid; the
+            // minimap set in a sunken well (`MinimapRect::bottom_right`).
+            p.boxed(
+                -12.0,
+                py,
+                vw + 24.0,
+                BOTTOM_PANEL + 12.0,
+                skin::Style::Panel,
+                true,
+            );
+            p.fill(left_w, py + 10.0, 1.0, BOTTOM_PANEL - 20.0, skin::BRONZE);
+            p.fill(
+                left_w + 1.0,
+                py + 10.0,
+                1.0,
+                BOTTOM_PANEL - 20.0,
+                skin::GOLD_LINE,
+            );
+            let (mw, margin) = (256.0, 16.0);
+            if reserve >= mw * 0.5 {
+                let (mx, my) = (vw - margin - mw, vh - margin - mw * 0.5);
+                p.boxed(
+                    mx - 8.0,
+                    my - 8.0,
+                    mw + 16.0,
+                    mw * 0.5 + 16.0,
+                    skin::Style::Plate,
+                    true,
+                );
+                p.boxed(
+                    mx - 3.0,
+                    my - 3.0,
+                    mw + 6.0,
+                    mw * 0.5 + 6.0,
+                    skin::Style::Trough,
+                    false,
+                );
+            }
+        } else {
+            p.rect(0.0, py, vw, BOTTOM_PANEL, BROWN_DARK, 0);
+            p.rect(0.0, py, vw, 2.0, BLACK, 0);
+            p.rect(left_w, py + 8.0, 2.0, BOTTOM_PANEL - 16.0, BLACK, 0);
+        }
 
         // Selection summary.
         let selected: Vec<Slot> = world
@@ -1722,13 +2358,8 @@ impl Hud {
             1 => {
                 let i = selected[0].index();
                 let info = kinds::info(world.kind[i]);
-                p.text(
-                    10.0,
-                    ty,
-                    &fit(&info.name.to_uppercase(), text_w / 2.0),
-                    false,
-                    2.0,
-                );
+                let name = p.fit_at(&info.name.to_uppercase(), text_w, 2.0);
+                p.text(10.0, ty, &name, false, 2.0);
                 ty += 20.0;
                 let hp = fx_to_f32(world.health[i]);
                 p.text(
@@ -1744,17 +2375,26 @@ impl Hud {
                 );
                 // Health bar.
                 let bw = text_w;
-                p.rect(10.0, ty + 10.0, bw, 6.0, BLACK, 0);
                 let frac =
                     (hp / sim.max_health_of(world.owner[i], world.kind[i]) as f32).clamp(0.0, 1.0);
-                p.rect(
-                    11.0,
-                    ty + 11.0,
-                    (bw - 2.0) * frac,
-                    4.0,
-                    if frac > 0.5 { GREEN_LIGHT } else { RED },
-                    0,
-                );
+                if p.skinned() {
+                    let c = if frac > 0.5 {
+                        skin::MALACHITE
+                    } else {
+                        skin::RED_OCHRE
+                    };
+                    p.bar(10.0, ty + 10.0, bw, 6.0, frac, c);
+                } else {
+                    p.rect(10.0, ty + 10.0, bw, 6.0, BLACK, 0);
+                    p.rect(
+                        11.0,
+                        ty + 11.0,
+                        (bw - 2.0) * frac,
+                        4.0,
+                        if frac > 0.5 { GREEN_LIGHT } else { RED },
+                        0,
+                    );
+                }
                 ty += 22.0;
                 if let Some(done) = world.construction[i] {
                     let pct = done * 100 / info.build_work().max(1);
@@ -1917,8 +2557,12 @@ impl Hud {
                     let sy = py + BOTTOM_PANEL - 30.0;
                     for (n, item) in q.queue.iter().enumerate().take(5) {
                         let bx = 10.0 + n as f32 * 26.0;
-                        p.rect(bx, sy, 22.0, 20.0, BLACK, 0);
-                        p.rect(bx + 1.0, sy + 1.0, 20.0, 18.0, BROWN, 0);
+                        if p.skinned() {
+                            p.boxed(bx, sy, 22.0, 20.0, skin::Style::Button, false);
+                        } else {
+                            p.rect(bx, sy, 22.0, 20.0, BLACK, 0);
+                            p.rect(bx + 1.0, sy + 1.0, 20.0, 18.0, BROWN, 0);
+                        }
                         let (letter, total) = match item.item {
                             Item::Unit(k) => {
                                 let u = kinds::info(k);
@@ -1933,7 +2577,20 @@ impl Hud {
                             let fill = (18.0 * frac.clamp(0.0, 1.0)).round();
                             p.rect(bx + 1.0, sy + 19.0 - fill, 20.0, fill, GOLD, 0);
                         }
-                        p.text(bx + 8.0, sy + 6.0, &letter.to_string(), true, 1.0);
+                        // With the skin, a unit in the queue is its picture.
+                        let pictured = match item.item {
+                            Item::Unit(k) => p.icon(
+                                skin::PORTRAIT_ID + k,
+                                (bx + 1.0, sy + 1.0, 20.0, 18.0),
+                                row_for_owner(me),
+                            ),
+                            Item::Tech(_) => false,
+                        };
+                        if !pictured {
+                            let l = letter.to_string();
+                            let lx = bx + ((22.0 - p.measure(&l, 1.0)) / 2.0).round();
+                            p.text(lx, sy + 6.0, &l, true, 1.0);
+                        }
                     }
                 }
             }
@@ -2051,7 +2708,8 @@ impl Hud {
             (None, None) => age_progress(sim, me),
         };
         let line_y = py + 10.0 + GRID_ROWS as f32 * (BUTTON_H + BUTTON_GAP) + 2.0;
-        p.text(grid_x, line_y, &fit(&line, grid_w), false, 1.0);
+        let line = p.fit(&line, grid_w);
+        p.text(grid_x, line_y, &line, false, 1.0);
         // The tooltip (`UX-TIP-01`): a box above the panel by the hovered
         // button, its lines the button's, the reason last when it is
         // greyed. Tooltips are the manual.
@@ -2060,31 +2718,47 @@ impl Hud {
             if !b.enabled {
                 lines.push(b.reason.clone());
             }
-            let lines: Vec<String> = lines.iter().map(|l| fit(l, 320.0)).collect();
+            // With the skin, a line more of room: its type is taller.
+            let (lh, top) = if p.skinned() {
+                (11.0, 6.0)
+            } else {
+                (10.0, 4.0)
+            };
+            let lines: Vec<String> = lines.iter().map(|l| p.fit(l, 320.0)).collect();
             let w = lines
                 .iter()
-                .map(|l| font::width(l) as f32)
+                .map(|l| p.measure(l, 1.0).ceil())
                 .fold(0.0, f32::max)
                 + 12.0;
-            let h = lines.len() as f32 * 10.0 + 8.0;
+            let h = lines.len() as f32 * lh + 2.0 * top;
             let x = b.x.clamp(4.0, (vw - w - 4.0).max(4.0)).round();
             let y = (py - h - 4.0).round();
-            p.rect(x - 1.0, y - 1.0, w + 2.0, h + 2.0, BLACK, 0);
-            p.rect(x, y, w, h, BROWN_DARK, 0);
+            if p.skinned() {
+                p.boxed(x, y, w, h, skin::Style::Plate, true);
+            } else {
+                p.rect(x - 1.0, y - 1.0, w + 2.0, h + 2.0, BLACK, 0);
+                p.rect(x, y, w, h, BROWN_DARK, 0);
+            }
             for (i, l) in lines.iter().enumerate() {
-                let ly = y + 4.0 + i as f32 * 10.0;
+                let ly = y + top + i as f32 * lh;
                 if i == 0 {
                     p.text_in(x + 6.0, ly, l, Ink::Gold, 1.0);
                 } else if !b.enabled && i == lines.len() - 1 {
-                    p.rect(
-                        x + 4.0,
-                        ly - 1.0,
-                        font::width(l) as f32 + 4.0,
-                        9.0,
-                        RED_DARK,
-                        0,
-                    );
-                    p.text(x + 6.0, ly, l, false, 1.0);
+                    if p.skinned() {
+                        let lw = p.measure(l, 1.0).ceil();
+                        p.boxed(x + 3.0, ly - 2.0, lw + 6.0, 11.0, skin::Style::Warn, false);
+                        p.type_in(x + 6.0, ly, l, skin::Ink::Cream, 1.0);
+                    } else {
+                        p.rect(
+                            x + 4.0,
+                            ly - 1.0,
+                            font::width(l) as f32 + 4.0,
+                            9.0,
+                            RED_DARK,
+                            0,
+                        );
+                        p.text(x + 6.0, ly, l, false, 1.0);
+                    }
                 } else {
                     p.text(x + 6.0, ly, l, false, 1.0);
                 }
@@ -2095,14 +2769,19 @@ impl Hud {
         let hint = input
             .hint
             .filter(|_| !input.help)
-            .map(|h| fit(h, vw - 40.0));
+            .map(|h| p.fit(h, vw - 40.0));
         if let Some(h) = &hint {
-            let w = font::width(h) as f32 + 28.0;
+            let w = p.measure(h, 1.0).ceil() + 28.0;
             let x = ((vw - w) / 2.0).round();
             let y = py - 30.0;
-            p.rect(x - 1.0, y - 1.0, w + 2.0, 18.0, BLACK, 0);
-            p.rect(x, y, w, 16.0, BROWN_DARK, 0);
-            p.rect(x + 4.0, y + 4.0, 8.0, 8.0, GOLD_DARK, 0);
+            if p.skinned() {
+                p.boxed(x, y - 1.0, w, 18.0, skin::Style::Plate, true);
+                p.boxed(x + 4.0, y + 3.0, 9.0, 9.0, skin::Style::Gold, false);
+            } else {
+                p.rect(x - 1.0, y - 1.0, w + 2.0, 18.0, BLACK, 0);
+                p.rect(x, y, w, 16.0, BROWN_DARK, 0);
+                p.rect(x + 4.0, y + 4.0, 8.0, 8.0, GOLD_DARK, 0);
+            }
             p.text(x + 18.0, y + 4.0, h, false, 1.0);
         }
 
@@ -2129,7 +2808,6 @@ impl Hud {
             let (sx, sy) = (sx / scale, sy / scale);
             let lift = if info.footprint > 0 { 60.0 } else { 50.0 } * input.camera.zoom() / scale;
             let w = 32.0;
-            p.rect(sx - w / 2.0 - 1.0, sy - lift - 1.0, w + 2.0, 6.0, BLACK, 0);
             let frac = if under_construction {
                 world.construction[i].unwrap_or(0) as f32 / info.build_work().max(1) as f32
             } else {
@@ -2142,7 +2820,17 @@ impl Hud {
             } else {
                 RED
             };
-            p.rect(sx - w / 2.0, sy - lift, w * frac, 4.0, colour, 0);
+            if p.skinned() {
+                let c = match colour {
+                    GOLD => skin::GOLD,
+                    GREEN_LIGHT => skin::MALACHITE,
+                    _ => skin::RED_OCHRE,
+                };
+                p.bar(sx - w / 2.0 - 1.0, sy - lift - 1.0, w + 2.0, 6.0, frac, c);
+            } else {
+                p.rect(sx - w / 2.0 - 1.0, sy - lift - 1.0, w + 2.0, 6.0, BLACK, 0);
+                p.rect(sx - w / 2.0, sy - lift, w * frac, 4.0, colour, 0);
+            }
         }
 
         // The notification stack (`docs/03` §6.3): what just happened to
@@ -2152,7 +2840,7 @@ impl Hud {
         for (i, n) in input.notices.iter().enumerate() {
             let depth = (input.notices.len() - 1 - i) as f32;
             let y = bottom - (depth + 1.0) * NOTICE_H;
-            let text = fit(&n.text, NOTICE_W - 28.0);
+            let text = p.fit(&n.text, NOTICE_W - 28.0);
             let mark = match n.kind {
                 NoticeKind::Attack => RED,
                 NoticeKind::Loss => GREY,
@@ -2160,9 +2848,20 @@ impl Hud {
                 NoticeKind::Age => GOLD_LIGHT,
                 NoticeKind::Cheat => GREEN_LIGHT,
             };
-            p.rect(8.0, y, NOTICE_W, NOTICE_H - 2.0, BLACK, 0);
-            p.rect(9.0, y + 1.0, NOTICE_W - 2.0, NOTICE_H - 4.0, BROWN_DARK, 0);
-            p.rect(12.0, y + 3.0, 8.0, 8.0, mark, 0);
+            if p.skinned() {
+                p.boxed(8.0, y, NOTICE_W, NOTICE_H - 2.0, skin::Style::Plate, true);
+                let style = match n.kind {
+                    NoticeKind::Attack => skin::Style::Warn,
+                    NoticeKind::Loss => skin::Style::Disabled,
+                    NoticeKind::Cheat => skin::Style::Accent,
+                    NoticeKind::Research | NoticeKind::Age => skin::Style::Gold,
+                };
+                p.boxed(12.0, y + 3.0, 8.0, 8.0, style, false);
+            } else {
+                p.rect(8.0, y, NOTICE_W, NOTICE_H - 2.0, BLACK, 0);
+                p.rect(9.0, y + 1.0, NOTICE_W - 2.0, NOTICE_H - 4.0, BROWN_DARK, 0);
+                p.rect(12.0, y + 3.0, 8.0, 8.0, mark, 0);
+            }
             p.text(24.0, y + 3.0, &text, false, 1.0);
             if n.tile.is_some() {
                 buttons.push(Button {
@@ -2189,17 +2888,34 @@ impl Hud {
         if let Some(banner) = input.banner {
             let text = banner.title();
             let scale = 3.0;
-            let w = font::width(&text) as f32 * scale + 32.0;
+            let tw = p.measure_ink(&text, Ink::Gold, scale).ceil();
+            let w = tw + 32.0;
             let x = ((vw - w) / 2.0).round();
             let y = TOP_BAR + 28.0;
-            p.rect(x, y, w, 40.0, BLACK, 0);
-            p.rect(x + 2.0, y + 2.0, w - 4.0, 36.0, BROWN_DARK, 0);
-            p.rect(x + 2.0, y + 2.0, w - 4.0, 2.0, GOLD, 0);
-            p.rect(x + 2.0, y + 36.0, w - 4.0, 2.0, GOLD, 0);
+            if p.skinned() {
+                p.boxed(x, y, w, 40.0, skin::Style::Panel, true);
+            } else {
+                p.rect(x, y, w, 40.0, BLACK, 0);
+                p.rect(x + 2.0, y + 2.0, w - 4.0, 36.0, BROWN_DARK, 0);
+                p.rect(x + 2.0, y + 2.0, w - 4.0, 2.0, GOLD, 0);
+                p.rect(x + 2.0, y + 36.0, w - 4.0, 2.0, GOLD, 0);
+            }
             p.text_in(x + 16.0, y + 10.0, &text, Ink::Gold, scale);
             if let Some(sub) = banner.subtitle() {
-                let sw = font::width(sub) as f32;
-                p.text(((vw - sw) / 2.0).round(), y + 46.0, sub, false, 1.0);
+                let sw = p.measure(sub, 1.0).ceil();
+                let sx = ((vw - sw) / 2.0).round();
+                if p.skinned() {
+                    // Over the world the line stands on a plate, to read.
+                    p.boxed(
+                        sx - 8.0,
+                        y + 42.0,
+                        sw + 16.0,
+                        15.0,
+                        skin::Style::Plate,
+                        true,
+                    );
+                }
+                p.text(sx, y + 46.0, sub, false, 1.0);
             }
         }
 
@@ -2213,12 +2929,16 @@ impl Hud {
             let world_h = vh - TOP_BAR - BOTTOM_PANEL;
             let x = ((vw - pw) / 2.0).round();
             let y = (TOP_BAR + ((world_h - ph) / 2.0).max(4.0)).round();
-            p.rect(x, y, pw, ph, BLACK, 0);
-            p.rect(x + 2.0, y + 2.0, pw - 4.0, ph - 4.0, BROWN_DARK, 0);
-            p.rect(x + 2.0, y + 2.0, pw - 4.0, 2.0, GOLD, 0);
-            p.rect(x + 2.0, y + ph - 4.0, pw - 4.0, 2.0, GOLD, 0);
+            if p.skinned() {
+                p.boxed(x, y, pw, ph, skin::Style::Panel, true);
+            } else {
+                p.rect(x, y, pw, ph, BLACK, 0);
+                p.rect(x + 2.0, y + 2.0, pw - 4.0, ph - 4.0, BROWN_DARK, 0);
+                p.rect(x + 2.0, y + 2.0, pw - 4.0, 2.0, GOLD, 0);
+                p.rect(x + 2.0, y + ph - 4.0, pw - 4.0, 2.0, GOLD, 0);
+            }
             let title = "CONTROLS";
-            let tw = font::width(title) as f32 * 2.0;
+            let tw = p.measure_ink(title, Ink::Gold, 2.0);
             p.text_in(
                 x + ((pw - tw) / 2.0).round(),
                 y + 10.0,
@@ -2232,12 +2952,14 @@ impl Hud {
                 let cx = x + 12.0 + c as f32 * col_w;
                 for (i, (key, what)) in column.iter().enumerate() {
                     let ly = y + 38.0 + i as f32 * line;
-                    p.text_in(cx, ly, &fit(key, key_w - 6.0), Ink::Gold, 1.0);
-                    p.text(cx + key_w, ly, &fit(what, col_w - key_w - 6.0), false, 1.0);
+                    let key = p.fit(key, key_w - 6.0);
+                    let what = p.fit(what, col_w - key_w - 6.0);
+                    p.text_in(cx, ly, &key, Ink::Gold, 1.0);
+                    p.text(cx + key_w, ly, &what, false, 1.0);
                 }
             }
             let foot = "F1 OR ? CLOSES THIS";
-            let fw = font::width(foot) as f32;
+            let fw = p.measure(foot, 1.0);
             p.text(
                 x + ((pw - fw) / 2.0).round(),
                 y + ph - 16.0,
@@ -2258,13 +2980,17 @@ impl Hud {
             let ph = 30.0 + lines.len() as f32 * line + 6.0;
             let x = 8.0;
             let y = TOP_BAR + 8.0;
-            p.rect(x, y, pw, ph, BLACK, 0);
-            p.rect(x + 2.0, y + 2.0, pw - 4.0, ph - 4.0, BROWN_DARK, 0);
-            p.rect(x + 2.0, y + 2.0, pw - 4.0, 2.0, GOLD, 0);
+            if p.skinned() {
+                p.boxed(x, y, pw, ph, skin::Style::Panel, true);
+            } else {
+                p.rect(x, y, pw, ph, BLACK, 0);
+                p.rect(x + 2.0, y + 2.0, pw - 4.0, ph - 4.0, BROWN_DARK, 0);
+                p.rect(x + 2.0, y + 2.0, pw - 4.0, 2.0, GOLD, 0);
+            }
             p.text_in(x + 8.0, y + 8.0, "PERFORMANCE", Ink::Gold, 1.0);
             let hint = "F4 CLOSES";
             p.text(
-                x + pw - 8.0 - font::width(hint) as f32,
+                x + pw - 8.0 - p.measure(hint, 1.0),
                 y + 8.0,
                 hint,
                 false,

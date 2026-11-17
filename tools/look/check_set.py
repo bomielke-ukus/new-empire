@@ -58,6 +58,8 @@ def parse_ron(text):
         "scale": int(field("scale", r"(\d+)")), "sheet": field("sheet"),
         "anchor": anchor, "frame": frame, "mask": mask, "animations": anims, "timing": timing,
         "colour": field("colour", r"(true|false)") == "true",
+        # The view draws the decay: no rows for it in the sheet.
+        "synth_decay": re.search(r"\bdecay\s*:\s*Synth\b", text) is not None,
     }
 
 
@@ -122,8 +124,13 @@ def main():
         mask = np.zeros((H, W))
 
     fw, fh = man["frame"] or (0, 0)
-    rows = [(a, f) for a, n in man["animations"] for f in range(FACINGS if turns else 1)]
-    cols = max(n for _, n in man["animations"])
+    # A synthesised decay (docs/look/units.md, "Memory") keeps its timing in
+    # the list but has no rows in the sheet.
+    drawn = [(a, n) for a, n in man["animations"] if not (man["synth_decay"] and a == "decay")]
+    if man["synth_decay"] and not turns:
+        errors.append("decay: Synth on a set that does not turn (only a unit decays)")
+    rows = [(a, f) for a, n in drawn for f in range(FACINGS if turns else 1)]
+    cols = max(n for _, n in drawn)
     if (W, H) != (fw * cols, fh * len(rows)):
         errors.append("sheet is %dx%d; frame %dx%d x %d columns x %d rows wants %dx%d"
                       % (W, H, fw, fh, cols, len(rows), fw * cols, fh * len(rows)))

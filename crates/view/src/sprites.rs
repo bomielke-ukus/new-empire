@@ -329,7 +329,35 @@ pub struct Atlas {
     /// A building look's attachment points, by the id it is filed under:
     /// only colour sets have any.
     attach: HashMap<KindId, Vec<Attachment>>,
+    /// The looks whose decay the view draws from the death's last frame
+    /// ([`Atlas::decay_look`]), by the id they are filed under.
+    synth_decay: std::collections::HashSet<KindId>,
 }
+
+/// How a corpse whose set has no decay frames is drawn at a moment of its
+/// decay ([`Atlas::decay_look`]): as the exporter drew those frames, the
+/// death's last frame faded and a little sunk.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct DecayLook {
+    /// Of [`DECAY_FADE_STEPS`]: how far faded (0, not at all).
+    pub fade: u8,
+    /// How far sunk into the ground, in 1x pixels.
+    pub sink: f32,
+}
+
+/// The corpse's opacity on the decay's last frame (`tools/look/unitexport.py`,
+/// `DECAY_FADE`).
+pub const DECAY_FADE: f32 = 0.55;
+
+/// Fading is carried in steps of 1/20 of opacity ([`DecayLook::fade`],
+/// `SpriteInstance::fade`): 0.55 is nine of them.
+pub const DECAY_FADE_STEPS: u8 = 20;
+
+/// How far the corpse has sunk by the decay's last frame, in 1x pixels:
+/// the exporter's 0.05 of a unit (`tools/look/anim.py`, `decay`), which
+/// matches its frames best at two pixels (measured on the hoplite:
+/// `the_synthesised_decay_looks_as_the_exported_frames_did`).
+pub const DECAY_SINK: f32 = 2.0;
 
 impl Atlas {
     /// Finds the idle frame for a kind at a facing, and whether to mirror it.
@@ -360,6 +388,11 @@ impl Atlas {
                 _ => 0,
             }
         };
+        if anim == Anim::Decay && self.synth_decay.contains(&kind) {
+            // No decay frames: the death's last (it does not loop), the
+            // whole decay long.
+            return self.frame_at(kind, facing8, Anim::Death, u32::MAX);
+        }
         for a in [anim, Anim::Idle] {
             let idx = index(a);
             if let Some(&i) = self.lookup.get(&(kind, 0, a, idx)) {
@@ -456,6 +489,35 @@ impl Atlas {
         self.anims.get(&(kind, anim)).copied()
     }
 
+    /// How to draw `kind`'s corpse `time_ms` into its decay, if its set
+    /// has no decay frames (`docs/look/units.md`, "Memory"): frame `k` of
+    /// the decay's `n` (by its timing, as frames would be picked) is the
+    /// death's last frame faded to `1 - (1 - DECAY_FADE) k / (n - 1)` and
+    /// sunk `DECAY_SINK k / (n - 1)`, as `tools/look/unitexport.py` drew
+    /// them. `None` for a set with decay frames of its own, and any other.
+    pub fn decay_look(&self, kind: KindId, time_ms: u32) -> Option<DecayLook> {
+        if !self.synth_decay.contains(&kind) {
+            return None;
+        }
+        let info = self.anims.get(&(kind, Anim::Decay))?;
+        let n = info.frames.max(1);
+        let k = (time_ms / info.frame_ms.max(1)).min(n - 1);
+        let t = k as f32 / (n - 1).max(1) as f32;
+        Some(DecayLook {
+            fade: ((1.0 - DECAY_FADE) * t * DECAY_FADE_STEPS as f32).round() as u8,
+            sink: DECAY_SINK * t,
+        })
+    }
+
+    /// The longest side of any of its pages, indexed or colour: what a GPU
+    /// must allow a texture to measure to hold it.
+    pub fn largest_side(&self) -> u32 {
+        self.width
+            .max(self.height)
+            .max(self.colour_width)
+            .max(self.colour_height)
+    }
+
     /// Every frame.
     pub fn frames(&self) -> &[Frame] {
         &self.frames
@@ -510,6 +572,12 @@ impl Atlas {
         }
     }
 
+    /// An atlas with nothing in it: a stand-in until the art is loaded,
+    /// never drawn from.
+    pub fn empty() -> Atlas {
+        pack(Vec::new(), 1, 1)
+    }
+
     /// Builds the placeholder atlas: coloured shapes for every kind the
     /// simulation knows, at the sizes the art spec calls for, plus the UI
     /// frames (solid fills, glyphs, selection rings, placement footprints).
@@ -523,6 +591,26 @@ impl Atlas {
     /// ignored. A colour set replaces the indexed set of its name
     /// (`docs/look/colour-sets.md`), and its frames go on colour pages.
     pub fn with_sheets(sheets: &[crate::sheets::Sheet]) -> Atlas {
+        Atlas::with_sheets_max(sheets, ATLAS_PAGE_HEIGHT)
+    }
+
+    /// [`Atlas::with_sheets`] for a GPU whose textures may measure at most
+    /// `max_side` a side (`max_texture_dimension_2d`): no page is wider
+    /// or taller, and what does not fit goes on further pages. At 8192 and
+    /// up, the atlas is [`Atlas::with_sheets`]'s.
+    pub fn with_sheets_max(sheets: &[crate::sheets::Sheet], max_side: u32) -> Atlas {
+        Atlas::with_sheets_skinned(sheets, max_side, false)
+    }
+
+    /// [`Atlas::with_sheets_max`], and with `skin` the new look's UI
+    /// (`crate::skin`, `docs/look/ui.md`) on its colour pages: drawn with
+    /// the new art on (`Settings::new_art`), so the UI matches it.
+    pub fn with_sheets_skinned(
+        sheets: &[crate::sheets::Sheet],
+        max_side: u32,
+        skin: bool,
+    ) -> Atlas {
+        let max_side = max_side.clamp(MIN_SIDE, ATLAS_PAGE_HEIGHT);
         let mut canvases: Vec<Entry> = Vec::new();
         let mut colour: Vec<ColourEntry> = Vec::new();
         // The new art's rule (`docs/look/buildings.md`, "Which look"): a
@@ -541,6 +629,7 @@ impl Atlas {
         let mut attach: HashMap<KindId, Vec<Attachment>> = HashMap::new();
         let mut variants: HashMap<(KindId, u8, u8), KindId> = HashMap::new();
         let mut loaded_sets = Vec::new();
+        let mut synth_decay = std::collections::HashSet::new();
         // A kind with colour sets has no placeholder either: what it has no
         // colour set for is drawn from the colour sets it has.
         let mut covered: Vec<KindId> = colour_kinds.keys().copied().collect();
@@ -612,6 +701,11 @@ impl Atlas {
                 None => {}
             }
             loaded_sets.push(sheet.name.clone());
+            if sheet.decay == crate::sheets::Decay::Synth
+                && sheet.animations.iter().any(|a| a.name == "decay")
+            {
+                synth_decay.insert(kind);
+            }
             if sheet.colour && !sheet.attach.is_empty() {
                 let sc = sheet.scale.max(1) as f32;
                 let (ax, ay) = (sheet.anchor.0 as f32, sheet.anchor.1 as f32);
@@ -818,8 +912,23 @@ impl Atlas {
             canvases.push(still(UI_GLYPH_DARK + i as KindId, 0, glyph(ch, BLACK)));
             canvases.push(still(UI_GLYPH_GOLD + i as KindId, 0, glyph(ch, GOLD_LIGHT)));
         }
-        let mut atlas = pack(canvases, ATLAS_WIDTH, ATLAS_PAGE_HEIGHT);
-        pack_colour(&mut atlas, colour, ATLAS_PAGE_HEIGHT);
+        if skin {
+            push_skin(&mut colour);
+        }
+        // With the new art, little is left on the indexed pages (the UI's
+        // frames and projectiles: `docs/look/colour-sets.md`, "In the
+        // atlas"), so they are sized as the colour pages are, not a full
+        // page width; without it, as they always were.
+        let width = if colour.is_empty() {
+            ATLAS_WIDTH.min(max_side)
+        } else {
+            let mut sizes: Vec<(u32, u32)> =
+                canvases.iter().map(|e| (e.canvas.w, e.canvas.h)).collect();
+            sizes.sort_by_key(|s| std::cmp::Reverse(s.1));
+            colour_size(&sizes, max_side, shelve).0
+        };
+        let mut atlas = pack(canvases, width, max_side);
+        pack_colour(&mut atlas, colour, max_side);
         // The tree's other looks count only beside a drawn tree.
         let mut trees: Vec<KindId> = (1..100)
             .map(|n| TREE_LOOK + n)
@@ -832,6 +941,7 @@ impl Atlas {
         atlas.stand_ins = stand_ins;
         atlas.attach = attach;
         atlas.loaded_sets = loaded_sets;
+        atlas.synth_decay = synth_decay;
         atlas
     }
 
@@ -843,6 +953,20 @@ impl Atlas {
     /// The stone drawn for a siege engine's shot in flight.
     pub fn stone(&self) -> Option<&Frame> {
         self.frame(UI_STONE, 0).map(|(f, _)| f)
+    }
+
+    /// A frame by its exact key: the UI skin's (`crate::skin`).
+    pub fn frame_exact(&self, kind: KindId, facing: u8, index: u8) -> Option<&Frame> {
+        self.lookup
+            .get(&(kind, facing, Anim::Idle, index))
+            .map(|&i| &self.frames[i])
+    }
+
+    /// Whether the new look's UI skin is on the colour pages
+    /// ([`Atlas::with_sheets_skinned`]).
+    pub fn has_skin(&self) -> bool {
+        self.frame_exact(crate::skin::MISC_ID, crate::skin::Misc::Sheen as u8, 0)
+            .is_some()
     }
 
     /// A 4×4 fill of a palette index, for stretching into rectangles.
@@ -1050,6 +1174,10 @@ pub const ATLAS_WIDTH: u32 = 8192;
 /// filled more than one).
 pub const ATLAS_PAGE_HEIGHT: u32 = 8192;
 
+/// The smallest texture side an atlas is built for ([`Atlas::with_sheets_max`]):
+/// every GPU wgpu runs on allows 2048.
+pub const MIN_SIDE: u32 = 2048;
+
 /// A frame waiting to be packed.
 struct Entry {
     kind: KindId,
@@ -1111,6 +1239,10 @@ fn cut_frames(
         let Some(anim) = Anim::from_name(&animation.name) else {
             continue;
         };
+        if !sheet.in_sheet(ai) {
+            // A synthesised decay: drawn from the death's last frame.
+            continue;
+        }
         for (fi, &facing) in sheet.facings().iter().enumerate() {
             for frame in 0..animation.frames {
                 let (x, y, w, h) = sheet.frame_rect(ai, fi, frame);
@@ -1270,7 +1402,7 @@ fn drawn_bounds(
 /// `width` wide and at most `page_height` tall, a pixel apart: each one's
 /// (page, x, y), the page count, and how far down the last page is used.
 fn shelve(
-    sizes: impl Iterator<Item = (u32, u32)>,
+    sizes: &mut dyn Iterator<Item = (u32, u32)>,
     width: u32,
     page_height: u32,
 ) -> (Vec<(u32, u32, u32)>, u32, u32) {
@@ -1314,7 +1446,7 @@ fn page_height_for(pages: u32, used: u32, page_height: u32) -> u32 {
 fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
     canvases.sort_by_key(|e| std::cmp::Reverse(e.canvas.h));
     let (spots, pages, used) = shelve(
-        canvases.iter().map(|e| (e.canvas.w, e.canvas.h)),
+        &mut canvases.iter().map(|e| (e.canvas.w, e.canvas.h)),
         width,
         page_height,
     );
@@ -1364,27 +1496,162 @@ fn pack(mut canvases: Vec<Entry>, width: u32, page_height: u32) -> Atlas {
         loaded_sets: Vec::new(),
         trees: vec![kinds::TREE],
         attach: HashMap::new(),
+        synth_decay: Default::default(),
     }
 }
 
-/// The size of every colour page for frames of `sizes`, none wider or
-/// taller than `max_side`: the width is the smallest power of two that
-/// holds the widest frame and, growing before another page is added, lets
-/// the frames fill about a square; the height is what one page uses,
+/// A packer: lays rectangles of the sizes given, in that order, onto pages
+/// of the width and the most height given, a pixel apart; each one's
+/// (page, x, y), the page count, and how far down the last page is used.
+type Packer =
+    fn(&mut dyn Iterator<Item = (u32, u32)>, u32, u32) -> (Vec<(u32, u32, u32)>, u32, u32);
+
+/// The size of every page for frames of `sizes` laid by `packer`, none
+/// wider or taller than `max_side`: the width is the smallest power of two
+/// that holds the widest frame and, growing before another page is added,
+/// lets the frames fill about a square; the height is what one page uses,
 /// rounded up to a multiple of 64. When one page of `max_side` is not
-/// enough, the pages are all `max_side` square. Also the page count.
-fn colour_size(sizes: &[(u32, u32)], max_side: u32) -> (u32, u32, u32) {
+/// enough, the pages are `max_side` wide and as short as still lets the
+/// frames fit on as few pages (a texture array's layers are all alike, so a
+/// last page half full would cost a whole one). Also the page count.
+fn colour_size(sizes: &[(u32, u32)], max_side: u32, packer: Packer) -> (u32, u32, u32) {
+    let lay = |width: u32, height: u32| packer(&mut sizes.iter().copied(), width, height);
     let widest = sizes.iter().map(|s| s.0).max().unwrap_or(1);
     let mut width = widest.next_power_of_two().min(max_side);
     loop {
-        let (_, pages, used) = shelve(sizes.iter().copied(), width, max_side);
+        let (_, pages, used) = lay(width, max_side);
         if pages == 1 && (used <= width || width == max_side) {
             return (width, used.div_ceil(64).max(1) * 64, 1);
         }
         if width == max_side {
-            return (width, max_side, pages);
+            // The shortest height, to a multiple of 64, that needs no more
+            // pages than full ones do.
+            let tallest = sizes.iter().map(|s| s.1).max().unwrap_or(1);
+            let (mut lo, mut hi) = (tallest.div_ceil(64), max_side / 64);
+            while lo < hi {
+                let mid = (lo + hi) / 2;
+                if lay(width, mid * 64).1 <= pages {
+                    hi = mid;
+                } else {
+                    lo = mid + 1;
+                }
+            }
+            return (width, hi * 64, pages);
         }
         width *= 2;
+    }
+}
+
+/// Skyline-packs rectangles of `sizes`, in the order given (tallest first
+/// packs best), onto pages `width` wide and at most `page_height` tall, a
+/// pixel apart: each rectangle goes where its top comes lowest on the
+/// first page it fits on, so a short frame fills the gap beside a tall one
+/// rather than starting a shelf of its own. Returns as [`shelve`] does.
+fn skyline(
+    sizes: &mut dyn Iterator<Item = (u32, u32)>,
+    width: u32,
+    page_height: u32,
+) -> (Vec<(u32, u32, u32)>, u32, u32) {
+    // Each page's skyline: (x, y) segments left to right, each reaching to
+    // the next one's x (the last to the page's edge, a pixel past it for
+    // the gap); y is where the next rectangle there may start.
+    let mut pages: Vec<Vec<(u32, u32)>> = vec![vec![(0, 0)]];
+    let mut out = Vec::new();
+    // How far down each page is used.
+    let mut used = vec![0u32];
+    let edge = width + 1;
+    for (w, h) in sizes {
+        let (pw, ph) = (w + 1, h + 1);
+        let place = |sky: &Vec<(u32, u32)>| -> Option<(usize, u32, u32)> {
+            let mut best: Option<(usize, u32, u32)> = None;
+            for i in 0..sky.len() {
+                let x = sky[i].0;
+                if x + pw > edge {
+                    break;
+                }
+                let mut y = 0;
+                let mut j = i;
+                while j < sky.len() && sky[j].0 < x + pw {
+                    y = y.max(sky[j].1);
+                    j += 1;
+                }
+                if y + h <= page_height && best.is_none_or(|b| y < b.2) {
+                    best = Some((i, x, y));
+                }
+            }
+            best
+        };
+        let (page, (i, x, y)) = match pages
+            .iter()
+            .enumerate()
+            .find_map(|(p, sky)| place(sky).map(|b| (p, b)))
+        {
+            Some(found) => found,
+            None => {
+                pages.push(vec![(0, 0)]);
+                used.push(0);
+                let p = pages.len() - 1;
+                (p, place(&pages[p]).unwrap_or((0, 0, 0)))
+            }
+        };
+        // The rectangle's top edge (plus the gap) replaces the segments it
+        // covers; the one it ends inside starts again after it.
+        let sky = &mut pages[page];
+        let mut j = i;
+        while j < sky.len() && sky[j].0 < x + pw {
+            j += 1;
+        }
+        let rest = (j > 0 && sky[j - 1].0 < x + pw && (j == sky.len() || sky[j].0 > x + pw))
+            .then(|| (x + pw, sky[j - 1].1))
+            .filter(|&(rx, _)| rx < edge);
+        let mut new = vec![(x, y + ph)];
+        new.extend(rest);
+        sky.splice(i..j, new);
+        out.push((page as u32, x, y));
+        used[page] = used[page].max(y + h);
+    }
+    (out, pages.len() as u32, used.last().copied().unwrap_or(0))
+}
+
+/// Adds the UI skin's frames (`crate::skin::frames`) to the colour frames
+/// to be packed, its icons and portraits made from the colour frames
+/// already there: each kind's still idle frame, a unit's facing the camera.
+fn push_skin(colour: &mut Vec<ColourEntry>) {
+    let sources: Vec<crate::skin::Source> = crate::skin::source_kinds()
+        .into_iter()
+        .filter_map(|kind| {
+            let still = |e: &&ColourEntry| {
+                e.kind == kind && e.anim == Anim::Idle && e.index == 0 && !e.shadow
+            };
+            let e = [0, 7, 1]
+                .iter()
+                .find_map(|&f| colour.iter().filter(still).find(|e| e.facing == f))
+                .or_else(|| colour.iter().find(still))?;
+            Some(crate::skin::Source {
+                kind,
+                w: e.canvas.w,
+                h: e.canvas.h,
+                rgba: e.canvas.rgba.clone(),
+                mask: e.canvas.mask.clone(),
+            })
+        })
+        .collect();
+    for f in crate::skin::frames(&sources) {
+        colour.push(ColourEntry {
+            kind: f.kind,
+            facing: f.facing,
+            anim: Anim::Idle,
+            index: f.index,
+            scale: 1,
+            canvas: ColourCanvas {
+                w: f.w,
+                h: f.h,
+                anchor: (0, 0),
+                rgba: f.rgba,
+                mask: f.mask,
+            },
+            shadow: false,
+        });
     }
 }
 
@@ -1398,8 +1665,8 @@ fn pack_colour(atlas: &mut Atlas, mut entries: Vec<ColourEntry>, max_side: u32) 
     }
     entries.sort_by_key(|e| std::cmp::Reverse(e.canvas.h));
     let sizes: Vec<(u32, u32)> = entries.iter().map(|e| (e.canvas.w, e.canvas.h)).collect();
-    let (width, height, pages) = colour_size(&sizes, max_side);
-    let (spots, _, _) = shelve(sizes.into_iter(), width, height);
+    let (width, height, pages) = colour_size(&sizes, max_side, skyline);
+    let (spots, _, _) = skyline(&mut sizes.into_iter(), width, height);
     assert!(
         pages <= u32::from(!COLOUR_PAGE) + 1,
         "{pages} colour pages; the page bits hold 128"
@@ -1487,17 +1754,38 @@ impl Architectures {
         arch < 4 && self.0 & (1 << arch) != 0
     }
 
-    /// The first architecture and those of `civs`.
+    /// Those of `civs`; the first alone if there are none. The first is
+    /// not among them otherwise: its buildings are loaded beside them only
+    /// where one of theirs has no look of its own ([`worth_decoding`]).
     pub fn of_civs(civs: impl IntoIterator<Item = sim::Civ>) -> Architectures {
-        civs.into_iter().fold(Architectures::FIRST, |a, c| {
+        let a = civs.into_iter().fold(Architectures(0), |a, c| {
             a.with(arch_index(c.info().architecture))
-        })
+        });
+        if a.is_empty() {
+            Architectures::FIRST
+        } else {
+            a
+        }
     }
 
     /// Those of the sides of the match `sim` holds; a side with no
     /// civilisation builds in the first.
     pub fn of_match(sim: &sim::Simulation) -> Architectures {
-        Architectures::of_civs((0..sim.players().len()).filter_map(|p| sim.civ(p as sim::PlayerId)))
+        let sides: Vec<Option<sim::Civ>> = (0..sim.players().len())
+            .map(|p| sim.civ(p as sim::PlayerId))
+            .collect();
+        Architectures::of_sides(&sides)
+    }
+
+    /// Those of sides playing `civs`, a `None` one with no civilisation
+    /// (which builds in the first); the first alone if there are none.
+    pub fn of_sides(civs: &[Option<sim::Civ>]) -> Architectures {
+        let a = Architectures::of_civs(civs.iter().flatten().copied());
+        if civs.iter().any(Option::is_none) {
+            a.with(0)
+        } else {
+            a
+        }
     }
 
     /// Whether a colour set of this name is loaded with these: one of a
@@ -1517,7 +1805,7 @@ impl Architectures {
         self.0.count_ones() as usize
     }
 
-    /// Never: the first is always there.
+    /// Whether there are none: never for those a match or a loadout holds.
     pub fn is_empty(self) -> bool {
         self.0 == 0
     }
@@ -1532,6 +1820,277 @@ impl std::fmt::Display for Architectures {
             .collect();
         f.write_str(&on.join(", "))
     }
+}
+
+/// The unit kinds whose colour sets an atlas holds (`docs/look/units.md`,
+/// "Memory"): those some side of the match can train, and any already in
+/// its world. Only the kinds a civilisation can be denied are ever left
+/// out (trainable units, ids below 64); buildings, resources and the
+/// neutral animals and relic are always kept.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Units(u64);
+
+impl Units {
+    /// Every unit.
+    pub const ALL: Units = Units(u64::MAX);
+    /// None that may be left out: only the kinds that are always kept.
+    pub const NONE: Units = Units(0);
+
+    /// Whether `kind` is a unit that may be left out of an atlas.
+    pub fn optional(kind: KindId) -> bool {
+        static OPTIONAL: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+        let mask = OPTIONAL.get_or_init(|| {
+            kinds::all()
+                .iter()
+                .filter(|k| k.mobile && k.id < 64)
+                .fold(0, |m, k| m | 1 << k.id)
+        });
+        kind < 64 && mask & 1 << kind != 0
+    }
+
+    /// These and `kind` too, if it is a unit that may be left out (any
+    /// other is always there).
+    pub fn with(self, kind: KindId) -> Units {
+        if Units::optional(kind) {
+            Units(self.0 | 1 << kind)
+        } else {
+            self
+        }
+    }
+
+    /// Whether `kind`'s sets are loaded with these: always, unless it is
+    /// a unit that may be left out and is not among them.
+    pub fn contains(self, kind: KindId) -> bool {
+        !Units::optional(kind) || self.0 & 1 << kind != 0
+    }
+
+    /// Whether every one of `other` is among these.
+    pub fn covers(self, other: Units) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// The units a side playing `civ` can have: every one its
+    /// civilisation is not denied; every one at all without a
+    /// civilisation.
+    pub fn of_civ(civ: Option<sim::Civ>) -> Units {
+        kinds::all()
+            .iter()
+            .filter(|k| Units::optional(k.id))
+            .filter(|k| civ.is_none_or(|c| c.allows(k.id)))
+            .fold(Units::NONE, |u, k| u.with(k.id))
+    }
+
+    /// The units the sides of `sim`'s match can have, and every kind
+    /// standing in its world (a scenario's or a save's, of any kind). A
+    /// priest converts only from the sides in play, so whatever changes
+    /// hands is among them; a kind that turns up some other way (a
+    /// scenario's trigger) is caught by [`Loadout::with_world`].
+    pub fn of_match(sim: &sim::Simulation) -> Units {
+        (0..sim.players().len())
+            .map(|p| Units::of_civ(sim.civ(p as sim::PlayerId)))
+            .fold(Units::NONE, |a, u| Units(a.0 | u.0))
+            .with_world(sim)
+    }
+
+    /// These and every kind in `sim`'s world.
+    pub fn with_world(self, sim: &sim::Simulation) -> Units {
+        let world = sim.world();
+        world
+            .slots()
+            .map(|s| world.kind[s.index()])
+            .fold(self, Units::with)
+    }
+
+    /// How many may-be-left-out kinds are among these.
+    fn len(self) -> usize {
+        kinds::all()
+            .iter()
+            .filter(|k| Units::optional(k.id) && self.contains(k.id))
+            .count()
+    }
+}
+
+/// What an atlas holds with the new art on: the colour buildings of some
+/// architectures and the colour sets of some units (`docs/look/buildings.md`
+/// and `docs/look/units.md`, "Memory"); everything else is always there.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Loadout {
+    /// Whose buildings.
+    pub archs: Architectures,
+    /// Which units.
+    pub units: Units,
+}
+
+impl From<Architectures> for Loadout {
+    /// Those architectures' buildings and every unit.
+    fn from(archs: Architectures) -> Loadout {
+        Loadout {
+            archs,
+            units: Units::ALL,
+        }
+    }
+}
+
+impl Loadout {
+    /// The first architecture and every unit: the title's diorama, whose
+    /// sides have no civilisation.
+    pub const FIRST: Loadout = Loadout {
+        archs: Architectures::FIRST,
+        units: Units::ALL,
+    };
+    /// Everything: the editor, where a side's civilisation and any kind
+    /// are a click away.
+    pub const ALL: Loadout = Loadout {
+        archs: Architectures::ALL,
+        units: Units::ALL,
+    };
+
+    /// What the match `sim` holds needs: its sides' architectures, the
+    /// units they can have and the kinds in its world.
+    pub fn of_match(sim: &sim::Simulation) -> Loadout {
+        Loadout {
+            archs: Architectures::of_match(sim),
+            units: Units::of_match(sim),
+        }
+    }
+
+    /// What drawing the world of `sim` as it stands needs: its sides'
+    /// architectures and the kinds in it, and no unit it does not hold (the
+    /// menu's diorama, which a match's atlas covers).
+    pub fn of_world(sim: &sim::Simulation) -> Loadout {
+        Loadout {
+            archs: Architectures::of_match(sim),
+            units: Units::NONE.with_world(sim),
+        }
+    }
+
+    /// For sides playing `civs`, a `None` one with no civilisation.
+    pub fn of_civs(civs: &[Option<sim::Civ>]) -> Loadout {
+        Loadout {
+            archs: Architectures::of_sides(civs),
+            units: civs
+                .iter()
+                .map(|&c| Units::of_civ(c))
+                .fold(Units::NONE, |a, u| Units(a.0 | u.0)),
+        }
+    }
+
+    /// These, and every kind standing in `sim`'s world: what to load
+    /// when something turns up that the atlas was built without (a
+    /// scenario's trigger spawning it). The same loadout when nothing has.
+    pub fn with_world(self, sim: &sim::Simulation) -> Loadout {
+        Loadout {
+            units: self.units.with_world(sim),
+            ..self
+        }
+    }
+
+    /// Whether a colour set of this name is loaded with these.
+    pub fn keeps(self, set_name: &str) -> bool {
+        self.archs.keeps(set_name)
+            && set_target(set_name).is_none_or(|(kind, _, _)| self.units.contains(kind))
+    }
+
+    /// Whether every one of `other` is among these.
+    pub fn covers(self, other: Loadout) -> bool {
+        self.archs.covers(other.archs) && self.units.covers(other.units)
+    }
+}
+
+impl std::fmt::Display for Loadout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let all = Units::ALL.len();
+        let n = self.units.len();
+        if n == all {
+            write!(f, "{} buildings, every unit", self.archs)
+        } else {
+            write!(f, "{} buildings, {n} of {all} units", self.archs)
+        }
+    }
+}
+
+/// Which of the sets `sets` (each its name and whether it is a colour set)
+/// are worth decoding for an atlas holding `loadout` with the new art on:
+/// a colour set it keeps, and an indexed set that no kept colour set
+/// replaces ([`Atlas::with_sheets`]'s rule, `docs/look/buildings.md`,
+/// "Which look"). An indexed set of a kind with colour sets, of any age or
+/// architecture, is never drawn, so it is never read beyond its manifest.
+///
+/// A building's sets are kept for the loadout's architectures; the first
+/// architecture's too only if one of them has no look of its own for the
+/// kind in the first age (the fallback of "Which look"), and if none of
+/// them nor the first has one, the kind's first set (the stand-in). With
+/// every architecture's buildings exported, a match of the Egyptians and
+/// the Shang holds no Greek building.
+pub fn worth_decoding(sets: &[(&str, bool)], loadout: Loadout) -> Vec<bool> {
+    // Each kind's colour sets: (index, age, architecture).
+    let mut by_kind: HashMap<KindId, Vec<(usize, u8, u8)>> = HashMap::new();
+    for (i, &(name, colour)) in sets.iter().enumerate() {
+        if let Some((k, age, arch)) = set_target(name).filter(|_| colour) {
+            by_kind.entry(k).or_default().push((i, age, arch));
+        }
+    }
+    let keeps_colour = |i: usize, name: &str| -> bool {
+        let Some((kind, _, arch)) = set_target(name) else {
+            // Scenery, effects, the tree's other looks.
+            return true;
+        };
+        if !loadout.units.contains(kind) {
+            return false;
+        }
+        let of_kind = &by_kind[&kind];
+        if of_kind.iter().all(|&(_, _, a)| a == 0) {
+            // No architecture to choose between: units, resources, trees.
+            return true;
+        }
+        if loadout.archs.contains(arch) {
+            return true;
+        }
+        let has = |want: u8| of_kind.iter().any(|&(_, g, a)| a == want && g == 0);
+        let lacking = (0..4u8).any(|a| loadout.archs.contains(a) && !has(a));
+        if !lacking {
+            return false;
+        }
+        if of_kind.iter().any(|&(_, _, a)| a == 0) {
+            arch == 0
+        } else {
+            // No first-architecture set either: the stand-in, the kind's
+            // first by architecture, then age.
+            let first = of_kind.iter().min_by_key(|&&(_, g, a)| (a, g)).map(|e| e.0);
+            first == Some(i)
+        }
+    };
+    let kept: Vec<bool> = sets
+        .iter()
+        .enumerate()
+        .map(|(i, &(name, colour))| !colour || keeps_colour(i, name))
+        .collect();
+    let colour_names: std::collections::HashSet<&str> = sets
+        .iter()
+        .zip(&kept)
+        .filter(|((_, colour), &k)| *colour && k)
+        .map(|((name, _), _)| *name)
+        .collect();
+    let colour_kinds: std::collections::HashSet<KindId> = colour_names
+        .iter()
+        .filter_map(|n| set_target(n))
+        .map(|(k, _, _)| k)
+        .collect();
+    sets.iter()
+        .zip(kept)
+        .map(|(&(name, colour), kept)| {
+            if colour {
+                return kept;
+            }
+            // An indexed set of a unit the loadout leaves out is not drawn
+            // with the new art either: the unit's colour set comes with it.
+            let left_out_unit = !colour_names.is_empty()
+                && set_target(name).is_some_and(|(k, _, _)| !loadout.units.contains(k));
+            !(colour_names.contains(name)
+                || set_target(name).is_some_and(|(k, _, _)| colour_kinds.contains(&k))
+                || left_out_unit)
+        })
+        .collect()
 }
 
 /// The kind a rendered sprite set draws, the age and the architecture, by
@@ -3293,16 +3852,16 @@ mod tests {
     #[test]
     fn colour_size_grows_wide_before_it_adds_pages() {
         // One frame: its width to a power of two, its height to 64.
-        assert_eq!(colour_size(&[(100, 70)], 1024), (128, 128, 1));
+        assert_eq!(colour_size(&[(100, 70)], 1024, skyline), (128, 128, 1));
         // 40 frames of 100 x 100 in a row of 128 would be 4000 tall; the
         // width grows until the page is no taller than wide.
         let sizes = vec![(100, 100); 40];
-        let (w, h, n) = colour_size(&sizes, 1024);
+        let (w, h, n) = colour_size(&sizes, 1024, skyline);
         assert_eq!(n, 1);
         assert!(w.is_power_of_two() && w >= 100 && h <= w && h % 64 == 0);
         assert!(w * h < 2 * 40 * 100 * 100, "{w}x{h}");
         // More than one 128 x 128 page of frames: all pages full size.
-        assert_eq!(colour_size(&[(100, 100); 3], 128), (128, 128, 3));
+        assert_eq!(colour_size(&[(100, 100); 3], 128, skyline), (128, 128, 3));
     }
 
     /// Only a small colour set loaded: its page is small, not a full
@@ -3926,12 +4485,42 @@ mod tests {
         let second = match_atlas(&look, &[Civ::Babylonians, Civ::Egyptians]);
         assert!(!holds_architecture(&second, 3));
         assert!(holds_architecture(&second, 1) && holds_architecture(&second, 2));
+        // Both have every building of their own: no Greek one is needed
+        // as a fallback, so none is loaded, and an owner of another
+        // architecture (none here) would be drawn by the stand-in.
+        assert!(!holds_architecture(&second, 0));
         let house = kinds::HOUSE;
         assert_eq!(second.variant(house, 0, 2), look_id(house, 0, 2));
         assert_eq!(
             second.variant(house, 0, 3),
-            house,
-            "the first's, as a fallback"
+            look_id(house, 0, 1),
+            "a stand-in"
+        );
+        assert_eq!(
+            second.variant(house, 0, 0),
+            look_id(house, 0, 1),
+            "a stand-in"
+        );
+        // Where an architecture lacks a look (the Shang a house; a temple
+        // before the Iron Age), the first's comes as its fallback.
+        let sets = [
+            ("house", true),
+            ("house_egyptian", true),
+            ("temple", true),
+            ("temple_asian_iron", true),
+            ("barracks", true),
+            ("barracks_asian", true),
+        ];
+        let shang = Loadout::of_civs(&[Some(Civ::Shang)]);
+        assert_eq!(
+            worth_decoding(&sets, shang),
+            [true, false, true, true, false, true]
+        );
+        let only_egyptian = [("temple_egyptian", true), ("temple_asian_iron", true)];
+        assert_eq!(
+            worth_decoding(&only_egyptian, Loadout::of_civs(&[Some(Civ::Babylonians)])),
+            [true, false],
+            "the stand-in"
         );
         assert_eq!(first.variant(house, 0, 3), look_id(house, 0, 3));
 
@@ -3945,7 +4534,12 @@ mod tests {
         assert_eq!(Architectures::of_civs([]), Architectures::FIRST);
         assert_eq!(
             Architectures::of_civs([Civ::Persians, Civ::Assyrians]).to_string(),
-            "Greek, Mesopotamian"
+            "Mesopotamian"
+        );
+        assert_eq!(
+            Architectures::of_sides(&[Some(Civ::Persians), None]).to_string(),
+            "Greek, Mesopotamian",
+            "a side with no civilisation builds in the first"
         );
         assert!(Architectures::ALL.covers(Architectures::FIRST.with(2)));
         assert!(!Architectures::FIRST.covers(Architectures::FIRST.with(1)));
@@ -4008,5 +4602,411 @@ mod tests {
         // A stage with no shadow has none apart.
         let site = a.stage_frame(kinds::STONE_WALL, 0).unwrap();
         assert!(a.shadow_of(site).is_none());
+    }
+
+    /// The hoplite's colour set as exported now, with its decay frames,
+    /// and as the next export makes it, without them (`decay: Synth`).
+    fn hoplite_with_and_without_decay() -> (crate::sheets::Sheet, crate::sheets::Sheet) {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let full =
+            crate::sheets::Sheet::load(&root.join("assets/look/hoplite/hoplite.ron")).unwrap();
+        let synth = full.without_decay_frames();
+        (full, synth)
+    }
+
+    /// A unit set without decay frames (`docs/look/units.md`, "Memory")
+    /// loads and keeps its decay's timing; its corpse is the death's last
+    /// frame the whole decay long, faded and sunk step by step as the
+    /// exporter drew the frames; everything else is as the set with its
+    /// decay frames draws it. A set with them is drawn from them.
+    #[test]
+    fn a_unit_without_decay_frames_decays_from_its_deaths_last_frame() {
+        let (full, synth) = hoplite_with_and_without_decay();
+        assert_eq!(full.decay, crate::sheets::Decay::Frames);
+        assert_eq!(synth.animations, full.animations, "the same timing");
+        assert_eq!(synth.height * 5, full.height * 4, "no decay rows");
+        let (a, b) = (Atlas::with_sheets(&[full]), Atlas::with_sheets(&[synth]));
+        let h = kinds::HOPLITE;
+        let decay = b.anim_info(h, Anim::Decay).unwrap();
+        assert_eq!(Some(decay), a.anim_info(h, Anim::Decay));
+        assert!(b
+            .frames()
+            .iter()
+            .all(|f| f.kind != h || f.anim != Anim::Decay));
+        // Every frame but the decay's draws the same pixels.
+        let pixels = |atlas: &Atlas, f: &Frame| -> Vec<[u8; 5]> {
+            (0..f.h as u32)
+                .flat_map(|y| (0..f.w as u32).map(move |x| (x, y)))
+                .map(|(x, y)| {
+                    let (px, py) = (f.x as u32 + x, f.y as u32 + y);
+                    let c = atlas.rgba_at(f.page, px, py);
+                    [c[0], c[1], c[2], c[3], atlas.mask_at(f.page, px, py)]
+                })
+                .collect()
+        };
+        for f in a
+            .frames()
+            .iter()
+            .filter(|f| f.kind == h && f.anim != Anim::Decay)
+        {
+            let g = b
+                .lookup
+                .get(&(f.kind, f.facing, f.anim, f.index))
+                .map(|&i| &b.frames[i])
+                .unwrap();
+            assert_eq!(
+                (g.w, g.h, g.anchor_x, g.anchor_y),
+                (f.w, f.h, f.anchor_x, f.anchor_y)
+            );
+            assert!(
+                pixels(&a, f) == pixels(&b, g),
+                "{:?} {} {}",
+                f.anim,
+                f.facing,
+                f.index
+            );
+        }
+        assert_eq!(a.decay_look(h, 0), None, "its own frames");
+        for facing8 in 0..8 {
+            let last = b.frame_at(h, facing8, Anim::Death, u32::MAX).unwrap();
+            assert_eq!(last.0.index, 7);
+            for k in 0..decay.frames {
+                let t = k * decay.frame_ms + decay.frame_ms / 2;
+                assert_eq!(b.frame_at(h, facing8, Anim::Decay, t), Some(last));
+                let look = b.decay_look(h, t).unwrap();
+                let step = k as f32 / 3.0;
+                assert_eq!(look.fade, (9.0 * step).round() as u8);
+                assert!((look.sink - DECAY_SINK * step).abs() < 1e-6);
+            }
+        }
+        assert_eq!(b.decay_look(h, 0), Some(DecayLook { fade: 0, sink: 0.0 }));
+        assert_eq!(
+            b.decay_look(h, u32::MAX),
+            Some(DecayLook {
+                fade: 9,
+                sink: DECAY_SINK
+            })
+        );
+        // Faded nine twentieths: the exporter's 55% on the last frame.
+        assert!((1.0 - 9.0 / f32::from(DECAY_FADE_STEPS) - DECAY_FADE).abs() < 1e-6);
+    }
+
+    /// What the synthesised decay draws is what the exported decay frames
+    /// drew, near enough not to tell apart: frame by frame and facing by
+    /// facing, the death's last frame faded and sunk against the decay
+    /// frame itself, by the corpse's coverage (alpha) and its colour where
+    /// both are solid.
+    #[test]
+    fn the_synthesised_decay_looks_as_the_exported_frames_did() {
+        let (full, synth) = hoplite_with_and_without_decay();
+        let (a, b) = (Atlas::with_sheets(&[full]), Atlas::with_sheets(&[synth]));
+        let h = kinds::HOPLITE;
+        let decay = a.anim_info(h, Anim::Decay).unwrap();
+        // Each pixel of a frame by its offset from the anchor, at 1x.
+        let drawn = |atlas: &Atlas, f: &Frame, alpha: f32, sink: i32| {
+            let mut out = HashMap::new();
+            for y in 0..f.h as i32 {
+                for x in 0..f.w as i32 {
+                    let p = atlas.rgba_at(f.page, f.x as u32 + x as u32, f.y as u32 + y as u32);
+                    if p[3] > 0 {
+                        let at = (x - f.anchor_x as i32, y - f.anchor_y as i32 + sink);
+                        out.insert(at, [p[0], p[1], p[2], (p[3] as f32 * alpha).round() as u8]);
+                    }
+                }
+            }
+            out
+        };
+        let mut worst = (0.0f32, 0.0f32);
+        for facing8 in AUTHORED {
+            for k in 0..decay.frames {
+                let t = k * decay.frame_ms;
+                let (real, _) = a.frame_at(h, facing8, Anim::Decay, t).unwrap();
+                let (last, _) = b.frame_at(h, facing8, Anim::Decay, t).unwrap();
+                let look = b.decay_look(h, t).unwrap();
+                let alpha = 1.0 - f32::from(look.fade) / f32::from(DECAY_FADE_STEPS);
+                let want = drawn(&a, real, 1.0, 0);
+                // Lowered and cut as `scene::sink` does it: whole pixels.
+                let sunk = (look.sink * f32::from(last.scale)) as i32 / i32::from(last.scale);
+                let mut got = drawn(&b, last, alpha, sunk);
+                got.retain(|&(_, y), _| y < last.h as i32 - last.anchor_y as i32);
+                let keys: std::collections::HashSet<_> = want.keys().chain(got.keys()).collect();
+                let (mut diff, mut mass, mut colour, mut solid) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+                for k in keys {
+                    let (w, g) = (
+                        want.get(k).copied().unwrap_or([0; 4]),
+                        got.get(k).copied().unwrap_or([0; 4]),
+                    );
+                    diff += (w[3] as f32 - g[3] as f32).abs();
+                    mass += w[3] as f32;
+                    if w[3] > 128 && g[3] > 128 {
+                        colour += (0..3)
+                            .map(|c| (w[c] as f32 - g[c] as f32).abs())
+                            .sum::<f32>()
+                            / 3.0;
+                        solid += 1.0;
+                    }
+                }
+                let (coverage, tone) = (diff / mass, colour / solid.max(1.0));
+                println!(
+                    "facing {facing8} decay {k}: coverage off {:.1}%, colour off {tone:.1}",
+                    coverage * 100.0
+                );
+                worst = (worst.0.max(coverage), worst.1.max(tone));
+            }
+        }
+        // What is left is the render's own noise (each exported frame was
+        // rendered apart) and the sub-pixel sinking: measured, at most 17%
+        // of the coverage and 14 levels of colour where both are solid,
+        // against 25% and 27 drawn faded but not sunk.
+        assert!(worst.0 < 0.2 && worst.1 < 16.0, "{worst:?}");
+    }
+
+    /// A match's sides can have only the units their civilisations are not
+    /// denied; a side with none, every unit. What a loadout keeps follows,
+    /// and nothing but optional units is ever left out.
+    #[test]
+    fn a_loadout_holds_the_units_its_sides_can_have() {
+        use sim::Civ;
+        let greek = Loadout::of_civs(&[Some(Civ::Greeks), Some(Civ::Greeks)]);
+        assert_eq!(greek.archs, Architectures::FIRST);
+        for k in [kinds::CHARIOT_ARCHER, kinds::HORSE_ARCHER] {
+            assert!(!greek.units.contains(k));
+            assert!(!greek.keeps(
+                kinds::info(k)
+                    .name
+                    .to_lowercase()
+                    .replace(' ', "_")
+                    .as_str()
+            ));
+        }
+        for k in [
+            kinds::HOPLITE,
+            kinds::VILLAGER,
+            kinds::GAZELLE,
+            kinds::FISH,
+            kinds::RELIC,
+            kinds::HOUSE,
+            kinds::TREE,
+        ] {
+            assert!(greek.units.contains(k), "{k}");
+        }
+        assert!(greek.keeps("hoplite") && greek.keeps("house") && !greek.keeps("house_egyptian"));
+        assert!(
+            !greek.keeps("chariot_archer") && greek.keeps("tree_2") && greek.keeps("decor_rock_1")
+        );
+        let two = Loadout::of_civs(&[Some(Civ::Greeks), Some(Civ::Egyptians)]);
+        assert_eq!(two.units, Units::of_civ(None), "between them, every unit");
+        assert!(two.covers(greek) && !greek.covers(two));
+        assert_eq!(Loadout::of_civs(&[None]).units, Units::of_civ(None));
+        assert!(Loadout::ALL.covers(two) && Units::ALL.covers(Units::of_civ(None)));
+        assert_eq!(
+            greek
+                .units
+                .with(kinds::CHARIOT_ARCHER)
+                .with(kinds::HORSE_ARCHER),
+            Units::of_civ(None)
+        );
+        assert_eq!(
+            greek.units.with(kinds::TOWN_CENTER),
+            greek.units,
+            "a building is always there"
+        );
+        assert_eq!(
+            format!("{greek}"),
+            "Greek buildings, 24 of 26 units"
+                .replace("24", &(Units::of_civ(None).len() - 2).to_string())
+                .replace("26", &Units::of_civ(None).len().to_string())
+        );
+    }
+
+    /// With the new art on, an indexed set is decoded only if it is still
+    /// drawn: never one of a kind some kept colour set draws, of any age or
+    /// architecture, nor one of a unit left out; a colour set only if the
+    /// loadout keeps it. With no colour sets (the new art off), every
+    /// indexed set as before.
+    #[test]
+    fn only_what_is_drawn_is_decoded() {
+        let sets = [
+            ("house", false),
+            ("house_tool", false),
+            ("house_egyptian_iron", false),
+            ("chariot_archer", false),
+            ("hoplite", false),
+            ("scout", false),
+            ("house", true),
+            ("house_egyptian", true),
+            ("hoplite", true),
+            ("chariot_archer", true),
+        ];
+        let greek = Loadout::of_civs(&[Some(sim::Civ::Greeks)]);
+        assert_eq!(
+            worth_decoding(&sets, greek),
+            [false, false, false, false, false, true, true, false, true, false]
+        );
+        assert_eq!(
+            worth_decoding(&sets, Loadout::ALL),
+            [false, false, false, false, false, true, true, true, true, true]
+        );
+        let off: Vec<_> = sets.iter().copied().filter(|s| !s.1).collect();
+        assert!(worth_decoding(&off, greek).iter().all(|&d| d));
+    }
+
+    /// A GPU that allows smaller textures gets an atlas of smaller pages,
+    /// more of them, with every frame the same: the same size, anchor and
+    /// pixels. At 8192, the atlas is the one the game has always built.
+    #[test]
+    fn a_smaller_texture_limit_packs_the_same_frames_onto_smaller_pages() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let (sheets, errors) = crate::sheets::load_art_for(
+            Some(&root.join("assets/sprites")),
+            Some(&root.join("assets/look")),
+            true,
+            Loadout::of_civs(&[Some(sim::Civ::Greeks)]),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        let big = Atlas::with_sheets(&sheets);
+        let small = Atlas::with_sheets_max(&sheets, 2048);
+        assert!(big.largest_side() > 2048, "a big atlas to start with");
+        assert!(small.largest_side() <= 2048);
+        assert!(small.colour_pages > 1);
+        assert_eq!(big.frames().len(), small.frames().len());
+        let at = |atlas: &Atlas, f: &Frame, x: u32, y: u32| {
+            let (px, py) = (f.x as u32 + x, f.y as u32 + y);
+            (
+                atlas.rgba_at(f.page, px, py),
+                atlas.mask_at(f.page, px, py),
+                atlas.index_at(f.page, px, py),
+            )
+        };
+        for (n, f) in big.frames().iter().enumerate() {
+            let key = (f.kind, f.facing, f.anim, f.index);
+            // Each frame is filed as the frame of its key, or as the
+            // shadow cut from it; the smaller atlas files it the same.
+            let i = if big.lookup.get(&key) == Some(&n) {
+                small.lookup[&key]
+            } else {
+                assert_eq!(big.shadows.get(&key), Some(&n));
+                small.shadows[&key]
+            };
+            let g = &small.frames[i];
+            assert_eq!(
+                (g.w, g.h, g.anchor_x, g.anchor_y, g.scale),
+                (f.w, f.h, f.anchor_x, f.anchor_y, f.scale)
+            );
+            assert_eq!(g.page & COLOUR_PAGE, f.page & COLOUR_PAGE);
+            for y in (0..f.h as u32).step_by(3) {
+                for x in (0..f.w as u32).step_by(3) {
+                    assert_eq!(at(&big, f, x, y), at(&small, g, x, y));
+                }
+            }
+        }
+        // Off, at 8192, exactly as before: two full pages 8192 wide.
+        let (old, _) = crate::sheets::load_art(Some(&root.join("assets/sprites")), None, false);
+        let old = Atlas::with_sheets(&old);
+        assert_eq!(
+            (old.width, old.height, old.colour_pages),
+            (ATLAS_WIDTH, ATLAS_PAGE_HEIGHT, 0)
+        );
+    }
+
+    /// The skyline packer lays every rectangle inside its page, a pixel
+    /// clear of every other; pages past the first are no taller than they
+    /// need be. (On the game's frames it packs about 8% tighter than
+    /// shelves: `tests/atlas_memory.rs`.)
+    #[test]
+    fn skyline_packs_without_overlap() {
+        let mut sizes = Vec::new();
+        let mut r = 7u32;
+        for _ in 0..400 {
+            r = r.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            sizes.push((8 + (r >> 8) % 120, 8 + (r >> 20) % 90));
+        }
+        sizes.sort_by_key(|s| std::cmp::Reverse(s.1));
+        let (spots, pages, _) = skyline(&mut sizes.iter().copied(), 512, 512);
+        for (i, (&(w, h), &(p, x, y))) in sizes.iter().zip(&spots).enumerate() {
+            assert!(x + w <= 512 && y + h <= 512 && p < pages);
+            for (&(w2, h2), &(p2, x2, y2)) in sizes.iter().zip(&spots).skip(i + 1) {
+                let apart = p != p2 || x + w < x2 || x2 + w2 < x || y + h < y2 || y2 + h2 < y;
+                assert!(
+                    apart,
+                    "{:?} and {:?} touch",
+                    (p, x, y, w, h),
+                    (p2, x2, y2, w2, h2)
+                );
+            }
+        }
+        // Pages past the first are as short as still fit the frames.
+        let (w, h, n) = colour_size(&sizes, 256, skyline);
+        assert!(n > 1 && w == 256 && h <= 256 && h % 64 == 0);
+        assert!(skyline(&mut sizes.iter().copied(), w, h).1 == n);
+        assert!(h == 64 || skyline(&mut sizes.iter().copied(), w, h - 64).1 > n);
+    }
+
+    /// What the atlas will cost once the units are exported without decay
+    /// frames (`docs/look/units.md`, "Memory"): a report, run by hand
+    /// beside `tests/atlas_memory.rs`:
+    /// `cargo test --release -p view projected_memory -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a report on the real art; run by hand"]
+    fn projected_memory_without_decay_frames() {
+        use sim::Civ;
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mib = |b: usize| b as f64 / (1024.0 * 1024.0);
+        for (label, loadout) in [
+            ("title / diorama", Loadout::FIRST),
+            ("Greeks only", Loadout::of_civs(&[Some(Civ::Greeks)])),
+            (
+                "Greeks v Egyptians",
+                Loadout::of_civs(&[Some(Civ::Greeks), Some(Civ::Egyptians)]),
+            ),
+            (
+                "Egyptians v Shang",
+                Loadout::of_civs(&[Some(Civ::Egyptians), Some(Civ::Shang)]),
+            ),
+            (
+                "four architectures",
+                Loadout::of_civs(&[
+                    Some(Civ::Greeks),
+                    Some(Civ::Egyptians),
+                    Some(Civ::Assyrians),
+                    Some(Civ::Shang),
+                ]),
+            ),
+        ] {
+            let (sheets, _) = crate::sheets::load_art_for(
+                Some(&root.join("assets/sprites")),
+                Some(&root.join("assets/look")),
+                true,
+                loadout,
+            );
+            let sheets: Vec<_> = sheets
+                .into_iter()
+                .map(|s| {
+                    if s.colour
+                        && s.decay == crate::sheets::Decay::Frames
+                        && s.animations.iter().any(|a| a.name == "decay")
+                    {
+                        s.without_decay_frames()
+                    } else {
+                        s
+                    }
+                })
+                .collect();
+            for max in [8192, 4096] {
+                let a = Atlas::with_sheets_max(&sheets, max);
+                println!(
+                    "| {label:<20} max {max} | {}x{}x{} {:.1} | {}x{}x{} {:.1} | {:.1} |",
+                    a.width,
+                    a.height,
+                    a.pages,
+                    mib(a.indices.len()),
+                    a.colour_width,
+                    a.colour_height,
+                    a.colour_pages,
+                    mib(a.colour.len() + a.mask.len()),
+                    mib(a.indices.len() + a.colour.len() + a.mask.len()),
+                );
+            }
+        }
     }
 }
