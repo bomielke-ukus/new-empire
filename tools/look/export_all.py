@@ -52,7 +52,8 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-MODULES = ("greek", "egyptian", "mesopotamian", "asian", "nature", "fx", "units")
+MODULES = ("greek", "egyptian", "mesopotamian", "asian", "nature", "fx", "units",
+           "units_foot", "units_naval", "units_mounted")
 KEYS = {"func", "cls", "tiles", "kwargs", "fit", "model_tiles", "stages", "anims", "sun_angle",
         "samples", "fires", "timing", "scale"}
 
@@ -107,7 +108,7 @@ def digest(entry):
     h = hashlib.sha256()
     h.update(json.dumps(entry, sort_keys=True).encode())
     h.update(export_version().encode())
-    extra = UNIT_SOURCES if mod == "units" else set()
+    extra = UNIT_SOURCES if mod.startswith("units") else set()
     for m in sorted(local_imports(mod) | {"stages", "lib"} | extra):
         h.update(m.encode())
         with open(os.path.join(HERE, m + ".py"), "rb") as fh:

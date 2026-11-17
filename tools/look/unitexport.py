@@ -42,6 +42,47 @@ FACING_ORDER = ("S", "SW", "W", "NW", "N")
 SAMPLES = 20                  # with the denoiser; the AOVs are not denoised
 CONTACT = (2.5, 30.0)         # the contact light's strength and angular size (degrees)
 DECAY_FADE = 0.55             # the corpse's alpha on the decay's last frame
+# Crispness at game size (a unit is 40 to 50 px tall at zoom 1 and drawn
+# pixel-doubled at zoom 2): the denoiser's prefilter kept accurate, a pixel
+# filter narrower than the buildings' 1.5, and after the render a slight
+# unsharp mask against the figure's own local colour (so its silhouette gets
+# no halo against the ground) and a darkened rim one pixel in from the
+# silhouette, as an outline would be painted.
+FILTER = 1.0                  # px (Blackman-Harris width)
+SHARPEN = (0.55, 0.8)         # unsharp mask: amount, gaussian sigma in px
+OUTLINE = 0.28                # how much the silhouette's rim pixels are darkened
+
+
+def _blur(x, sigma):
+    r = max(1, int(math.ceil(sigma * 2.5)))
+    k = np.exp(-0.5 * (np.arange(-r, r + 1) / sigma) ** 2)
+    k /= k.sum()
+    pad = [(r, r), (r, r)] + [(0, 0)] * (x.ndim - 2)
+    xp = np.pad(x, pad, mode="edge")
+    h, w = x.shape[:2]
+    y = sum(k[i] * xp[i:i + h] for i in range(2 * r + 1))
+    return sum(k[i] * y[:, i:i + w] for i in range(2 * r + 1))
+
+
+def crisp(rgb, cov, sharpen=None, outline=None):
+    """`rgb` (sRGB 0..1) sharpened where the figure covers (`cov`): an
+    unsharp mask against the coverage-weighted local mean, and the rim one
+    pixel in from the silhouette darkened."""
+    amount, sigma = sharpen or SHARPEN
+    outline = OUTLINE if outline is None else outline
+    if amount <= 0 and outline <= 0:
+        return rgb
+    c = cov[..., None]
+    mean = _blur(rgb * c, sigma) / np.maximum(_blur(c, sigma), 1e-4)
+    out = rgb + amount * (rgb - mean) * c
+    if outline > 0:
+        cp = np.pad(cov, 1, mode="constant")
+        h, w = cov.shape
+        ero = np.min([cp[1 + dy:1 + dy + h, 1 + dx:1 + dx + w]
+                      for dy in (-1, 0, 1) for dx in (-1, 0, 1)], axis=0)
+        rim = (cov - ero).clip(0, 1) * (cov > 0.5)
+        out = out * (1 - outline * rim)[..., None]
+    return out.clip(0, 1)
 
 
 def set_scale(scale):
@@ -55,6 +96,22 @@ def set_scale(scale):
     export.MARGIN = 4 * scale
 
 
+def water_plane():
+    """The waterline for a ship: a big holdout plane at z=0 (the sprite is
+    transparent where it hides the hull), drawing nothing of its own."""
+    m = bpy.data.materials.new("water_holdout")
+    m.use_nodes = True
+    nt = m.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    nt.links.new(nt.nodes.new("ShaderNodeHoldout").outputs[0], out.inputs["Surface"])
+    m["look_ground"] = True
+    ob = lib.mesh([(-30, -30, 0), (30, -30, 0), (30, 30, 0), (-30, 30, 0)], [(0, 1, 2, 3)], m,
+                  name="export_ground")
+    ob["export_ground"] = True
+    return ob
+
+
 def _collection(name):
     c = bpy.data.collections.new(name)
     bpy.context.scene.collection.children.link(c)
@@ -64,12 +121,15 @@ def _collection(name):
 class Stage:
     """The scene the figure is rendered in, set up once."""
 
-    def __init__(self, samples, out_dir):
+    def __init__(self, samples, out_dir, water=False):
         lib.reset()
         sc = bpy.context.scene
         self.fig_c = _collection("figure")
         self.ground_c = _collection("ground")
-        ground = export.catcher()
+        # A ship (a figure with `water = True`) sits in the water: the
+        # ground is a holdout at the waterline that hides the hull under
+        # it, and the figure draws its own water shadow and wake.
+        ground = water_plane() if water else export.catcher()
         sc.collection.objects.unlink(ground)
         self.ground_c.objects.link(ground)
         export.light()
@@ -89,6 +149,8 @@ class Stage:
             a = vl.aovs.add()
             a.name, a.type = n, "VALUE"
         export.render_settings(samples)
+        sc.render.filter_size = FILTER
+        sc.cycles.denoising_prefilter = "ACCURATE"
         s = sc.render.image_settings
         s.media_type = "MULTI_LAYER_IMAGE"
         s.file_format = "OPEN_EXR_MULTILAYER"
@@ -128,7 +190,9 @@ class Stage:
         for m in bpy.data.materials:
             if m.name in self.marked or m.node_tree is None:
                 continue
-            ground = m.name.startswith("grass")
+            # `look_ground`: a figure's own shadow on the water, split off
+            # as a shadow is (not subject)
+            ground = m.name.startswith("grass") or bool(m.get("look_ground"))
             for n, v in (("subject", 0.0 if ground else 1.0),
                          ("player", 1.0 if m.name in player else 0.0)):
                 o = m.node_tree.nodes.new("ShaderNodeOutputAOV")
@@ -175,6 +239,7 @@ class Stage:
         play = d["ViewLayer.player.X"].astype(np.float64).clip(0, 1)
         lin = np.where(a[..., None] > 1e-5, rgb / np.maximum(a, 1e-5)[..., None], 0).clip(0, 1)
         srgb = np.where(lin <= 0.0031308, 12.92 * lin, 1.055 * np.power(lin, 1 / 2.4) - 0.055)
+        srgb = crisp(srgb, np.minimum(subj, a))
         # The shadow is cleaned (and faded out at the edges) inside the
         # render border only, so the border's edge never shows as a line.
         x0, y0, x1, y1 = self.box
@@ -248,7 +313,7 @@ def main(args, factory):
     if not args.hash:
         shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work, exist_ok=True)
-    stage = Stage(samples, work)
+    stage = Stage(samples, work, getattr(getattr(factory, "figure", None), "water", False))
     figure = factory()
     rows = layout(figure)
     meta = os.path.join(work, "frame.json")

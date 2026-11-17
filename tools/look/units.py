@@ -152,6 +152,12 @@ class Rig:
                 cur = M.to_3x3() @ V((1, 0, 0))
                 a = cur.lerp(aim, p["aimw"]).normalized()
                 up = M.to_3x3() @ V((0, 0, 1))
+                if p.get("aimup", 0) > 0:
+                    # the striking side leads the swing about N
+                    nrm = self.U.to_3x3() @ V((p["Nx"], p["Ny"], p["Nz"]))
+                    lead = nrm.cross(a)
+                    if lead.length > 1e-4:
+                        up = up.lerp(lead.normalized(), p["aimup"])
                 up = (up - a * up.dot(a)).normalized()
                 y = up.cross(a)
                 M = Matrix(((a.x, y.x, up.x, 0), (a.y, y.y, up.y, 0), (a.z, y.z, up.z, 0),
@@ -275,8 +281,10 @@ def draw_head(b, r, skin, hair, style="short", beard=False, face=True, band=None
 def tool_mesh(b, M, kind):
     """A tool in the frame M (origin at the grip, X along the handle toward
     its head, Z the head's striking side)."""
+    # iron a little dark and rough: bright metal catches the sky and burns
+    # to a white blob at game size
     wood, dark, iron = mat("wood", rough=0.8), mat("wood_dark", rough=0.8), \
-        mat((0.62, 0.64, 0.68), rough=0.4, metal=0.6)
+        mat((0.50, 0.52, 0.56), rough=0.48, metal=0.55)
     with b.at(M, True):
         if kind == "hammer":
             b.seg((-0.05, 0, 0), (0.30, 0, 0), 0.026, 0.024, wood, n=6)
@@ -297,10 +305,82 @@ def tool_mesh(b, M, kind):
             b.plate([(0.58, -0.02), (0.65, -0.02), (0.68, 0.22), (0.52, 0.22)], 0.03, iron,
                     frame=R("X", 90))
         elif kind == "spear":
-            b.seg((-0.62, 0, 0), (0.95, 0, 0), 0.019, 0.017, wood, n=6)
-            b.seg((0.94, 0, 0), (1.03, 0, 0), 0.014, 0.042, bronze(), n=6, sy=0.45)
-            b.seg((1.03, 0, 0), (1.17, 0, 0), 0.042, 0.002, bronze(), n=6, sy=0.45)
-            b.seg((-0.62, 0, 0), (-0.69, 0, 0), 0.017, 0.004, bronze(), n=6)
+            # the hoplite's dory, shortened so the figure is not much taller
+            # than a villager (units.md): about 1.6 long, head included
+            b.seg((-0.55, 0, 0), (0.82, 0, 0), 0.020, 0.018, wood, n=6)
+            b.seg((0.81, 0, 0), (0.90, 0, 0), 0.015, 0.046, bronze(), n=6, sy=0.45)
+            b.seg((0.90, 0, 0), (1.03, 0, 0), 0.046, 0.002, bronze(), n=6, sy=0.45)
+            b.seg((-0.55, 0, 0), (-0.61, 0, 0), 0.018, 0.004, bronze(), n=6)
+        elif kind == "spear_plain":
+            # a plain ash spear with an iron leaf, no butt-spike (spearman)
+            b.seg((-0.42, 0, 0), (0.80, 0, 0), 0.021, 0.019, wood, n=6)
+            b.seg((0.79, 0, 0), (0.88, 0, 0), 0.016, 0.050, iron, n=6, sy=0.4)
+            b.seg((0.88, 0, 0), (1.02, 0, 0), 0.050, 0.002, iron, n=6, sy=0.4)
+            b.seg((0.76, 0, 0), (0.80, 0, 0), 0.026, 0.026, mat("leather", rough=0.8), n=6)
+        elif kind == "club":
+            # a knobbed club, thick at the head
+            b.seg((-0.08, 0, 0), (0.24, 0, 0), 0.028, 0.034, wood, n=7)
+            b.seg((0.22, 0, 0), (0.56, 0, 0), 0.044, 0.078, dark, n=8)
+            b.ball((0.56, 0, 0), 0.078, dark, n=8)
+            for k, (x, a) in enumerate(((0.38, 0), (0.46, 120), (0.53, 240), (0.44, 300),
+                                        (0.58, 60))):
+                c, sn = math.cos(math.radians(a)), math.sin(math.radians(a))
+                b.ball((x, 0.062 * c, 0.062 * sn), 0.026, wood, n=6)
+        elif kind == "battleaxe":
+            # a long-hafted axe with a broad bearded iron head
+            b.seg((-0.10, 0, 0), (0.62, 0, 0), 0.026, 0.024, wood, n=6)
+            b.plate([(0.42, -0.02), (0.60, -0.02), (0.66, 0.16), (0.62, 0.30), (0.50, 0.32),
+                     (0.46, 0.18), (0.44, 0.05)], 0.035, iron, frame=R("X", 90))
+            b.cube((0.53, 0, -0.03), (0.09, 0.06, 0.09), dark)
+            b.seg((0.53, 0, -0.06), (0.53, 0, -0.14), 0.022, 0.004, iron, n=5)
+        elif kind == "sword":
+            # a bronze leaf-bladed sword, the blade's flat facing Z
+            b.seg((-0.07, 0, 0), (0.05, 0, 0), 0.020, 0.020, mat("leather", rough=0.8), n=6)
+            b.ball((-0.08, 0, 0), 0.026, gold(), n=6)
+            b.cube((0.055, 0, 0), (0.025, 0.12, 0.035), gold())
+            b.plate([(0.06, -0.024), (0.30, -0.034), (0.52, -0.026), (0.62, 0.0),
+                     (0.52, 0.026), (0.30, 0.034), (0.06, 0.024)], 0.014, bronze(),
+                    frame=R("X", 90))
+        elif kind == "gladius":
+            # the legionary's short iron sword
+            b.seg((-0.06, 0, 0), (0.05, 0, 0), 0.020, 0.020, mat("wood_dark", rough=0.7), n=6)
+            b.ball((-0.07, 0, 0), 0.028, mat((0.85, 0.80, 0.70), rough=0.5), n=6)
+            b.cube((0.055, 0, 0), (0.025, 0.09, 0.04), mat((0.85, 0.80, 0.70), rough=0.5))
+            b.plate([(0.06, -0.032), (0.33, -0.032), (0.40, 0.0), (0.33, 0.032), (0.06, 0.032)],
+                    0.014, iron, frame=R("X", 90))
+        elif kind == "staff":
+            # a tall staff topped with a gold sun disc
+            b.seg((-0.50, 0, 0), (0.70, 0, 0), 0.020, 0.018, wood, n=6)
+            b.seg((0.68, 0, 0), (0.74, 0, 0), 0.026, 0.026, gold(), n=6)
+            b.seg((0.80, 0, -0.012), (0.80, 0, 0.012), 0.075, 0.075, gold(), n=12,
+                  hint=(1, 0, 0))
+            b.seg((0.80, 0, -0.016), (0.80, 0, 0.016), 0.040, 0.040,
+                  mat((0.95, 0.30, 0.15), rough=0.4), n=10, hint=(1, 0, 0))
+
+
+def draw_cape(b, r, m, length=0.36, width=0.30, fly=None, flare=0.12):
+    """A cape hanging from the shoulders, swinging back as the figure leans
+    (or by `fly`, 0..1), drawn two-sided in the torso frame."""
+    p = r.p
+    if fly is None:
+        fly = min(1.0, max(0.0, (p["lean"] - 2) / 10)) * 0.5 + 0.1
+    vs, fs = [], []
+    nr, nc = 5, 5
+    for i in range(nr):
+        t = i / (nr - 1)
+        for j in range(nc):
+            u = j / (nc - 1) - 0.5
+            w = width + flare * t
+            x = -0.105 - 0.04 * t - fly * t * 0.12 - 0.035 * (1 - (2 * u) ** 2) * (0.5 + t)
+            vs.append((x, u * w, r.bd.torso + 0.0 - length * t))
+    for i in range(nr - 1):
+        for j in range(nc - 1):
+            k = i * nc + j
+            fs.append((k, k + 1, k + nc + 1, k + nc))
+    with b.at(r.U, True):
+        b.poly(vs, fs, m, smooth=True)
+        b.poly([(x - 0.004, y, z) for x, y, z in vs], [tuple(reversed(f)) for f in fs], m,
+               smooth=True)
 
 
 def shield_mesh(b, r, player, blazon):
@@ -322,6 +402,7 @@ class Figure:
     fn(t) -> pose}."""
 
     cls = "Foot"
+    blazon = "lambda"            # the aspis's device, for draw_shield
     speed = 1.0                  # tiles a second (kinds.rs), for the walk
     animations = ()              # [(name, frames, ms, loops, impact)]
     seed = 0
@@ -357,12 +438,20 @@ class Figure:
         b = B("unit")
         self.outfit(b, rig, player)
         if tool:
-            tool_mesh(b, rig.tool, tool)
+            self.draw_tool(b, rig, tool)
         if shield:
-            shield_mesh(b, rig, player, self.blazon)
+            self.draw_shield(b, rig, player)
         self.load(b, rig, name, player)
         b.finish(root)
         return root
+
+    def draw_tool(self, b, rig, kind):
+        """The tool in the right hand (tool_mesh's kinds)."""
+        tool_mesh(b, rig.tool, kind)
+
+    def draw_shield(self, b, rig, player):
+        """The shield on the left arm (the aspis unless a figure has its own)."""
+        shield_mesh(b, rig, player, self.blazon)
 
     def load(self, b, rig, name, player):
         pass
@@ -483,54 +572,74 @@ class Villager(Figure):
         return dict(p, ikL=1, Lx=0.02, Ly=0.22, Lz=0.40, side=p["side"] - 5)
 
     # ---- swings: two hands on the handle
-    def swing(self, t, up, hit, grip, rise=0.0):
-        """A two-handed swing: up (wound) at t=0, the stroke landing on
-        frame 3 of 6 (t = 0.5) as the attack's impact does, the follow
-        through and lift back between."""
+    # The tool is aimed (aimw) rather than left to the wrist, so it stays
+    # in sight in every facing: wound up it points up and back over the
+    # right shoulder, never straight behind the head, and the stroke lands
+    # a little to the right of the body's line, not hidden under it.
+    def swing(self, t, up, hit, grip, rise=0.0, mid=None):
+        """A two-handed swing: up (wound) at t=0, through `mid` (if given),
+        the stroke landing on frame 3 of 6 (t = 0.5) as the attack's impact
+        does, the follow through and lift back between."""
         down = dict(hit)
         follow = anim.lerp(hit, up, 0.3)
         lift = anim.lerp(hit, up, 0.75)
-        keys = [(0.0, up), (0.333, anim.lerp(up, hit, 0.35), anim.ease_in),
+        keys = [(0.0, up), (0.333, mid or anim.lerp(up, hit, 0.35), anim.ease_in),
                 (0.5, down, anim.ease_in), (0.667, follow), (0.833, lift)]
         p = anim.keyed(keys, t)
         p["grip"] = grip
         return p
 
+    @staticmethod
+    def aim(x, y, z, up=1.0):
+        """Pose keys pointing the held tool along (x, y, z) (torso frame),
+        its striking side leading an overhead swing."""
+        return dict(aimw=1.0, Tx=x, Ty=y, Tz=z, aimup=up)
+
     def pose_attack(self, t):
         base = anim.pose(self.base(), FLx=0.14, FLy=0.02, FRx=-0.12, FRy=0.02, ikL=1)
-        up = anim.pose(base, Rf=165, Ra=20, Re=55, Rw=-30, lean=-6, twist=-14, drop=0.01,
-                       hpitch=-6, ikL=1)
-        hit = anim.pose(base, Rf=70, Ra=10, Re=8, Rw=65, lean=18, twist=12, drop=0.05,
-                        hpitch=10, ikL=1)
-        p = anim.keyed([(0.0, anim.lerp(up, hit, 0.5)), (0.4, up), (0.6, hit, anim.ease_in),
-                        (1.0, anim.lerp(hit, up, 0.4))], t, loop=False)
+        up = anim.pose(base, Rf=140, Ra=34, Re=45, lean=-6, twist=-14, drop=0.01, hpitch=-6,
+                       **self.aim(-0.35, -0.45, 0.82))
+        mid = anim.pose(base, Rf=140, Ra=24, Re=25, lean=4, twist=0, drop=0.02,
+                        **self.aim(0.45, -0.25, 0.86))
+        hit = anim.pose(base, Rf=72, Ra=24, Re=8, lean=18, twist=8, drop=0.05, hpitch=10,
+                        **self.aim(0.68, -0.42, -0.60))
+        p = anim.keyed([(0.0, anim.lerp(up, hit, 0.5)), (0.4, up), (0.5, mid, anim.ease_in),
+                        (0.6, hit, anim.ease_in), (1.0, anim.lerp(hit, up, 0.4))], t, loop=False)
         p["grip"] = 0.16
         return p
 
     def pose_chop(self, t):
+        # a diagonal chop at waist height, from over the right shoulder
         base = anim.pose(self.base(), FLx=0.10, FLy=0.03, FRx=-0.10, FRy=0.03, ikL=1)
-        up = anim.pose(base, Rf=150, Ra=40, Re=60, Rw=-40, Rt=20, twist=-28, lean=-4, hyaw=12)
-        hit = anim.pose(base, Rf=75, Ra=12, Re=10, Rw=60, Rt=-10, twist=20, lean=12, drop=0.03,
-                        hyaw=-6)
+        up = anim.pose(base, Rf=120, Ra=45, Re=50, Rt=20, twist=-28, lean=-4, hyaw=12,
+                       Nx=0.0, Ny=0.6, Nz=0.8, **self.aim(-0.30, -0.70, 0.65))
+        hit = anim.pose(base, Rf=75, Ra=12, Re=10, Rt=-10, twist=20, lean=12, drop=0.03,
+                        hyaw=-6, Nx=0.0, Ny=0.6, Nz=0.8, **self.aim(0.85, 0.35, -0.15))
         return self.swing(t, up, hit, 0.18)
 
     def pose_mine(self, t):
         base = anim.pose(self.base(), FLx=0.11, FLy=0.04, FRx=-0.11, FRy=0.04, ikL=1)
-        up = anim.pose(base, Rf=175, Ra=18, Re=60, Rw=-35, lean=-8, hpitch=-8)
-        hit = anim.pose(base, Rf=55, Ra=8, Re=10, Rw=30, lean=24, drop=0.07, hpitch=14)
-        return self.swing(t, up, hit, 0.2)
+        up = anim.pose(base, Rf=150, Ra=30, Re=45, lean=-6, hpitch=-8,
+                       **self.aim(-0.40, -0.40, 0.82))
+        mid = anim.pose(base, Rf=150, Ra=22, Re=28, lean=6, hpitch=0,
+                        **self.aim(0.45, -0.25, 0.86))
+        hit = anim.pose(base, Rf=60, Ra=24, Re=10, lean=24, drop=0.07, hpitch=14,
+                        **self.aim(0.50, -0.42, -0.76))
+        return self.swing(t, up, hit, 0.2, mid=mid)
 
     def pose_farm(self, t):
         base = anim.pose(self.base(), FLx=0.12, FLy=0.03, FRx=-0.12, FRy=0.03, ikL=1)
-        up = anim.pose(base, Rf=110, Ra=12, Re=40, Rw=-10, lean=6, hpitch=6)
-        hit = anim.pose(base, Rf=40, Ra=8, Re=10, Rw=35, lean=22, drop=0.05, hpitch=16)
+        up = anim.pose(base, Rf=110, Ra=22, Re=40, lean=6, hpitch=6,
+                       **self.aim(0.10, -0.35, 0.93))
+        hit = anim.pose(base, Rf=45, Ra=20, Re=10, lean=22, drop=0.05, hpitch=16,
+                        **self.aim(0.75, -0.35, -0.56))
         return self.swing(t, up, hit, 0.24)
 
     def pose_build(self, t):
         base = anim.pose(self.base(), FLx=0.13, FLy=0.05, FRx=-0.14, FRy=0.04, drop=0.10,
                          lean=24, hpitch=14, Lf=55, La=14, Le=30)
-        up = anim.pose(base, Rf=140, Ra=22, Re=80, Rw=-40)
-        hit = anim.pose(base, Rf=48, Ra=10, Re=18, Rw=40, drop=0.12)
+        up = anim.pose(base, Rf=130, Ra=30, Re=70, **self.aim(-0.10, -0.45, 0.89))
+        hit = anim.pose(base, Rf=50, Ra=14, Re=18, drop=0.12, **self.aim(0.75, -0.15, -0.64))
         return self.swing(t, up, hit, 0.0)
 
     def pose_forage(self, t):
@@ -588,7 +697,7 @@ class Hoplite(Figure):
             inn, out = [], []
             for i in range(11):
                 a = math.radians(-50 + 175 * i / 10)
-                hh = 0.13 if i < 8 else 0.13 + 0.03 * (i - 7)
+                hh = 0.085 if i < 8 else 0.085 + 0.025 * (i - 7)
                 inn.append((0.126 * math.sin(a), 0.012 + 0.126 * math.cos(a)))
                 out.append(((0.128 + hh) * math.sin(a), 0.012 + (0.128 + hh) * math.cos(a)))
             b.plate(inn + list(reversed(out)), 0.075, crest_m, frame=R("X", 90))
@@ -596,37 +705,21 @@ class Hoplite(Figure):
 
     def cape(self, b, r, m):
         """A short cape from the shoulders, swinging back as it walks."""
-        p = r.p
-        fly = min(1.0, max(0.0, (p["lean"] - 2) / 10)) * 0.5 + 0.1
-        vs, fs = [], []
-        nr, nc = 5, 5
-        for i in range(nr):
-            t = i / (nr - 1)
-            for j in range(nc):
-                u = j / (nc - 1) - 0.5
-                w = 0.30 + 0.12 * t
-                x = -0.105 - 0.04 * t - fly * t * 0.12 - 0.035 * (1 - (2 * u) ** 2) * (0.5 + t)
-                vs.append((x, u * w, r.bd.torso + 0.0 - 0.36 * t))
-        for i in range(nr - 1):
-            for j in range(nc - 1):
-                k = i * nc + j
-                fs.append((k, k + 1, k + nc + 1, k + nc))
-        with b.at(r.U, True):
-            b.poly(vs, fs, m, smooth=True)
-            b.poly([(x - 0.004, y, z) for x, y, z in vs], [tuple(reversed(f)) for f in fs], m,
-                   smooth=True)
+        draw_cape(b, r, m)
 
     def base(self):
-        return anim.pose(FLx=0.04, FLy=0.02, FRx=-0.03, FRy=0.02, Rf=8, Ra=14, Re=70, Rt=6,
-                         Rw=0, aimw=1, Tx=0.05, Ty=0.0, Tz=1.0,
-                         ikL=1, Sx=0.17, Sy=0.13, Sz=0.12, Snx=0.85, Sny=0.55, Snz=0.08)
+        # the shield carried at the left side, turned half outward, so the
+        # body shows beside it facing the camera; the spear held low
+        return anim.pose(FLx=0.04, FLy=0.02, FRx=-0.03, FRy=0.02, Rf=10, Ra=16, Re=45, Rt=6,
+                         Rw=0, aimw=1, Tx=0.12, Ty=0.0, Tz=1.0,
+                         ikL=1, Sx=0.10, Sy=0.20, Sz=0.06, Snx=0.55, Sny=0.83, Snz=0.05)
 
     def pose_idle(self, t):
         return anim.breathe(self.base(), t)
 
     def pose_walk(self, t):
         p = self.walk_pose(t, self.base(), arms=14, which="R")
-        return dict(p, Tx=0.35, Tz=1.0)
+        return dict(p, Tx=0.45, Tz=1.0)
 
     def pose_attack(self, t):
         # the spear overhand: raised to the shoulder pointing at the enemy,
@@ -645,14 +738,30 @@ class Hoplite(Figure):
     def pose_death(self, t):
         p = anim.death(self.base(), t)
         p["ikL"] = max(0.0, 1 - t * 2.5)
-        p["aimw"] = max(0.0, 1 - t * 1.5)
-        return p
+        return drop_tool(p, (t - 0.25) / 0.6)
 
     def pose_decay(self, t, n):
         p = anim.decay(self.base(), t, n)
         p["ikL"] = 0.0
-        p["aimw"] = 0.0
+        return drop_tool(p, 1.0)
+
+
+def drop_tool(p, u, lie=(-0.05, -0.75, 0.65)):
+    """The held tool let fall flat beside the body as it goes down (u 0..1):
+    aimed, in the torso's frame, out to the right and toward the head, which
+    lies along the ground once the body is on its back (else a dead hand
+    holds a spear or an axe straight up)."""
+    u = anim.smooth(u)
+    if u <= 0:
         return p
+    for k, v in zip(("Tx", "Ty", "Tz"), lie):
+        p[k] = p[k] + (v - p[k]) * u if p["aimw"] > 0 else v
+    p["aimw"] = max(p["aimw"], u)
+    p["aimup"] = p["aimup"] * (1 - u)
+    # a shield falls face up, not standing on its rim beside the body
+    for k, v in (("Snx", 1.0), ("Sny", 0.15), ("Snz", 0.0)):
+        p[k] = p[k] + (v - p[k]) * u
+    return p
 
 
 def _unit(cls):

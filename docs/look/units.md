@@ -98,6 +98,11 @@ on the ground while the unit moves at that speed; the hips sit as low as
 the planted legs need (lowest with both feet down). A unit sped up or
 slowed by its civilisation slides a little, as the old art did.
 
+**Death.** The body falls on its back roughly where the unit stood
+(`anim.FALL_X` carries it forward so its middle lies over the ground point,
+not a body's length behind it); what it held falls flat beside it and a
+shield face up (`units.drop_tool`).
+
 ## Figure rules
 
 Readability at game size first: a unit is 40 to 50 px tall at zoom 1.
@@ -107,7 +112,16 @@ Readability at game size first: a unit is 40 to 50 px tall at zoom 1.
   (0.068 to 0.044), torso 0.30, shoulders 0.158 either side.
 - **Silhouette**: weapon and shield visible in every facing: tools and
   weapons drawn thick (a handle 0.025 across) with big heads; the shield
-  0.25 in radius on the left forearm; the hoplite's crest tall.
+  0.25 in radius on the left forearm; the hoplite's crest tall but not
+  towering (the hoplite stands about 1.15 to the crest's top, 1.45 to the
+  spear's point, against the villager's 1.07).
+- **Facing the camera** (S) a shield is carried at the left side, turned
+  half outward, so the body shows beside it; a swung tool is aimed (`aimw`,
+  `aimup`) so that wound up it points up and back over the right shoulder,
+  never straight behind the head, and lands a little right of the body.
+- **Tell the kinds apart by shape first** (`units_foot.py`'s docstring):
+  weapon, shield shape, headgear and cloak differ between every two
+  infantry kinds, and each has large player-colour areas.
 - One set is one person (a fixed seed): no per-unit variety in a set.
 - The figure faces +X; the exporter turns it, never the camera or the sun.
 
@@ -122,20 +136,29 @@ Readability at game size first: a unit is 40 to 50 px tall at zoom 1.
 - **`units.py`**: `Rig` turns a pose into joint positions and frames
   (two-bone IK for legs and IK'd arms); `draw_body`, `draw_torso`,
   `draw_skirt`, `draw_head`, `tool_mesh` (hammer, axe, pick, hoe, spear),
-  `shield_mesh`, `carry_load` draw on it, one mesh per frame (figures.py's
-  builder). A `Figure` subclass is a unit: its `Build`, `speed`,
+  `shield_mesh`, `draw_cape`, `carry_load` draw on it, one mesh per frame
+  (figures.py's builder); `tool_mesh` also has the soldiers' `club`,
+  `battleaxe`, `sword`, `gladius`, `spear_plain` and the priest's `staff`.
+  A figure with its own shield or tool overrides `Figure.draw_shield` /
+  `draw_tool`. A `Figure` subclass is a unit: its `Build`, `speed`,
   `animations` (from `anim.FOOT`), `gear(anim)` (the tool in the right
   hand, a shield on the left), `outfit()`, `load()`, and a `pose_<anim>(t)`
   for each animation, most of them one line over the shared ones.
 - **`unitexport.py`**, export.py's path for a figure (a `units.py` factory
   marked `unit`): one scene set up once; per (animation, frame) the figure's
   mesh is rebuilt, then turned to each facing and rendered (Cycles, 20
-  samples, denoised, only the render border the pose can reach). Each render
+  samples, denoised with the accurate prefilter, a 1.0 px pixel filter, only
+  the render border the pose can reach). Each render
   is written as a multilayer EXR (uncompressed) and read back by `exr.py`:
   the beauty and two AOVs, the subject's coverage (to split the contact
   shadow off, as a building's) and its player-coloured share (the mask).
   The compositor, which would do this in Blender, needs a GPU context
   headless Blender lacks. The decay's frames fade (alpha to 55%).
+  **Crispness**: a unit is drawn pixel-doubled at zoom 2 beside buildings
+  authored at 2, so each render is sharpened (`unitexport.crisp`): an
+  unsharp mask against the figure's own local colour (no halo against the
+  ground; `SHARPEN`) and the rim one pixel in from the silhouette darkened
+  as a painted outline (`OUTLINE`).
   Resumable: every finished cell is kept under
   `target/look-units/<set>/<hash>/` until the set is written, and a rerun
   with the same hash renders only what is missing.
@@ -153,7 +176,9 @@ SETS = {
 }
 ```
 
-`func` is a factory made by `units._unit(FigureClass)`; `cls` the size
+The foot soldiers and the priest are in `units_foot.py` (its own `SETS`,
+listed in `export_all.MODULES`); riders and ships in their own modules the
+same way. `func` is a factory made by `units._unit(FigureClass)`; `cls` the size
 class (`Foot`, `Mounted`, `Heavy`, `Ship`); `scale` 1 (or omitted: 2);
 `samples` as for buildings. `export_all.py` exports, hash-skips and checks
 them as it does buildings; a unit's hash also covers `unitexport.py` and

@@ -26,6 +26,10 @@ forward, Y to its left, Z up, origin on the ground between its feet.
              FRx FRy FRz FRp   right foot (feet are IK targets: the legs bend to them)
     tool     aimw Tx Ty Tz     0..1: how far the right hand's tool points along (T*)
                                in the torso's frame instead of following the wrist
+             aimup Nx Ny Nz    with aimw: 0..1, how far the tool's striking side
+                               (its Z) turns to the way a swing about the axis N
+                               (torso frame; default its left, an overhead swing
+                               forward) moves it, instead of the wrist's up
     shield   Sx Sy Sz          its centre, in the torso's frame (the left hand holds it)
              Snx Sny Snz       the way its face looks
 """
@@ -38,7 +42,7 @@ NEUTRAL = dict(
     Lf=4.0, La=8.0, Lt=0.0, Le=12.0, Lw=0.0, Rf=4.0, Ra=8.0, Rt=0.0, Re=12.0, Rw=0.0,
     ikL=0.0, ikR=0.0, Lx=0.0, Ly=0.0, Lz=0.0, Rx=0.0, Ry=0.0, Rz=0.0, grip=0.0,
     FLx=0.0, FLy=0.0, FLz=0.0, FLp=0.0, FRx=0.0, FRy=0.0, FRz=0.0, FRp=0.0,
-    aimw=0.0, Tx=1.0, Ty=0.0, Tz=0.0,
+    aimw=0.0, Tx=1.0, Ty=0.0, Tz=0.0, aimup=0.0, Nx=0.0, Ny=1.0, Nz=0.0,
     Sx=0.17, Sy=0.13, Sz=0.12, Snx=1.0, Sny=0.0, Snz=0.0,
 )
 
@@ -120,7 +124,7 @@ def frame_t(i, n, loop):
 
 # ------------------------------------------------------------------- walk
 
-def walk(t, speed, period, leg, stance=0.58, lift=0.07, width=0.02, base=None):
+def walk(t, speed, period, leg, stance=0.58, lift=0.12, width=0.035, base=None):
     """The walk cycle at `t` (0..1): the feet planted on the ground while
     they carry the figure (moving back under it at `speed` tiles a second,
     so they do not slide when the unit moves at that speed), lifted and
@@ -157,8 +161,11 @@ def walk(t, speed, period, leg, stance=0.58, lift=0.07, width=0.02, base=None):
     c = math.cos(2 * math.pi * t)
     p["pyaw"] += -7 * c                    # the left hip forward at t = 0
     p["twist"] += 5 * c                    # the shoulders against it
-    p["py"] += 0.012 * math.cos(2 * math.pi * (t - 0.12))     # over the planted foot
-    p["proll"] += 3 * math.cos(2 * math.pi * (t - 0.12))
+    # over the planted foot: a clear side to side sway, which is what shows
+    # of a walk seen from the front (S)
+    p["py"] += 0.02 * math.cos(2 * math.pi * (t - 0.12))
+    p["proll"] += 4 * math.cos(2 * math.pi * (t - 0.12))
+    p["side"] -= 2.5 * math.cos(2 * math.pi * (t - 0.12))
     p["lean"] += 4
     p["hyaw"] += -4 * c
     return p
@@ -201,18 +208,25 @@ def death(base, t):
     stagger = pose(base, x=-0.05, lean=-14, hpitch=-18, drop=0.02,
                    Lf=40, La=30, Le=40, Rf=35, Ra=30, Re=30, ikL=0.0, ikR=0.0,
                    FLx=0.06, FRx=-0.12)
-    buckle = pose(base, x=-0.10, drop=0.16, lean=-20, hpitch=-10, side=8,
+    buckle = pose(base, x=-0.02, drop=0.16, lean=-20, hpitch=-10, side=8,
                   Lf=20, La=45, Le=30, Rf=10, Ra=50, Re=25, ikL=0.0, ikR=0.0,
                   FLx=0.10, FRx=-0.05, fall=-18, fallx=-0.08)
-    sit = pose(lying, fall=-62, drop=0.20, lean=-10, Lf=60, Rf=60, La=50, Ra=50,
+    sit = pose(lying, x=FALL_X * 0.5, fall=-62, drop=0.20, lean=-10, Lf=60, Rf=60, La=50, Ra=50,
                hpitch=-20)
     return keyed([(0.0, base), (0.15, stagger, ease_out), (0.42, buckle),
                   (0.70, sit, ease_in), (0.86, lying, ease_in), (1.0, lying)], t, loop=False)
 
 
+# How far forward the falling body is carried so that it lies roughly where
+# the unit stood (its middle over the ground point), not a body's length
+# behind it.
+FALL_X = 0.42
+
+
 def fallen(base):
-    """Lying on its back, arms flung out, one knee up."""
-    return pose(base, fall=-90, fallx=-0.05, fallz=0.075, drop=0.04, lean=0, side=0, twist=0,
+    """Lying on its back, arms flung out, one knee up, its middle about over
+    the ground point."""
+    return pose(base, x=FALL_X, fall=-90, fallx=-0.05, fallz=0.075, drop=0.04, lean=0, side=0, twist=0,
                 hyaw=25, hpitch=-6, Lf=20, La=70, Le=30, Rf=10, Ra=55, Re=15, ikL=0.0, ikR=0.0,
                 FLx=0.10, FLz=0.02, FRx=-0.04, FRz=0.0, FRp=20, FLp=10, px=0.0, py=0.0)
 
