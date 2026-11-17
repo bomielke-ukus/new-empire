@@ -213,7 +213,7 @@ class QuadRig:
             down = (M3 @ V((0, 0, -1))).lerp((end - joint).normalized(), max(w, 0.0)).normalized()
             lat = (B3 @ V((0, 1, 0))).normalized()
             hd = Matrix.Rotation(math.radians(q[k + "f"]), 3, lat) @ down
-            self.legs[k] = (top, joint, end, end + hd * sp.hoof * 1.25)
+            self.legs[k] = (top, joint, end, end + hd * sp.hoof)
         n0 = V((sp.neck0[0], 0, sp.neck0[1]))
         self.N = self.Bf @ T(n0) @ R("Z", q["hy"])
         nl, na, _, _ = sp.neck
@@ -466,12 +466,14 @@ class Beast(units.Figure):
 
     animations = ANIMS
     cls = "Mounted"
+    size = 1.0                  # the whole figure scaled (its gait corrected for it)
 
     def build(self, name, i, player, parent=None):
         n, loops = next((n, lp) for a, n, _, lp, _ in self.animations if a == name)
         t = anim.frame_t(i, n, loops)
         sink = -0.05 * t if name == "decay" else 0.0
         root = lib.empty("unit", (0, 0, sink), 0.0, parent)
+        root.scale = (self.size,) * 3
         b = B("unit")
         self.draw(b, name, t, player)
         b.finish(root)
@@ -514,6 +516,7 @@ class Horseman(Beast):
 
     cls = "Mounted"
     speed = 2.0
+    size = 1.12                 # a rider stands out over the foot soldiers
     horse = HORSE
     coat, dark, sock = "cedar", "hair_black", None
     weapon_kind = None
@@ -533,7 +536,7 @@ class Horseman(Beast):
             return dict(base, nk=-4 + 5 * s, hp=4 * c, ts=18 * c, tu=0.05 + 0.08 * max(0, s),
                         ear=0.5 * max(0.0, c), RHz=0.01, RHf=25, RHx=sp.hx + 0.06, hy=3 * s)
         if name == "walk":
-            q = gait(sp, t, self.speed, CANTER, 0.40, base=base)
+            q = gait(sp, t, self.speed / self.size, CANTER, 0.40, base=base)
             q["nk"] = -6 + 7 * math.sin(2 * math.pi * (t - 0.30))
             q["hp"] = 6 * math.sin(2 * math.pi * (t - 0.1))
             q["tu"] = 0.5 + 0.1 * math.sin(2 * math.pi * t)
@@ -692,6 +695,13 @@ class LightCavalry(Horseman):
     coat, dark, sock = (0.52, 0.27, 0.14), "hair_black", None
     weapon_kind = "sword"
     lean = 8.0
+
+    def draw_mount(self, b, qr, player, name):
+        draw_horse(b, qr, self.coat, self.dark, sock=self.sock)
+        sp = qr.sp
+        saddle_cloth(b, qr, [gold(), pm(player), pm(player), gold()], x0=-0.20, x1=0.14)
+        drape(b, qr, -0.20 * sp.k, 0.14 * sp.k, 0.15 * sp.k, pm(player, 0.82), flare=1.1,
+              top_up=0.02 * sp.k, hem=gold())
 
     def rider_base(self):
         return anim.pose(SEATED, Rf=35, Ra=25, Re=60, Rt=0, aimw=1, Tx=0.45, Ty=-0.15, Tz=0.9,
@@ -921,6 +931,7 @@ class Gazelle(Beast):
 
     cls = "Foot"
     speed = 1.4
+    size = 1.2
     sp = GAZELLE
 
     def quad(self, name, t):
@@ -932,7 +943,7 @@ class Gazelle(Beast):
             return dict(base, nk=-88 + 4 * s, hp=-22 + 6 * c, ts=40 * max(0.0, s) ** 3, tu=0.5,
                         ear=0.6 * max(0, c), pitch=-3, bz=base["bz"] - 0.01, LFx=sp.fx + 0.06)
         if name == "walk":
-            q = gait(sp, t, self.speed, BOUND, 0.30, lift=(0.14, 0.12), fold=(110, 60),
+            q = gait(sp, t, self.speed / self.size, BOUND, 0.30, lift=(0.14, 0.12), fold=(110, 60),
                      base=base)
             q["nk"] = 4 * math.sin(2 * math.pi * (t - 0.2))
             q["tu"], q["ear"] = 0.9, 1.0
@@ -1364,16 +1375,16 @@ class ChariotArcher(Beast):
         rs, dr, arrow = HorseArcher.bow_state(None, name, t)
         if name == "walk":
             rs = 0.5
-        ap = anim.pose(stand, lean=4)
+        ap = anim.pose(stand, lean=4, pyaw=20)
         if rs > 0:
             ap.update(ikL=1.0, Lx=0.18 + 0.18 * rs, Ly=0.12, Lz=0.14 + 0.22 * rs, ikR=1.0,
                       Rx=0.28 * rs - 0.22 * dr * rs + 0.04, Ry=-0.10 + 0.03 * dr,
-                      Rz=0.14 + 0.24 * rs + 0.02 * dr, twist=16 * rs, hyaw=-12 * rs,
+                      Rz=0.14 + 0.24 * rs + 0.02 * dr, twist=22 * rs, hyaw=-10 * rs,
                       FLx=0.12, FRx=-0.10)
         else:
             ap = anim.breathe(dict(ap, ikL=1.0, Lx=0.16, Ly=0.18, Lz=0.10, Rf=10, Re=20), t, 0.6)
             ap.update(stand)
-        Am = C @ T(-0.06, 0.10, fz)
+        Am = C @ T(-0.12, 0.11, fz)
         ap.update(x=Am.translation.x, y=Am.translation.y, z=Am.translation.z)
         ra = units.Rig(self.bd, ap)
         self.dress(b, ra, player, skin, lin, 1)
