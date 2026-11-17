@@ -225,8 +225,8 @@ scale 2 about 700 MiB. Over the 150 MiB wanted for units, so:
 2. **One look per unit kind**: no age costumes in the new art unless a
    kind needs one to be told apart (the rule already makes one set enough
    for every age). Saves about 50 MiB.
-3. **Decay from the death's last frame**. Built; it takes effect with the
-   units' next export. A unit's manifest says `decay: Synth`: the `decay`
+3. **Decay from the death's last frame**. Built, and in effect: the units
+   are exported this way. A unit's manifest says `decay: Synth`: the `decay`
    animation stays in its list with the old set's timing (so
    `check_set.py` and `the_new_units_keep_the_old_units_timing` compare
    the same list), but the sheet has no rows for it. The view draws decay
