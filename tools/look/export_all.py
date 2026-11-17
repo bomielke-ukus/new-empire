@@ -52,7 +52,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-MODULES = ("greek", "egyptian", "mesopotamian", "asian", "nature", "fx", "units",
+MODULES = ("greek", "egyptian", "mesopotamian", "asian", "nature", "fx", "fx_combat", "units",
            "units_foot", "units_naval", "units_mounted")
 KEYS = {"func", "cls", "tiles", "kwargs", "fit", "model_tiles", "stages", "anims", "sun_angle",
         "samples", "fires", "timing", "scale"}

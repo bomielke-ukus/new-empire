@@ -11,6 +11,7 @@ use sim::{kinds, EntityId, Event, KindId, Replay, ReplayError, Simulation, Task,
 
 use crate::hud::{BOTTOM_PANEL, TOP_BAR};
 use crate::minimap::Mark;
+use crate::sprites::CombatFx;
 use crate::{fog, fx_to_f32, iso, palette, Atlas, Camera, Scene, SpriteInstance};
 
 /// The spark lasts this long: 200 ms.
@@ -291,6 +292,13 @@ impl CombatFeedback {
             }
             let (x, y) = tile(hit.pos);
             let (gx, gy) = ground((x, y));
+            // With the new art, its own burst (`docs/look/atmosphere.md`).
+            if let Some(f) = atlas.combat_fx(CombatFx::Spark, age as u32) {
+                let mut s = crate::scene::overlay(f, gx, gy - 24.0, 0, x + y + 0.8, u32::MAX);
+                s.light = fog::VISIBLE;
+                scene.sprites.push(s);
+                continue;
+            }
             let radius = 3.0 + age as f32;
             for (dx, dy) in [(radius, 0.0), (-radius, 0.0), (0.0, radius), (0.0, -radius)] {
                 mote(
@@ -324,6 +332,37 @@ impl CombatFeedback {
             let (gx, gy) = ground(p.pos);
             let (sx, sy) = iso::direction(p.dir.0, p.dir.1);
             let depth = p.pos.0 + p.pos.1 + 0.9;
+            // With the new art, puffs of dust (`docs/look/atmosphere.md`):
+            // the frames played over the puff's life, a ring of them for a
+            // building, wider with its footprint.
+            let frames = atlas.combat_fx_frames(CombatFx::Dust);
+            if frames > 0 {
+                let index = (t * frames as f32) as u32;
+                let Some(f) = atlas.combat_fx(CombatFx::Dust, index) else {
+                    continue;
+                };
+                let mut puff = |x: f32, y: f32, scale: f32| {
+                    let mut s = crate::scene::overlay(f, x, y, 0, depth, u32::MAX);
+                    let (cx, by) = (s.x + s.w * 0.5, s.y + s.h);
+                    s.w = (s.w * scale).round();
+                    s.h = (s.h * scale).round();
+                    s.x = (cx - s.w * 0.5).round();
+                    s.y = (by - s.h).round();
+                    scene.sprites.push(s);
+                };
+                match p.kind {
+                    PuffKind::Kill => puff(gx + sx * 6.0, gy + sy * 6.0, 1.0),
+                    PuffKind::Hammer => puff(gx, gy - 6.0, 0.6),
+                    PuffKind::Collapse(fp) => {
+                        let r = f32::from(fp) * 16.0;
+                        for k in 0..6 {
+                            let a = k as f32 / 6.0 * std::f32::consts::TAU;
+                            puff(gx + a.cos() * r, gy + a.sin() * r * 0.5, 1.6);
+                        }
+                    }
+                }
+                continue;
+            }
             match p.kind {
                 PuffKind::Kill => {
                     for k in 0..5 {

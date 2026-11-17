@@ -64,6 +64,29 @@ pub const FX_SETS: [&str; 5] = [
     "fx_flag",
 ];
 
+/// The new look's combat feedback and small life
+/// (`docs/look/atmosphere.md`, `tools/look/fx_combat.py`): the set
+/// `FX_COMBAT_SETS[i]` is filed under `FX_COMBAT + i`. Pictures only.
+pub const FX_COMBAT: KindId = 63_720;
+/// The combat effects' sets, by [`CombatFx`].
+pub const FX_COMBAT_SETS: [&str; 5] = ["fx_arrow", "fx_stone", "fx_spark", "fx_dust", "fx_birds"];
+
+/// A combat effect or a touch of life, drawn from its colour set's frames
+/// by number.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum CombatFx {
+    /// An arrow in flight: frame `k` flies toward facing `k`.
+    Arrow = 0,
+    /// A stone in flight, tumbling.
+    Stone = 1,
+    /// Where a blow lands.
+    Spark = 2,
+    /// A puff of dust.
+    Dust = 3,
+    /// A few birds far above.
+    Birds = 4,
+}
+
 /// An effect drawn at an attachment point: a looping colour set of its own.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Effect {
@@ -482,6 +505,28 @@ impl Atlas {
     pub fn effect(&self, effect: Effect, time_ms: u32) -> Option<&Frame> {
         self.frame_at(FX + effect as KindId, 0, Anim::Idle, time_ms)
             .map(|(f, _)| f)
+    }
+
+    /// Frame `index` of a combat effect's set (`docs/look/atmosphere.md`),
+    /// if the set is loaded: wrapping for the loops, the last held for the
+    /// rest.
+    pub fn combat_fx(&self, fx: CombatFx, index: u32) -> Option<&Frame> {
+        let kind = FX_COMBAT + fx as KindId;
+        let info = self.anim_info(kind, Anim::Idle)?;
+        let n = info.frames.max(1);
+        let i = if info.loops {
+            index % n
+        } else {
+            index.min(n - 1)
+        };
+        self.frame_at(kind, 0, Anim::Idle, i * info.frame_ms)
+            .map(|(f, _)| f)
+    }
+
+    /// How many frames a combat effect's set has: 0 if it is not loaded.
+    pub fn combat_fx_frames(&self, fx: CombatFx) -> u32 {
+        self.anim_info(FX_COMBAT + fx as KindId, Anim::Idle)
+            .map_or(0, |a| a.frames)
     }
 
     /// Timing of an animation, if the kind has it.
@@ -2153,6 +2198,12 @@ pub fn fx_id_for_set(name: &str) -> Option<KindId> {
         .iter()
         .position(|&n| n == name)
         .map(|i| FX + i as KindId)
+        .or_else(|| {
+            FX_COMBAT_SETS
+                .iter()
+                .position(|&n| n == name)
+                .map(|i| FX_COMBAT + i as KindId)
+        })
 }
 
 /// A well-mixed hash of a tile and a salt, for picking a tree's look (and

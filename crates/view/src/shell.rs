@@ -322,6 +322,8 @@ pub enum ShellAction {
     PlayerSymbols(i32),
     /// Settings: the new art on or off, from the next start.
     ToggleNewArt,
+    /// Settings: the new art's atmosphere on or off, at once.
+    ToggleAtmosphere,
     /// Title and briefing: the campaigns screen.
     Campaigns,
     /// Campaigns: the briefing of a campaign's scenario.
@@ -1249,6 +1251,19 @@ pub fn settings_screen(
         false,
         1.0,
     );
+    // The new art's atmosphere (`docs/look/atmosphere.md`), off for a slow
+    // machine: only with the new art, which it belongs to.
+    if settings.new_art {
+        row(
+            &mut s,
+            ay + ROW_H,
+            audio,
+            "ATMOSPHERE",
+            if settings.atmosphere { "ON" } else { "OFF" },
+            (ShellAction::ToggleAtmosphere, "-"),
+            (ShellAction::ToggleAtmosphere, "+", true),
+        );
+    }
     ry = row(
         &mut s,
         ry,
@@ -2100,6 +2115,18 @@ mod tests {
         assert!(find(&plain, ShellAction::PlayerSymbols(1)).enabled);
         // The new art, from the next start.
         assert!(find(&plain, ShellAction::ToggleNewArt).enabled);
+        // The atmosphere belongs to the new art: its row only with it.
+        assert!(!plain
+            .buttons
+            .iter()
+            .any(|b| b.action == ShellAction::ToggleAtmosphere));
+        let look = Settings {
+            new_art: true,
+            ..Settings::default()
+        };
+        let with = settings_screen(&atlas, &input(), &look, SettingsPage::Keys, None, None);
+        assert!(find(&with, ShellAction::ToggleAtmosphere).enabled);
+        assert!(inside(&with, &input()));
         for c in Control::ALL {
             assert!(find(&plain, ShellAction::Rebind(c)).enabled, "{c:?}");
         }

@@ -675,6 +675,28 @@ const SCENES: &[Scene] = &[
         ],
     },
     Scene {
+        // The same battle without the new art's atmosphere (`--atmo 0`,
+        // `docs/look/atmosphere.md`): the fog black and dimmed, the map's
+        // edge cut, no clouds, no grade, as it was drawn before it.
+        name: "look-battle-flat",
+        args: &[
+            "--seed",
+            "1",
+            "--scenario",
+            "battle",
+            "--ticks",
+            "140",
+            "--look",
+            "1",
+            "--atmo",
+            "0",
+            "--width",
+            "960",
+            "--height",
+            "540",
+        ],
+    },
+    Scene {
         // The new art's ground zoomed out: the textures read from their
         // smaller levels, not shimmering.
         name: "look-zoomed-out",

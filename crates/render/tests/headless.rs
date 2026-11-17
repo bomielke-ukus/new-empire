@@ -572,3 +572,244 @@ fn the_skinned_hud_draws_as_the_rasteriser_draws_it() {
     assert_eq!(far, 0, "{far} pixels differ by more than 3 (worst {worst})");
     assert!(mean < 1.0, "mean channel delta {mean:.2}");
 }
+
+/// The atmosphere (`docs/look/atmosphere.md`) drawn by the GPU looks as
+/// the software rasteriser draws it: the backdrop past the map's edge, the
+/// haze over ground never seen with its feathered edge, the memory of
+/// ground seen once, the cloud shadows half a minute in, the glints on the
+/// deep water and the grade, on the ground and on world sprites lit and
+/// remembered; and a UI sprite over it all is drawn as it is without the
+/// atmosphere, ungraded.
+#[test]
+fn the_atmosphere_draws_as_the_rasteriser_draws_it() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let art = view::ground::GroundArt::load(
+        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/look/terrain"),
+    )
+    .unwrap();
+    let mut map = sim::TileMap::new(16, 16);
+    for y in 0..16 {
+        for x in 0..16 {
+            let t = match x + y / 3 {
+                0..=4 => sim::Terrain::DeepWater,
+                5..=6 => sim::Terrain::ShallowWater,
+                7..=8 => sim::Terrain::Sand,
+                9..=11 => sim::Terrain::Grass,
+                _ => sim::Terrain::ForestFloor,
+            };
+            map.set_terrain(x, y, t);
+        }
+    }
+    for (x, y) in [(10, 6), (11, 6), (10, 7), (11, 7)] {
+        map.set_corner(x, y, 1);
+    }
+    // Never seen past column 12; seen once from 6 to 11; in sight now
+    // west of 6, the water and the map's western edges.
+    let mut fog = sim::Fog::new(16, 16);
+    for y in 0..16 {
+        for x in 0..12 {
+            fog.see(x, y);
+        }
+    }
+    fog.clear_visible();
+    for y in 0..16 {
+        for x in 0..6 {
+            fog.see(x, y);
+        }
+    }
+    let lights = FogLights::from_fog(&fog);
+    // Two colour frames, one in sight and one remembered, and the same
+    // frame on the screen as UI.
+    let dir = std::env::temp_dir().join(format!("ne-headless-atmo-{}", std::process::id()));
+    let set = dir.join("house");
+    std::fs::create_dir_all(&set).unwrap();
+    let px: [[u8; 4]; 4] = [
+        [230, 225, 215, 255],
+        [180, 60, 40, 255],
+        [40, 40, 60, 255],
+        [90, 140, 200, 255],
+    ];
+    let png = |name: &str, colour: png::ColorType, data: &[u8]| {
+        let file = std::fs::File::create(set.join(name)).unwrap();
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), 2, 2);
+        enc.set_color(colour);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(data).unwrap();
+    };
+    png("house.png", png::ColorType::Rgba, px.as_flattened());
+    png("house.mask.png", png::ColorType::Grayscale, &[0, 0, 0, 255]);
+    std::fs::write(
+        set.join("house.ron"),
+        r#"SpriteSet(name: "house", class: SmallBuilding, scale: 1, palette: "rgba",
+            sheet: "house.png", anchor: (1, 2),
+            animations: [(name: "idle", frames: 1, frame_ms: 100, loops: true, impact: None)],
+            colour: true, mask: Some("house.mask.png"), frame: Some((2, 2)))"#,
+    )
+    .unwrap();
+    let sheet = view::sheets::Sheet::load(&set.join("house.ron")).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    let atlas = Atlas::with_sheets(&[sheet]);
+    let (f, _) = atlas.frame(sim::kinds::HOUSE, 0).unwrap();
+
+    let (w, h) = (360u32, 240u32);
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    let mut renderer = Renderer::new(&device, &queue, format, &atlas);
+    renderer.upload_ground_art(&device, &queue, &art);
+    renderer.upload_map(&device, &queue, &map);
+    renderer.upload_fog(&device, &queue, &lights);
+    renderer.set_atmosphere(true);
+    assert!(renderer.atmosphere());
+    let time = 31.5;
+    renderer.set_ground_time(time);
+    let mut camera = Camera::new(16, 16, (w as f32, h as f32));
+    camera.set_zoom_index(1);
+    camera.look_at_tile(6.0, 6.0);
+    let sprite = |x: f32, y: f32, light: u8, screen: bool| view::SpriteInstance {
+        x,
+        y,
+        w: 24.0,
+        h: 24.0,
+        page: f.page,
+        u: f.x,
+        v: f.y,
+        uw: f.w,
+        vh: f.h,
+        row: 1,
+        flip: false,
+        depth: 0.0,
+        slot: u32::MAX,
+        screen,
+        light,
+    };
+    let (ax, ay) = view::iso::project(3.0, 6.0, 0.0);
+    let (bx, by) = view::iso::project(8.0, 6.0, 0.0);
+    let scene = Scene {
+        sprites: vec![
+            sprite(ax - 12.0, ay - 24.0, 255, false),
+            sprite(bx - 12.0, by - 24.0, view::fog::EXPLORED, false),
+        ],
+        ui: vec![sprite(8.0, 8.0, 255, true)],
+    };
+    let gpu = {
+        let target = target(&device, format, w, h);
+        renderer.render(
+            &device,
+            &queue,
+            &target.create_view(&Default::default()),
+            &camera,
+            &scene,
+            None,
+        );
+        read_back(&device, &queue, &target, w, h)
+    };
+    let types = view::ground::TypeMap::from_map(&map);
+    let ground = view::ground::Ground {
+        art: &art,
+        types: &types,
+    };
+    let mut cpu = view::raster::Image::new(w, h, [0, 0, 0, 255]);
+    view::raster::draw_backdrop(&mut cpu, &camera, Some(&lights), ground, time);
+    view::raster::draw_ground_with(
+        &mut cpu,
+        &camera,
+        &view::terrain::build_all_textured(&map),
+        Some(&lights),
+        ground,
+        time,
+        true,
+    );
+    let pal = view::palette::texture();
+    let atmo = view::raster::Atmosphere {
+        noise: &art.noise,
+        time,
+    };
+    view::raster::draw_sprites_with(&mut cpu, &camera, &atlas, &pal, &scene.sprites, Some(atmo));
+    view::raster::draw_sprites(&mut cpu, &camera, &atlas, &pal, &scene.ui);
+    let (mut far, mut sum) = (0usize, 0u64);
+    for y in 0..h {
+        for x in 0..w {
+            let g = gpu[(y * w + x) as usize];
+            let c = cpu.get(x as i32, y as i32);
+            let d = (0..3)
+                .map(|k| (g[k] as i32 - c[k] as i32).unsigned_abs())
+                .max()
+                .unwrap();
+            sum += d as u64;
+            far += usize::from(d > 6);
+        }
+    }
+    let total = (w * h) as usize;
+    // For a look: `NE_HEADLESS_OUT=dir` writes both frames there.
+    if let Some(out) = std::env::var_os("NE_HEADLESS_OUT") {
+        let out = std::path::PathBuf::from(out);
+        for (name, px) in [
+            ("atmosphere_gpu.png", gpu.clone()),
+            ("atmosphere_cpu.png", cpu.pixels.clone()),
+        ] {
+            let file = std::fs::File::create(out.join(name)).unwrap();
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.write_header()
+                .unwrap()
+                .write_image_data(px.as_flattened())
+                .unwrap();
+        }
+    }
+    let mean = sum as f64 / total as f64;
+    eprintln!("atmosphere: mean channel delta {mean:.2}, {far} of {total} over 6");
+    assert!(mean < 1.5, "mean channel delta {mean:.2}");
+    assert!(
+        far * 100 < total,
+        "{far} of {total} pixels differ by more than 6"
+    );
+    // The picture has all of it: haze (never seen), the backdrop past the
+    // western edge, memory and sight.
+    let at = |x: u32, y: u32| gpu[(y * w + x) as usize];
+    let (sx, sy) = view::iso::project(12.5, 8.5, 0.0);
+    let (hx, hy) = camera.to_window(sx, sy);
+    let haze = at(hx as u32, hy as u32);
+    assert!(haze[2] > haze[1] && haze[0] < 70, "haze: {haze:?}");
+    // The UI sprite, texel for texel as without the atmosphere.
+    let mut plain = view::raster::Image::new(w, h, [0, 0, 0, 255]);
+    view::raster::draw_sprites(&mut plain, &camera, &atlas, &pal, &scene.ui);
+    for (x, y) in [(14, 14), (26, 14), (14, 26), (26, 26)] {
+        let (g, p) = (at(x, y), plain.get(x as i32, y as i32));
+        assert!(
+            (0..3).all(|k| (g[k] as i32 - p[k] as i32).abs() <= 1),
+            "UI at {x},{y}: {g:?} vs {p:?}"
+        );
+    }
+    // And off, the same renderer draws the ground as it did.
+    renderer.set_atmosphere(false);
+    let off = {
+        let target = target(&device, format, w, h);
+        renderer.render(
+            &device,
+            &queue,
+            &target.create_view(&Default::default()),
+            &camera,
+            &Scene::default(),
+            None,
+        );
+        read_back(&device, &queue, &target, w, h)
+    };
+    let mut plain = view::raster::Image::new(w, h, [0, 0, 0, 255]);
+    view::raster::draw_ground(
+        &mut plain,
+        &camera,
+        &view::terrain::build_all_textured(&map),
+        Some(&lights),
+        ground,
+        time,
+    );
+    let (hx, hy) = (hx as i32, hy as i32);
+    assert_eq!(
+        plain.get(hx, hy),
+        [0, 0, 0, 255],
+        "never seen is black without it"
+    );
+    assert!(off[(hy as u32 * w + hx as u32) as usize][..3] == [0, 0, 0]);
+}

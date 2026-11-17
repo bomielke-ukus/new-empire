@@ -1235,6 +1235,15 @@ mod tests {
             get("fx_flag").mask.is_some(),
             "the flag takes its owner's colour"
         );
+        // The combat feedback and life (`docs/look/atmosphere.md`): the
+        // arrow a frame a facing, fletched in its owner's colour.
+        for name in crate::sprites::FX_COMBAT_SETS {
+            let m = get(name);
+            assert!(m.colour && m.animations.len() == 1, "{name}");
+            assert!(m.animations[0].frames >= 4, "{name}");
+        }
+        assert_eq!(get("fx_arrow").animations[0].frames, 8);
+        assert!(get("fx_arrow").mask.is_some());
     }
 
     /// A unit's colour set (`docs/look/units.md`) plays exactly what the

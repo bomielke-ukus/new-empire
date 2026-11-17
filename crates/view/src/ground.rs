@@ -234,16 +234,7 @@ impl GroundArt {
     /// centres and wrapping, 0 to 1: what a linear sampler returns.
     #[inline]
     pub fn noise_at(&self, u: f32, v: f32) -> f32 {
-        let n = NOISE_SIZE as i32;
-        let (u, v) = (u - 0.5, v - 0.5);
-        let (u0, v0) = (u.floor(), v.floor());
-        let (fu, fv) = (u - u0, v - v0);
-        let (x0, y0) = ((u0 as i32).rem_euclid(n), (v0 as i32).rem_euclid(n));
-        let (x1, y1) = ((x0 + 1) % n, (y0 + 1) % n);
-        let at = |x: i32, y: i32| self.noise[(y * n + x) as usize] as f32;
-        let top = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * fu;
-        let bottom = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * fu;
-        (top + (bottom - top) * fv) / 255.0
+        noise_at(&self.noise, u, v)
     }
 
     /// How far the noise pushes the blend's sample point at world `(x, y)`,
@@ -275,6 +266,23 @@ impl GroundArt {
             a[2] + (b[2] - a[2]) * f,
         ]
     }
+}
+
+/// The noise texels `noise` ([`NOISE_SIZE`] a side) at texel position
+/// `(u, v)`, bilinear between texel centres and wrapping, 0 to 1: what a
+/// linear sampler returns.
+#[inline]
+pub fn noise_at(noise: &[u8], u: f32, v: f32) -> f32 {
+    let n = NOISE_SIZE as i32;
+    let (u, v) = (u - 0.5, v - 0.5);
+    let (u0, v0) = (u.floor(), v.floor());
+    let (fu, fv) = (u - u0, v - v0);
+    let (x0, y0) = ((u0 as i32).rem_euclid(n), (v0 as i32).rem_euclid(n));
+    let (x1, y1) = ((x0 + 1) % n, (y0 + 1) % n);
+    let at = |x: i32, y: i32| noise[(y * n + x) as usize] as f32;
+    let top = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * fu;
+    let bottom = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * fu;
+    (top + (bottom - top) * fv) / 255.0
 }
 
 /// A level of `size` a side at texture coordinates `(u, v)`, bilinear
@@ -346,6 +354,12 @@ impl Ground<'_> {
     /// [`wrap_time`]), its textures read at `lod`, sRGB 0 to 1, before the
     /// slope's shade and the fog's light.
     pub fn colour(&self, x: f32, y: f32, time: f32, lod: f32) -> [f32; 3] {
+        self.colour_deep(x, y, time, lod).0
+    }
+
+    /// [`Ground::colour`], and how much of the blend there is deep water,
+    /// which the atmosphere's glints sparkle on (`crate::atmosphere`).
+    pub fn colour_deep(&self, x: f32, y: f32, time: f32, lod: f32) -> ([f32; 3], f32) {
         let b = self.blend(x, y);
         // The texture at the pixel's own position, not the pushed one: the
         // wobble moves the edge between types, not the types themselves.
@@ -392,7 +406,7 @@ impl Ground<'_> {
                 col[k] += (fc - col[k]) * f;
             }
         }
-        col
+        (col, b.weight(Terrain::DeepWater))
     }
 
     /// The foam at world `(x, y)` as `(alpha, edge)`, where the blend there

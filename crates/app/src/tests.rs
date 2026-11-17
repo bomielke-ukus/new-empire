@@ -3334,6 +3334,20 @@ fn the_new_art_is_kept_at_once_and_drawn_from_the_next_start() {
     assert!(!app.settings.new_art);
 }
 
+/// The new art's atmosphere (`docs/look/atmosphere.md`) is on out of the
+/// box and kept in the file at once when turned off, for a slow machine.
+#[test]
+fn the_atmosphere_is_on_by_default_and_kept_when_turned_off() {
+    let mut app = app();
+    assert!(app.settings.atmosphere);
+    app.shell_action(ShellAction::ToggleAtmosphere);
+    assert!(!app.settings.atmosphere);
+    let text = std::fs::read_to_string(&app.settings_path).unwrap();
+    assert!(text.contains("atmosphere: false"), "{text}");
+    app.shell_action(ShellAction::ToggleAtmosphere);
+    assert!(app.settings.atmosphere);
+}
+
 /// With the new art on, a match's atlas holds the units its sides can have
 /// and no others (`docs/look/units.md`, "Memory"); one that turns up
 /// anyway (a cheat's spawn, a scenario's trigger) has its colour set loaded

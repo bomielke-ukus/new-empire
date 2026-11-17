@@ -55,6 +55,10 @@ struct VsOut {
     @location(0) world: vec2<f32>,
     // The slope's shade times the fog's light.
     @location(1) light: f32,
+    // The fog's light alone, and the slope's shade alone: the atmosphere
+    // tones by the one and scales by the other.
+    @location(2) fog: f32,
+    @location(3) shade: f32,
 };
 
 @vertex
@@ -64,6 +68,8 @@ fn vs_main(in: VsIn) -> VsOut {
     let last = textureDimensions(fog) - vec2<u32>(1u, 1u);
     let light = textureLoad(fog, vec2<i32>(min(in.corner, last)), 0).r;
     out.light = in.colour.r * (255.0 / SHADE_ONE) * light;
+    out.fog = light;
+    out.shade = in.colour.r * (255.0 / SHADE_ONE);
     out.world = vec2<f32>(in.corner);
     return out;
 }
@@ -97,18 +103,9 @@ fn water_at(p: vec2<f32>) -> f32 {
     return w;
 }
 
-@fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let w = in.world;
-    // `view::ground::lod`: from how the world moves a pixel across and a
-    // pixel down, constant over the triangle. Before anything returns, so
-    // the derivatives are taken in uniform control flow.
-    let dx = length(dpdx(w)) * TEX_PER_TILE;
-    let dy = length(dpdy(w)) * TEX_PER_TILE;
-    let lod = clamp(log2(max(max(dx, dy) * 0.70710677, 1e-6)), 0.0, LAST_LEVEL);
-    if (in.light <= 0.0) {
-        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
-    }
+// `view::ground::Ground::colour_deep`: the ground's colour at world `w`,
+// its textures read at `lod`, and how much of the blend is deep water.
+fn ground_colour(w: vec2<f32>, lod: f32) -> vec4<f32> {
     let time = cam.c0.w;
 
     // The four tile centres around the point the noise pushes this one
@@ -152,6 +149,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let tint = vec3<f32>(l + m * 0.02, l, l - m * 0.03);
     var col = vec3<f32>(0.0);
     var water = 0.0;
+    var deep = 0.0;
     for (var i = 0; i < 4; i++) {
         if (wt[i] <= 0.0) {
             continue;
@@ -164,6 +162,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             let p2 = textureSampleLevel(ground, samp, uv + DRIFT_B * s, layer, lod).rgb;
             c = (p1 + p2) * 0.5;
             water += wt[i];
+            if (t[i] == 5u) {
+                deep += wt[i];
+            }
         } else {
             c = textureSampleLevel(ground, samp, uv, layer, lod).rgb * tint;
         }
@@ -199,5 +200,180 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             col += (mix(FOAM_CORE, FOAM_EDGE, edge) - col) * alpha;
         }
     }
-    return vec4<f32>(col * in.light, 1.0);
+    return vec4<f32>(col, deep);
+}
+
+// The atmosphere's sums that read the noise (`view::atmosphere`).
+const HAZE_DARK: vec3<f32> = vec3<f32>(0.095, 0.105, 0.15);
+const HAZE_LIGHT: vec3<f32> = vec3<f32>(0.145, 0.14, 0.165);
+const HAZE_SCALE_A: f32 = 0.4;
+const HAZE_SCALE_B: f32 = 1.3;
+const FEATHER: f32 = 0.4;
+const FEATHER_SCALE_A: f32 = 2.5;
+const FEATHER_SCALE_B: f32 = 7.0;
+const KNOWN_RAMP: f32 = 0.5;
+const CLOUD_SCALE_A: f32 = 0.25;
+const CLOUD_SCALE_B: f32 = 0.2;
+const CLOUD_DRIFT: f32 = 0.5;
+const CLOUD_DEPTH: f32 = 0.15;
+const CLOUD_LO: f32 = 0.54;
+const CLOUD_HI: f32 = 0.68;
+const GLINT_SCALE_A: f32 = 13.7;
+const GLINT_SCALE_B: f32 = 9.3;
+const GLINT_DRIFT: vec2<f32> = vec2<f32>(2.0, -1.5);
+const GLINT_MAX: f32 = 0.55;
+const EDGE_FADE: f32 = 1.6;
+
+// `atmosphere::haze`.
+fn haze(w: vec2<f32>) -> vec3<f32> {
+    let a = HAZE_SCALE_A * NOISE_PER_TILE;
+    let b = HAZE_SCALE_B * NOISE_PER_TILE;
+    let n = noise_at(vec2<f32>(w.x * a + 59.0, w.y * a + 173.0)) * 0.7
+        + noise_at(vec2<f32>(w.y * b + 211.0, w.x * b + 7.0)) * 0.3;
+    return mix(HAZE_DARK, HAZE_LIGHT, smoothstep(0.3, 0.7, n));
+}
+
+// `atmosphere::feather`.
+fn feather(w: vec2<f32>) -> f32 {
+    let a = FEATHER_SCALE_A * NOISE_PER_TILE;
+    let b = FEATHER_SCALE_B * NOISE_PER_TILE;
+    let n = noise_at(vec2<f32>(w.x * a + 31.0, w.y * a + 97.0)) * 0.65
+        + noise_at(vec2<f32>(w.y * b + 143.0, w.x * b + 61.0)) * 0.35;
+    return n * FEATHER;
+}
+
+// `atmosphere::fog_tone`: the haze where the light is zero, the memory
+// where it is half, the colour where it is full, the haze's edge
+// feathered onto known ground only.
+fn fog_tone(c: vec3<f32>, light: f32, w: vec2<f32>) -> vec3<f32> {
+    if (light <= 0.0) {
+        return haze(w);
+    }
+    let seen = seen_at(c, light);
+    if (light >= KNOWN_RAMP + FEATHER) {
+        return seen;
+    }
+    let known = smoothstep(0.0, KNOWN_RAMP, light - feather(w));
+    return mix(haze(w), seen, known);
+}
+
+// `atmosphere::cloud`, as it falls at light `light` (`cloud_in`).
+fn cloud(w: vec2<f32>, light: f32) -> f32 {
+    let a = CLOUD_SCALE_A * NOISE_PER_TILE;
+    let b = CLOUD_SCALE_B * NOISE_PER_TILE;
+    let drift = CLOUD_DRIFT * cam.c0.w;
+    let n = noise_at(vec2<f32>(w.x * a + drift + 13.0, w.y * a + 71.0)) * 0.55
+        + noise_at(vec2<f32>(w.y * b + 5.0, w.x * b + drift + 191.0)) * 0.45;
+    let c = 1.0 - CLOUD_DEPTH * smoothstep(CLOUD_LO, CLOUD_HI, n);
+    return 1.0 - (1.0 - c) * smoothstep(0.5, 1.0, light);
+}
+
+// `atmosphere::glint`.
+fn glint(w: vec2<f32>, deep: f32) -> f32 {
+    if (deep <= 0.0) {
+        return 0.0;
+    }
+    let a = GLINT_SCALE_A * NOISE_PER_TILE;
+    let b = GLINT_SCALE_B * NOISE_PER_TILE;
+    let time = cam.c0.w;
+    let f = noise_at(vec2<f32>(w.x * a + GLINT_DRIFT.x * time + 3.0, w.y * a + GLINT_DRIFT.y * time + 89.0));
+    let g = noise_at(vec2<f32>(w.y * b - GLINT_DRIFT.y * time + 151.0, w.x * b + GLINT_DRIFT.x * time + 47.0));
+    let sparse = noise_at(vec2<f32>(w.y * (NOISE_PER_TILE * 1.1) + 17.0, w.x * (NOISE_PER_TILE * 1.1) + 233.0));
+    return smoothstep(0.8, 0.9, f) * smoothstep(0.78, 0.88, g) * smoothstep(0.5, 0.75, sparse)
+        * deep * GLINT_MAX;
+}
+
+// The ground at world `w` (its colour and deep water from
+// `ground_colour`), in the atmosphere: glints, the slope's `shade`, the
+// cloud, the fog's tone at `light` and the grade at window pixel `px`.
+fn atmosphere(g: vec4<f32>, w: vec2<f32>, shade: f32, light: f32, px: vec2<f32>) -> vec3<f32> {
+    var c = g.rgb;
+    let gl = glint(w, g.a);
+    c = (c + (vec3<f32>(1.0) - c) * gl) * shade * cloud(w, light);
+    return grade(fog_tone(c, light, w), px);
+}
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let w = in.world;
+    // `view::ground::lod`: from how the world moves a pixel across and a
+    // pixel down, constant over the triangle. Before anything returns, so
+    // the derivatives are taken in uniform control flow.
+    let dx = length(dpdx(w)) * TEX_PER_TILE;
+    let dy = length(dpdy(w)) * TEX_PER_TILE;
+    let lod = clamp(log2(max(max(dx, dy) * 0.70710677, 1e-6)), 0.0, LAST_LEVEL);
+    if (atmosphere_on()) {
+        if (in.fog <= 0.0) {
+            return vec4<f32>(grade(haze(w), in.clip.xy), 1.0);
+        }
+        return vec4<f32>(atmosphere(ground_colour(w, lod), w, in.shade, in.fog, in.clip.xy), 1.0);
+    }
+    if (in.light <= 0.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    return vec4<f32>(ground_colour(w, lod).rgb * in.light, 1.0);
+}
+
+// The backdrop (`view::raster::draw_backdrop`), drawn first under the
+// ground in the atmosphere: a triangle over the whole window. On the map
+// the haze; past its edge the ground going on as the map ends, in the
+// fog's light at the nearest point of the edge, fading into the haze.
+
+struct BackOut {
+    @builtin(position) clip: vec4<f32>,
+};
+
+@vertex
+fn vs_backdrop(@builtin(vertex_index) vi: u32) -> BackOut {
+    var corners = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0),
+    );
+    var out: BackOut;
+    out.clip = vec4<f32>(corners[vi], 0.0, 1.0);
+    return out;
+}
+
+// The fog's light at a point on the map, its corners' bilinear.
+fn fog_bilinear(p: vec2<f32>) -> f32 {
+    let last = vec2<i32>(textureDimensions(fog)) - vec2<i32>(1, 1);
+    let p0 = floor(p);
+    let f = p - p0;
+    let i = vec2<i32>(p0);
+    let a = textureLoad(fog, clamp(i, vec2<i32>(0), last), 0).r;
+    let b = textureLoad(fog, clamp(i + vec2<i32>(1, 0), vec2<i32>(0), last), 0).r;
+    let c = textureLoad(fog, clamp(i + vec2<i32>(0, 1), vec2<i32>(0), last), 0).r;
+    let d = textureLoad(fog, clamp(i + vec2<i32>(1, 1), vec2<i32>(0), last), 0).r;
+    let top = a + (b - a) * f.x;
+    let bottom = c + (d - c) * f.x;
+    return top + (bottom - top) * f.y;
+}
+
+@fragment
+fn fs_backdrop(in: BackOut) -> @location(0) vec4<f32> {
+    let px = in.clip.xy;
+    // Window px -> world-screen px -> the ground plane, in tiles
+    // (`view::Camera::from_window`, `view::iso::unproject`).
+    let ws = (px - cam.c1.xy * 0.5) / cam.c0.z + cam.c0.xy;
+    let a = ws.x / 32.0;
+    let b = ws.y / 16.0;
+    let w = vec2<f32>((a + b) * 0.5, (b - a) * 0.5);
+    let dx = length(dpdx(w)) * TEX_PER_TILE;
+    let dy = length(dpdy(w)) * TEX_PER_TILE;
+    let lod = clamp(log2(max(max(dx, dy) * 0.70710677, 1e-6)), 0.0, LAST_LEVEL);
+    let size = cam.c2.yz;
+    if (w.x >= 0.0 && w.y >= 0.0 && w.x <= size.x && w.y <= size.y) {
+        return vec4<f32>(grade(haze(w), px), 1.0);
+    }
+    let edge = clamp(w, vec2<f32>(0.0), size);
+    // `atmosphere::edge_fade`.
+    let o = max(max(-w, w - size), vec2<f32>(0.0));
+    let dist = length(o);
+    let s = NOISE_PER_TILE * 1.2;
+    let n = noise_at(vec2<f32>(w.x * s + 113.0, w.y * s + 29.0));
+    let fade = 1.0 - smoothstep(0.0, EDGE_FADE, dist * (0.6 + 0.8 * n));
+    let light = fog_bilinear(edge) * fade;
+    if (light <= 0.0) {
+        return vec4<f32>(grade(haze(w), px), 1.0);
+    }
+    return vec4<f32>(atmosphere(ground_colour(w, lod), w, 1.0, light, px), 1.0);
 }

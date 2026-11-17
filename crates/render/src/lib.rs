@@ -5,7 +5,11 @@
 //! textures uploaded, the same diamonds painted from them by the ground
 //! pipeline, `docs/look/ground.md`), sprites (one
 //! instanced draw, palette-indexed or full colour, depth-sorted on the CPU by
-//! `view::Scene`, each in its own light), and UI quads (the minimap). All
+//! `view::Scene`, each in its own light), and UI quads (the minimap). With
+//! the ground's textures and the atmosphere on (`docs/look/atmosphere.md`),
+//! a backdrop pass first paints the haze and the ground past the map's
+//! edge, and the ground and world sprites are toned, shadowed by the
+//! clouds and graded in their own shaders, so the UI is never graded. All
 //! coordinate maths comes from `view`, so what this draws is what
 //! `view::raster` draws.
 
@@ -96,12 +100,21 @@ pub struct Renderer {
     /// sheet is uploaded.
     grain: wgpu::BindGroup,
     ground_pipeline: wgpu::RenderPipeline,
+    /// The atmosphere's backdrop: a full-window triangle under the ground.
+    backdrop_pipeline: wgpu::RenderPipeline,
     ground_bgl: wgpu::BindGroupLayout,
     /// The ground's textures, once uploaded: the terrain is then drawn by
     /// the ground pipeline.
     ground: Option<GroundGpu>,
     /// The ground's clock, seconds (`view::ground::wrap_time`).
     time: f32,
+    /// Whether the atmosphere is wanted (`Renderer::set_atmosphere`); it
+    /// is drawn only with the ground's textures.
+    atmosphere: bool,
+    /// The ground's noise, kept on the CPU for the clouds on the sprites.
+    noise: Vec<u8>,
+    /// The map's size in tiles, for the backdrop.
+    map_size: (f32, f32),
     /// Clear colour.
     pub clear: wgpu::Color,
 }
@@ -130,7 +143,7 @@ impl Renderer {
         // its clock from it too.
         let camera_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera"),
-            size: 32,
+            size: 48,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -260,12 +273,13 @@ impl Renderer {
         });
 
         // Fog lights (R8Unorm, one texel per tile corner): group 1 for the
-        // terrain pipeline, read in the vertex shader.
+        // terrain pipeline, read in the vertex shader (and by the
+        // atmosphere's backdrop in its fragments).
         let fog_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fog"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float { filterable: false },
                     view_dimension: wgpu::TextureViewDimension::D2,
@@ -426,6 +440,29 @@ impl Renderer {
             cache: None,
         });
 
+        // The atmosphere's backdrop: the ground's bind groups, no vertices.
+        let backdrop_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("backdrop"),
+            layout: Some(&ground_layout),
+            vertex: wgpu::VertexState {
+                module: &ground_mod,
+                entry_point: Some("vs_backdrop"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            primitive,
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &ground_mod,
+                entry_point: Some("fs_backdrop"),
+                targets: &terrain_targets,
+                compilation_options: Default::default(),
+            }),
+            multiview: None,
+            cache: None,
+        });
+
         let sprite_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sprites"),
             bind_group_layouts: &[&camera_bgl, &sprite_bgl],
@@ -525,9 +562,13 @@ impl Renderer {
             grain_bgl,
             grain,
             ground_pipeline,
+            backdrop_pipeline,
             ground_bgl,
             ground: None,
             time: 0.0,
+            atmosphere: false,
+            noise: Vec::new(),
+            map_size: (1.0, 1.0),
             clear: wgpu::Color {
                 r: 0.05,
                 g: 0.04,
@@ -644,6 +685,7 @@ impl Renderer {
             view_formats: &[],
         });
         write_texture(queue, &noise, &art.noise, n, n, 1);
+        self.noise = art.noise.clone();
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("ground"),
             address_mode_u: wgpu::AddressMode::Repeat,
@@ -734,6 +776,7 @@ impl Renderer {
     /// chunks, built for the ground's textures if they are uploaded (and
     /// then its types too), else for the flat colours as before.
     pub fn upload_map(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, map: &sim::TileMap) {
+        self.map_size = (map.width().max(1) as f32, map.height().max(1) as f32);
         if self.ground.is_some() {
             self.upload_terrain(device, &view::terrain::build_all_textured(map));
             let types = TypeMap::from_map(map);
@@ -760,6 +803,20 @@ impl Renderer {
     /// smoothly however long the game runs.
     pub fn set_ground_time(&mut self, secs: f32) {
         self.time = secs;
+    }
+
+    /// Whether the frames that follow are drawn in the atmosphere
+    /// (`docs/look/atmosphere.md`): the fog's haze and memory, the ground
+    /// past the map's edge, the cloud shadows, the glints and the grade.
+    /// Only with the ground's textures uploaded; without them, or off,
+    /// frames are drawn exactly as before.
+    pub fn set_atmosphere(&mut self, on: bool) {
+        self.atmosphere = on;
+    }
+
+    /// Whether frames are drawn in the atmosphere now.
+    pub fn atmosphere(&self) -> bool {
+        self.atmosphere && self.ground.is_some()
     }
 
     /// Uploads the ground's grain for the frames that follow.
@@ -837,20 +894,42 @@ impl Renderer {
         minimap_rect: Option<MinimapRect>,
     ) {
         let u = camera.uniform();
-        let cam = [u[0], u[1], u[2], self.time, u[3], u[4], 0.0, 0.0];
+        let atmo = self.atmosphere();
+        let (mw, mh) = self.map_size;
+        let cam = [
+            u[0],
+            u[1],
+            u[2],
+            self.time,
+            u[3],
+            u[4],
+            0.0,
+            0.0,
+            if atmo { 1.0 } else { 0.0 },
+            mw,
+            mh,
+            0.0,
+        ];
         queue.write_buffer(&self.camera_buf, 0, bytemuck::cast_slice(&cam));
 
         // Sprites: cull to the view, then upload.
         let visible = camera.visible_rect();
+        let (noise, time) = (&self.noise, self.time);
         let to_gpu = |s: &view::SpriteInstance| SpriteGpu {
             rect: [s.x, s.y, s.w, s.h],
             uv: [s.u as f32, s.v as f32, s.uw as f32, s.vh as f32],
             // The page rides above the flip bit, the colour bit
-            // (`view::sprites::COLOUR_PAGE`) with it.
+            // (`view::sprites::COLOUR_PAGE`) with it; the cloud on a world
+            // sprite above the screen bit, the same as the rasteriser's.
             misc: [
                 s.row as u32,
                 s.flip as u32 | (s.page as u32) << 1,
-                s.screen as u32,
+                if s.screen || !atmo {
+                    s.screen as u32
+                } else {
+                    let rect = (s.x, s.y, s.w, s.h);
+                    u32::from(view::atmosphere::sprite_cloud(noise, rect, s.light, time)) << 8
+                },
                 s.light as u32,
             ],
         };
@@ -914,6 +993,14 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_bind_group(0, &self.camera_bg, &[]);
+
+            // The atmosphere's backdrop, under everything.
+            if let (true, Some(g)) = (atmo, &self.ground) {
+                pass.set_pipeline(&self.backdrop_pipeline);
+                pass.set_bind_group(1, &self.fog.1, &[]);
+                pass.set_bind_group(2, &g.bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
 
             match &self.ground {
                 Some(g) => {
@@ -1228,6 +1315,12 @@ mod tests {
                 entries.contains(&"vs_main") && entries.contains(&"fs_main"),
                 "{name}: {entries:?}"
             );
+            if name == "ground" {
+                assert!(
+                    entries.contains(&"vs_backdrop") && entries.contains(&"fs_backdrop"),
+                    "{name}: {entries:?}"
+                );
+            }
             if name == "sprites" {
                 // The colour pages and their mask sit beside the indexed
                 // pages and the palette (`docs/look/colour-sets.md`).
@@ -1241,6 +1334,72 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The atmosphere's numbers in the shaders are `view::atmosphere`'s,
+    /// which the software rasteriser draws with.
+    #[test]
+    fn the_shaders_atmosphere_is_the_views() {
+        use view::atmosphere as a;
+        let src = format!("{COMMON}\n{GROUND}");
+        let scalar = |name: &str| -> f32 {
+            let line = src
+                .lines()
+                .find(|l| l.starts_with(&format!("const {name}: f32 = ")))
+                .unwrap_or_else(|| panic!("no {name}"));
+            line.split('=')
+                .nth(1)
+                .unwrap()
+                .trim()
+                .trim_end_matches(';')
+                .parse()
+                .unwrap()
+        };
+        let vec3 = |name: &str| -> [f32; 3] {
+            let line = src
+                .lines()
+                .find(|l| l.starts_with(&format!("const {name}: vec3<f32> = ")))
+                .unwrap_or_else(|| panic!("no {name}"));
+            let inner = line.split('(').nth(1).unwrap().split(')').next().unwrap();
+            let v: Vec<f32> = inner
+                .split(',')
+                .map(|x| x.trim().parse().unwrap())
+                .collect();
+            [v[0], v[1], v[2]]
+        };
+        assert_eq!(vec3("HAZE_DARK"), a::HAZE_DARK);
+        assert_eq!(vec3("HAZE_LIGHT"), a::HAZE_LIGHT);
+        assert_eq!(vec3("MEMORY_TINT"), a::MEMORY_TINT);
+        assert_eq!(vec3("GRADE_WARM"), a::GRADE_WARM);
+        assert_eq!(vec3("GRADE_COOL"), a::GRADE_COOL);
+        for (name, want) in [
+            ("HAZE_SCALE_A", a::HAZE_SCALES[0]),
+            ("HAZE_SCALE_B", a::HAZE_SCALES[1]),
+            ("FEATHER", a::FEATHER),
+            ("FEATHER_SCALE_A", a::FEATHER_SCALES[0]),
+            ("FEATHER_SCALE_B", a::FEATHER_SCALES[1]),
+            ("KNOWN_RAMP", a::KNOWN_RAMP),
+            ("MEMORY_SATURATION", a::MEMORY_SATURATION),
+            ("CLOUD_SCALE_A", a::CLOUD_SCALES[0]),
+            ("CLOUD_SCALE_B", a::CLOUD_SCALES[1]),
+            ("CLOUD_DRIFT", a::CLOUD_DRIFT),
+            ("CLOUD_DEPTH", a::CLOUD_DEPTH),
+            ("CLOUD_LO", a::CLOUD_EDGES[0]),
+            ("CLOUD_HI", a::CLOUD_EDGES[1]),
+            ("GLINT_SCALE_A", a::GLINT_SCALES[0]),
+            ("GLINT_SCALE_B", a::GLINT_SCALES[1]),
+            ("GLINT_MAX", a::GLINT_MAX),
+            ("GRADE_SATURATION", a::GRADE_SATURATION),
+            ("VIGNETTE", a::VIGNETTE),
+            ("EDGE_FADE", a::EDGE_FADE),
+        ] {
+            assert_eq!(scalar(name), want, "{name}");
+        }
+        assert!(src.contains(&format!(
+            "const GLINT_DRIFT: vec2<f32> = vec2<f32>({:?}, {:?});",
+            a::GLINT_DRIFT[0],
+            a::GLINT_DRIFT[1]
+        )));
     }
 
     #[test]

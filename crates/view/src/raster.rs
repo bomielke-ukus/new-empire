@@ -6,6 +6,7 @@
 //! It exists so a frame can be checked as a PNG without a GPU, and so the
 //! renderer has a reference to match.
 
+use crate::atmosphere;
 use crate::camera::Camera;
 use crate::detail::Detail;
 use crate::fog::FogLights;
@@ -125,7 +126,26 @@ pub fn draw_ground(
     ground: Ground,
     time: f32,
 ) {
+    draw_ground_with(img, cam, chunks, fog, ground, time, false);
+}
+
+/// [`draw_ground`], with the atmosphere (`docs/look/atmosphere.md`) when
+/// `atmosphere`: glints on the deep water, the cloud shadows, the fog's
+/// haze and memory in place of its plain dimming, and the grade, as the
+/// ground shader does them ([`crate::atmosphere`]). Without it, exactly
+/// [`draw_ground`].
+pub fn draw_ground_with(
+    img: &mut Image,
+    cam: &Camera,
+    chunks: &[ChunkMesh],
+    fog: Option<&FogLights>,
+    ground: Ground,
+    time: f32,
+    atmosphere: bool,
+) {
     let visible = cam.visible_rect();
+    let viewport = cam.viewport;
+    let noise = &ground.art.noise;
     for chunk in chunks.iter().filter(|c| c.overlaps(visible)) {
         for tri in chunk.indices.as_chunks::<3>().0 {
             let v = [
@@ -134,27 +154,132 @@ pub fn draw_ground(
                 chunk.vertices[tri[2] as usize],
             ];
             let p = v.map(|v| cam.to_window(v.pos[0], v.pos[1]));
-            let light = v.map(|v| {
-                let fog = fog.map_or(255, |f| f.at(v.corner[0] as i32, v.corner[1] as i32));
-                v.colour[0] as f32 / SHADE_ONE * fog as f32 / 255.0
+            let fogs = v.map(|v| {
+                fog.map_or(255, |f| f.at(v.corner[0] as i32, v.corner[1] as i32)) as f32 / 255.0
             });
+            let shade = v.map(|v| v.colour[0] as f32 / SHADE_ONE);
             let world = v.map(|v| (v.corner[0] as f32, v.corner[1] as f32));
-            ground_triangle(img, p, light, world, |x, y, lod| {
-                ground.colour(x, y, time, lod)
-            });
+            if !atmosphere {
+                let light = [0, 1, 2].map(|k| shade[k] * fogs[k]);
+                ground_triangle(
+                    img,
+                    p,
+                    light,
+                    world,
+                    |x, y, lod, _| ground.colour(x, y, time, lod),
+                    false,
+                );
+                continue;
+            }
+            let paint = |x: f32, y: f32, lod: f32, at: Shading| {
+                let (f, (px, py), w) = (at.light, at.window, at.weights);
+                let (mut c, deep) = ground.colour_deep(x, y, time, lod);
+                let g = atmosphere::glint(noise, x, y, time, deep);
+                // The shade, interpolated on its own as the shader has it.
+                let s = shade[0] * w[0] + shade[1] * w[1] + shade[2] * w[2];
+                let k = atmosphere::cloud_in(atmosphere::cloud(noise, x, y, time), f);
+                for ch in c.iter_mut() {
+                    *ch = (*ch + (1.0 - *ch) * g) * s * k;
+                }
+                let c = atmosphere::fog_tone(
+                    c,
+                    f,
+                    || atmosphere::feather(noise, x, y),
+                    || atmosphere::haze(noise, x, y),
+                );
+                atmosphere::grade(c, px, py, viewport)
+            };
+            ground_triangle(img, p, fogs, world, paint, true);
         }
     }
 }
 
+/// The atmosphere past the map's edge and under it
+/// (`docs/look/atmosphere.md`), drawn first, under the ground, as the
+/// GPU's backdrop pass draws it: every window pixel's ground-plane point
+/// on the map is the haze (the ground covers it); past the edge, the
+/// ground goes on as the map ends ([`ground::TypeMap::at`] clamps), in the
+/// fog's light at the nearest point of the edge, fading into the haze over
+/// [`atmosphere::EDGE_FADE`] tiles.
+pub fn draw_backdrop(
+    img: &mut Image,
+    cam: &Camera,
+    fog: Option<&FogLights>,
+    ground: Ground,
+    time: f32,
+) {
+    let noise = &ground.art.noise;
+    let (w, h) = (ground.types.width as f32, ground.types.height as f32);
+    let z = cam.zoom();
+    let lod = ground::lod(
+        crate::iso::unproject(1.0 / z, 0.0),
+        crate::iso::unproject(0.0, 1.0 / z),
+    );
+    for py in 0..img.height as i32 {
+        for px in 0..img.width as i32 {
+            let (fx, fy) = (px as f32 + 0.5, py as f32 + 0.5);
+            let (sx, sy) = cam.from_window(fx, fy);
+            let (x, y) = crate::iso::unproject(sx, sy);
+            let inside = x >= 0.0 && y >= 0.0 && x <= w && y <= h;
+            let c = if inside {
+                atmosphere::haze(noise, x, y)
+            } else {
+                let (cx, cy) = atmosphere::clamp_to_map(x, y, w, h);
+                let light = fog.map_or(1.0, |f| fog_bilinear(f, cx, cy))
+                    * atmosphere::edge_fade(noise, x, y, w, h);
+                if light <= 0.0 {
+                    atmosphere::haze(noise, x, y)
+                } else {
+                    let (mut c, deep) = ground.colour_deep(x, y, time, lod);
+                    let g = atmosphere::glint(noise, x, y, time, deep);
+                    let k = atmosphere::cloud_in(atmosphere::cloud(noise, x, y, time), light);
+                    for ch in c.iter_mut() {
+                        *ch = (*ch + (1.0 - *ch) * g) * k;
+                    }
+                    atmosphere::fog_tone(
+                        c,
+                        light,
+                        || atmosphere::feather(noise, x, y),
+                        || atmosphere::haze(noise, x, y),
+                    )
+                }
+            };
+            let c = atmosphere::grade(c, fx, fy, cam.viewport);
+            let ch = |k: usize| (c[k] * 255.0).round().clamp(0.0, 255.0) as u8;
+            img.put(px, py, [ch(0), ch(1), ch(2), 255]);
+        }
+    }
+}
+
+/// The fog's light at world point `(x, y)` on the map, 0 to 1: its
+/// corners' lights, bilinear.
+fn fog_bilinear(f: &FogLights, x: f32, y: f32) -> f32 {
+    let (x0, y0) = (x.floor(), y.floor());
+    let (fx, fy) = (x - x0, y - y0);
+    let (i, j) = (x0 as i32, y0 as i32);
+    let at = |a: i32, b: i32| {
+        let a = a.clamp(0, f.width as i32 - 1);
+        let b = b.clamp(0, f.height as i32 - 1);
+        f.at(a, b) as f32 / 255.0
+    };
+    let top = at(i, j) + (at(i + 1, j) - at(i, j)) * fx;
+    let bottom = at(i, j + 1) + (at(i + 1, j + 1) - at(i, j + 1)) * fx;
+    top + (bottom - top) * fy
+}
+
 /// A triangle of textured ground with the same fill rule as [`triangle`]:
-/// `colour` gives the ground at an interpolated world position and the
-/// triangle's mip level, scaled by the interpolated light.
+/// `colour` gives the ground at an interpolated world position, the
+/// triangle's mip level, the interpolated light and the window pixel's
+/// centre, and is scaled by the light, or in the atmosphere is the
+/// finished colour. A light of zero or less is black (the haze, in the
+/// atmosphere).
 fn ground_triangle(
     img: &mut Image,
     p: [(f32, f32); 3],
     light: [f32; 3],
     world: [(f32, f32); 3],
-    colour: impl Fn(f32, f32, f32) -> [f32; 3],
+    colour: impl Fn(f32, f32, f32, Shading) -> [f32; 3],
+    atmosphere: bool,
 ) {
     let Some((min_x, max_x, min_y, max_y)) = bounds(img, p) else {
         return;
@@ -189,18 +314,39 @@ fn ground_triangle(
             let w2 = edge(p[0], p[1], fx, fy) / area;
             if w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0 {
                 let l = light[0] * w0 + light[1] * w1 + light[2] * w2;
-                if l <= 0.0 {
+                if l <= 0.0 && !atmosphere {
                     img.put(x, y, [0, 0, 0, 255]);
                     continue;
                 }
                 let wx = world[0].0 * w0 + world[1].0 * w1 + world[2].0 * w2;
                 let wy = world[0].1 * w0 + world[1].1 * w1 + world[2].1 * w2;
-                let c = colour(wx, wy, lod);
+                let c = colour(
+                    wx,
+                    wy,
+                    lod,
+                    Shading {
+                        light: l,
+                        weights: [w0, w1, w2],
+                        window: (fx, fy),
+                    },
+                );
+                let l = if atmosphere { 1.0 } else { l };
                 let ch = |k: usize| (c[k] * l * 255.0).round().clamp(0.0, 255.0) as u8;
                 img.put(x, y, [ch(0), ch(1), ch(2), 255]);
             }
         }
     }
+}
+
+/// What a pixel of a [`ground_triangle`] knows besides its world point.
+#[derive(Clone, Copy)]
+struct Shading {
+    /// The light interpolated from the vertices.
+    light: f32,
+    /// Its barycentric weights.
+    weights: [f32; 3],
+    /// The window pixel's centre.
+    window: (f32, f32),
 }
 
 /// The window pixels a triangle's box covers, clipped to the image:
@@ -316,8 +462,39 @@ pub fn draw_sprites(
     palette_tex: &[[u8; 4]],
     sprites: &[SpriteInstance],
 ) {
+    draw_sprites_with(img, cam, atlas, palette_tex, sprites, None);
+}
+
+/// What the atmosphere needs to draw a frame's sprites
+/// (`docs/look/atmosphere.md`): the noise the clouds are read from, and
+/// the renderers' clock.
+#[derive(Clone, Copy, Debug)]
+pub struct Atmosphere<'a> {
+    /// The ground's noise ([`crate::ground::GroundArt::noise`]).
+    pub noise: &'a [u8],
+    /// Seconds, as the ground's clock.
+    pub time: f32,
+}
+
+/// [`draw_sprites`], with the atmosphere if `atmosphere` is given: each
+/// world sprite in the cloud's shadow at its foot
+/// ([`atmosphere::sprite_cloud`]), toned by its light as the fog tones the
+/// ground, and graded ([`atmosphere::sprite_colour`]). Screen-space
+/// sprites, the UI, are drawn exactly as [`draw_sprites`] draws them.
+pub fn draw_sprites_with(
+    img: &mut Image,
+    cam: &Camera,
+    atlas: &Atlas,
+    palette_tex: &[[u8; 4]],
+    sprites: &[SpriteInstance],
+    atmosphere: Option<Atmosphere>,
+) {
     let visible = cam.visible_rect();
+    let viewport = cam.viewport;
     for s in sprites {
+        let atmo = atmosphere
+            .filter(|_| !s.screen)
+            .map(|a| atmosphere::sprite_cloud(a.noise, (s.x, s.y, s.w, s.h), s.light, a.time));
         let (x0, y0, zoom) = if s.screen {
             (s.x, s.y, 1.0)
         } else {
@@ -340,6 +517,26 @@ pub fn draw_sprites(
                 c
             } else {
                 [c[0], c[1], c[2], (c[3] as f32 * opacity).round() as u8]
+            }
+        };
+        // In the atmosphere, the colour lit, toned and graded at its
+        // window pixel; else lit by the fog's light, in bytes.
+        let shade = |c: [u8; 4], px: i32, py: i32| -> [u8; 4] {
+            match atmo {
+                None => lit(c, s.light),
+                Some(cloud) => {
+                    let f = [0, 1, 2].map(|k| c[k] as f32 / 255.0);
+                    let o = atmosphere::sprite_colour(
+                        f,
+                        s.light,
+                        cloud,
+                        px as f32 + 0.5,
+                        py as f32 + 0.5,
+                        viewport,
+                    );
+                    let ch = |k: usize| (o[k] * 255.0).round().clamp(0.0, 255.0) as u8;
+                    [ch(0), ch(1), ch(2), c[3]]
+                }
             }
         };
         // Source scale: a stretched fill (w != uw) maps proportionally.
@@ -368,7 +565,8 @@ pub fn draw_sprites(
                     }
                     let ramp = &palette_tex[row + palette::PLAYER_RAMP.start as usize..][..8];
                     let c = tint(c, atlas.mask_at(s.page, ax, ay), ramp);
-                    img.blend(x0 + dx, y0 + dy, fade(lit(c, s.light)));
+                    let (px, py) = (x0 + dx, y0 + dy);
+                    img.blend(px, py, fade(shade(c, px, py)));
                     continue;
                 }
                 let idx = atlas.index_at(s.page, ax, ay);
@@ -380,7 +578,8 @@ pub fn draw_sprites(
                 } else {
                     palette_tex[row + idx as usize]
                 };
-                img.blend(x0 + dx, y0 + dy, fade(lit(c, s.light)));
+                let (px, py) = (x0 + dx, y0 + dy);
+                img.blend(px, py, fade(shade(c, px, py)));
             }
         }
     }
@@ -632,6 +831,173 @@ mod tests {
         for (x, y) in [(48, 40), (20, 50), (70, 45)] {
             assert_eq!(lifted.get(x, y - lift), flat.get(x, y), "at {x},{y}");
         }
+    }
+
+    /// The atmosphere's fog leaks nothing (`GD-FOG-01`,
+    /// `docs/look/atmosphere.md`): over many fog states, every pixel whose
+    /// ground point lies in a tile never seen, or past the map's edge
+    /// beside one, is the haze and nothing else: the same whatever the
+    /// ground there is, and the haze's own colour. The feather only ever
+    /// takes known ground into the haze, never the other way.
+    ///
+    /// REQ: GD-FOG-01
+    #[test]
+    fn the_atmospheres_fog_leaks_nothing_of_ground_never_seen() {
+        use crate::ground::{Ground, TypeMap};
+        let art = crate::ground::tests::committed_art();
+        let (w, h) = (10u16, 10u16);
+        let mut cam = Camera::new(w as i32, h as i32, (160.0, 120.0));
+        cam.set_zoom_index(2);
+        cam.look_at_tile(1.0, 1.0);
+        let mut seed = 0x2545_f491_u32;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed
+        };
+        let mut checked = 0;
+        for _ in 0..12 {
+            // A third never seen; of the rest, some in sight now.
+            let mut fog = sim::Fog::new(w as i32, h as i32);
+            let mut known = Vec::new();
+            for y in 0..h as i32 {
+                for x in 0..w as i32 {
+                    if next() % 3 != 0 {
+                        fog.see(x, y);
+                        known.push((x, y));
+                    }
+                }
+            }
+            fog.clear_visible();
+            for &(x, y) in &known {
+                if next() % 2 == 0 {
+                    fog.see(x, y);
+                }
+            }
+            let lights = FogLights::from_fog(&fog);
+            let unseen = |x: f32, y: f32| {
+                let (tx, ty) = (x.floor() as i32, y.floor() as i32);
+                fog.state(tx.clamp(0, w as i32 - 1), ty.clamp(0, h as i32 - 1))
+                    == sim::Visibility::Unexplored
+            };
+            // The same fog over two grounds that differ everywhere.
+            let draw = |terrain: sim::Terrain| {
+                let mut map = sim::TileMap::new(w, h);
+                for y in 0..h {
+                    for x in 0..w {
+                        let t = if (x + y) % 2 == 0 {
+                            terrain
+                        } else {
+                            sim::Terrain::Sand
+                        };
+                        map.set_terrain(x as i32, y as i32, t);
+                    }
+                }
+                let types = TypeMap::from_map(&map);
+                let ground = Ground {
+                    art: &art,
+                    types: &types,
+                };
+                let mut img = Image::new(160, 120, [0, 0, 0, 255]);
+                draw_backdrop(&mut img, &cam, Some(&lights), ground, 7.0);
+                let chunks = terrain::build_all_textured(&map);
+                draw_ground_with(&mut img, &cam, &chunks, Some(&lights), ground, 7.0, true);
+                img
+            };
+            let (a, b) = (draw(sim::Terrain::Grass), draw(sim::Terrain::DeepWater));
+            for py in 0..120 {
+                for px in 0..160 {
+                    let (fx, fy) = (px as f32 + 0.5, py as f32 + 0.5);
+                    let (sx, sy) = cam.from_window(fx, fy);
+                    let (x, y) = crate::iso::unproject(sx, sy);
+                    // Clear of the tile's edges by a little, for the
+                    // rasteriser's sampling.
+                    let e = 0.02;
+                    let all = [
+                        (x - e, y - e),
+                        (x + e, y - e),
+                        (x - e, y + e),
+                        (x + e, y + e),
+                    ];
+                    if !all.iter().all(|&(x, y)| unseen(x, y)) {
+                        continue;
+                    }
+                    let (pa, pb) = (a.get(px, py), b.get(px, py));
+                    assert_eq!(pa, pb, "the ground shows at ({x:.2}, {y:.2})");
+                    let haze =
+                        atmosphere::grade(atmosphere::haze(&art.noise, x, y), fx, fy, cam.viewport);
+                    for k in 0..3 {
+                        assert!(
+                            (pa[k] as f32 - haze[k] * 255.0).abs() <= 1.0,
+                            "not the haze at ({x:.2}, {y:.2}): {pa:?} vs {haze:?}"
+                        );
+                    }
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 20_000, "{checked} pixels over ground never seen");
+    }
+
+    /// With the atmosphere, the ground in sight and a sprite on it take
+    /// the same cloud; the UI is untouched by it.
+    #[test]
+    fn the_atmosphere_shades_world_sprites_and_never_the_ui() {
+        use crate::sheets::fixture;
+        let art = crate::ground::tests::committed_art();
+        let atlas = Atlas::with_sheets(&[fixture::house("raster-atmo")]);
+        let (f, _) = atlas.frame(sim::kinds::HOUSE, 0).unwrap();
+        let pal = palette::texture();
+        let mut cam = Camera::new(16, 16, (64.0, 32.0));
+        // World-screen and window pixels the same.
+        cam.set_zoom_index(
+            crate::camera::ZOOM_LEVELS
+                .iter()
+                .position(|&z| z == 1.0)
+                .unwrap(),
+        );
+        cam.focus = (32.0, 16.0);
+        let ground = [90, 110, 70, 255];
+        let s = SpriteInstance {
+            x: 1.0,
+            y: 1.0,
+            w: f.w as f32,
+            h: f.h as f32,
+            page: f.page,
+            u: f.x,
+            v: f.y,
+            uw: f.w,
+            vh: f.h,
+            row: 1,
+            flip: false,
+            depth: 0.0,
+            slot: u32::MAX,
+            screen: true,
+            light: 255,
+        };
+        let atmo = Atmosphere {
+            noise: &art.noise,
+            time: 0.0,
+        };
+        let draw = |s: SpriteInstance, a: Option<Atmosphere>| {
+            let mut img = Image::new(64, 32, ground);
+            draw_sprites_with(&mut img, &cam, &atlas, &pal, &[s], a);
+            img
+        };
+        // The UI: the same with or without.
+        assert!(draw(s, Some(atmo)) == draw(s, None), "the UI is untouched");
+        // In the world: graded and in its cloud, so different; a memory
+        // differently again.
+        let world = SpriteInstance { screen: false, ..s };
+        let (plain, toned) = (draw(world, None), draw(world, Some(atmo)));
+        assert!(plain != toned, "the world is graded");
+        assert_eq!(toned.get(0, 0), ground, "around it, nothing");
+        let remembered = SpriteInstance {
+            light: crate::fog::EXPLORED,
+            ..world
+        };
+        assert!(draw(remembered, Some(atmo)) != draw(remembered, None));
     }
 
     #[test]

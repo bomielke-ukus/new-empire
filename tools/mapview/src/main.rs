@@ -6,7 +6,7 @@
 //!         [--civ NAME] [--enemy-civ NAME] [--select N] [--select-tc 1] [--select-kind NAME] [--hud 1] [--symbols off|selected|always]
 //!         [--ghost house|store|<kind>] [--sweep MS] [--hover X,Y] [--assets DIR]
 //!         [--replay FILE] (render at --ticks, or at the end if omitted)
-//!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0] [--look 1] [--time SECS]
+//!         [--dpi N] [--ui-scale N] [--controls 1] [--fog 0] [--look 1] [--time SECS] [--atmo 0]
 //!         [--screen title|setup|load|settings|pause|results|editor] [--notices 1]
 //!         [--difficulty easy,standard,hard,hardest]
 //! mapview --keys KEYS.md
@@ -27,7 +27,9 @@
 //! the UI wears the new look's skin (`docs/look/ui.md`), and
 //! scattered with scenery (`docs/look/ground.md`); `--time` is the
 //! ground's clock in seconds (the water's drift and the foam's breath),
-//! 0 by default. `--civ` gives player 0 a civilisation by the sim's name
+//! 0 by default, which the cloud shadows drift by too; `--atmo 0` draws
+//! the new art without its atmosphere (`docs/look/atmosphere.md`): the
+//! haze, the cloud shadows and the grade. `--civ` gives player 0 a civilisation by the sim's name
 //! (`Greeks`, `Egyptians`, `Shang`, ...) and `--enemy-civ` player 1, in a
 //! plain start and in every `--scenario`; with either, `--look 1` loads
 //! only the buildings of their architectures, as a match in the game does
@@ -82,6 +84,9 @@ struct Args {
     look: bool,
     /// The ground's clock, seconds (`--time`).
     time: f32,
+    /// With the new art, its atmosphere (`--atmo`, on by default:
+    /// `Settings::atmosphere`).
+    atmo: bool,
     stockpile: Option<i32>,
     select_tc: bool,
     select_kind: Option<String>,
@@ -164,6 +169,7 @@ fn parse() -> Result<Args, String> {
         assets: None,
         look: false,
         time: 0.0,
+        atmo: true,
         stockpile: None,
         select_tc: false,
         select_kind: None,
@@ -240,6 +246,7 @@ fn parse() -> Result<Args, String> {
             "--assets" => a.assets = Some(std::path::PathBuf::from(val)),
             "--look" => a.look = val == "1" || val == "true",
             "--time" => a.time = num(val)?,
+            "--atmo" => a.atmo = val == "1" || val == "true",
             "--stockpile" => a.stockpile = Some(val.parse().map_err(|e| format!("{key}: {e}"))?),
             "--select-tc" => a.select_tc = val == "1" || val == "true",
             "--select-kind" => a.select_kind = Some(val.clone()),
@@ -305,7 +312,9 @@ fn ground_art(a: &Args) -> Option<view::ground::GroundArt> {
 }
 
 /// Draws a map's ground: from the textures if there are any, else the
-/// flat colours and their grain as before.
+/// flat colours and their grain as before; with the textures and `atmo`,
+/// in the atmosphere (`docs/look/atmosphere.md`), its backdrop first.
+#[allow(clippy::too_many_arguments)]
 fn draw_ground(
     img: &mut raster::Image,
     cam: &Camera,
@@ -314,19 +323,35 @@ fn draw_ground(
     art: Option<&view::ground::GroundArt>,
     detail: &view::detail::Detail,
     time: f32,
+    atmo: bool,
 ) {
     match art {
         Some(art) => {
             let chunks = view::terrain::build_all_textured(map);
             let types = view::ground::TypeMap::from_map(map);
             let ground = view::ground::Ground { art, types: &types };
-            raster::draw_ground(img, cam, &chunks, lights, ground, time);
+            if atmo {
+                raster::draw_backdrop(img, cam, lights, ground, time);
+            }
+            raster::draw_ground_with(img, cam, &chunks, lights, ground, time, atmo);
         }
         None => {
             let chunks = view::terrain::build_all(map);
             raster::draw_terrain(img, cam, &chunks, lights, detail);
         }
     }
+}
+
+/// The atmosphere the world's sprites are drawn in: with the ground's
+/// textures and `--atmo` on.
+fn atmosphere<'a>(
+    a: &Args,
+    art: Option<&'a view::ground::GroundArt>,
+) -> Option<raster::Atmosphere<'a>> {
+    art.filter(|_| a.atmo).map(|art| raster::Atmosphere {
+        noise: &art.noise,
+        time: a.time,
+    })
 }
 
 fn save(path: &str, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
@@ -394,7 +419,11 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
             shell::settings_screen(
                 &atlas,
                 &input,
-                &Settings::default(),
+                // With `--look 1`, as the new art's settings have it.
+                &Settings {
+                    new_art: a.look,
+                    ..Settings::default()
+                },
                 shell::SettingsPage::Keys,
                 None,
                 None,
@@ -549,6 +578,7 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
             art.as_ref(),
             &detail,
             time,
+            a.atmo,
         );
         let mut scene = d.scene(&atlas, a.time);
         view::scenery::Scenery::new(d.sim().map(), d.sim().seed(), &atlas).decorate(
@@ -557,7 +587,8 @@ fn render_screen(a: &Args, name: &str) -> Result<(), String> {
             None,
             Some(&cam),
         );
-        raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.sprites);
+        let atmo = atmosphere(a, art.as_ref());
+        raster::draw_sprites_with(&mut img, &cam, &atlas, &palette, &scene.sprites, atmo);
     }
     let cam = Camera::new(1, 1, (a.width as f32, a.height as f32));
     raster::draw_sprites(&mut img, &cam, &atlas, &palette, &screen.sprites);
@@ -945,9 +976,11 @@ fn run() -> Result<(), String> {
         art.as_ref(),
         &detail,
         a.time,
+        a.atmo,
     );
     let palette = view::palette::texture();
-    raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.sprites);
+    let atmo = atmosphere(&a, art.as_ref());
+    raster::draw_sprites_with(&mut img, &cam, &atlas, &palette, &scene.sprites, atmo);
     raster::draw_sprites(&mut img, &cam, &atlas, &palette, &scene.ui);
     if a.hud {
         // In the panel's reserved corner, as the game draws it.

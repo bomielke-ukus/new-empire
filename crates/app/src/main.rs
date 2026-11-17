@@ -847,6 +847,11 @@ impl App {
             self.speaker.set_volume(bus, volume);
         }
         self.input.edge_scroll = self.settings.edge_scroll;
+        // Drawn only with the ground's textures, which only the new art
+        // uploads.
+        if let Some(gpu) = &mut self.gpu {
+            gpu.renderer.set_atmosphere(self.settings.atmosphere);
+        }
         self.input.pan = [
             Control::PanUp,
             Control::PanDown,
@@ -2184,6 +2189,11 @@ impl App {
                 self.settings.new_art = !self.settings.new_art;
                 self.apply_and_save_settings();
             }
+            // At once: the renderer draws the next frame without it.
+            ShellAction::ToggleAtmosphere => {
+                self.settings.atmosphere = !self.settings.atmosphere;
+                self.apply_and_save_settings();
+            }
             ShellAction::ToggleEdgeScroll => {
                 self.settings.edge_scroll = !self.settings.edge_scroll;
                 self.apply_and_save_settings();
@@ -3369,6 +3379,7 @@ impl ApplicationHandler for App {
         if let Some(art) = &self.ground_art {
             gpu.renderer.upload_ground_art(&gpu.device, &gpu.queue, art);
         }
+        gpu.renderer.set_atmosphere(self.settings.atmosphere);
         gpu.upload_map(self.sim.map());
         let size = window.inner_size();
         self.camera.viewport = (size.width as f32, size.height as f32);

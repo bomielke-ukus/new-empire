@@ -164,6 +164,10 @@ pub struct Settings {
     /// Whether the new art's colour sets (`docs/look/colour-sets.md`)
     /// replace the indexed sets of their names. Read when the game starts.
     pub new_art: bool,
+    /// With the new art, its atmosphere (`docs/look/atmosphere.md`): the
+    /// fog's haze, the ground past the map's edge, the cloud shadows, the
+    /// glints and the grade. Off for a slow machine; takes effect at once.
+    pub atmosphere: bool,
 }
 
 /// The volumes out of the box: everything full, the music under it.
@@ -187,6 +191,7 @@ impl Default for Settings {
             letters: BTreeMap::new(),
             player_symbols: crate::symbols::PlayerSymbols::default(),
             new_art: false,
+            atmosphere: true,
         }
     }
 }

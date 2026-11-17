@@ -458,6 +458,20 @@ impl Scene {
             }
             let top = sprite.y;
             sprites.push(sprite);
+            // With the new art, dust kicked up behind a horse or a chariot
+            // on the move (`docs/look/atmosphere.md`, "Life"): a puff every
+            // so often, by the clock and the slot.
+            if info.class == kinds::Class::Cavalry && anim == Anim::Walk && world.dying[i] == 0 {
+                push_hoof_dust(
+                    atlas,
+                    (px, py),
+                    world.facing[i],
+                    map,
+                    time_ms,
+                    depth,
+                    &mut sprites,
+                );
+            }
             // A colour wall's or gate's shadow lies under the wall's pieces.
             if (kinds::is_wall(kind) || kind == kinds::GATE) && standing {
                 push_shadow(atlas, frame, (gx, gy), row, depth, i as u32, &mut sprites);
@@ -606,9 +620,14 @@ impl Scene {
             if fog.is_some_and(|f| !f.visible(p.pos.x.floor(), p.pos.y.floor())) {
                 continue;
             }
-            // A stone is a stone whichever way it flies, and it flies high.
+            // A stone is a stone whichever way it flies, and it flies high:
+            // with the new art, tumbling (`docs/look/atmosphere.md`).
             if !p.blast.is_zero() {
-                if let Some(stone) = atlas.stone() {
+                let tumble = (sim.tick() as u32).wrapping_add(p.pos.x.raw() as u32 >> 12);
+                if let Some(stone) = atlas
+                    .combat_fx(sprites::CombatFx::Stone, tumble)
+                    .or_else(|| atlas.stone())
+                {
                     let (x, y) = (fx_to_f32(p.pos.x), fx_to_f32(p.pos.y));
                     let (gx, gy) = iso::project(x, y, iso::ground_height(map, x, y));
                     sprites.push(overlay(stone, gx, gy - 32.0, 0, x + y + 0.75, u32::MAX));
@@ -616,7 +635,12 @@ impl Scene {
                 continue;
             }
             let facing = (p.aim - p.pos).angle().facing8();
-            if let Some((arrow, flip)) = atlas.arrow(facing) {
+            // With the new art its own arrow, a frame a facing.
+            let arrow = atlas
+                .combat_fx(sprites::CombatFx::Arrow, u32::from(facing))
+                .map(|f| (f, false))
+                .or_else(|| atlas.arrow(facing));
+            if let Some((arrow, flip)) = arrow {
                 let (x, y) = (fx_to_f32(p.pos.x), fx_to_f32(p.pos.y));
                 let h = iso::ground_height(map, x, y);
                 let (gx, gy) = iso::project(x, y, h);
@@ -700,6 +724,7 @@ impl Scene {
                 }
             }
         }
+        push_birds(sim, atlas, fog, time, &mut sprites);
         carried_relics(sim, atlas, fog, viewer, prev, alpha, &mut sprites);
         waypoint_marks(sim, atlas, selected, &mut sprites);
         sprites.sort_by(|a, b| a.depth.total_cmp(&b.depth).then(a.slot.cmp(&b.slot)));
@@ -707,6 +732,108 @@ impl Scene {
             sprites,
             ui: Vec::new(),
         }
+    }
+}
+
+/// Milliseconds a puff of hoof dust is apart from the next, at most.
+const HOOF_DUST_MS: u32 = 560;
+
+/// A puff of dust behind a mounted unit at world `pos` facing `facing`,
+/// `time_ms` into its walk, if the new art's dust is loaded: one puff
+/// every [`HOOF_DUST_MS`], playing its frames and then gone.
+fn push_hoof_dust(
+    atlas: &Atlas,
+    pos: (f32, f32),
+    facing: u8,
+    map: &sim::TileMap,
+    time_ms: u32,
+    depth: f32,
+    sprites: &mut Vec<SpriteInstance>,
+) {
+    let frames = atlas.combat_fx_frames(sprites::CombatFx::Dust);
+    let Some(info) = atlas.anim_info(
+        sprites::FX_COMBAT + sprites::CombatFx::Dust as sim::entity::KindId,
+        Anim::Idle,
+    ) else {
+        return;
+    };
+    let index = (time_ms % HOOF_DUST_MS) / info.frame_ms.max(1);
+    if frames == 0 || index >= frames {
+        return;
+    }
+    let Some(frame) = atlas.combat_fx(sprites::CombatFx::Dust, index) else {
+        return;
+    };
+    // Behind it: against the way it faces, a third of a tile.
+    let a = f32::from(facing & 7) * std::f32::consts::FRAC_PI_4;
+    let (x, y) = (pos.0 - a.cos() * 0.35, pos.1 - a.sin() * 0.35);
+    let (gx, gy) = iso::project(x, y, iso::ground_height(map, x, y));
+    sprites.push(overlay(frame, gx, gy, 0, depth - 0.02, u32::MAX));
+}
+
+/// How long a flock's crossing takes, of every [`FLOCK_CYCLE`] seconds.
+const FLOCK_FLIGHT: f32 = 40.0;
+/// A flock crosses once in this many seconds; divides the clock's period.
+const FLOCK_CYCLE: f32 = 128.0;
+/// Tiles of map to a flock.
+const FLOCK_AREA: i32 = 48 * 48;
+/// How high the birds fly over the ground, world-screen px at 1x.
+const FLOCK_HEIGHT: f32 = 150.0;
+
+/// A few flocks of birds crossing the map now and then, with the new art
+/// (`docs/look/atmosphere.md`, "Life"): where and when from the map's
+/// seed and the renderers' clock alone, flying up and to the right across
+/// the screen, and drawn only where the ground under them is in sight.
+fn push_birds(
+    sim: &Simulation,
+    atlas: &Atlas,
+    fog: Option<&sim::Fog>,
+    time: f32,
+    sprites: &mut Vec<SpriteInstance>,
+) {
+    let frames = atlas.combat_fx_frames(sprites::CombatFx::Birds);
+    if frames == 0 {
+        return;
+    }
+    let map = sim.map();
+    let flocks = (map.width() * map.height() / FLOCK_AREA).max(1);
+    let seed = sim.seed() as u32;
+    for k in 0..flocks {
+        let h = sprites::tile_hash(k, seed as i32, 0xB1_4D5);
+        let phase = (h % 1000) as f32 / 1000.0 * FLOCK_CYCLE;
+        let t = (time + phase).rem_euclid(FLOCK_CYCLE);
+        if t >= FLOCK_FLIGHT {
+            continue;
+        }
+        let cx = (h >> 10 & 0x3FF) as f32 / 1024.0 * map.width() as f32;
+        let cy = (h >> 20 & 0x3FF) as f32 / 1024.0 * map.height() as f32;
+        // Facing 7 (+x, -y), two tiles a second, centred on (cx, cy)
+        // halfway through.
+        let along = (t - FLOCK_FLIGHT * 0.5) * 2.0 * std::f32::consts::FRAC_1_SQRT_2;
+        let (x, y) = (cx + along, cy - along);
+        // In sight both under them and where they show on screen, a
+        // flight's height up the screen from it.
+        let (gx, gy) = iso::project(x, y, iso::ground_height(map, x, y));
+        let (ux, uy) = iso::unproject(gx, gy - FLOCK_HEIGHT);
+        let seen = |x: f32, y: f32| {
+            let (tx, ty) = (x.floor() as i32, y.floor() as i32);
+            map.in_bounds(tx, ty) && fog.is_none_or(|f| f.visible(tx, ty))
+        };
+        if !seen(x, y) || !seen(ux, uy) {
+            continue;
+        }
+        let beat = (t * 1000.0) as u32 / 90 + k as u32;
+        let Some(frame) = atlas.combat_fx(sprites::CombatFx::Birds, beat) else {
+            continue;
+        };
+        sprites.push(overlay(
+            frame,
+            gx,
+            gy - FLOCK_HEIGHT,
+            0,
+            SYMBOL_DEPTH * 2.0,
+            u32::MAX,
+        ));
     }
 }
 

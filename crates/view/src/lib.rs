@@ -7,6 +7,7 @@
 //!
 //! Floats are fine here. Nothing flows back into the simulation.
 
+pub mod atmosphere;
 pub mod camera;
 pub mod combat_view;
 pub mod detail;
